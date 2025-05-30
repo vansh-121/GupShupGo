@@ -10,8 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class FCMService {
   static const _fcmScope = 'https://www.googleapis.com/auth/firebase.messaging';
+  // Replace 'videocallapp-81166' with your actual project ID from google-services.json
   static const _fcmEndpoint =
-      'https://fcm.googleapis.com/v1/projects/your-project-id/messages:send';
+      'https://fcm.googleapis.com/v1/projects/videocallapp-81166/messages:send';
 
   Future<void> setupFCM() async {
     try {
@@ -87,15 +88,21 @@ class FCMService {
           .collection('users')
           .doc(calleeId)
           .get();
+
+      if (!doc.exists) {
+        print('User $calleeId not found in database');
+        return;
+      }
+
       String? fcmToken = doc['fcmToken'];
       if (fcmToken == null) {
         print('No FCM token found for $calleeId');
         return;
       }
+
       final accessToken = await _getAccessToken();
       final response = await http.post(
-        Uri.parse(_fcmEndpoint.replaceFirst('your-project-id',
-            'your-project-id')), // Replace with your Firebase project ID
+        Uri.parse(_fcmEndpoint),
         headers: {
           'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
@@ -106,6 +113,7 @@ class FCMService {
             'data': {
               'callerId': callerId,
               'channelId': channelId,
+              'type': 'incoming_call',
             },
             'notification': {
               'title': 'Incoming Call',
