@@ -72,7 +72,7 @@ class _CallScreenState extends State<CallScreen> {
       // Join channel
       await _engine!.joinChannel(
         token:
-            '', // Use empty string for testing, implement token server for production
+            '007eJxTYBBeYKOuslwgJ3FnxUSXjPtOYlzXrtoySz+7c7XSc8uuU98VGNIsLE0tzY1MDQ2TzEyMUxItUowsUyxMUhONTFNNLAwMZ7NaZTQEMjJwv9NhYmSAQBCfhaEktbiEgQEAu20dUA==', // Use empty string for testing, implement token server for production
         channelId: widget.channelId,
         uid: 0,
         options: const ChannelMediaOptions(
