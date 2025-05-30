@@ -65,19 +65,32 @@ class _CallScreenState extends State<CallScreen> {
           },
           onError: (ErrorCodeType err, String msg) {
             print("Agora Error: $err - $msg");
+            if (err == ErrorCodeType.errInvalidToken) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                      'Token expired or invalid. Please restart the call.'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           },
         ),
       );
 
-      // Join channel
+      // Join channel with null token for testing
       await _engine!.joinChannel(
         token:
-            '007eJxTYBBeYKOuslwgJ3FnxUSXjPtOYlzXrtoySz+7c7XSc8uuU98VGNIsLE0tzY1MDQ2TzEyMUxItUowsUyxMUhONTFNNLAwMZ7NaZTQEMjJwv9NhYmSAQBCfhaEktbiEgQEAu20dUA==', // Use empty string for testing, implement token server for production
+            '007eJxTYBBeYKOuslwgJ3FnxUSXjPtOYlzXrtoySz+7c7XSc8uuU98VGNIsLE0tzY1MDQ2TzEyMUxItUowsUyxMUhONTFNNLAwMZ7NaZTQEMjJwv9NhYmSAQBCfhaEktbiEgQEAu20dUA==', // Use empty string for testing without token server
         channelId: widget.channelId,
         uid: 0,
         options: const ChannelMediaOptions(
           clientRoleType: ClientRoleType.clientRoleBroadcaster,
           channelProfile: ChannelProfileType.channelProfileCommunication,
+          publishCameraTrack: true,
+          publishMicrophoneTrack: true,
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: true,
         ),
       );
     } catch (e) {
