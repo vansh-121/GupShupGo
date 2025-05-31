@@ -1,16 +1,46 @@
-# gupshupgo
+# 📞 GupShupGo — One-to-One Video Calling App
 
-A new Flutter project.
+> ⚠️ **Status: Under Development**  
+> This Flutter app is actively being built as part of a developer assignment. Features like background call handling, real-time video streaming, and notification actions are under construction.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+A Flutter-based one-on-one **video calling app** using **Agora RTC Engine** and **Firebase Cloud Messaging (FCM)**. It demonstrates smooth video communication, WhatsApp-style incoming call notifications, and user-friendly call controls — even when the app is closed or in the background.
 
-A few resources to get you started if this is your first Flutter project:
+---
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## 🚀 Features (Planned & In Progress)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- ✅ One-on-one real-time video calling
+- 📲 Incoming call notification when app is in **background or terminated**
+- 🎥 Video + audio support using Agora
+- 🔔 Accept/Reject calls via full-screen notification
+- 📞 Dynamic call states: Idle, Calling, Ringing, Connected, Ended
+- 🎚️ In-call features: Mute/Unmute, End Call, Switch Camera
+- 📶 Graceful reconnection on network loss
+- 🧾 (Bonus) In-app call logs
+
+---
+
+## 🧑‍💻 Simulated Users
+
+To simplify testing, the app simulates two users:
+
+- **User A** – ID: `user_a`
+- **User B** – ID: `user_b`
+
+You can switch between the two to test call initiation and reception.
+
+---
+
+## 🛠️ Tech Stack
+
+| Tool                  | Purpose                                  |
+|-----------------------|------------------------------------------|
+| Flutter               | UI & cross-platform app development      |
+| Agora RTC Engine      | Real-time video/audio communication      |
+| Firebase Cloud Messaging (FCM) | Push notifications           |
+| flutter_callkit_incoming / awesome_notifications | Full-screen call UI |
+| Shared Preferences    | Local user session storage               |
+
+---
