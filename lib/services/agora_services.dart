@@ -6,7 +6,7 @@ class AgoraService {
     RtcEngine engine = createAgoraRtcEngine();
 
     await engine.initialize(const RtcEngineContext(
-      appId: 'f895972511b643da8d29d84ea25e4801', // Your Agora App ID
+      appId: '49a88df036b446d892ed933756e9fe6f', // Your Agora App ID
       channelProfile: ChannelProfileType.channelProfileCommunication,
     ));
 
