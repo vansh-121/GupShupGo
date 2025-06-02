@@ -144,8 +144,6 @@ GupShupGo requests the following permissions to ensure a smooth and secure video
 | `RECEIVE_BOOT_COMPLETED`| Android      | *(Optional)* Restarts services after reboot   |
 
 
-> ⚠️ Be sure to request runtime permissions where required (especially for `CAMERA`, `RECORD_AUDIO`, and `POST_NOTIFICATIONS` on Android 13+).
-
 
 6. **Run on device**
 ```bash
