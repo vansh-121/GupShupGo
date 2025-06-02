@@ -5,6 +5,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -24,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen>
       id: 'user_a',
       name: 'User A',
       lastMessage: 'Hello!',
-      time: '2:21 PM',
+      time: '10:20 PM',
       avatarUrl:
           'https://ui-avatars.com/api/?name=User+A&background=4CAF50&color=fff&size=128',
       isOnline: true,
@@ -271,7 +272,10 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               CircularProgressIndicator(color: Colors.blue),
               SizedBox(height: 20),
-              Text('Initializing...', style: TextStyle(fontSize: 16)),
+              Text('Initializing...',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontFamily: GoogleFonts.poppins().fontFamily)),
             ],
           ),
         ),
@@ -287,7 +291,10 @@ class _HomeScreenState extends State<HomeScreen>
         title: Text(
           'Messages',
           style: TextStyle(
-              fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black),
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+              fontFamily: GoogleFonts.poppins().fontFamily),
         ),
         actions: [
           IconButton(
@@ -348,9 +355,18 @@ class _HomeScreenState extends State<HomeScreen>
           labelColor: Colors.blue,
           unselectedLabelColor: Colors.grey,
           tabs: [
-            Tab(text: 'Chats'),
-            Tab(text: 'Status'),
-            Tab(text: 'Calls'),
+            Tab(
+                child: Text('Chats',
+                    style: TextStyle(
+                        fontFamily: GoogleFonts.poppins().fontFamily))),
+            Tab(
+                child: Text('Status',
+                    style: TextStyle(
+                        fontFamily: GoogleFonts.poppins().fontFamily))),
+            Tab(
+                child: Text('Calls',
+                    style: TextStyle(
+                        fontFamily: GoogleFonts.poppins().fontFamily))),
           ],
         ),
       ),

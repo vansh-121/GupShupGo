@@ -36,6 +36,9 @@ dependencies:
   
   # Agora RTC Engine
   agora_rtc_engine: ^6.3.1
+  audioplayers: ^5.2.1
+
+  google_fonts: ^6.2.1
   
   # Permissions
   permission_handler: ^11.1.0
@@ -61,6 +64,12 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

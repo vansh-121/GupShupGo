@@ -22,10 +22,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Video Call App',
+      title: 'GupShupGo',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        fontFamily: 'Roboto',
+        fontFamily: 'Poppins',
         appBarTheme: AppBarTheme(
           elevation: 1,
           backgroundColor: Colors.white,

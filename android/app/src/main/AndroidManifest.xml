@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
     <application
-        android:label="gupshupgo"
+        android:label="GupShupGo"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
