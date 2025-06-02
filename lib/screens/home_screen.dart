@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 
@@ -16,87 +17,26 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isInitialized = false;
   late TabController _tabController;
 
+  final List<String> _availableUsers = ['user_a', 'user_b'];
+
   final List<Contact> _contacts = [
     Contact(
-      id: 'chirag',
-      name: 'Chirag C4D',
-      lastMessage: 'Hello Sam !!!',
+      id: 'user_a',
+      name: 'User A',
+      lastMessage: 'Hello!',
       time: '2:21 PM',
       avatarUrl:
-          'https://ui-avatars.com/api/?name=Chirag+C4D&background=4CAF50&color=fff&size=128',
+          'https://ui-avatars.com/api/?name=User+A&background=4CAF50&color=fff&size=128',
       isOnline: true,
     ),
     Contact(
-      id: 'josh',
-      name: 'Josh',
+      id: 'user_b',
+      name: 'User B',
       lastMessage: 'How are you?',
       time: '1:02 PM',
       avatarUrl:
-          'https://ui-avatars.com/api/?name=Josh&background=2196F3&color=fff&size=128',
+          'https://ui-avatars.com/api/?name=User+B&background=2196F3&color=fff&size=128',
       isOnline: true,
-    ),
-    Contact(
-      id: 'tim',
-      name: 'Tim',
-      lastMessage: 'Call me maybe?',
-      time: '12:21 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Tim&background=FF9800&color=fff&size=128',
-      isOnline: false,
-    ),
-    Contact(
-      id: 'stefan',
-      name: 'Stefan',
-      lastMessage: 'Done Sir !!',
-      time: '12:00 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Stefan&background=9C27B0&color=fff&size=128',
-      isOnline: true,
-    ),
-    Contact(
-      id: 'ben',
-      name: 'Ben',
-      lastMessage: 'Please send documents',
-      time: '11:30 AM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Ben&background=F44336&color=fff&size=128',
-      isOnline: false,
-    ),
-    Contact(
-      id: 'david',
-      name: 'David',
-      lastMessage: 'See you tomorrow',
-      time: '10:02 AM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=David&background=607D8B&color=fff&size=128',
-      isOnline: true,
-    ),
-    Contact(
-      id: 'elena',
-      name: 'Elena',
-      lastMessage: 'I am leaving now',
-      time: '9:30 AM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Elena&background=E91E63&color=fff&size=128',
-      isOnline: false,
-    ),
-    Contact(
-      id: 'neha',
-      name: 'Neha',
-      lastMessage: 'Hello Sam !!!',
-      time: '9:22 AM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Neha&background=00BCD4&color=fff&size=128',
-      isOnline: true,
-    ),
-    Contact(
-      id: 'kiran',
-      name: 'Kiran',
-      lastMessage: 'Where are you ?',
-      time: '9:00 AM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=Kiran&background=795548&color=fff&size=128',
-      isOnline: false,
     ),
   ];
 
@@ -124,12 +64,11 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _loadUser() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('user_id') ?? 'sam';
+      final userId = prefs.getString('user_id') ?? _availableUsers[0];
       setState(() {
         _currentUser = userId;
       });
-
-      await FCMService().setupFCM();
+      await FCMService().setupFCM(userId: userId);
       print('App initialized for user: $userId');
     } catch (e) {
       print('Error loading user: $e');
@@ -139,13 +78,28 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _switchUser(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_id', userId);
+    setState(() {
+      _currentUser = userId;
+    });
+    await FCMService().setupFCM(userId: userId);
+    print('Switched to user: $userId');
+  }
+
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       FCMService().onCallReceived((callerId, channelId) {
         print('Incoming call from $callerId on channel $channelId');
         callState.updateState(CallState.Ringing);
-        // Navigate to call screen when call is received
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(channelId: channelId, isCaller: false),
+          ),
+        );
       });
     } catch (e) {
       print('Error setting up call listener: $e');
@@ -180,17 +134,11 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       title: Text(
         contact.name,
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: 16,
-        ),
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
       ),
       subtitle: Text(
         contact.lastMessage,
-        style: TextStyle(
-          color: Colors.grey[600],
-          fontSize: 14,
-        ),
+        style: TextStyle(color: Colors.grey[600], fontSize: 14),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -200,10 +148,7 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           Text(
             contact.time,
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.grey[500], fontSize: 12),
           ),
           SizedBox(height: 4),
           Container(
@@ -229,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen>
           MaterialPageRoute(
             builder: (context) => ChatScreen(
               contact: contact,
-              currentUserId: _currentUser ?? 'sam',
+              currentUserId: _currentUser ?? _availableUsers[0],
             ),
           ),
         );
@@ -269,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildCallsTab() {
     return ListView.builder(
-      itemCount: 5,
+      itemCount: _contacts.length,
       itemBuilder: (context, index) {
         final contact = _contacts[index];
         return ListTile(
@@ -296,13 +241,20 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-          trailing: Icon(
-            Icons.videocam,
-            color: Colors.blue,
+          trailing: IconButton(
+            icon: Icon(Icons.videocam, color: Colors.blue),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatScreen(
+                    contact: contact,
+                    currentUserId: _currentUser ?? _availableUsers[0],
+                  ),
+                ),
+              );
+            },
           ),
-          onTap: () {
-            // Handle call tap
-          },
         );
       },
     );
@@ -335,10 +287,7 @@ class _HomeScreenState extends State<HomeScreen>
         title: Text(
           'Messages',
           style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.black,
-          ),
+              fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black),
         ),
         actions: [
           IconButton(
@@ -350,22 +299,45 @@ class _HomeScreenState extends State<HomeScreen>
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Colors.black),
             onSelected: (value) {
-              // Handle menu selection
+              if (value == 'switch_user') {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text('Switch User'),
+                    content: DropdownButtonFormField<String>(
+                      value: _currentUser,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Select User',
+                      ),
+                      items: _availableUsers.map((user) {
+                        return DropdownMenuItem(
+                          value: user,
+                          child: Text(user.replaceAll('_', ' ').toUpperCase()),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          _switchUser(value);
+                          Navigator.pop(context);
+                        }
+                      },
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text('Cancel'),
+                      ),
+                    ],
+                  ),
+                );
+              }
             },
             itemBuilder: (BuildContext context) {
               return [
-                PopupMenuItem(
-                  value: 'profile',
-                  child: Text('Profile'),
-                ),
-                PopupMenuItem(
-                  value: 'settings',
-                  child: Text('Settings'),
-                ),
-                PopupMenuItem(
-                  value: 'logout',
-                  child: Text('Switch User'),
-                ),
+                PopupMenuItem(value: 'profile', child: Text('Profile')),
+                PopupMenuItem(value: 'settings', child: Text('Settings')),
+                PopupMenuItem(value: 'switch_user', child: Text('Switch User')),
               ];
             },
           ),

@@ -88,6 +88,13 @@ class _ChatScreenState extends State<ChatScreen> {
   ];
 
   Future<void> _initiateVideoCall() async {
+    if (widget.currentUserId == widget.contact.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cannot call yourself')),
+      );
+      return;
+    }
+
     try {
       final channelId = '${widget.currentUserId}_to_${widget.contact.id}';
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
@@ -96,11 +103,9 @@ class _ChatScreenState extends State<ChatScreen> {
       print(
           'Initiating video call to ${widget.contact.name} on channel $channelId');
 
-      // Send notification to callee
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId);
 
-      // Navigate to call screen
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -116,6 +121,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initiateAudioCall() async {
+    if (widget.currentUserId == widget.contact.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cannot call yourself')),
+      );
+      return;
+    }
+
     try {
       final channelId = '${widget.currentUserId}_to_${widget.contact.id}_audio';
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
@@ -124,11 +136,9 @@ class _ChatScreenState extends State<ChatScreen> {
       print(
           'Initiating audio call to ${widget.contact.name} on channel $channelId');
 
-      // Send notification to callee (you might want to add audio call type to FCM data)
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId);
 
-      // For now, navigate to the same call screen (you can create a separate audio call screen)
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -262,18 +272,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   Text(
                     widget.contact.name,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   if (widget.contact.isOnline)
                     Text(
                       'Online',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.green,
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.green),
                     ),
                 ],
               ),
@@ -311,7 +315,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages list
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -322,15 +325,12 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-
-          // Message input area
           Container(
             padding: EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border(
-                top: BorderSide(color: Colors.grey[300]!, width: 0.5),
-              ),
+              border:
+                  Border(top: BorderSide(color: Colors.grey[300]!, width: 0.5)),
             ),
             child: SafeArea(
               child: Row(
@@ -354,9 +354,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           hintStyle: TextStyle(color: Colors.grey[600]),
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 10,
-                          ),
+                              horizontal: 20, vertical: 10),
                         ),
                         maxLines: null,
                         onSubmitted: (_) => _sendMessage(),

@@ -6,17 +6,15 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 class FCMService {
   static const _fcmScope = 'https://www.googleapis.com/auth/firebase.messaging';
-  // Replace 'videocallapp-81166' with your actual project ID from google-services.json
   static const _fcmEndpoint =
       'https://fcm.googleapis.com/v1/projects/videocallapp-81166/messages:send';
 
-  Future<void> setupFCM() async {
+  Future<void> setupFCM({required String userId}) async {
     try {
-      print('Setting up FCM...');
+      print('Setting up FCM for user: $userId');
       FirebaseMessaging messaging = FirebaseMessaging.instance;
       NotificationSettings settings = await messaging.requestPermission(
         alert: true,
@@ -31,11 +29,10 @@ class FCMService {
       String? token = await messaging.getToken();
       print('FCM Token: $token');
       if (token != null) {
-        final prefs = await SharedPreferences.getInstance();
-        String? userId = prefs.getString('user_id') ?? 'unknown_user';
         await FirebaseFirestore.instance.collection('users').doc(userId).set(
-            {'fcmToken': token, 'lastUpdated': FieldValue.serverTimestamp()},
-            SetOptions(merge: true));
+          {'fcmToken': token, 'lastUpdated': FieldValue.serverTimestamp()},
+          SetOptions(merge: true),
+        );
         print('FCM token stored for user: $userId');
       }
       FirebaseMessaging.onBackgroundMessage(
