@@ -46,7 +46,8 @@ https://github.com/user-attachments/assets/ac001810-0c6f-4f1d-bb83-8cd345dcd267
 You can easily test GupShupGo using:
 
 ### ✅ 1. Two Physical Devices
-- Sign in with two different accounts.
+- Sign in with two different accounts & select user from settings.
+- On Device A, select User A & on Device B, select User B and vice versa.
 - From one device, tap on the user in the list and initiate a call.
 - The second device receives a push notification and joins the call.
 
