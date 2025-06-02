@@ -23,8 +23,22 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Video Call App',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        fontFamily: 'Roboto',
+        appBarTheme: AppBarTheme(
+          elevation: 1,
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          titleTextStyle: TextStyle(
+            color: Colors.black,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
       home: HomeScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }

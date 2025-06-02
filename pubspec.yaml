@@ -53,7 +53,7 @@ dependencies:
   googleapis_auth: ^1.4.1
   
   # CallKit for native call UI
-  flutter_callkit_incoming: ^2.0.0
+  flutter_callkit_incoming: ^2.5.2
   
   # UI components
   cupertino_icons: ^1.0.2
