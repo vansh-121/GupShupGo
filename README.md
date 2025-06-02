@@ -13,19 +13,14 @@ GupShupGo is a modern Flutter-based video calling app that leverages **Agora SDK
 
 ## 📽️ Video Demo
 
-▶️ **Video Call using Device A and Device B:** 
+▶️ [Full Video Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link)
 
-https://github.com/user-attachments/assets/e4f4f005-3ce5-4afa-a6cf-6ddd3dce5b09
-
-> **Tip** : Unmute sound for voice instructions & userguide. 
 
 ---
 
-▶️ **Background Call using Firebase Cloud Messaging**
+▶️ [Background Call Architecture Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
 
-https://github.com/user-attachments/assets/ac001810-0c6f-4f1d-bb83-8cd345dcd267
 
-> **Tip** : Unmute sound for voice instructions & userguide. 
 
 ---
 
