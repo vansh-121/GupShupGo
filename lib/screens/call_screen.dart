@@ -7,8 +7,15 @@ import 'package:video_chat_app/services/agora_services.dart';
 class CallScreen extends StatefulWidget {
   final String channelId;
   final bool isCaller;
+  final String? calleeId;
+  final String? calleeName;
 
-  CallScreen({required this.channelId, required this.isCaller});
+  CallScreen({
+    required this.channelId,
+    required this.isCaller,
+    this.calleeId,
+    this.calleeName,
+  });
 
   @override
   _CallScreenState createState() => _CallScreenState();
@@ -283,18 +290,19 @@ class _CallScreenState extends State<CallScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.isCaller ? 'Calling...' : 'Incoming Call',
+                  widget.calleeName ?? (widget.isCaller ? 'Calling...' : 'Incoming Call'),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                SizedBox(height: 4),
                 Text(
-                  'Channel: ${widget.channelId}',
+                  _remoteUid != null ? 'Connected' : 'Waiting...',
                   style: const TextStyle(
                     color: Colors.white70,
-                    fontSize: 14,
+                    fontSize: 16,
                   ),
                 ),
               ],

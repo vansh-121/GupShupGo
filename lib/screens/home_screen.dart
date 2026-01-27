@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
+import 'package:video_chat_app/screens/contacts_screen.dart';
+import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/user_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -13,50 +17,59 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  String? _currentUser;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  String? _currentUserId;
+  UserModel? _currentUser;
   bool _isInitialized = false;
   late TabController _tabController;
 
-  final List<String> _availableUsers = ['user_a', 'user_b'];
+  final AuthService _authService = AuthService();
+  final UserService _userService = UserService();
+  final FCMService _fcmService = FCMService();
 
-  final List<Contact> _contacts = [
-    Contact(
-      id: 'user_a',
-      name: 'User A',
-      lastMessage: 'Hello!',
-      time: '10:20 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=User+A&background=4CAF50&color=fff&size=128',
-      isOnline: true,
-    ),
-    Contact(
-      id: 'user_b',
-      name: 'User B',
-      lastMessage: 'How are you?',
-      time: '1:02 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=User+B&background=2196F3&color=fff&size=128',
-      isOnline: true,
-    ),
-  ];
+  List<UserModel> _recentContacts = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
     _initializeApp();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
+    if (_currentUserId != null) {
+      _userService.updateOnlineStatus(_currentUserId!, false);
+    }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (_currentUserId != null) {
+      switch (state) {
+        case AppLifecycleState.resumed:
+          _userService.updateOnlineStatus(_currentUserId!, true);
+          break;
+        case AppLifecycleState.paused:
+        case AppLifecycleState.inactive:
+        case AppLifecycleState.detached:
+          _userService.updateOnlineStatus(_currentUserId!, false);
+          break;
+        case AppLifecycleState.hidden:
+          break;
+      }
+    }
   }
 
   Future<void> _initializeApp() async {
     await _loadUser();
     await _setupCallListener();
+    _loadRecentContacts();
     setState(() {
       _isInitialized = true;
     });
@@ -64,50 +77,84 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadUser() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('user_id') ?? _availableUsers[0];
-      setState(() {
-        _currentUser = userId;
-      });
-      await FCMService().setupFCM(userId: userId);
-      print('App initialized for user: $userId');
+      _currentUser = await _authService.getSavedUser();
+      if (_currentUser != null) {
+        setState(() {
+          _currentUserId = _currentUser!.id;
+        });
+        await _fcmService.setupFCM(userId: _currentUserId!);
+        await _userService.setupPresence(_currentUserId!);
+        print('App initialized for user: ${_currentUser!.name}');
+      }
     } catch (e) {
       print('Error loading user: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error initializing app: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error initializing app: $e')),
+        );
+      }
     }
   }
 
-  Future<void> _switchUser(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_id', userId);
-    setState(() {
-      _currentUser = userId;
+  void _loadRecentContacts() {
+    if (_currentUserId == null) return;
+    _userService.getAllUsers(_currentUserId!).listen((users) {
+      if (mounted) {
+        setState(() {
+          _recentContacts = users.take(10).toList();
+        });
+      }
     });
-    await FCMService().setupFCM(userId: userId);
-    print('Switched to user: $userId');
   }
 
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      FCMService().onCallReceived((callerId, channelId) {
+      _fcmService.onCallReceived((callerId, channelId) {
         print('Incoming call from $callerId on channel $channelId');
         callState.updateState(CallState.Ringing);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CallScreen(channelId: channelId, isCaller: false),
-          ),
-        );
+        
+        _userService.getUserById(callerId).then((caller) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CallScreen(
+                  channelId: channelId,
+                  isCaller: false,
+                  calleeId: callerId,
+                  calleeName: caller?.name ?? 'Unknown',
+                ),
+              ),
+            );
+          }
+        });
       });
     } catch (e) {
       print('Error setting up call listener: $e');
     }
   }
 
-  Widget _buildContactItem(Contact contact) {
+  Future<void> _signOut() async {
+    await _authService.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => PhoneAuthScreen()),
+      );
+    }
+  }
+
+  Widget _buildContactItem(UserModel user) {
+    final contact = Contact(
+      id: user.id,
+      name: user.name,
+      lastMessage: 'Tap to chat',
+      time: '',
+      avatarUrl: user.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+      isOnline: user.isOnline,
+    );
+    
     return ListTile(
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Stack(
@@ -134,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       title: Text(
-        contact.name,
+        user.name,
         style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
       ),
       subtitle: Text(
@@ -143,39 +190,16 @@ class _HomeScreenState extends State<HomeScreen>
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            contact.time,
-            style: TextStyle(color: Colors.grey[500], fontSize: 12),
-          ),
-          SizedBox(height: 4),
-          Container(
-            padding: EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-            ),
-            child: Text(
-              '1',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
+      trailing: user.isOnline
+          ? Icon(Icons.circle, color: Colors.green, size: 12)
+          : null,
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatScreen(
               contact: contact,
-              currentUserId: _currentUser ?? _availableUsers[0],
+              currentUserId: _currentUserId!,
             ),
           ),
         );
@@ -184,15 +208,45 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildChatsTab() {
+    if (_recentContacts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
+              'No recent chats',
+              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            ),
+            SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                if (_currentUserId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+                    ),
+                  );
+                }
+              },
+              child: Text('Browse Contacts'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.separated(
-      itemCount: _contacts.length,
+      itemCount: _recentContacts.length,
       separatorBuilder: (context, index) => Divider(
         height: 1,
         indent: 72,
         endIndent: 16,
       ),
       itemBuilder: (context, index) {
-        return _buildContactItem(_contacts[index]);
+        return _buildContactItem(_recentContacts[index]);
       },
     );
   }
@@ -214,48 +268,86 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildCallsTab() {
-    return ListView.builder(
-      itemCount: _contacts.length,
-      itemBuilder: (context, index) {
-        final contact = _contacts[index];
-        return ListTile(
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          leading: CircleAvatar(
-            radius: 28,
-            backgroundImage: NetworkImage(contact.avatarUrl),
-          ),
-          title: Text(
-            contact.name,
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          subtitle: Row(
-            children: [
-              Icon(
-                index % 2 == 0 ? Icons.call_received : Icons.call_made,
-                size: 16,
-                color: index % 2 == 0 ? Colors.green : Colors.red,
-              ),
-              SizedBox(width: 4),
-              Text(
-                '${contact.time} • Video',
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-            ],
-          ),
-          trailing: IconButton(
-            icon: Icon(Icons.videocam, color: Colors.blue),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatScreen(
-                    contact: contact,
-                    currentUserId: _currentUser ?? _availableUsers[0],
-                  ),
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return StreamBuilder<List<UserModel>>(
+      stream: _userService.getAllUsers(_currentUserId!),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.call, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No call history',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
                 ),
-              );
-            },
-          ),
+              ],
+            ),
+          );
+        }
+
+        final users = snapshot.data!;
+        return ListView.builder(
+          itemCount: users.length,
+          itemBuilder: (context, index) {
+            final user = users[index];
+            return ListTile(
+              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: CircleAvatar(
+                radius: 28,
+                backgroundImage: NetworkImage(
+                  user.photoUrl ??
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                ),
+              ),
+              title: Text(
+                user.name,
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Row(
+                children: [
+                  Icon(
+                    index % 2 == 0 ? Icons.call_received : Icons.call_made,
+                    size: 16,
+                    color: index % 2 == 0 ? Colors.green : Colors.red,
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    'Video',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                  ),
+                ],
+              ),
+              trailing: IconButton(
+                icon: Icon(Icons.videocam, color: Colors.blue),
+                onPressed: () {
+                  final contact = Contact(
+                    id: user.id,
+                    name: user.name,
+                    lastMessage: '',
+                    time: '',
+                    avatarUrl: user.photoUrl ??
+                        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                    isOnline: user.isOnline,
+                  );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ChatScreen(
+                        contact: contact,
+                        currentUserId: _currentUserId!,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
         );
       },
     );
@@ -300,51 +392,59 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             icon: Icon(Icons.search, color: Colors.black),
             onPressed: () {
-              // Implement search
+              if (_currentUserId != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+                  ),
+                );
+              }
             },
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Colors.black),
             onSelected: (value) {
-              if (value == 'switch_user') {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text('Switch User'),
-                    content: DropdownButtonFormField<String>(
-                      value: _currentUser,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(),
-                        labelText: 'Select User',
-                      ),
-                      items: _availableUsers.map((user) {
-                        return DropdownMenuItem(
-                          value: user,
-                          child: Text(user.replaceAll('_', ' ').toUpperCase()),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          _switchUser(value);
-                          Navigator.pop(context);
-                        }
-                      },
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: Text('Cancel'),
-                      ),
-                    ],
-                  ),
-                );
+              if (value == 'profile') {
+                // Show profile screen
+              } else if (value == 'settings') {
+                // Show settings screen
+              } else if (value == 'logout') {
+                _signOut();
               }
             },
             itemBuilder: (BuildContext context) {
               return [
-                PopupMenuItem(value: 'profile', child: Text('Profile')),
-                PopupMenuItem(value: 'settings', child: Text('Settings')),
-                PopupMenuItem(value: 'switch_user', child: Text('Switch User')),
+                PopupMenuItem(
+                  value: 'profile',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person, color: Colors.black),
+                      SizedBox(width: 12),
+                      Text('Profile'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, color: Colors.black),
+                      SizedBox(width: 12),
+                      Text('Settings'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'logout',
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, color: Colors.red),
+                      SizedBox(width: 12),
+                      Text('Logout', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
               ];
             },
           ),
@@ -380,7 +480,14 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // Handle new chat/call
+          if (_currentUserId != null) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+              ),
+            );
+          }
         },
         backgroundColor: Colors.blue,
         child: Icon(Icons.message, color: Colors.white),
