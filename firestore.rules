@@ -19,21 +19,28 @@ service cloud.firestore {
     match /chatRooms/{chatRoomId} {
       // Helper function to check if user is participant
       function isParticipant() {
-        return request.auth.uid in resource.data.participants;
+        return resource.data.participants != null 
+          && request.auth.uid in resource.data.participants;
       }
       
       function willBeParticipant() {
-        return request.auth.uid in request.resource.data.participants;
+        return request.resource.data.participants != null
+          && request.auth.uid in request.resource.data.participants;
+      }
+      
+      // Helper to check if user ID is in the chatRoomId (fallback for legacy data)
+      function isUserInChatRoomId() {
+        return chatRoomId.matches('.*' + request.auth.uid + '.*');
       }
       
       // Allow creating chat room if user is a participant
       allow create: if request.auth != null && willBeParticipant();
       
-      // Allow reading if user is a participant
-      allow read: if request.auth != null && isParticipant();
+      // Allow reading if user is a participant OR user ID is in chatRoomId (legacy support)
+      allow read: if request.auth != null && (isParticipant() || isUserInChatRoomId());
       
       // Allow updating (for last message, unread count, etc.)
-      allow update: if request.auth != null && isParticipant();
+      allow update: if request.auth != null && (isParticipant() || isUserInChatRoomId());
       
       // Prevent deletion of chat rooms (or allow only if participant)
       allow delete: if false;
@@ -42,26 +49,28 @@ service cloud.firestore {
       match /messages/{messageId} {
         // Helper to check parent chat room participation
         function isChatParticipant() {
-          return request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(chatRoomId)).data.participants;
+          let chatRoom = get(/databases/$(database)/documents/chatRooms/$(chatRoomId));
+          return chatRoom != null 
+            && chatRoom.data.participants != null
+            && request.auth.uid in chatRoom.data.participants;
         }
         
-        // Allow reading messages if participant
-        allow read: if request.auth != null && isChatParticipant();
+        // Fallback: check if user ID is in the chatRoomId
+        function isUserInRoomId() {
+          return chatRoomId.matches('.*' + request.auth.uid + '.*');
+        }
         
-        // Allow creating message if:
-        // - User is authenticated
-        // - User is the sender
-        // - User is a participant in the chat
-        // - Message has required fields
+        // Allow reading messages if participant or user is in room ID
+        allow read: if request.auth != null && (isChatParticipant() || isUserInRoomId());
+        
+        // Allow creating message if user is authenticated and is sender
         allow create: if request.auth != null 
           && request.auth.uid == request.resource.data.senderId
-          && isChatParticipant()
-          && request.resource.data.keys().hasAll(['senderId', 'receiverId', 'text', 'timestamp']);
+          && (isChatParticipant() || isUserInRoomId());
         
         // Allow updating (for read receipts) if participant
         allow update: if request.auth != null 
-          && isChatParticipant()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+          && (isChatParticipant() || isUserInRoomId());
         
         // Allow deleting only own messages
         allow delete: if request.auth != null 

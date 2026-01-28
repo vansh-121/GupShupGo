@@ -27,8 +27,13 @@ class Contact {
 class ChatScreen extends StatefulWidget {
   final Contact contact;
   final String currentUserId;
+  final String? currentUserName;
 
-  ChatScreen({required this.contact, required this.currentUserId});
+  ChatScreen({
+    required this.contact,
+    required this.currentUserId,
+    this.currentUserName,
+  });
 
   @override
   _ChatScreenState createState() => _ChatScreenState();
@@ -56,7 +61,13 @@ class _ChatScreenState extends State<ChatScreen> {
         widget.contact.id,
       );
 
-      // Mark messages as read when opening chat
+      // Mark messages as delivered first (in case they were sent)
+      await _chatService.markMessagesAsDelivered(
+        widget.currentUserId,
+        widget.contact.id,
+      );
+
+      // Mark messages as read when opening chat (user is viewing them)
       await _chatService.markMessagesAsRead(
         widget.currentUserId,
         widget.contact.id,
@@ -65,12 +76,29 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _isLoading = false;
       });
+
+      // Start listening for new messages and mark them as read immediately
+      _startReadReceiptListener();
     } catch (e) {
       print('Error initializing chat: $e');
       setState(() {
         _isLoading = false;
       });
     }
+  }
+
+  // Continuously mark new incoming messages as read while chat is open
+  void _startReadReceiptListener() {
+    // This will be called when new messages arrive via StreamBuilder
+    // We'll mark them as read in the stream listener
+  }
+
+  // Call this when new messages arrive while chat is open
+  Future<void> _markNewMessagesAsRead() async {
+    await _chatService.markMessagesAsRead(
+      widget.currentUserId,
+      widget.contact.id,
+    );
   }
 
   Future<void> _initiateVideoCall() async {
@@ -154,6 +182,7 @@ class _ChatScreenState extends State<ChatScreen> {
         senderId: widget.currentUserId,
         receiverId: widget.contact.id,
         text: text,
+        senderName: widget.currentUserName,
       );
 
       _scrollToBottom();
@@ -274,13 +303,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 if (isMe) ...[
                   SizedBox(width: 4),
-                  Icon(
-                    message.isRead ? Icons.done_all : Icons.done,
-                    size: 14,
-                    color: message.isRead
-                        ? Colors.lightBlueAccent
-                        : Colors.white70,
-                  ),
+                  _buildMessageStatusIcon(message),
                 ],
               ],
             ),
@@ -288,6 +311,32 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildMessageStatusIcon(MessageModel message) {
+    switch (message.status) {
+      case MessageStatus.sent:
+        // Single gray tick - sent but not delivered
+        return Icon(
+          Icons.done,
+          size: 14,
+          color: Colors.white70,
+        );
+      case MessageStatus.delivered:
+        // Double gray ticks - delivered but not read
+        return Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.white70,
+        );
+      case MessageStatus.read:
+        // Double blue ticks - read
+        return Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.lightBlueAccent,
+        );
+    }
   }
 
   Widget _buildMessagesList(List<MessageModel> messages) {
@@ -476,6 +525,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       }
 
                       final messages = snapshot.data ?? [];
+
+                      // Mark any unread messages as read (for real-time incoming messages)
+                      final hasUnreadMessages = messages.any((m) =>
+                          m.receiverId == widget.currentUserId &&
+                          m.status != MessageStatus.read);
+                      if (hasUnreadMessages) {
+                        _markNewMessagesAsRead();
+                      }
 
                       // Auto-scroll when new messages arrive
                       WidgetsBinding.instance.addPostFrameCallback((_) {

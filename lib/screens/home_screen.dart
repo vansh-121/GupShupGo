@@ -30,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen>
   final FCMService _fcmService = FCMService();
   final ChatService _chatService = ChatService();
 
+  // ignore: unused_field
   List<UserModel> _recentContacts = [];
 
   @override
@@ -57,6 +58,8 @@ class _HomeScreenState extends State<HomeScreen>
       switch (state) {
         case AppLifecycleState.resumed:
           _userService.updateOnlineStatus(_currentUserId!, true);
+          // Mark all messages as delivered when app comes to foreground
+          _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
           break;
         case AppLifecycleState.paused:
         case AppLifecycleState.inactive:
@@ -73,6 +76,10 @@ class _HomeScreenState extends State<HomeScreen>
     await _loadUser();
     await _setupCallListener();
     _loadRecentContacts();
+    // Mark all messages as delivered on app open
+    if (_currentUserId != null) {
+      await _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+    }
     setState(() {
       _isInitialized = true;
     });
@@ -203,6 +210,7 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (context) => ChatScreen(
               contact: contact,
               currentUserId: _currentUserId!,
+              currentUserName: _currentUser?.name,
             ),
           ),
         );
@@ -241,8 +249,10 @@ class _HomeScreenState extends State<HomeScreen>
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            ContactsScreen(currentUserId: _currentUserId!),
+                        builder: (_) => ContactsScreen(
+                          currentUserId: _currentUserId!,
+                          currentUserName: _currentUser?.name,
+                        ),
                       ),
                     );
                   },
@@ -346,7 +356,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (chatRoom.lastMessageSenderId == _currentUserId)
             Padding(
               padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.done_all, size: 16, color: Colors.blue),
+              child: _buildMessageStatusIcon(chatRoom.lastMessageStatus),
             ),
           Expanded(
             child: Text(
@@ -401,11 +411,25 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (context) => ChatScreen(
               contact: contact,
               currentUserId: _currentUserId!,
+              currentUserName: _currentUser?.name,
             ),
           ),
         );
       },
     );
+  }
+
+  Widget _buildMessageStatusIcon(MessageStatus? status) {
+    switch (status) {
+      case MessageStatus.sent:
+        return Icon(Icons.done, size: 16, color: Colors.grey);
+      case MessageStatus.delivered:
+        return Icon(Icons.done_all, size: 16, color: Colors.grey);
+      case MessageStatus.read:
+        return Icon(Icons.done_all, size: 16, color: Colors.blue);
+      default:
+        return Icon(Icons.done, size: 16, color: Colors.grey);
+    }
   }
 
   String _formatChatTime(DateTime dateTime) {
@@ -522,6 +546,7 @@ class _HomeScreenState extends State<HomeScreen>
                       builder: (context) => ChatScreen(
                         contact: contact,
                         currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name,
                       ),
                     ),
                   );
@@ -577,8 +602,10 @@ class _HomeScreenState extends State<HomeScreen>
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        ContactsScreen(currentUserId: _currentUserId!),
+                    builder: (_) => ContactsScreen(
+                      currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
+                    ),
                   ),
                 );
               }
@@ -666,7 +693,10 @@ class _HomeScreenState extends State<HomeScreen>
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+                builder: (_) => ContactsScreen(
+                  currentUserId: _currentUserId!,
+                  currentUserName: _currentUser?.name,
+                ),
               ),
             );
           }

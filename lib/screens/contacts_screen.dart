@@ -7,8 +7,9 @@ import 'package:video_chat_app/services/fcm_service.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
+  final String? currentUserName;
 
-  ContactsScreen({required this.currentUserId});
+  ContactsScreen({required this.currentUserId, this.currentUserName});
 
   @override
   _ContactsScreenState createState() => _ContactsScreenState();
@@ -18,7 +19,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<UserModel> _searchResults = [];
   bool _isSearching = false;
 
@@ -53,8 +54,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _initiateCall(UserModel user) async {
-    String channelId = '${widget.currentUserId}_${user.id}_${DateTime.now().millisecondsSinceEpoch}';
-    
+    String channelId =
+        '${widget.currentUserId}_${user.id}_${DateTime.now().millisecondsSinceEpoch}';
+
     // Send call notification to the user
     await _fcmService.sendCallNotification(
       user.id,
@@ -83,7 +85,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       name: user.name,
       lastMessage: '',
       time: '',
-      avatarUrl: user.photoUrl ?? 
+      avatarUrl: user.photoUrl ??
           'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
       isOnline: user.isOnline,
     );
@@ -94,6 +96,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         builder: (_) => ChatScreen(
           contact: contact,
           currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName,
         ),
       ),
     );
@@ -198,7 +201,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   borderRadius: BorderRadius.circular(25),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
           ),

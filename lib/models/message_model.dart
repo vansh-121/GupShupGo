@@ -2,6 +2,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum MessageType { text, image, audio, video }
 
+enum MessageStatus {
+  sent, // Message sent but not delivered
+  delivered, // Message delivered to device but not read
+  read // Message read by receiver
+}
+
 class MessageModel {
   final String id;
   final String senderId;
@@ -9,7 +15,7 @@ class MessageModel {
   final String text;
   final MessageType type;
   final DateTime timestamp;
-  final bool isRead;
+  final MessageStatus status;
   final String? mediaUrl;
 
   MessageModel({
@@ -19,9 +25,14 @@ class MessageModel {
     required this.text,
     this.type = MessageType.text,
     required this.timestamp,
-    this.isRead = false,
+    this.status = MessageStatus.sent,
     this.mediaUrl,
   });
+
+  // Convenience getters for status
+  bool get isDelivered =>
+      status == MessageStatus.delivered || status == MessageStatus.read;
+  bool get isRead => status == MessageStatus.read;
 
   // Convert MessageModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -32,7 +43,7 @@ class MessageModel {
       'text': text,
       'type': type.name,
       'timestamp': Timestamp.fromDate(timestamp),
-      'isRead': isRead,
+      'status': status.name,
       'mediaUrl': mediaUrl,
     };
   }
@@ -46,7 +57,7 @@ class MessageModel {
       text: map['text'] ?? '',
       type: _parseMessageType(map['type']),
       timestamp: _parseTimestamp(map['timestamp']),
-      isRead: map['isRead'] ?? false,
+      status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
     );
   }
@@ -69,6 +80,22 @@ class MessageModel {
     }
   }
 
+  static MessageStatus _parseMessageStatus(dynamic status) {
+    if (status == null) return MessageStatus.sent;
+    // Handle legacy isRead boolean
+    if (status is bool) {
+      return status ? MessageStatus.read : MessageStatus.delivered;
+    }
+    switch (status.toString()) {
+      case 'delivered':
+        return MessageStatus.delivered;
+      case 'read':
+        return MessageStatus.read;
+      default:
+        return MessageStatus.sent;
+    }
+  }
+
   static DateTime _parseTimestamp(dynamic value) {
     if (value == null) return DateTime.now();
     if (value is Timestamp) {
@@ -86,7 +113,7 @@ class MessageModel {
     String? text,
     MessageType? type,
     DateTime? timestamp,
-    bool? isRead,
+    MessageStatus? status,
     String? mediaUrl,
   }) {
     return MessageModel(
@@ -96,7 +123,7 @@ class MessageModel {
       text: text ?? this.text,
       type: type ?? this.type,
       timestamp: timestamp ?? this.timestamp,
-      isRead: isRead ?? this.isRead,
+      status: status ?? this.status,
       mediaUrl: mediaUrl ?? this.mediaUrl,
     );
   }
@@ -109,6 +136,7 @@ class ChatRoom {
   final String? lastMessage;
   final DateTime? lastMessageTime;
   final String? lastMessageSenderId;
+  final MessageStatus? lastMessageStatus;
   final Map<String, int> unreadCount;
 
   ChatRoom({
@@ -117,6 +145,7 @@ class ChatRoom {
     this.lastMessage,
     this.lastMessageTime,
     this.lastMessageSenderId,
+    this.lastMessageStatus,
     this.unreadCount = const {},
   });
 
@@ -128,6 +157,7 @@ class ChatRoom {
       'lastMessageTime':
           lastMessageTime != null ? Timestamp.fromDate(lastMessageTime!) : null,
       'lastMessageSenderId': lastMessageSenderId,
+      'lastMessageStatus': lastMessageStatus?.name,
       'unreadCount': unreadCount,
     };
   }
@@ -141,8 +171,20 @@ class ChatRoom {
           ? (map['lastMessageTime'] as Timestamp).toDate()
           : null,
       lastMessageSenderId: map['lastMessageSenderId'],
+      lastMessageStatus: _parseMessageStatus(map['lastMessageStatus']),
       unreadCount: Map<String, int>.from(map['unreadCount'] ?? {}),
     );
+  }
+
+  static MessageStatus? _parseMessageStatus(dynamic value) {
+    if (value == null) return null;
+    if (value is String) {
+      return MessageStatus.values.firstWhere(
+        (e) => e.name == value,
+        orElse: () => MessageStatus.sent,
+      );
+    }
+    return MessageStatus.sent;
   }
 
   factory ChatRoom.fromFirestore(DocumentSnapshot doc) {

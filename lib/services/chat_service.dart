@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/services/fcm_service.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FCMService _fcmService = FCMService();
   final String _chatRoomsCollection = 'chatRooms';
   final String _messagesCollection = 'messages';
 
@@ -26,10 +28,11 @@ class ChatService {
       return ChatRoom.fromFirestore(doc);
     }
 
-    // Create new chat room
+    // Create new chat room with initial lastMessageTime so it shows in queries
     ChatRoom newChatRoom = ChatRoom(
       id: chatRoomId,
       participants: [currentUserId, otherUserId],
+      lastMessageTime: DateTime.now(),
       unreadCount: {currentUserId: 0, otherUserId: 0},
     );
 
@@ -46,6 +49,7 @@ class ChatService {
     required String senderId,
     required String receiverId,
     required String text,
+    String? senderName,
     MessageType type = MessageType.text,
     String? mediaUrl,
   }) async {
@@ -65,7 +69,7 @@ class ChatService {
       text: text,
       type: type,
       timestamp: DateTime.now(),
-      isRead: false,
+      status: MessageStatus.sent,
       mediaUrl: mediaUrl,
     );
 
@@ -82,12 +86,29 @@ class ChatService {
         'lastMessage': text,
         'lastMessageTime': Timestamp.fromDate(message.timestamp),
         'lastMessageSenderId': senderId,
+        'lastMessageStatus': MessageStatus.sent.name,
         'unreadCount.$receiverId': FieldValue.increment(1),
       },
     );
 
     await batch.commit();
     print('Message sent: ${message.id}');
+
+    // Send push notification for message delivery
+    // This helps mark message as delivered even if receiver app is in background
+    try {
+      String displayName = senderName ?? 'Someone';
+      await _fcmService.sendMessageNotification(
+        receiverId: receiverId,
+        senderId: senderId,
+        senderName: displayName,
+        message: text,
+        chatRoomId: chatRoomId,
+      );
+    } catch (e) {
+      print('Error sending message notification: $e');
+      // Don't fail the message send if notification fails
+    }
 
     return message;
   }
@@ -150,25 +171,107 @@ class ChatService {
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .where('receiverId', isEqualTo: currentUserId)
-        .where('isRead', isEqualTo: false)
-        .get();
+        .where('status', whereIn: ['sent', 'delivered']).get();
 
     if (unreadMessages.docs.isEmpty) return;
 
     WriteBatch batch = _firestore.batch();
 
     for (var doc in unreadMessages.docs) {
-      batch.update(doc.reference, {'isRead': true});
+      batch.update(doc.reference, {'status': 'read'});
     }
 
-    // Reset unread count for current user
+    // Reset unread count for current user and update lastMessageStatus
     batch.update(
       _firestore.collection(_chatRoomsCollection).doc(chatRoomId),
-      {'unreadCount.$currentUserId': 0},
+      {
+        'unreadCount.$currentUserId': 0,
+        'lastMessageStatus': MessageStatus.read.name,
+      },
     );
 
     await batch.commit();
     print('Marked ${unreadMessages.docs.length} messages as read');
+  }
+
+  // Mark messages as delivered when receiver opens chat or receives them
+  Future<void> markMessagesAsDelivered(
+      String currentUserId, String otherUserId) async {
+    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
+
+    // Get sent messages (not yet delivered) sent by the other user
+    QuerySnapshot sentMessages = await _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .collection(_messagesCollection)
+        .where('receiverId', isEqualTo: currentUserId)
+        .where('status', isEqualTo: 'sent')
+        .get();
+
+    if (sentMessages.docs.isEmpty) return;
+
+    WriteBatch batch = _firestore.batch();
+
+    for (var doc in sentMessages.docs) {
+      batch.update(doc.reference, {'status': 'delivered'});
+    }
+
+    // Update lastMessageStatus on chatRoom
+    batch.update(
+      _firestore.collection(_chatRoomsCollection).doc(chatRoomId),
+      {'lastMessageStatus': MessageStatus.delivered.name},
+    );
+
+    await batch.commit();
+    print('Marked ${sentMessages.docs.length} messages as delivered');
+  }
+
+  // Mark ALL messages as delivered across ALL chats when app opens
+  // This simulates WhatsApp behavior - messages are delivered when app syncs
+  Future<void> markAllMessagesAsDeliveredOnAppOpen(String currentUserId) async {
+    try {
+      // Get all chat rooms where user is a participant
+      QuerySnapshot chatRoomsSnapshot = await _firestore
+          .collection(_chatRoomsCollection)
+          .where('participants', arrayContains: currentUserId)
+          .get();
+
+      if (chatRoomsSnapshot.docs.isEmpty) return;
+
+      int totalMarked = 0;
+
+      for (var chatRoomDoc in chatRoomsSnapshot.docs) {
+        // Get all 'sent' messages in this chat room where current user is receiver
+        QuerySnapshot sentMessages = await _firestore
+            .collection(_chatRoomsCollection)
+            .doc(chatRoomDoc.id)
+            .collection(_messagesCollection)
+            .where('receiverId', isEqualTo: currentUserId)
+            .where('status', isEqualTo: 'sent')
+            .get();
+
+        if (sentMessages.docs.isEmpty) continue;
+
+        WriteBatch batch = _firestore.batch();
+
+        for (var doc in sentMessages.docs) {
+          batch.update(doc.reference, {'status': 'delivered'});
+        }
+
+        // Also update the chatRoom's lastMessageStatus
+        batch.update(chatRoomDoc.reference,
+            {'lastMessageStatus': MessageStatus.delivered.name});
+
+        await batch.commit();
+        totalMarked += sentMessages.docs.length;
+      }
+
+      if (totalMarked > 0) {
+        print('Marked $totalMarked messages as delivered on app open');
+      }
+    } catch (e) {
+      print('Error marking messages as delivered on app open: $e');
+    }
   }
 
   // Get chat rooms for a user
@@ -176,10 +279,20 @@ class ChatService {
     return _firestore
         .collection(_chatRoomsCollection)
         .where('participants', arrayContains: userId)
-        .orderBy('lastMessageTime', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) => ChatRoom.fromFirestore(doc)).toList();
+      List<ChatRoom> chatRooms =
+          snapshot.docs.map((doc) => ChatRoom.fromFirestore(doc)).toList();
+
+      // Sort locally to handle null lastMessageTime
+      chatRooms.sort((a, b) {
+        if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
+        if (a.lastMessageTime == null) return 1;
+        if (b.lastMessageTime == null) return -1;
+        return b.lastMessageTime!.compareTo(a.lastMessageTime!);
+      });
+
+      return chatRooms;
     });
   }
 
