@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
@@ -9,6 +10,7 @@ import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/chat_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen>
   final AuthService _authService = AuthService();
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
+  final ChatService _chatService = ChatService();
 
   List<UserModel> _recentContacts = [];
 
@@ -96,24 +99,13 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  void _loadRecentContacts() {
-    if (_currentUserId == null) return;
-    _userService.getAllUsers(_currentUserId!).listen((users) {
-      if (mounted) {
-        setState(() {
-          _recentContacts = users.take(10).toList();
-        });
-      }
-    });
-  }
-
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       _fcmService.onCallReceived((callerId, channelId) {
         print('Incoming call from $callerId on channel $channelId');
         callState.updateState(CallState.Ringing);
-        
+
         _userService.getUserById(callerId).then((caller) {
           if (mounted) {
             Navigator.push(
@@ -144,6 +136,17 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  void _loadRecentContacts() {
+    if (_currentUserId == null) return;
+    _userService.getAllUsers(_currentUserId!).listen((users) {
+      if (mounted) {
+        setState(() {
+          _recentContacts = users.take(10).toList();
+        });
+      }
+    });
+  }
+
   Widget _buildContactItem(UserModel user) {
     final contact = Contact(
       id: user.id,
@@ -154,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen>
           'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
       isOnline: user.isOnline,
     );
-    
+
     return ListTile(
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Stack(
@@ -208,47 +211,225 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildChatsTab() {
-    if (_recentContacts.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text(
-              'No recent chats',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return StreamBuilder<List<ChatRoom>>(
+      stream: _chatService.getChatRooms(_currentUserId!),
+      builder: (context, chatSnapshot) {
+        if (chatSnapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        final chatRooms = chatSnapshot.data ?? [];
+
+        if (chatRooms.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No recent chats',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                ),
+                SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ContactsScreen(currentUserId: _currentUserId!),
+                      ),
+                    );
+                  },
+                  child: Text('Start a conversation'),
+                ),
+              ],
             ),
-            SizedBox(height: 8),
-            TextButton(
-              onPressed: () {
-                if (_currentUserId != null) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+          );
+        }
+
+        return ListView.separated(
+          itemCount: chatRooms.length,
+          separatorBuilder: (context, index) => Divider(
+            height: 1,
+            indent: 72,
+            endIndent: 16,
+          ),
+          itemBuilder: (context, index) {
+            final chatRoom = chatRooms[index];
+            // Get the other participant's ID
+            final otherUserId = chatRoom.participants
+                .firstWhere((id) => id != _currentUserId, orElse: () => '');
+
+            if (otherUserId.isEmpty) return SizedBox.shrink();
+
+            return FutureBuilder<UserModel?>(
+              future: _userService.getUserById(otherUserId),
+              builder: (context, userSnapshot) {
+                if (!userSnapshot.hasData) {
+                  return ListTile(
+                    leading: CircleAvatar(
+                      radius: 28,
+                      backgroundColor: Colors.grey[300],
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    title: Container(
+                      height: 16,
+                      width: 100,
+                      color: Colors.grey[200],
                     ),
                   );
                 }
-              },
-              child: Text('Browse Contacts'),
-            ),
-          ],
-        ),
-      );
-    }
 
-    return ListView.separated(
-      itemCount: _recentContacts.length,
-      separatorBuilder: (context, index) => Divider(
-        height: 1,
-        indent: 72,
-        endIndent: 16,
-      ),
-      itemBuilder: (context, index) {
-        return _buildContactItem(_recentContacts[index]);
+                final user = userSnapshot.data!;
+                final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+
+                return _buildChatRoomItem(user, chatRoom, unreadCount);
+              },
+            );
+          },
+        );
       },
     );
+  }
+
+  Widget _buildChatRoomItem(
+      UserModel user, ChatRoom chatRoom, int unreadCount) {
+    final contact = Contact(
+      id: user.id,
+      name: user.name,
+      lastMessage: chatRoom.lastMessage ?? 'Tap to chat',
+      time: chatRoom.lastMessageTime != null
+          ? _formatChatTime(chatRoom.lastMessageTime!)
+          : '',
+      avatarUrl: user.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+      isOnline: user.isOnline,
+    );
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: Stack(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundImage: NetworkImage(contact.avatarUrl),
+            backgroundColor: Colors.grey[300],
+          ),
+          if (contact.isOnline)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
+      title: Text(
+        user.name,
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Row(
+        children: [
+          if (chatRoom.lastMessageSenderId == _currentUserId)
+            Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: Icon(Icons.done_all, size: 16, color: Colors.blue),
+            ),
+          Expanded(
+            child: Text(
+              contact.lastMessage,
+              style: TextStyle(
+                color: unreadCount > 0 ? Colors.black87 : Colors.grey[600],
+                fontSize: 14,
+                fontWeight:
+                    unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            contact.time,
+            style: TextStyle(
+              color: unreadCount > 0 ? Colors.blue : Colors.grey[600],
+              fontSize: 12,
+            ),
+          ),
+          if (unreadCount > 0) ...[
+            SizedBox(height: 4),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : unreadCount.toString(),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              contact: contact,
+              currentUserId: _currentUserId!,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatChatTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
+
+    if (messageDate == today) {
+      String hour = dateTime.hour > 12
+          ? (dateTime.hour - 12).toString()
+          : dateTime.hour == 0
+              ? '12'
+              : dateTime.hour.toString();
+      String minute = dateTime.minute.toString().padLeft(2, '0');
+      String period = dateTime.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $period';
+    } else if (messageDate == today.subtract(Duration(days: 1))) {
+      return 'Yesterday';
+    } else if (now.difference(dateTime).inDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[dateTime.weekday - 1];
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    }
   }
 
   Widget _buildStatusTab() {
@@ -396,7 +577,8 @@ class _HomeScreenState extends State<HomeScreen>
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ContactsScreen(currentUserId: _currentUserId!),
+                    builder: (_) =>
+                        ContactsScreen(currentUserId: _currentUserId!),
                   ),
                 );
               }
