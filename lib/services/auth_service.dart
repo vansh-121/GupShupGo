@@ -18,15 +18,15 @@ class AuthService {
   Future<UserModel?> signInAnonymously(String displayName) async {
     try {
       print('Starting anonymous sign in...');
-      
+
       // Sign in to Firebase Auth
       UserCredential userCredential = await _auth.signInAnonymously();
-      
+
       if (userCredential.user == null) {
         print('Error: User credential is null');
         return null;
       }
-      
+
       String userId = userCredential.user!.uid;
       print('Signed in with user ID: $userId');
 
@@ -40,20 +40,20 @@ class AuthService {
 
       print('Creating user in Firestore...');
       await _userService.createOrUpdateUser(user);
-      
+
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
-      
+
       print('Setting up FCM...');
       try {
         await _fcmService.setupFCM(userId: userId);
       } catch (e) {
         print('FCM setup failed (non-critical): $e');
       }
-      
+
       print('Setting up presence...');
       await _userService.setupPresence(userId);
-      
+
       print('Anonymous sign in complete!');
       return user;
     } catch (e, stackTrace) {
@@ -141,6 +141,148 @@ class AuthService {
     } catch (e) {
       print('Error verifying OTP: $e');
       return null;
+    }
+  }
+
+  // Sign up with email and password
+  Future<UserModel?> signUpWithEmail({
+    required String email,
+    required String password,
+    required String name,
+    String? photoUrl,
+  }) async {
+    try {
+      print('Starting email sign up...');
+
+      UserCredential userCredential =
+          await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user == null) {
+        print('Error: User credential is null');
+        return null;
+      }
+
+      String userId = userCredential.user!.uid;
+      print('Signed up with user ID: $userId');
+
+      // Create user profile in Firestore
+      UserModel user = UserModel(
+        id: userId,
+        name: name,
+        email: email,
+        photoUrl: photoUrl,
+        isOnline: true,
+        createdAt: DateTime.now(),
+      );
+
+      print('Creating user in Firestore...');
+      await _userService.createOrUpdateUser(user);
+
+      print('Saving user ID locally...');
+      await _saveUserIdLocally(userId);
+
+      print('Setting up FCM...');
+      try {
+        await _fcmService.setupFCM(userId: userId);
+      } catch (e) {
+        print('FCM setup failed (non-critical): $e');
+      }
+
+      print('Setting up presence...');
+      await _userService.setupPresence(userId);
+
+      print('Email sign up complete!');
+      return user;
+    } on FirebaseAuthException catch (e) {
+      print('Firebase Auth Error: ${e.code} - ${e.message}');
+      rethrow;
+    } catch (e, stackTrace) {
+      print('Error signing up with email: $e');
+      print('Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
+  // Sign in with email and password
+  Future<UserModel?> signInWithEmail({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      print('Starting email sign in...');
+
+      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user == null) {
+        print('Error: User credential is null');
+        return null;
+      }
+
+      String userId = userCredential.user!.uid;
+      print('Signed in with user ID: $userId');
+
+      // Check if user exists in Firestore
+      UserModel? existingUser = await _userService.getUserById(userId);
+
+      UserModel user;
+      if (existingUser != null) {
+        // Update existing user status
+        user = existingUser.copyWith(
+          isOnline: true,
+          lastSeen: DateTime.now(),
+        );
+      } else {
+        // Create user profile if it doesn't exist
+        user = UserModel(
+          id: userId,
+          name: userCredential.user!.displayName ?? 'User',
+          email: email,
+          isOnline: true,
+          createdAt: DateTime.now(),
+        );
+      }
+
+      await _userService.createOrUpdateUser(user);
+
+      print('Saving user ID locally...');
+      await _saveUserIdLocally(userId);
+
+      print('Setting up FCM...');
+      try {
+        await _fcmService.setupFCM(userId: userId);
+      } catch (e) {
+        print('FCM setup failed (non-critical): $e');
+      }
+
+      print('Setting up presence...');
+      await _userService.setupPresence(userId);
+
+      print('Email sign in complete!');
+      return user;
+    } on FirebaseAuthException catch (e) {
+      print('Firebase Auth Error: ${e.code} - ${e.message}');
+      rethrow;
+    } catch (e, stackTrace) {
+      print('Error signing in with email: $e');
+      print('Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
+  // Reset password
+  Future<void> resetPassword(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      print('Password reset email sent to $email');
+    } catch (e) {
+      print('Error sending password reset email: $e');
+      rethrow;
     }
   }
 

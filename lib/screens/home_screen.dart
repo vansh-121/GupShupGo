@@ -6,7 +6,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
-import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
+import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -138,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen>
     await _authService.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => PhoneAuthScreen()),
+        MaterialPageRoute(builder: (_) => LoginScreen()),
       );
     }
   }

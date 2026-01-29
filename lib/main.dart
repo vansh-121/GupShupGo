@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/auth_service.dart';
-import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
+import 'package:video_chat_app/screens/auth/login_screen.dart';
 
 import 'screens/home_screen.dart';
 
@@ -51,7 +51,7 @@ class MyApp extends StatelessWidget {
           if (snapshot.data == true) {
             return HomeScreen();
           } else {
-            return PhoneAuthScreen();
+            return LoginScreen();
           }
         },
       ),
