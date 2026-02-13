@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
@@ -47,10 +49,17 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = true;
   bool _isSending = false;
 
+  // ─── Typing indicator state ───────────────────────────────────────
+  Timer? _typingTimer;
+  bool _isTyping = false;
+  bool _isOtherUserTyping = false;
+  StreamSubscription<bool>? _typingSubscription;
+
   @override
   void initState() {
     super.initState();
     _initializeChat();
+    _messageController.addListener(_onTextChanged);
   }
 
   Future<void> _initializeChat() async {
@@ -79,6 +88,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Start listening for new messages and mark them as read immediately
       _startReadReceiptListener();
+
+      // Start listening for the other user's typing status
+      _listenToTypingStatus();
     } catch (e) {
       print('Error initializing chat: $e');
       setState(() {
@@ -91,6 +103,53 @@ class _ChatScreenState extends State<ChatScreen> {
   void _startReadReceiptListener() {
     // This will be called when new messages arrive via StreamBuilder
     // We'll mark them as read in the stream listener
+  }
+
+  // ─── Typing indicator helpers ──────────────────────────────────────
+
+  void _listenToTypingStatus() {
+    _typingSubscription = _chatService
+        .getTypingStatus(
+          currentUserId: widget.currentUserId,
+          otherUserId: widget.contact.id,
+        )
+        .listen((isTyping) {
+      if (mounted && _isOtherUserTyping != isTyping) {
+        setState(() {
+          _isOtherUserTyping = isTyping;
+        });
+      }
+    });
+  }
+
+  /// Called every time the text field value changes.
+  void _onTextChanged() {
+    final hasText = _messageController.text.trim().isNotEmpty;
+
+    // User started typing — notify Firestore once
+    if (hasText && !_isTyping) {
+      _isTyping = true;
+      _chatService.setTypingStatus(
+        currentUserId: widget.currentUserId,
+        otherUserId: widget.contact.id,
+        isTyping: true,
+      );
+    }
+
+    // Reset the stop-typing debounce timer on every keystroke
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 3), _stopTyping);
+  }
+
+  void _stopTyping() {
+    if (_isTyping) {
+      _isTyping = false;
+      _chatService.setTypingStatus(
+        currentUserId: widget.currentUserId,
+        otherUserId: widget.contact.id,
+        isTyping: false,
+      );
+    }
   }
 
   // Call this when new messages arrive while chat is open
@@ -177,6 +236,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       _messageController.clear();
+      // User sent the message — stop typing indicator immediately
+      _stopTyping();
 
       await _chatService.sendMessage(
         senderId: widget.currentUserId,
@@ -387,6 +448,11 @@ class _ChatScreenState extends State<ChatScreen> {
       messageWidgets.add(_buildMessage(message));
     }
 
+    // Append typing bubble as the last item in the conversation
+    if (_isOtherUserTyping) {
+      messageWidgets.add(_buildTypingBubble());
+    }
+
     return ListView(
       controller: _scrollController,
       padding: EdgeInsets.symmetric(vertical: 8),
@@ -449,7 +515,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     widget.contact.name,
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
-                  if (widget.contact.isOnline)
+                  if (_isOtherUserTyping)
+                    Text(
+                      'typing...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  else if (widget.contact.isOnline)
                     Text(
                       'Online',
                       style: TextStyle(fontSize: 12, color: Colors.green),
@@ -617,10 +692,112 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Animated typing dots bubble — appears at the bottom left of the chat.
+  Widget _buildTypingBubble() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(left: 16, bottom: 4, top: 4),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+            bottomLeft: Radius.circular(4),
+            bottomRight: Radius.circular(20),
+          ),
+        ),
+        child: const _TypingDotsIndicator(),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    // Clear typing status so the other user doesn't see a stale indicator
+    _stopTyping();
+    _typingTimer?.cancel();
+    _typingSubscription?.cancel();
+    _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+}
+
+// ─── Animated typing dots (the 3 bouncing dots) ──────────────────────────
+
+class _TypingDotsIndicator extends StatefulWidget {
+  const _TypingDotsIndicator();
+
+  @override
+  State<_TypingDotsIndicator> createState() => _TypingDotsIndicatorState();
+}
+
+class _TypingDotsIndicatorState extends State<_TypingDotsIndicator>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _controllers;
+  late final List<Animation<double>> _animations;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controllers = List.generate(3, (i) {
+      return AnimationController(
+        duration: const Duration(milliseconds: 600),
+        vsync: this,
+      );
+    });
+
+    _animations = _controllers.map((c) {
+      return Tween<double>(begin: 0, end: -6).animate(
+        CurvedAnimation(parent: c, curve: Curves.easeInOut),
+      );
+    }).toList();
+
+    // Stagger the animations
+    for (int i = 0; i < _controllers.length; i++) {
+      Future.delayed(Duration(milliseconds: i * 180), () {
+        if (mounted) _controllers[i].repeat(reverse: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(3, (i) {
+        return AnimatedBuilder(
+          animation: _animations[i],
+          builder: (context, child) {
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              child: Transform.translate(
+                offset: Offset(0, _animations[i].value),
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[500],
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      }),
+    );
   }
 }

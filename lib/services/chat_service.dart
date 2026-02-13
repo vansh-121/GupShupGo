@@ -339,4 +339,60 @@ class ChatService {
         await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).get();
     return doc.exists;
   }
+
+  // ─── Typing Indicator ───────────────────────────────────────────────
+
+  /// Set typing status for a user in a chat room.
+  /// Writes the current server timestamp when typing, or removes the entry
+  /// when the user stops typing.
+  Future<void> setTypingStatus({
+    required String currentUserId,
+    required String otherUserId,
+    required bool isTyping,
+  }) async {
+    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
+
+    await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).set(
+      {
+        'typing': {
+          currentUserId: isTyping ? FieldValue.serverTimestamp() : null,
+        },
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Returns a real-time stream that emits `true` when the other user is
+  /// currently typing (i.e. their typing timestamp is less than 5 seconds old).
+  Stream<bool> getTypingStatus({
+    required String currentUserId,
+    required String otherUserId,
+  }) {
+    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
+
+    return _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .snapshots()
+        .map((snapshot) {
+      if (!snapshot.exists) return false;
+
+      final data = snapshot.data();
+      if (data == null) return false;
+
+      final typing = data['typing'] as Map<String, dynamic>?;
+      if (typing == null) return false;
+
+      final otherTypingTimestamp = typing[otherUserId];
+      if (otherTypingTimestamp == null) return false;
+
+      if (otherTypingTimestamp is Timestamp) {
+        final diff =
+            DateTime.now().difference(otherTypingTimestamp.toDate()).inSeconds;
+        return diff < 5;
+      }
+
+      return false;
+    });
+  }
 }
