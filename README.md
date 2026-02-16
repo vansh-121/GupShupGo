@@ -1,4 +1,4 @@
-# 📞 GupShupGo – Complete WhatsApp-Style Communication App
+# 📞 GupShupGo – Real-Time Messaging & Video Calling App
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-flutter-blue.svg)
