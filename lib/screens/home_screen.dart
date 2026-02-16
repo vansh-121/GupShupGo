@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
+import 'package:video_chat_app/screens/add_text_status_screen.dart';
+import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
@@ -79,6 +83,10 @@ class _HomeScreenState extends State<HomeScreen>
     // Mark all messages as delivered on app open
     if (_currentUserId != null) {
       await _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+      // Initialize status provider
+      final statusProvider =
+          Provider.of<StatusProvider>(context, listen: false);
+      statusProvider.initialize(_currentUserId!);
     }
     setState(() {
       _isInitialized = true;
@@ -457,17 +465,208 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildStatusTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return Consumer<StatusProvider>(
+      builder: (context, statusProvider, child) {
+        final myStatus = statusProvider.myStatus;
+        final otherStatuses = statusProvider.otherStatuses;
+        final hasMyStatus = statusProvider.hasMyStatus;
+
+        return ListView(
+          children: [
+            // My Status section
+            _buildMyStatusTile(myStatus, hasMyStatus),
+
+            // Divider
+            if (otherStatuses.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Recent updates',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+
+            // Other users' statuses
+            ...otherStatuses.map((status) => _buildStatusTile(status)),
+
+            // Empty state
+            if (otherStatuses.isEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 48),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.update, size: 64, color: Colors.grey[300]),
+                      SizedBox(height: 16),
+                      Text(
+                        'No status updates yet',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Tap the pencil icon to share a status',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[400],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMyStatusTile(StatusModel? myStatus, bool hasMyStatus) {
+    final avatarUrl = _currentUser?.photoUrl ??
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=4CAF50&color=fff&size=128';
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: Stack(
         children: [
-          Icon(Icons.camera_alt_outlined, size: 80, color: Colors.grey),
-          SizedBox(height: 16),
-          Text(
-            'Status updates coming soon',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+          Container(
+            padding: EdgeInsets.all(hasMyStatus ? 2 : 0),
+            decoration: hasMyStatus
+                ? BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.blue, width: 2),
+                  )
+                : null,
+            child: CircleAvatar(
+              radius: 28,
+              backgroundImage: NetworkImage(avatarUrl),
+              backgroundColor: Colors.grey[300],
+            ),
           ),
+          if (!hasMyStatus)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: Icon(Icons.add, color: Colors.white, size: 14),
+              ),
+            ),
         ],
+      ),
+      title: Text(
+        'My Status',
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Text(
+        hasMyStatus
+            ? '${myStatus!.activeStatusItems.length} status update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
+            : 'Tap to add status update',
+        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+      ),
+      onTap: () {
+        if (hasMyStatus) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => StatusViewerScreen(
+                statusModel: myStatus!,
+                currentUserId: _currentUserId!,
+                isMyStatus: true,
+              ),
+            ),
+          );
+        } else {
+          _navigateToAddStatus();
+        }
+      },
+    );
+  }
+
+  Widget _buildStatusTile(StatusModel status) {
+    final activeItems = status.activeStatusItems;
+    if (activeItems.isEmpty) return SizedBox.shrink();
+
+    final allViewed =
+        activeItems.every((item) => item.viewedBy.contains(_currentUserId));
+
+    final avatarUrl = status.userPhotoUrl ??
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(status.userName)}&background=4CAF50&color=fff&size=128';
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Container(
+        padding: EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: allViewed ? Colors.grey[400]! : Colors.blue,
+            width: 2,
+          ),
+        ),
+        child: CircleAvatar(
+          radius: 26,
+          backgroundImage: NetworkImage(avatarUrl),
+          backgroundColor: Colors.grey[300],
+        ),
+      ),
+      title: Text(
+        status.userName,
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Text(
+        _formatStatusTime(status.lastUpdated),
+        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => StatusViewerScreen(
+              statusModel: status,
+              currentUserId: _currentUserId!,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatStatusTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final diff = now.difference(dateTime);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
+    if (diff.inHours < 24) return '${diff.inHours} hours ago';
+    return 'Yesterday';
+  }
+
+  void _navigateToAddStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddTextStatusScreen(
+          userId: _currentUserId!,
+          userName: _currentUser?.name ?? 'User',
+          userPhotoUrl: _currentUser?.photoUrl,
+          userPhoneNumber: _currentUser?.phoneNumber,
+        ),
       ),
     );
   }
@@ -687,23 +886,83 @@ class _HomeScreenState extends State<HomeScreen>
           _buildCallsTab(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_currentUserId != null) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContactsScreen(
-                  currentUserId: _currentUserId!,
-                  currentUserName: _currentUser?.name,
-                ),
-              ),
-            );
-          }
-        },
-        backgroundColor: Colors.blue,
-        child: Icon(Icons.message, color: Colors.white),
-      ),
+      floatingActionButton: _buildFAB(),
     );
+  }
+
+  Widget _buildFAB() {
+    return AnimatedBuilder2(
+      animation: _tabController.animation!,
+      builder: (context, child) {
+        final index = _tabController.index;
+        if (index == 1) {
+          // Status tab - show add status FAB
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FloatingActionButton(
+                heroTag: 'statusTextBtn',
+                mini: true,
+                backgroundColor: Colors.white,
+                onPressed: () {
+                  if (_currentUserId != null) {
+                    _navigateToAddStatus();
+                  }
+                },
+                child: Icon(Icons.edit, color: Colors.blue, size: 20),
+              ),
+              SizedBox(height: 12),
+              FloatingActionButton(
+                heroTag: 'statusCameraBtn',
+                backgroundColor: Colors.blue,
+                onPressed: () {
+                  if (_currentUserId != null) {
+                    _navigateToAddStatus();
+                  }
+                },
+                child: Icon(Icons.camera_alt, color: Colors.white),
+              ),
+            ],
+          );
+        }
+        // Chats & Calls tabs - show message FAB
+        return FloatingActionButton(
+          heroTag: 'chatFab',
+          backgroundColor: Colors.blue,
+          onPressed: () {
+            if (_currentUserId != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ContactsScreen(
+                    currentUserId: _currentUserId!,
+                    currentUserName: _currentUser?.name,
+                  ),
+                ),
+              );
+            }
+          },
+          child: Icon(Icons.message, color: Colors.white),
+        );
+      },
+    );
+  }
+}
+
+/// Helper AnimatedBuilder widget for FAB animation.
+class AnimatedBuilder2 extends AnimatedWidget {
+  final Widget Function(BuildContext context, Widget? child) builder;
+  final Widget? child;
+
+  const AnimatedBuilder2({
+    Key? key,
+    required Animation<double> animation,
+    required this.builder,
+    this.child,
+  }) : super(key: key, listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    return builder(context, child);
   }
 }

@@ -86,6 +86,19 @@ service cloud.firestore {
       allow delete: if false;
     }
     
+    // ==================== STATUSES ====================
+    match /statuses/{userId} {
+      // Anyone authenticated can read statuses
+      allow read: if request.auth != null;
+      
+      // Users can only create/update their own status
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Users can only delete their own status
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
     // ==================== CALL LOGS ====================
     match /callLogs/{logId} {
       allow read: if request.auth != null 

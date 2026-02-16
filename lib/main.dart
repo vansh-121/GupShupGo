@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 
@@ -11,8 +12,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => CallStateNotifier(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => CallStateNotifier()),
+        ChangeNotifierProvider(create: (_) => StatusProvider()),
+      ],
       child: MyApp(),
     ),
   );
@@ -47,7 +51,7 @@ class MyApp extends StatelessWidget {
               body: Center(child: CircularProgressIndicator()),
             );
           }
-          
+
           if (snapshot.data == true) {
             return HomeScreen();
           } else {
