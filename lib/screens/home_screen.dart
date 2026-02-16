@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/status_model.dart';
@@ -16,6 +17,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -34,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen>
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
   final ChatService _chatService = ChatService();
+  final CallLogService _callLogService = CallLogService();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -691,9 +694,13 @@ class _HomeScreenState extends State<HomeScreen>
       return Center(child: CircularProgressIndicator());
     }
 
-    return StreamBuilder<List<UserModel>>(
-      stream: _userService.getAllUsers(_currentUserId!),
+    return StreamBuilder<List<CallLogModel>>(
+      stream: _callLogService.getCallLogs(_currentUserId!),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return Center(
             child: Column(
@@ -710,61 +717,116 @@ class _HomeScreenState extends State<HomeScreen>
           );
         }
 
-        final users = snapshot.data!;
+        final callLogs = snapshot.data!;
         return ListView.builder(
-          itemCount: users.length,
+          itemCount: callLogs.length,
           itemBuilder: (context, index) {
-            final user = users[index];
+            final log = callLogs[index];
+            
+            // Get the other person's information
+            final otherPersonName = log.getOtherPersonName(_currentUserId!);
+            final otherPersonPhotoUrl = log.getOtherPersonPhotoUrl(_currentUserId!);
+            final otherPersonId = log.callerId == _currentUserId ? log.calleeId : log.callerId;
+            
+            // Determine icon and color based on call type and status
+            IconData callIcon;
+            Color callIconColor;
+            
+            if (log.callType == CallType.incoming) {
+              callIcon = Icons.call_received;
+              callIconColor = log.status == CallStatus.missed 
+                  ? Colors.red 
+                  : Colors.green;
+            } else if (log.callType == CallType.outgoing) {
+              callIcon = Icons.call_made;
+              callIconColor = log.status == CallStatus.cancelled 
+                  ? Colors.red 
+                  : Colors.green;
+            } else {
+              callIcon = Icons.call_missed;
+              callIconColor = Colors.red;
+            }
+            
+            // Format timestamp (e.g., "Today", "Yesterday", or date)
+            String formatTimestamp(DateTime timestamp) {
+              final now = DateTime.now();
+              final difference = now.difference(timestamp);
+              
+              if (difference.inDays == 0) {
+                final hour = timestamp.hour.toString().padLeft(2, '0');
+                final minute = timestamp.minute.toString().padLeft(2, '0');
+                return '$hour:$minute';
+              } else if (difference.inDays == 1) {
+                return 'Yesterday';
+              } else if (difference.inDays < 7) {
+                return '${difference.inDays} days ago';
+              } else {
+                return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
+              }
+            }
+
             return ListTile(
               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: CircleAvatar(
                 radius: 28,
                 backgroundImage: NetworkImage(
-                  user.photoUrl ??
-                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                  otherPersonPhotoUrl ??
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=4CAF50&color=fff&size=128',
                 ),
               ),
               title: Text(
-                user.name,
+                otherPersonName,
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
               subtitle: Row(
                 children: [
                   Icon(
-                    index % 2 == 0 ? Icons.call_received : Icons.call_made,
+                    callIcon,
                     size: 16,
-                    color: index % 2 == 0 ? Colors.green : Colors.red,
+                    color: callIconColor,
                   ),
                   SizedBox(width: 4),
                   Text(
-                    'Video',
+                    log.status == CallStatus.answered 
+                        ? log.getFormattedDuration() 
+                        : log.status.toString().split('.').last.capitalize(),
                     style: TextStyle(color: Colors.grey[600], fontSize: 14),
                   ),
                 ],
               ),
-              trailing: IconButton(
-                icon: Icon(Icons.videocam, color: Colors.blue),
-                onPressed: () {
-                  final contact = Contact(
-                    id: user.id,
-                    name: user.name,
-                    lastMessage: '',
-                    time: '',
-                    avatarUrl: user.photoUrl ??
-                        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
-                    isOnline: user.isOnline,
-                  );
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ChatScreen(
-                        contact: contact,
-                        currentUserId: _currentUserId!,
-                        currentUserName: _currentUser?.name,
-                      ),
-                    ),
-                  );
-                },
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    formatTimestamp(log.timestamp),
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(Icons.videocam, color: Colors.blue),
+                    onPressed: () {
+                      final contact = Contact(
+                        id: otherPersonId,
+                        name: otherPersonName,
+                        lastMessage: '',
+                        time: '',
+                        avatarUrl: otherPersonPhotoUrl ??
+                            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=4CAF50&color=fff&size=128',
+                        isOnline: false,
+                      );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(
+                            contact: contact,
+                            currentUserId: _currentUserId!,
+                            currentUserName: _currentUser?.name,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             );
           },
@@ -979,5 +1041,12 @@ class AnimatedBuilder2 extends AnimatedWidget {
   @override
   Widget build(BuildContext context) {
     return builder(context, child);
+  }
+}
+
+extension StringExtension on String {
+  String capitalize() {
+    if (isEmpty) return this;
+    return '${this[0].toUpperCase()}${substring(1)}';
   }
 }

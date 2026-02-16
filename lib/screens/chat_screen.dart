@@ -182,7 +182,12 @@ class _ChatScreenState extends State<ChatScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => CallScreen(channelId: channelId, isCaller: true),
+          builder: (_) => CallScreen(
+            channelId: channelId,
+            isCaller: true,
+            calleeId: widget.contact.id,
+            calleeName: widget.contact.name,
+          ),
         ),
       );
     } catch (e) {
@@ -215,7 +220,12 @@ class _ChatScreenState extends State<ChatScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => CallScreen(channelId: channelId, isCaller: true),
+          builder: (_) => CallScreen(
+            channelId: channelId,
+            isCaller: true,
+            calleeId: widget.contact.id,
+            calleeName: widget.contact.name,
+          ),
         ),
       );
     } catch (e) {

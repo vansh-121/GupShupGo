@@ -44,6 +44,7 @@ class FCMService {
 
         // Only show call notification for call type messages
         if (messageType == 'call' ||
+            messageType == 'incoming_call' ||
             messageType.isEmpty && message.data['channelId'] != null) {
           String callerId = message.data['callerId'] ?? 'Unknown';
           String channelId = message.data['channelId'] ?? '';
@@ -66,6 +67,7 @@ class FCMService {
 
       // Only trigger callback for call messages, not chat messages
       if (messageType == 'call' ||
+          messageType == 'incoming_call' ||
           (messageType.isEmpty && channelId.isNotEmpty)) {
         String callerId = message.data['callerId'] ?? 'Unknown';
         print('Call notification - callerId: $callerId, channelId: $channelId');
@@ -283,11 +285,13 @@ class FCMService {
           print('Error marking messages as delivered: $e');
         }
       }
-    } else {
+    } else if (messageType == 'call' || messageType == 'incoming_call') {
       // Handle call notification
       String callerId = message.data['callerId'] ?? 'Unknown';
       String channelId = message.data['channelId'] ?? '';
-      await _showCallNotification(callerId, channelId);
+      if (channelId.isNotEmpty) {
+        await _showCallNotification(callerId, channelId);
+      }
     }
   }
 

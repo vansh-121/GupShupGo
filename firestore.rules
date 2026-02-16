@@ -80,9 +80,22 @@ service cloud.firestore {
     
     // ==================== CALLS ====================
     match /calls/{callId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
+      // Only participants can read call data
+      allow read: if request.auth != null
+        && (resource.data.callerId == request.auth.uid 
+            || resource.data.calleeId == request.auth.uid);
+      
+      // Only the caller or callee can create a call
+      allow create: if request.auth != null
+        && (request.resource.data.callerId == request.auth.uid 
+            || request.resource.data.calleeId == request.auth.uid);
+      
+      // Only participants can update call status
+      allow update: if request.auth != null
+        && (resource.data.callerId == request.auth.uid 
+            || resource.data.calleeId == request.auth.uid);
+      
+      // Prevent deletion of call records
       allow delete: if false;
     }
     
@@ -101,10 +114,17 @@ service cloud.firestore {
     
     // ==================== CALL LOGS ====================
     match /callLogs/{logId} {
+      // Only participants can read their call logs
       allow read: if request.auth != null 
         && (resource.data.callerId == request.auth.uid 
             || resource.data.calleeId == request.auth.uid);
-      allow create: if request.auth != null;
+      
+      // Only the caller or callee can create a call log
+      allow create: if request.auth != null
+        && (request.resource.data.callerId == request.auth.uid 
+            || request.resource.data.calleeId == request.auth.uid);
+      
+      // Prevent updates and deletions
       allow update, delete: if false;
     }
   }
