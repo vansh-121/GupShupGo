@@ -112,7 +112,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ),
                   child: Icon(Icons.camera_alt, color: Colors.blue),
                 ),
-                title: Text('Camera', style: TextStyle(fontWeight: FontWeight.w500)),
+                title: Text('Camera',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
                 subtitle: Text('Take a photo'),
                 onTap: () {
                   Navigator.pop(context);
@@ -128,7 +129,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ),
                   child: Icon(Icons.photo_library, color: Colors.green),
                 ),
-                title: Text('Gallery Photo', style: TextStyle(fontWeight: FontWeight.w500)),
+                title: Text('Gallery Photo',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
                 subtitle: Text('Choose an image from gallery'),
                 onTap: () {
                   Navigator.pop(context);
@@ -144,7 +146,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ),
                   child: Icon(Icons.videocam, color: Colors.orange),
                 ),
-                title: Text('Record Video', style: TextStyle(fontWeight: FontWeight.w500)),
+                title: Text('Record Video',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
                 subtitle: Text('Record a short video'),
                 onTap: () {
                   Navigator.pop(context);
@@ -160,7 +163,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ),
                   child: Icon(Icons.video_library, color: Colors.purple),
                 ),
-                title: Text('Gallery Video', style: TextStyle(fontWeight: FontWeight.w500)),
+                title: Text('Gallery Video',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
                 subtitle: Text('Choose a video from gallery'),
                 onTap: () {
                   Navigator.pop(context);
@@ -246,7 +250,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     // Verify the file actually exists on disk
     if (!await _selectedFile!.exists()) {
       if (mounted) {
-        _showErrorDialog('The selected file could not be found. Please try selecting it again.');
+        _showErrorDialog(
+            'The selected file could not be found. Please try selecting it again.');
       }
       return;
     }
@@ -292,7 +297,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
           _isUploading = false;
         });
         _showErrorDialog(
-          e.toString().contains('unauthorized') || e.toString().contains('permission')
+          e.toString().contains('unauthorized') ||
+                  e.toString().contains('permission')
               ? 'Upload failed due to permission error.\n\nPlease make sure Firebase Storage security rules allow authenticated uploads.\n\nError: $e'
               : 'Failed to upload status.\n\nError: $e',
         );
@@ -429,8 +435,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                 children: [
                   // Re-pick media button
                   IconButton(
-                    icon:
-                        Icon(Icons.add_photo_alternate, color: Colors.white),
+                    icon: Icon(Icons.add_photo_alternate, color: Colors.white),
                     onPressed: _isUploading ? null : _showMediaSourcePicker,
                   ),
                   // Caption input

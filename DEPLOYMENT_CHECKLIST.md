@@ -12,14 +12,20 @@
 - [ ] Click **Publish**
 - [ ] Wait 1-2 minutes for rules to propagate
 
-**1.2 Phone Authentication (Optional - for production)**
+**1.2 Firebase Storage Security Rules**
+- [ ] Navigate to: **Storage → Rules**
+- [ ] Copy storage rules from `storage.rules` or `FIRESTORE_SETUP.md`
+- [ ] Click **Publish**
+- [ ] Verify storage bucket is active
+
+**1.3 Phone Authentication (Optional - for production)**
 - [ ] Go to: **Authentication → Sign-in method**
 - [ ] Enable **Phone** provider
 - [ ] Add authorized domains if needed
 - [ ] For Android: Add SHA-1 certificate fingerprint
 - [ ] For iOS: Enable push notifications in Xcode
 
-**1.3 Anonymous Authentication (For testing)**
+**1.4 Anonymous Authentication (For testing)**
 - [ ] Go to: **Authentication → Sign-in method**
 - [ ] Enable **Anonymous** provider
 - [ ] This allows guest login without phone
@@ -132,6 +138,80 @@
 - [ ] Can still call from search results
 
 **✅ If search works → SUCCESS!**
+
+### ✅ Test 6: Messaging Feature
+
+**On Device 1 (Alice):**
+- [ ] Tap search icon → Select "Bob"
+- [ ] Chat screen opens
+- [ ] Type a message: "Hello Bob!"
+- [ ] Press send button
+- [ ] Message appears in chat
+
+**On Device 2 (Bob):**
+- [ ] Message appears instantly in real-time
+- [ ] Tap on Alice's chat in Chats tab
+- [ ] Reply with: "Hi Alice!"
+- [ ] Message shows ✓✓ (read receipt)
+
+**Test media messages:**
+- [ ] Send an image from gallery
+- [ ] Image displays in chat with thumbnail
+- [ ] Tap image to view full-screen
+
+**✅ If messaging works with read receipts → SUCCESS!**
+
+### ✅ Test 7: Status Feature (WhatsApp-like)
+
+**On Device 1 (Alice) - Upload Text Status:**
+- [ ] Go to Status tab (middle tab)
+- [ ] Tap pencil FAB (small floating button)
+- [ ] Type: "My first status!"
+- [ ] Select a background color
+- [ ] Tap send (bottom right)
+- [ ] Status appears in "My Status" section
+
+**On Device 1 (Alice) - Upload Image Status:**
+- [ ] Tap camera FAB (larger floating button)
+- [ ] Select "Gallery Photo"
+- [ ] Choose an image from gallery
+- [ ] Add caption: "Beautiful view 🌄"
+- [ ] Tap send button (blue circle)
+- [ ] Status uploads with progress indicator
+
+**On Device 1 (Alice) - Upload Video Status:**
+- [ ] Tap camera FAB
+- [ ] Select "Gallery Video" or "Record Video"
+- [ ] Choose/record a short video (max 30s)
+- [ ] Add caption: "Check this out! 🎥"
+- [ ] Tap send
+- [ ] Video uploads (may take longer than image)
+
+**On Device 2 (Bob) - View Statuses:**
+- [ ] Go to Status tab
+- [ ] See Alice's status in "Recent updates"
+- [ ] Notice blue ring around Alice's avatar (unviewed)
+- [ ] Tap on Alice's status
+- [ ] Full-screen viewer opens with first status
+- [ ] Progress bars at top show 3 statuses
+- [ ] Tap right side or wait → Next status plays
+- [ ] Tap left side → Previous status
+- [ ] Long press → Pauses status
+- [ ] Swipe down → Exits viewer
+- [ ] Alice's ring turns grey (all viewed)
+
+**On Device 1 (Alice) - Check Viewers:**
+- [ ] Tap "My Status"
+- [ ] See "1 view" or "Bob viewed"
+- [ ] Swipe up or tap to see viewer list
+- [ ] Bob's name appears in viewers
+
+**Test Auto-Expiry:**
+- [ ] Wait 24 hours (or manually test by changing device time)
+- [ ] Status should auto-disappear
+- [ ] Or check Firebase Firestore console for expiry logic
+
+**✅ If all status types work with viewer → SUCCESS!**
 
 ## Common Issues & Fixes
 

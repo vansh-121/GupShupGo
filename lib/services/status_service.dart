@@ -79,7 +79,8 @@ class StatusService {
     // Listen for progress
     uploadTask.snapshotEvents.listen((event) {
       final progress = event.bytesTransferred / event.totalBytes;
-      debugPrint('[StatusService] Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
+      debugPrint(
+          '[StatusService] Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
     });
 
     final snapshot = await uploadTask;

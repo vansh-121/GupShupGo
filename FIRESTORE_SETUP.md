@@ -1,6 +1,6 @@
-# Firebase Firestore Setup Instructions
+# Firebase Setup Instructions
 
-## Required Firestore Security Rules
+## Part 1: Firestore Security Rules
 
 Copy and paste these rules into Firebase Console:
 
@@ -8,31 +8,149 @@ Copy and paste these rules into Firebase Console:
 
 ```javascript
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Users collection - allows authenticated users to read all profiles
-    // but only write their own
+    // ==================== USERS ====================
     match /users/{userId} {
       // Anyone authenticated can read user profiles
       allow read: if request.auth != null;
       
-      // Users can only update their own profile
-      allow write: if request.auth != null && request.auth.uid == userId;
-      
-      // Allow creating new user profiles during signup
+      // Users can only create/update their own profile
       allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Prevent users from deleting profiles
+      allow delete: if false;
     }
     
-    // Optional: Messages collection for chat functionality
-    match /messages/{messageId} {
-      allow read, write: if request.auth != null;
+    // ==================== CHAT ROOMS ====================
+    match /chatRooms/{chatRoomId} {
+      // Helper function to check if user is participant
+      function isParticipant() {
+        return resource.data.participants != null 
+          && request.auth.uid in resource.data.participants;
+      }
+      
+      function willBeParticipant() {
+        return request.resource.data.participants != null
+          && request.auth.uid in request.resource.data.participants;
+      }
+      
+      // Helper to check if user ID is in the chatRoomId (fallback for legacy data)
+      function isUserInChatRoomId() {
+        return chatRoomId.matches('.*' + request.auth.uid + '.*');
+      }
+      
+      // Allow creating chat room if user is a participant
+      allow create: if request.auth != null && willBeParticipant();
+      
+      // Allow reading if user is a participant OR user ID is in chatRoomId (legacy support)
+      allow read: if request.auth != null && (isParticipant() || isUserInChatRoomId());
+      
+      // Allow updating (for last message, unread count, etc.)
+      allow update: if request.auth != null && (isParticipant() || isUserInChatRoomId());
+      
+      // Prevent deletion of chat rooms
+      allow delete: if false;
+      
+      // ==================== MESSAGES ====================
+      match /messages/{messageId} {
+        // Helper to check parent chat room participation
+        function isChatParticipant() {
+          let chatRoom = get(/databases/$(database)/documents/chatRooms/$(chatRoomId));
+          return chatRoom != null 
+            && chatRoom.data.participants != null
+            && request.auth.uid in chatRoom.data.participants;
+        }
+        
+        // Fallback: check if user ID is in the chatRoomId
+        function isUserInRoomId() {
+          return chatRoomId.matches('.*' + request.auth.uid + '.*');
+        }
+        
+        // Allow reading messages if participant or user is in room ID
+        allow read: if request.auth != null && (isChatParticipant() || isUserInRoomId());
+        
+        // Allow creating message if user is authenticated and is sender
+        allow create: if request.auth != null 
+          && request.auth.uid == request.resource.data.senderId
+          && (isChatParticipant() || isUserInRoomId());
+        
+        // Allow updating (for read receipts) if participant
+        allow update: if request.auth != null 
+          && (isChatParticipant() || isUserInRoomId());
+        
+        // Allow deleting only own messages
+        allow delete: if request.auth != null 
+          && request.auth.uid == resource.data.senderId;
+      }
     }
     
-    // Optional: Call logs collection
+    // ==================== CALLS ====================
+    match /calls/{callId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if false;
+    }
+    
+    // ==================== STATUSES ====================
+    match /statuses/{userId} {
+      // Anyone authenticated can read statuses
+      allow read: if request.auth != null;
+      
+      // Users can only create/update their own status
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Users can only delete their own status
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // ==================== CALL LOGS ====================
     match /callLogs/{logId} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null 
+        && (resource.data.callerId == request.auth.uid 
+            || resource.data.calleeId == request.auth.uid);
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+  }
+}
+```
+
+## Part 2: Firebase Storage Security Rules
+
+Copy and paste these rules into Firebase Console:
+
+**Firebase Console → Storage → Rules**
+
+```javascript
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ==================== STATUS MEDIA ====================
+    match /statuses/{userId}/{allPaths=**} {
+      // Anyone authenticated can read status media (images/videos)
+      allow read: if request.auth != null;
+
+      // Users can only upload to their own status folder
+      allow write: if request.auth != null && request.auth.uid == userId
+        // Limit file size: 10 MB for images, 30 MB for videos
+        && request.resource.size < 30 * 1024 * 1024
+        // Only allow image and video content types
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('video/.*'));
+
+      // Users can delete their own status media
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Deny everything else by default
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }
@@ -45,25 +163,96 @@ Your app will create this structure automatically:
 ```
 Firestore Database
 │
-└── users (collection)
-    │
-    ├── {userId_1} (document)
-    │   ├── id: "userId_1"
-    │   ├── name: "Alice"
-    │   ├── phoneNumber: "+1234567890"
-    │   ├── email: "alice@example.com" (optional)
-    │   ├── photoUrl: "https://..." (optional)
-    │   ├── fcmToken: "fcm_token_here"
-    │   ├── isOnline: true
-    │   ├── lastSeen: 1234567890 (timestamp)
-    │   └── createdAt: 1234567890 (timestamp)
-    │
-    ├── {userId_2} (document)
-    │   ├── id: "userId_2"
-    │   ├── name: "Bob"
-    │   └── ... (same fields)
-    │
-    └── ... (more users)
+├── users (collection)
+│   ├── {userId} (document)
+│   │   ├── id: string
+│   │   ├── name: string
+│   │   ├── phoneNumber: string (optional)
+│   │   ├── email: string (optional)
+│   │   ├── photoUrl: string (optional)
+│   │   ├── fcmToken: string
+│   │   ├── isOnline: boolean
+│   │   ├── lastSeen: timestamp
+│   │   └── createdAt: timestamp
+│   └── ...
+│
+├── chatRooms (collection)
+│   ├── {chatRoomId} (document)
+│   │   ├── id: string
+│   │   ├── participants: array<string> [userId1, userId2]
+│   │   ├── participantNames: map {userId: name}
+│   │   ├── lastMessage: string
+│   │   ├── lastMessageTime: timestamp
+│   │   ├── lastMessageSenderId: string
+│   │   ├── createdAt: timestamp
+│   │   └── messages (subcollection)
+│   │       ├── {messageId} (document)
+│   │       │   ├── id: string
+│   │       │   ├── senderId: string
+│   │       │   ├── text: string
+│   │       │   ├── type: string (text, image, video)
+│   │       │   ├── mediaUrl: string (optional)
+│   │       │   ├── timestamp: timestamp
+│   │       │   ├── isRead: boolean
+│   │       │   └── readBy: array<string>
+│   │       └── ...
+│   └── ...
+│
+├── statuses (collection)
+│   ├── {userId} (document)
+│   │   ├── userId: string
+│   │   ├── userName: string
+│   │   ├── userPhotoUrl: string (optional)
+│   │   ├── lastUpdated: timestamp
+│   │   └── statusItems: array<map>
+│   │       ├── id: string
+│   │       ├── type: string (text, image, video)
+│   │       ├── text: string (for text status)
+│   │       ├── imageUrl: string (for image status)
+│   │       ├── videoUrl: string (for video)
+│   │       ├── thumbnailUrl: string (for video)
+│   │       ├── caption: string (optional)
+│   │       ├── backgroundColor: string (for text)
+│   │       ├── createdAt: timestamp
+│   │       └── viewedBy: array<string>
+│   └── ...
+│
+├── calls (collection)
+│   ├── {callId} (document)
+│   │   ├── callerId: string
+│   │   ├── calleeId: string
+│   │   ├── channelId: string
+│   │   ├── status: string (ringing, accepted, declined, ended)
+│   │   └── createdAt: timestamp
+│   └── ...
+│
+└── callLogs (collection)
+    ├── {logId} (document)
+    │   ├── callerId: string
+    │   ├── calleeId: string
+    │   ├── duration: number
+    │   ├── type: string (video, audio)
+    │   ├── timestamp: timestamp
+    │   └── status: string (completed, missed, declined)
+    └── ...
+```
+
+## Firebase Storage Structure
+
+```
+Firebase Storage
+│
+└── statuses/
+    ├── {userId1}/
+    │   ├── images/
+    │   │   ├── 1234567890_photo.jpg
+    │   │   └── 1234567891_photo.jpg
+    │   └── videos/
+    │       ├── 1234567892_video.mp4
+    │       └── 1234567893_video.mp4
+    ├── {userId2}/
+    │   └── ...
+    └── ...
 ```
 
 ## Testing Your Firestore Setup
