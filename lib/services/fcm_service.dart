@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -39,9 +40,19 @@ class FCMService {
           _firebaseMessagingBackgroundHandler);
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         print('Foreground message received: ${message.data}');
-        String callerId = message.data['callerId'] ?? 'Unknown';
-        String channelId = message.data['channelId'] ?? '';
-        _showCallNotification(callerId, channelId);
+        String messageType = message.data['type'] ?? '';
+
+        // Only show call notification for call type messages
+        if (messageType == 'call' ||
+            messageType == 'incoming_call' ||
+            messageType.isEmpty && message.data['channelId'] != null) {
+          String callerId = message.data['callerId'] ?? 'Unknown';
+          String channelId = message.data['channelId'] ?? '';
+          if (channelId.isNotEmpty) {
+            _showCallNotification(callerId, channelId);
+          }
+        }
+        // Chat messages are handled by the StreamBuilder in chat_screen.dart
       });
     } catch (e) {
       print('FCM setup error: $e');
@@ -50,10 +61,20 @@ class FCMService {
 
   void onCallReceived(void Function(String, String) callback) {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('Call received: ${message.data}');
-      String callerId = message.data['callerId'] ?? 'Unknown';
+      print('Message received in onCallReceived: ${message.data}');
+      String messageType = message.data['type'] ?? '';
       String channelId = message.data['channelId'] ?? '';
-      callback(callerId, channelId);
+
+      // Only trigger callback for call messages, not chat messages
+      if (messageType == 'call' ||
+          messageType == 'incoming_call' ||
+          (messageType.isEmpty && channelId.isNotEmpty)) {
+        String callerId = message.data['callerId'] ?? 'Unknown';
+        print('Call notification - callerId: $callerId, channelId: $channelId');
+        callback(callerId, channelId);
+      } else {
+        print('Ignoring non-call message of type: $messageType');
+      }
     });
   }
 
@@ -145,12 +166,133 @@ class FCMService {
     }
   }
 
+  // Send a chat message notification (for delivery receipts)
+  Future<void> sendMessageNotification({
+    required String receiverId,
+    required String senderId,
+    required String senderName,
+    required String message,
+    required String chatRoomId,
+  }) async {
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(receiverId)
+          .get();
+
+      if (!doc.exists) {
+        print('User $receiverId not found in database');
+        return;
+      }
+
+      String? fcmToken = doc['fcmToken'];
+      if (fcmToken == null) {
+        print('No FCM token found for $receiverId');
+        return;
+      }
+
+      final accessToken = await _getAccessToken();
+      final response = await http.post(
+        Uri.parse(_fcmEndpoint),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'message': {
+            'token': fcmToken,
+            'data': {
+              'type': 'chat_message',
+              'senderId': senderId,
+              'senderName': senderName,
+              'message': message,
+              'chatRoomId': chatRoomId,
+            },
+            'notification': {
+              'title': senderName,
+              'body': message,
+            },
+            'android': {
+              'priority': 'high',
+            },
+            'apns': {
+              'headers': {
+                'apns-priority': '10',
+              },
+              'payload': {
+                'aps': {
+                  'alert': {
+                    'title': senderName,
+                    'body': message,
+                  },
+                  'sound': 'default',
+                  'content-available': 1,
+                },
+              },
+            },
+          },
+        }),
+      );
+      print('Message notification sent: ${response.statusCode}');
+    } catch (e) {
+      print('Error sending message notification: $e');
+    }
+  }
+
   static Future<void> _firebaseMessagingBackgroundHandler(
       RemoteMessage message) async {
     print('Background message received: ${message.data}');
-    String callerId = message.data['callerId'] ?? 'Unknown';
-    String channelId = message.data['channelId'] ?? '';
-    await _showCallNotification(callerId, channelId);
+
+    String messageType = message.data['type'] ?? '';
+
+    if (messageType == 'chat_message') {
+      // Handle chat message - mark as delivered
+      String chatRoomId = message.data['chatRoomId'] ?? '';
+      String senderId = message.data['senderId'] ?? '';
+
+      if (chatRoomId.isNotEmpty && senderId.isNotEmpty) {
+        try {
+          await Firebase.initializeApp();
+          final firestore = FirebaseFirestore.instance;
+
+          // Get and update sent messages to delivered
+          final snapshot = await firestore
+              .collection('chatRooms')
+              .doc(chatRoomId)
+              .collection('messages')
+              .where('senderId', isEqualTo: senderId)
+              .where('status', isEqualTo: 'sent')
+              .get();
+
+          if (snapshot.docs.isNotEmpty) {
+            // Use batch to update all messages and chatRoom
+            WriteBatch batch = firestore.batch();
+
+            for (var doc in snapshot.docs) {
+              batch.update(doc.reference, {'status': 'delivered'});
+            }
+
+            // Also update the chatRoom's lastMessageStatus
+            batch.update(
+              firestore.collection('chatRooms').doc(chatRoomId),
+              {'lastMessageStatus': 'delivered'},
+            );
+
+            await batch.commit();
+            print('Messages and chatRoom marked as delivered for: $chatRoomId');
+          }
+        } catch (e) {
+          print('Error marking messages as delivered: $e');
+        }
+      }
+    } else if (messageType == 'call' || messageType == 'incoming_call') {
+      // Handle call notification
+      String callerId = message.data['callerId'] ?? 'Unknown';
+      String channelId = message.data['channelId'] ?? '';
+      if (channelId.isNotEmpty) {
+        await _showCallNotification(callerId, channelId);
+      }
+    }
   }
 
   static Future<void> _showCallNotification(

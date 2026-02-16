@@ -1,10 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/models/call_log_model.dart';
+import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
+import 'package:video_chat_app/screens/contacts_screen.dart';
+import 'package:video_chat_app/screens/add_text_status_screen.dart';
+import 'package:video_chat_app/screens/add_media_status_screen.dart';
+import 'package:video_chat_app/screens/status_viewer_screen.dart';
+import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -13,50 +26,72 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  String? _currentUser;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  String? _currentUserId;
+  UserModel? _currentUser;
   bool _isInitialized = false;
   late TabController _tabController;
 
-  final List<String> _availableUsers = ['user_a', 'user_b'];
+  final AuthService _authService = AuthService();
+  final UserService _userService = UserService();
+  final FCMService _fcmService = FCMService();
+  final ChatService _chatService = ChatService();
+  final CallLogService _callLogService = CallLogService();
 
-  final List<Contact> _contacts = [
-    Contact(
-      id: 'user_a',
-      name: 'User A',
-      lastMessage: 'Hello!',
-      time: '10:20 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=User+A&background=4CAF50&color=fff&size=128',
-      isOnline: true,
-    ),
-    Contact(
-      id: 'user_b',
-      name: 'User B',
-      lastMessage: 'How are you?',
-      time: '1:02 PM',
-      avatarUrl:
-          'https://ui-avatars.com/api/?name=User+B&background=2196F3&color=fff&size=128',
-      isOnline: true,
-    ),
-  ];
+  // ignore: unused_field
+  List<UserModel> _recentContacts = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
     _initializeApp();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
+    if (_currentUserId != null) {
+      _userService.updateOnlineStatus(_currentUserId!, false);
+    }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (_currentUserId != null) {
+      switch (state) {
+        case AppLifecycleState.resumed:
+          _userService.updateOnlineStatus(_currentUserId!, true);
+          // Mark all messages as delivered when app comes to foreground
+          _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+          break;
+        case AppLifecycleState.paused:
+        case AppLifecycleState.inactive:
+        case AppLifecycleState.detached:
+          _userService.updateOnlineStatus(_currentUserId!, false);
+          break;
+        case AppLifecycleState.hidden:
+          break;
+      }
+    }
   }
 
   Future<void> _initializeApp() async {
     await _loadUser();
     await _setupCallListener();
+    _loadRecentContacts();
+    // Mark all messages as delivered on app open
+    if (_currentUserId != null) {
+      await _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+      // Initialize status provider
+      final statusProvider =
+          Provider.of<StatusProvider>(context, listen: false);
+      statusProvider.initialize(_currentUserId!);
+    }
     setState(() {
       _isInitialized = true;
     });
@@ -64,50 +99,84 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadUser() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('user_id') ?? _availableUsers[0];
-      setState(() {
-        _currentUser = userId;
-      });
-      await FCMService().setupFCM(userId: userId);
-      print('App initialized for user: $userId');
+      _currentUser = await _authService.getSavedUser();
+      if (_currentUser != null) {
+        setState(() {
+          _currentUserId = _currentUser!.id;
+        });
+        await _fcmService.setupFCM(userId: _currentUserId!);
+        await _userService.setupPresence(_currentUserId!);
+        print('App initialized for user: ${_currentUser!.name}');
+      }
     } catch (e) {
       print('Error loading user: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error initializing app: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error initializing app: $e')),
+        );
+      }
     }
-  }
-
-  Future<void> _switchUser(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_id', userId);
-    setState(() {
-      _currentUser = userId;
-    });
-    await FCMService().setupFCM(userId: userId);
-    print('Switched to user: $userId');
   }
 
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      FCMService().onCallReceived((callerId, channelId) {
+      _fcmService.onCallReceived((callerId, channelId) {
         print('Incoming call from $callerId on channel $channelId');
         callState.updateState(CallState.Ringing);
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CallScreen(channelId: channelId, isCaller: false),
-          ),
-        );
+
+        _userService.getUserById(callerId).then((caller) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CallScreen(
+                  channelId: channelId,
+                  isCaller: false,
+                  calleeId: callerId,
+                  calleeName: caller?.name ?? 'Unknown',
+                ),
+              ),
+            );
+          }
+        });
       });
     } catch (e) {
       print('Error setting up call listener: $e');
     }
   }
 
-  Widget _buildContactItem(Contact contact) {
+  Future<void> _signOut() async {
+    await _authService.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => LoginScreen()),
+      );
+    }
+  }
+
+  void _loadRecentContacts() {
+    if (_currentUserId == null) return;
+    _userService.getAllUsers(_currentUserId!).listen((users) {
+      if (mounted) {
+        setState(() {
+          _recentContacts = users.take(10).toList();
+        });
+      }
+    });
+  }
+
+  Widget _buildContactItem(UserModel user) {
+    final contact = Contact(
+      id: user.id,
+      name: user.name,
+      lastMessage: 'Tap to chat',
+      time: '',
+      avatarUrl: user.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+      isOnline: user.isOnline,
+    );
+
     return ListTile(
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Stack(
@@ -134,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       title: Text(
-        contact.name,
+        user.name,
         style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
       ),
       subtitle: Text(
@@ -143,39 +212,17 @@ class _HomeScreenState extends State<HomeScreen>
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            contact.time,
-            style: TextStyle(color: Colors.grey[500], fontSize: 12),
-          ),
-          SizedBox(height: 4),
-          Container(
-            padding: EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-            ),
-            child: Text(
-              '1',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
+      trailing: user.isOnline
+          ? Icon(Icons.circle, color: Colors.green, size: 12)
+          : null,
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatScreen(
               contact: contact,
-              currentUserId: _currentUser ?? _availableUsers[0],
+              currentUserId: _currentUserId!,
+              currentUserName: _currentUser?.name,
             ),
           ),
         );
@@ -184,78 +231,605 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildChatsTab() {
-    return ListView.separated(
-      itemCount: _contacts.length,
-      separatorBuilder: (context, index) => Divider(
-        height: 1,
-        indent: 72,
-        endIndent: 16,
-      ),
-      itemBuilder: (context, index) {
-        return _buildContactItem(_contacts[index]);
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return StreamBuilder<List<ChatRoom>>(
+      stream: _chatService.getChatRooms(_currentUserId!),
+      builder: (context, chatSnapshot) {
+        if (chatSnapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        final chatRooms = chatSnapshot.data ?? [];
+
+        if (chatRooms.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No recent chats',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                ),
+                SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ContactsScreen(
+                          currentUserId: _currentUserId!,
+                          currentUserName: _currentUser?.name,
+                        ),
+                      ),
+                    );
+                  },
+                  child: Text('Start a conversation'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.separated(
+          itemCount: chatRooms.length,
+          separatorBuilder: (context, index) => Divider(
+            height: 1,
+            indent: 72,
+            endIndent: 16,
+          ),
+          itemBuilder: (context, index) {
+            final chatRoom = chatRooms[index];
+            // Get the other participant's ID
+            final otherUserId = chatRoom.participants
+                .firstWhere((id) => id != _currentUserId, orElse: () => '');
+
+            if (otherUserId.isEmpty) return SizedBox.shrink();
+
+            return FutureBuilder<UserModel?>(
+              future: _userService.getUserById(otherUserId),
+              builder: (context, userSnapshot) {
+                if (!userSnapshot.hasData) {
+                  return ListTile(
+                    leading: CircleAvatar(
+                      radius: 28,
+                      backgroundColor: Colors.grey[300],
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    title: Container(
+                      height: 16,
+                      width: 100,
+                      color: Colors.grey[200],
+                    ),
+                  );
+                }
+
+                final user = userSnapshot.data!;
+                final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+
+                return _buildChatRoomItem(user, chatRoom, unreadCount);
+              },
+            );
+          },
+        );
       },
     );
   }
 
-  Widget _buildStatusTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+  Widget _buildChatRoomItem(
+      UserModel user, ChatRoom chatRoom, int unreadCount) {
+    final contact = Contact(
+      id: user.id,
+      name: user.name,
+      lastMessage: chatRoom.lastMessage ?? 'Tap to chat',
+      time: chatRoom.lastMessageTime != null
+          ? _formatChatTime(chatRoom.lastMessageTime!)
+          : '',
+      avatarUrl: user.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+      isOnline: user.isOnline,
+    );
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: Stack(
         children: [
-          Icon(Icons.camera_alt_outlined, size: 80, color: Colors.grey),
-          SizedBox(height: 16),
-          Text(
-            'Status updates coming soon',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+          CircleAvatar(
+            radius: 28,
+            backgroundImage: NetworkImage(contact.avatarUrl),
+            backgroundColor: Colors.grey[300],
+          ),
+          if (contact.isOnline)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
+      title: Text(
+        user.name,
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Row(
+        children: [
+          if (chatRoom.lastMessageSenderId == _currentUserId)
+            Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: _buildMessageStatusIcon(chatRoom.lastMessageStatus),
+            ),
+          Expanded(
+            child: Text(
+              contact.lastMessage,
+              style: TextStyle(
+                color: unreadCount > 0 ? Colors.black87 : Colors.grey[600],
+                fontSize: 14,
+                fontWeight:
+                    unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            contact.time,
+            style: TextStyle(
+              color: unreadCount > 0 ? Colors.blue : Colors.grey[600],
+              fontSize: 12,
+            ),
+          ),
+          if (unreadCount > 0) ...[
+            SizedBox(height: 4),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : unreadCount.toString(),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              contact: contact,
+              currentUserId: _currentUserId!,
+              currentUserName: _currentUser?.name,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMessageStatusIcon(MessageStatus? status) {
+    switch (status) {
+      case MessageStatus.sent:
+        return Icon(Icons.done, size: 16, color: Colors.grey);
+      case MessageStatus.delivered:
+        return Icon(Icons.done_all, size: 16, color: Colors.grey);
+      case MessageStatus.read:
+        return Icon(Icons.done_all, size: 16, color: Colors.blue);
+      default:
+        return Icon(Icons.done, size: 16, color: Colors.grey);
+    }
+  }
+
+  String _formatChatTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
+
+    if (messageDate == today) {
+      String hour = dateTime.hour > 12
+          ? (dateTime.hour - 12).toString()
+          : dateTime.hour == 0
+              ? '12'
+              : dateTime.hour.toString();
+      String minute = dateTime.minute.toString().padLeft(2, '0');
+      String period = dateTime.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $period';
+    } else if (messageDate == today.subtract(Duration(days: 1))) {
+      return 'Yesterday';
+    } else if (now.difference(dateTime).inDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[dateTime.weekday - 1];
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    }
+  }
+
+  Widget _buildStatusTab() {
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return Consumer<StatusProvider>(
+      builder: (context, statusProvider, child) {
+        final myStatus = statusProvider.myStatus;
+        final otherStatuses = statusProvider.otherStatuses;
+        final hasMyStatus = statusProvider.hasMyStatus;
+
+        return ListView(
+          children: [
+            // My Status section
+            _buildMyStatusTile(myStatus, hasMyStatus),
+
+            // Divider
+            if (otherStatuses.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Recent updates',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+
+            // Other users' statuses
+            ...otherStatuses.map((status) => _buildStatusTile(status)),
+
+            // Empty state
+            if (otherStatuses.isEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 48),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.update, size: 64, color: Colors.grey[300]),
+                      SizedBox(height: 16),
+                      Text(
+                        'No status updates yet',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Tap the pencil icon to share a status',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[400],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMyStatusTile(StatusModel? myStatus, bool hasMyStatus) {
+    final avatarUrl = _currentUser?.photoUrl ??
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=4CAF50&color=fff&size=128';
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: Stack(
+        children: [
+          Container(
+            padding: EdgeInsets.all(hasMyStatus ? 2 : 0),
+            decoration: hasMyStatus
+                ? BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.blue, width: 2),
+                  )
+                : null,
+            child: CircleAvatar(
+              radius: 28,
+              backgroundImage: NetworkImage(avatarUrl),
+              backgroundColor: Colors.grey[300],
+            ),
+          ),
+          if (!hasMyStatus)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: Icon(Icons.add, color: Colors.white, size: 14),
+              ),
+            ),
+        ],
+      ),
+      title: Text(
+        'My Status',
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Text(
+        hasMyStatus
+            ? '${myStatus!.activeStatusItems.length} status update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
+            : 'Tap to add status update',
+        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+      ),
+      onTap: () {
+        if (hasMyStatus) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => StatusViewerScreen(
+                statusModel: myStatus!,
+                currentUserId: _currentUserId!,
+                isMyStatus: true,
+              ),
+            ),
+          );
+        } else {
+          _navigateToAddStatus();
+        }
+      },
+    );
+  }
+
+  Widget _buildStatusTile(StatusModel status) {
+    final activeItems = status.activeStatusItems;
+    if (activeItems.isEmpty) return SizedBox.shrink();
+
+    final allViewed =
+        activeItems.every((item) => item.viewedBy.contains(_currentUserId));
+
+    final avatarUrl = status.userPhotoUrl ??
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(status.userName)}&background=4CAF50&color=fff&size=128';
+
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Container(
+        padding: EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: allViewed ? Colors.grey[400]! : Colors.blue,
+            width: 2,
+          ),
+        ),
+        child: CircleAvatar(
+          radius: 26,
+          backgroundImage: NetworkImage(avatarUrl),
+          backgroundColor: Colors.grey[300],
+        ),
+      ),
+      title: Text(
+        status.userName,
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+      ),
+      subtitle: Text(
+        _formatStatusTime(status.lastUpdated),
+        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => StatusViewerScreen(
+              statusModel: status,
+              currentUserId: _currentUserId!,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatStatusTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final diff = now.difference(dateTime);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
+    if (diff.inHours < 24) return '${diff.inHours} hours ago';
+    return 'Yesterday';
+  }
+
+  void _navigateToAddStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddTextStatusScreen(
+          userId: _currentUserId!,
+          userName: _currentUser?.name ?? 'User',
+          userPhotoUrl: _currentUser?.photoUrl,
+          userPhoneNumber: _currentUser?.phoneNumber,
+        ),
+      ),
+    );
+  }
+
+  void _navigateToAddMediaStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddMediaStatusScreen(
+          userId: _currentUserId!,
+          userName: _currentUser?.name ?? 'User',
+          userPhotoUrl: _currentUser?.photoUrl,
+          userPhoneNumber: _currentUser?.phoneNumber,
+        ),
       ),
     );
   }
 
   Widget _buildCallsTab() {
-    return ListView.builder(
-      itemCount: _contacts.length,
-      itemBuilder: (context, index) {
-        final contact = _contacts[index];
-        return ListTile(
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          leading: CircleAvatar(
-            radius: 28,
-            backgroundImage: NetworkImage(contact.avatarUrl),
-          ),
-          title: Text(
-            contact.name,
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          subtitle: Row(
-            children: [
-              Icon(
-                index % 2 == 0 ? Icons.call_received : Icons.call_made,
-                size: 16,
-                color: index % 2 == 0 ? Colors.green : Colors.red,
-              ),
-              SizedBox(width: 4),
-              Text(
-                '${contact.time} • Video',
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-            ],
-          ),
-          trailing: IconButton(
-            icon: Icon(Icons.videocam, color: Colors.blue),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatScreen(
-                    contact: contact,
-                    currentUserId: _currentUser ?? _availableUsers[0],
-                  ),
+    if (_currentUserId == null) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return StreamBuilder<List<CallLogModel>>(
+      stream: _callLogService.getCallLogs(_currentUserId!),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.call, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'No call history',
+                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
                 ),
-              );
-            },
-          ),
+              ],
+            ),
+          );
+        }
+
+        final callLogs = snapshot.data!;
+        return ListView.builder(
+          itemCount: callLogs.length,
+          itemBuilder: (context, index) {
+            final log = callLogs[index];
+            
+            // Get the other person's information
+            final otherPersonName = log.getOtherPersonName(_currentUserId!);
+            final otherPersonPhotoUrl = log.getOtherPersonPhotoUrl(_currentUserId!);
+            final otherPersonId = log.callerId == _currentUserId ? log.calleeId : log.callerId;
+            
+            // Determine icon and color based on call type and status
+            IconData callIcon;
+            Color callIconColor;
+            
+            if (log.callType == CallType.incoming) {
+              callIcon = Icons.call_received;
+              callIconColor = log.status == CallStatus.missed 
+                  ? Colors.red 
+                  : Colors.green;
+            } else if (log.callType == CallType.outgoing) {
+              callIcon = Icons.call_made;
+              callIconColor = log.status == CallStatus.cancelled 
+                  ? Colors.red 
+                  : Colors.green;
+            } else {
+              callIcon = Icons.call_missed;
+              callIconColor = Colors.red;
+            }
+            
+            // Format timestamp (e.g., "Today", "Yesterday", or date)
+            String formatTimestamp(DateTime timestamp) {
+              final now = DateTime.now();
+              final difference = now.difference(timestamp);
+              
+              if (difference.inDays == 0) {
+                final hour = timestamp.hour.toString().padLeft(2, '0');
+                final minute = timestamp.minute.toString().padLeft(2, '0');
+                return '$hour:$minute';
+              } else if (difference.inDays == 1) {
+                return 'Yesterday';
+              } else if (difference.inDays < 7) {
+                return '${difference.inDays} days ago';
+              } else {
+                return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
+              }
+            }
+
+            return ListTile(
+              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: CircleAvatar(
+                radius: 28,
+                backgroundImage: NetworkImage(
+                  otherPersonPhotoUrl ??
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=4CAF50&color=fff&size=128',
+                ),
+              ),
+              title: Text(
+                otherPersonName,
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Row(
+                children: [
+                  Icon(
+                    callIcon,
+                    size: 16,
+                    color: callIconColor,
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    log.status == CallStatus.answered 
+                        ? log.getFormattedDuration() 
+                        : log.status.toString().split('.').last.capitalize(),
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                  ),
+                ],
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    formatTimestamp(log.timestamp),
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(Icons.videocam, color: Colors.blue),
+                    onPressed: () {
+                      final contact = Contact(
+                        id: otherPersonId,
+                        name: otherPersonName,
+                        lastMessage: '',
+                        time: '',
+                        avatarUrl: otherPersonPhotoUrl ??
+                            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=4CAF50&color=fff&size=128',
+                        isOnline: false,
+                      );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(
+                            contact: contact,
+                            currentUserId: _currentUserId!,
+                            currentUserName: _currentUser?.name,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -300,51 +874,62 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             icon: Icon(Icons.search, color: Colors.black),
             onPressed: () {
-              // Implement search
+              if (_currentUserId != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContactsScreen(
+                      currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
+                    ),
+                  ),
+                );
+              }
             },
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Colors.black),
             onSelected: (value) {
-              if (value == 'switch_user') {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text('Switch User'),
-                    content: DropdownButtonFormField<String>(
-                      value: _currentUser,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(),
-                        labelText: 'Select User',
-                      ),
-                      items: _availableUsers.map((user) {
-                        return DropdownMenuItem(
-                          value: user,
-                          child: Text(user.replaceAll('_', ' ').toUpperCase()),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          _switchUser(value);
-                          Navigator.pop(context);
-                        }
-                      },
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: Text('Cancel'),
-                      ),
-                    ],
-                  ),
-                );
+              if (value == 'profile') {
+                // Show profile screen
+              } else if (value == 'settings') {
+                // Show settings screen
+              } else if (value == 'logout') {
+                _signOut();
               }
             },
             itemBuilder: (BuildContext context) {
               return [
-                PopupMenuItem(value: 'profile', child: Text('Profile')),
-                PopupMenuItem(value: 'settings', child: Text('Settings')),
-                PopupMenuItem(value: 'switch_user', child: Text('Switch User')),
+                PopupMenuItem(
+                  value: 'profile',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person, color: Colors.black),
+                      SizedBox(width: 12),
+                      Text('Profile'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings, color: Colors.black),
+                      SizedBox(width: 12),
+                      Text('Settings'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'logout',
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, color: Colors.red),
+                      SizedBox(width: 12),
+                      Text('Logout', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
               ];
             },
           ),
@@ -378,13 +963,90 @@ class _HomeScreenState extends State<HomeScreen>
           _buildCallsTab(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // Handle new chat/call
-        },
-        backgroundColor: Colors.blue,
-        child: Icon(Icons.message, color: Colors.white),
-      ),
+      floatingActionButton: _buildFAB(),
     );
+  }
+
+  Widget _buildFAB() {
+    return AnimatedBuilder2(
+      animation: _tabController.animation!,
+      builder: (context, child) {
+        final index = _tabController.index;
+        if (index == 1) {
+          // Status tab - show add status FABs
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FloatingActionButton(
+                heroTag: 'statusTextBtn',
+                mini: true,
+                backgroundColor: Colors.white,
+                onPressed: () {
+                  if (_currentUserId != null) {
+                    _navigateToAddStatus();
+                  }
+                },
+                child: Icon(Icons.edit, color: Colors.blue, size: 20),
+              ),
+              SizedBox(height: 12),
+              FloatingActionButton(
+                heroTag: 'statusCameraBtn',
+                backgroundColor: Colors.blue,
+                onPressed: () {
+                  if (_currentUserId != null) {
+                    _navigateToAddMediaStatus();
+                  }
+                },
+                child: Icon(Icons.camera_alt, color: Colors.white),
+              ),
+            ],
+          );
+        }
+        // Chats & Calls tabs - show message FAB
+        return FloatingActionButton(
+          heroTag: 'chatFab',
+          backgroundColor: Colors.blue,
+          onPressed: () {
+            if (_currentUserId != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ContactsScreen(
+                    currentUserId: _currentUserId!,
+                    currentUserName: _currentUser?.name,
+                  ),
+                ),
+              );
+            }
+          },
+          child: Icon(Icons.message, color: Colors.white),
+        );
+      },
+    );
+  }
+}
+
+/// Helper AnimatedBuilder widget for FAB animation.
+class AnimatedBuilder2 extends AnimatedWidget {
+  final Widget Function(BuildContext context, Widget? child) builder;
+  final Widget? child;
+
+  const AnimatedBuilder2({
+    Key? key,
+    required Animation<double> animation,
+    required this.builder,
+    this.child,
+  }) : super(key: key, listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    return builder(context, child);
+  }
+}
+
+extension StringExtension on String {
+  String capitalize() {
+    if (isEmpty) return this;
+    return '${this[0].toUpperCase()}${substring(1)}';
   }
 }

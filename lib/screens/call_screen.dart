@@ -1,14 +1,25 @@
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
+import 'package:video_chat_app/services/call_log_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
   final bool isCaller;
+  final String? calleeId;
+  final String? calleeName;
 
-  CallScreen({required this.channelId, required this.isCaller});
+  CallScreen({
+    required this.channelId,
+    required this.isCaller,
+    this.calleeId,
+    this.calleeName,
+  });
 
   @override
   _CallScreenState createState() => _CallScreenState();
@@ -22,10 +33,50 @@ class _CallScreenState extends State<CallScreen> {
   int? _remoteUid;
   bool _localVideoEnabled = true;
 
+  // Call logging fields
+  final CallLogService _callLogService = CallLogService();
+  DateTime? _callStartTime;
+  bool _remoteUserJoined = false;
+  String? _currentUserId;
+  String? _currentUserName;
+  String? _currentUserPhotoUrl;
+  String? _calleePhotoUrl;
+
   @override
   void initState() {
     super.initState();
+    _initializeUserInfo();
     _initAgora();
+  }
+
+  Future<void> _initializeUserInfo() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      _currentUserId = currentUser.uid;
+      
+      // Fetch current user details from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+      
+      if (userDoc.exists) {
+        _currentUserName = userDoc.data()?['name'] ?? 'Unknown';
+        _currentUserPhotoUrl = userDoc.data()?['photoUrl'];
+      }
+
+      // Fetch callee photo URL if calleeId is provided
+      if (widget.calleeId != null) {
+        final calleeDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.calleeId)
+            .get();
+        
+        if (calleeDoc.exists) {
+          _calleePhotoUrl = calleeDoc.data()?['photoUrl'];
+        }
+      }
+    }
   }
 
   Future<void> _initAgora() async {
@@ -43,6 +94,7 @@ class _CallScreenState extends State<CallScreen> {
             print("Local user joined channel: ${connection.channelId}");
             setState(() {
               _isInitialized = true;
+              _callStartTime = DateTime.now(); // Track call start time
             });
             Provider.of<CallStateNotifier>(context, listen: false)
                 .updateState(CallState.Connected);
@@ -51,6 +103,7 @@ class _CallScreenState extends State<CallScreen> {
             print("Remote user joined: $remoteUid");
             setState(() {
               _remoteUid = remoteUid;
+              _remoteUserJoined = true; // Track that remote user joined
             });
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
@@ -102,9 +155,65 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    // Create call log (fire and forget for cases like back button press)
+    _createCallLog();
+    
     _engine?.leaveChannel();
     _engine?.release();
     super.dispose();
+  }
+
+  Future<void> _createCallLog() async {
+    print('=== Creating Call Log ===');
+    print('_currentUserId: $_currentUserId');
+    print('_currentUserName: $_currentUserName');
+    print('widget.calleeId: ${widget.calleeId}');
+    print('widget.calleeName: ${widget.calleeName}');
+    print('_callStartTime: $_callStartTime');
+    
+    // Only create log if we have necessary information
+    if (_currentUserId == null || 
+        _currentUserName == null || 
+        widget.calleeId == null || 
+        widget.calleeName == null ||
+        _callStartTime == null) {
+      print('⚠️ Cannot create call log - missing required fields');
+      return;
+    }
+
+    // Calculate call duration
+    final durationInSeconds = DateTime.now().difference(_callStartTime!).inSeconds;
+
+    // Determine call status
+    CallStatus status;
+    if (_remoteUserJoined) {
+      status = CallStatus.answered;
+    } else {
+      // If remote user never joined, it's either missed or cancelled
+      status = widget.isCaller ? CallStatus.cancelled : CallStatus.missed;
+    }
+
+    // Determine call type based on whether this user is caller or callee
+    final callType = widget.isCaller ? CallType.outgoing : CallType.incoming;
+
+    print('Creating log: callType=$callType, status=$status, duration=$durationInSeconds');
+    
+    try {
+      await _callLogService.createCallLog(
+        callerId: widget.isCaller ? _currentUserId! : widget.calleeId!,
+        callerName: widget.isCaller ? _currentUserName! : widget.calleeName!,
+        callerPhotoUrl: widget.isCaller ? _currentUserPhotoUrl : _calleePhotoUrl,
+        calleeId: widget.isCaller ? widget.calleeId! : _currentUserId!,
+        calleeName: widget.isCaller ? widget.calleeName! : _currentUserName!,
+        calleePhotoUrl: widget.isCaller ? _calleePhotoUrl : _currentUserPhotoUrl,
+        channelId: widget.channelId,
+        status: status,
+        durationInSeconds: status == CallStatus.answered ? durationInSeconds : 0,
+      );
+      print('✅ Call log created successfully');
+    } catch (e) {
+      print('❌ Error creating call log: $e');
+    }
   }
 
   Widget _buildLocalPreview() {
@@ -224,7 +333,10 @@ class _CallScreenState extends State<CallScreen> {
                       color: Colors.white,
                       size: 32,
                     ),
-                    onPressed: () {
+                    onPressed: () async {
+                      // Create call log before ending call
+                      await _createCallLog();
+                      
                       Provider.of<CallStateNotifier>(context, listen: false)
                           .updateState(CallState.Ended);
                       Navigator.pop(context);
@@ -283,18 +395,19 @@ class _CallScreenState extends State<CallScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.isCaller ? 'Calling...' : 'Incoming Call',
+                  widget.calleeName ?? (widget.isCaller ? 'Calling...' : 'Incoming Call'),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                SizedBox(height: 4),
                 Text(
-                  'Channel: ${widget.channelId}',
+                  _remoteUid != null ? 'Connected' : 'Waiting...',
                   style: const TextStyle(
                     color: Colors.white70,
-                    fontSize: 14,
+                    fontSize: 16,
                   ),
                 ),
               ],

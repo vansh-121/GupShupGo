@@ -30,9 +30,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  firebase_core: ^2.24.2
-  firebase_messaging: ^14.7.10
-  cloud_firestore: ^4.13.6
+  firebase_core: ^2.27.0
+  firebase_messaging: ^14.7.19
+  firebase_auth: ^4.17.8
+  cloud_firestore: ^4.15.8
+  firebase_storage: ^11.6.9
   
   # Agora RTC Engine
   agora_rtc_engine: ^6.3.1
@@ -58,12 +60,17 @@ dependencies:
   # CallKit for native call UI
   flutter_callkit_incoming: ^2.5.2
   
+  # Media picker & video player
+  image_picker: ^1.0.7
+  video_player: ^2.8.3
+  
   # UI components
   cupertino_icons: ^1.0.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.13.1
 
 flutter_launcher_icons:

@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ==================== STATUS MEDIA ====================
+    match /statuses/{userId}/{allPaths=**} {
+      // Anyone authenticated can read status media (images/videos)
+      allow read: if request.auth != null;
+
+      // Users can only upload to their own status folder
+      allow write: if request.auth != null && request.auth.uid == userId
+        // Limit file size: 10 MB for images, 30 MB for videos
+        && request.resource.size < 30 * 1024 * 1024
+        // Only allow image and video content types
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('video/.*'));
+
+      // Users can delete their own status media
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Deny everything else by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
