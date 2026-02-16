@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -87,13 +88,13 @@ class StatusProvider extends ChangeNotifier {
     }
   }
 
-  /// Upload an image status.
+  /// Upload an image status from a file.
   Future<void> uploadImageStatus({
     required String userId,
     required String userName,
     String? userPhotoUrl,
     String? userPhoneNumber,
-    required String imageUrl,
+    required File imageFile,
     String? caption,
   }) async {
     try {
@@ -105,7 +106,38 @@ class StatusProvider extends ChangeNotifier {
         userName: userName,
         userPhotoUrl: userPhotoUrl,
         userPhoneNumber: userPhoneNumber,
-        imageUrl: imageUrl,
+        imageFile: imageFile,
+        caption: caption,
+      );
+
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Upload a video status from a file.
+  Future<void> uploadVideoStatus({
+    required String userId,
+    required String userName,
+    String? userPhotoUrl,
+    String? userPhoneNumber,
+    required File videoFile,
+    String? caption,
+  }) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      await _statusService.uploadVideoStatus(
+        userId: userId,
+        userName: userName,
+        userPhotoUrl: userPhotoUrl,
+        userPhoneNumber: userPhoneNumber,
+        videoFile: videoFile,
         caption: caption,
       );
 

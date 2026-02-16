@@ -34,6 +34,7 @@ dependencies:
   firebase_messaging: ^14.7.19
   firebase_auth: ^4.17.8
   cloud_firestore: ^4.15.8
+  firebase_storage: ^11.6.9
   
   # Agora RTC Engine
   agora_rtc_engine: ^6.3.1
@@ -58,6 +59,10 @@ dependencies:
   
   # CallKit for native call UI
   flutter_callkit_incoming: ^2.5.2
+  
+  # Media picker & video player
+  image_picker: ^1.0.7
+  video_player: ^2.8.3
   
   # UI components
   cupertino_icons: ^1.0.2

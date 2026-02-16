@@ -9,6 +9,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
 import 'package:video_chat_app/screens/add_text_status_screen.dart';
+import 'package:video_chat_app/screens/add_media_status_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -671,6 +672,20 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  void _navigateToAddMediaStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddMediaStatusScreen(
+          userId: _currentUserId!,
+          userName: _currentUser?.name ?? 'User',
+          userPhotoUrl: _currentUser?.photoUrl,
+          userPhoneNumber: _currentUser?.phoneNumber,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCallsTab() {
     if (_currentUserId == null) {
       return Center(child: CircularProgressIndicator());
@@ -896,7 +911,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context, child) {
         final index = _tabController.index;
         if (index == 1) {
-          // Status tab - show add status FAB
+          // Status tab - show add status FABs
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -917,7 +932,7 @@ class _HomeScreenState extends State<HomeScreen>
                 backgroundColor: Colors.blue,
                 onPressed: () {
                   if (_currentUserId != null) {
-                    _navigateToAddStatus();
+                    _navigateToAddMediaStatus();
                   }
                 },
                 child: Icon(Icons.camera_alt, color: Colors.white),

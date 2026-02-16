@@ -1,5 +1,5 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -29,6 +29,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   int _currentIndex = 0;
   late List<StatusItem> _activeItems;
   bool _isPaused = false;
+  VideoPlayerController? _videoController;
+  bool _isVideoInitialized = false;
 
   @override
   void initState() {
@@ -40,8 +42,55 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       duration: Duration(seconds: 5),
     )..addStatusListener(_onProgressStatus);
 
-    _startProgress();
+    _loadCurrentStatus();
     _markCurrentAsViewed();
+  }
+
+  /// Initialize the current status - set appropriate duration, load video if needed.
+  void _loadCurrentStatus() {
+    if (_activeItems.isEmpty) return;
+    final item = _activeItems[_currentIndex];
+
+    _disposeVideoController();
+
+    if (item.type == 'video' && item.videoUrl != null) {
+      // For videos, wait until initialized to set duration
+      _isVideoInitialized = false;
+      _progressController.stop();
+      _videoController = VideoPlayerController.networkUrl(
+        Uri.parse(item.videoUrl!),
+      )..initialize().then((_) {
+          if (mounted) {
+            setState(() {
+              _isVideoInitialized = true;
+            });
+            // Set progress duration to video duration
+            final videoDuration = _videoController!.value.duration;
+            _progressController.duration = videoDuration;
+            _videoController!.play();
+            _progressController.reset();
+            _progressController.forward();
+          }
+        }).catchError((e) {
+          print('Error initializing video: $e');
+          if (mounted) {
+            // Fallback: use 5s timer for broken videos
+            _progressController.duration = Duration(seconds: 5);
+            _startProgress();
+          }
+        });
+    } else {
+      // Text or image: 5 seconds
+      _progressController.duration = Duration(seconds: 5);
+      _startProgress();
+    }
+  }
+
+  void _disposeVideoController() {
+    _videoController?.pause();
+    _videoController?.dispose();
+    _videoController = null;
+    _isVideoInitialized = false;
   }
 
   void _onProgressStatus(AnimationStatus status) {
@@ -65,7 +114,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
         duration: Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-      _startProgress();
+      _loadCurrentStatus();
       _markCurrentAsViewed();
     } else {
       Navigator.pop(context);
@@ -82,9 +131,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
         duration: Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-      _startProgress();
+      _loadCurrentStatus();
     } else {
-      _startProgress();
+      _loadCurrentStatus();
     }
   }
 
@@ -101,6 +150,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   void _onTapDown(TapDownDetails details) {
     _isPaused = true;
     _progressController.stop();
+    _videoController?.pause();
   }
 
   void _onTapUp(TapUpDetails details) {
@@ -118,11 +168,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   void _onLongPressStart(LongPressStartDetails details) {
     _isPaused = true;
     _progressController.stop();
+    _videoController?.pause();
   }
 
   void _onLongPressEnd(LongPressEndDetails details) {
     _isPaused = false;
     _progressController.forward();
+    _videoController?.play();
   }
 
   Color _parseColor(String hex) {
@@ -278,6 +330,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _progressController.removeStatusListener(_onProgressStatus);
     _progressController.dispose();
     _pageController.dispose();
+    _disposeVideoController();
     super.dispose();
   }
 
@@ -315,6 +368,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 final item = _activeItems[index];
                 if (item.type == 'text') {
                   return _buildTextStatus(item);
+                } else if (item.type == 'video') {
+                  return _buildVideoStatus(item);
                 } else {
                   return _buildImageStatus(item);
                 }
@@ -440,8 +495,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               ),
             ),
 
-            // Bottom: caption for image statuses
-            if (currentItem.type == 'image' &&
+            // Bottom: caption for image/video statuses
+            if (currentItem.type != 'text' &&
                 currentItem.caption != null &&
                 currentItem.caption!.isNotEmpty)
               Positioned(
@@ -564,6 +619,41 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             )
           : Center(
               child: Icon(Icons.image, color: Colors.white54, size: 64),
+            ),
+    );
+  }
+
+  Widget _buildVideoStatus(StatusItem item) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.black,
+      child: _videoController != null && _isVideoInitialized
+          ? Center(
+              child: AspectRatio(
+                aspectRatio: _videoController!.value.aspectRatio,
+                child: VideoPlayer(_videoController!),
+              ),
+            )
+          : Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 50,
+                    height: 50,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Loading video...',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                ],
+              ),
             ),
     );
   }

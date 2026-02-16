@@ -1,11 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Represents a single status item (text or image).
+/// Represents a single status item (text, image, or video).
 class StatusItem {
   final String id;
-  final String type; // 'text' or 'image'
+  final String type; // 'text', 'image', or 'video'
   final String? text;
   final String? imageUrl;
+  final String? videoUrl;
+  final String? thumbnailUrl; // Thumbnail for video statuses
   final String? caption;
   final String backgroundColor; // Hex color for text statuses
   final DateTime createdAt;
@@ -16,6 +18,8 @@ class StatusItem {
     required this.type,
     this.text,
     this.imageUrl,
+    this.videoUrl,
+    this.thumbnailUrl,
     this.caption,
     this.backgroundColor = '#075E54',
     required this.createdAt,
@@ -28,6 +32,8 @@ class StatusItem {
       'type': type,
       'text': text,
       'imageUrl': imageUrl,
+      'videoUrl': videoUrl,
+      'thumbnailUrl': thumbnailUrl,
       'caption': caption,
       'backgroundColor': backgroundColor,
       'createdAt': Timestamp.fromDate(createdAt),
@@ -41,6 +47,8 @@ class StatusItem {
       type: map['type'] ?? 'text',
       text: map['text'],
       imageUrl: map['imageUrl'],
+      videoUrl: map['videoUrl'],
+      thumbnailUrl: map['thumbnailUrl'],
       caption: map['caption'],
       backgroundColor: map['backgroundColor'] ?? '#075E54',
       createdAt: _parseDateTime(map['createdAt']),
