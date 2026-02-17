@@ -50,7 +50,8 @@ class FCMService {
           String channelId = message.data['channelId'] ?? '';
           bool isAudioOnly = message.data['isAudioOnly'] == 'true';
           if (channelId.isNotEmpty) {
-            _showCallNotification(callerId, channelId, isAudioOnly: isAudioOnly);
+            _showCallNotification(callerId, channelId,
+                isAudioOnly: isAudioOnly);
           }
         }
         // Chat messages are handled by the StreamBuilder in chat_screen.dart
@@ -72,7 +73,8 @@ class FCMService {
           (messageType.isEmpty && channelId.isNotEmpty)) {
         String callerId = message.data['callerId'] ?? 'Unknown';
         bool isAudioOnly = message.data['isAudioOnly'] == 'true';
-        print('Call notification - callerId: $callerId, channelId: $channelId, isAudioOnly: $isAudioOnly');
+        print(
+            'Call notification - callerId: $callerId, channelId: $channelId, isAudioOnly: $isAudioOnly');
         callback(callerId, channelId, isAudioOnly);
       } else {
         print('Ignoring non-call message of type: $messageType');
@@ -101,7 +103,8 @@ class FCMService {
   }
 
   Future<void> sendCallNotification(
-      String calleeId, String callerId, String channelId, {bool isAudioOnly = false}) async {
+      String calleeId, String callerId, String channelId,
+      {bool isAudioOnly = false}) async {
     try {
       print('Sending notification to $calleeId for channel $channelId');
       DocumentSnapshot doc = await FirebaseFirestore.instance
@@ -137,7 +140,8 @@ class FCMService {
               'isAudioOnly': isAudioOnly.toString(),
             },
             'notification': {
-              'title': isAudioOnly ? 'Incoming Audio Call' : 'Incoming Video Call',
+              'title':
+                  isAudioOnly ? 'Incoming Audio Call' : 'Incoming Video Call',
               'body': 'Call from $callerId',
             },
             'android': {
@@ -294,13 +298,14 @@ class FCMService {
       String channelId = message.data['channelId'] ?? '';
       bool isAudioOnly = message.data['isAudioOnly'] == 'true';
       if (channelId.isNotEmpty) {
-        await _showCallNotification(callerId, channelId, isAudioOnly: isAudioOnly);
+        await _showCallNotification(callerId, channelId,
+            isAudioOnly: isAudioOnly);
       }
     }
   }
 
-  static Future<void> _showCallNotification(
-      String callerId, String channelId, {bool isAudioOnly = false}) async {
+  static Future<void> _showCallNotification(String callerId, String channelId,
+      {bool isAudioOnly = false}) async {
     try {
       await FlutterCallkitIncoming.showCallkitIncoming(
         CallKitParams(
@@ -312,7 +317,8 @@ class FCMService {
           textDecline: 'Decline',
         ),
       );
-      print('Call notification shown for $callerId (${isAudioOnly ? 'Audio' : 'Video'})');
+      print(
+          'Call notification shown for $callerId (${isAudioOnly ? 'Audio' : 'Video'})');
     } catch (e) {
       print('Error showing call notification: $e');
     }

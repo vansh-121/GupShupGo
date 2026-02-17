@@ -1,4 +1,4 @@
-# GupShupGo – Realtime Messaging & Video Calling App
+# GupShupGo – Chat, Voice & Video Calling App
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-flutter-blue.svg)
@@ -21,14 +21,16 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 
 ## ✨ Core Features
 
-### 📞 Video & Audio Calling
+### 📞 Video & Voice Calling
 - 🎥 **HD video calling** with Agora RTC Engine
+- 🎙️ **Audio-only voice calls** — lightweight, no camera required
 - 🔊 Crystal-clear audio quality
 - 📱 One-to-one real-time communication
 - 🔔 **Push notifications** for incoming calls (even when app is closed)
 - 💤 Background and terminated app call support
-- 🎛️ In-call controls: mute, video on/off, speaker, flip camera
-- ⏱️ Real-time call duration tracking
+- 🎛️ In-call controls: mute, video on/off, speaker, flip camera, hold
+- ⏱️ Real-time call duration tracking (talk time only)
+- 📋 **Call log history** — records caller, callee, duration, type (audio/video), and status (answered/missed/cancelled)
 
 ### 💬 Real-Time Messaging
 - 📨 **Instant messaging** with typing indicators
@@ -97,28 +99,33 @@ Architecture Pattern:
 ### Project Structure
 ```plaintext
 lib/
-├── models/                    → Data models
-│   ├── user_model.dart       → User data structure
-│   ├── message_model.dart    → Chat message model
-│   └── status_model.dart     → Status data model
-├── services/                  → Business logic
-│   ├── auth_service.dart     → Authentication
-│   ├── user_service.dart     → User management
-│   ├── chat_service.dart     → Messaging
-│   ├── status_service.dart   → Status CRUD
-│   └── fcm_service.dart      → Push notifications
-├── provider/                  → State management
-│   └── status_provider.dart  → Status state
-├── screens/                   → UI pages
-│   ├── auth/                 → Login screens
-│   ├── home_screen.dart      → Main tabbed interface
-│   ├── chat_screen.dart      → Chat conversation
-│   ├── call_screen.dart      → Video call UI
-│   ├── contacts_screen.dart  → User list
+├── models/                        → Data models
+│   ├── user_model.dart            → User data structure
+│   ├── message_model.dart         → Chat message model
+│   ├── status_model.dart          → Status data model
+│   └── call_log_model.dart        → Call log (type, status, duration, media type)
+├── services/                      → Business logic
+│   ├── auth_service.dart          → Authentication
+│   ├── user_service.dart          → User management
+│   ├── chat_service.dart          → Messaging
+│   ├── status_service.dart        → Status CRUD
+│   ├── fcm_service.dart           → Push notifications & incoming call handling
+│   ├── agora_services.dart        → Agora RTC engine init, permissions, release
+│   └── call_log_service.dart      → Call log CRUD (Firestore)
+├── provider/                      → State management
+│   ├── status_provider.dart       → Status state
+│   └── call_state_provider.dart   → Real-time call state (ringing/connected/ended)
+├── screens/                       → UI pages
+│   ├── auth/                      → Login screens
+│   ├── home_screen.dart           → Main tabbed interface
+│   ├── chat_screen.dart           → Chat conversation
+│   ├── call_screen.dart           → Video/voice call UI with in-call controls
+│   ├── incoming_call_screen.dart  → Incoming call UI (accept/decline)
+│   ├── contacts_screen.dart       → User list
 │   ├── add_text_status_screen.dart
 │   ├── add_media_status_screen.dart
 │   └── status_viewer_screen.dart
-└── main.dart                  → App entry point
+└── main.dart                      → App entry point
 ```
 
 ---
@@ -127,7 +134,10 @@ lib/
 
 ### 🔥 WhatsApp Parity
 - ✅ Chats with read receipts
-- ✅ Video/voice calling
+- ✅ Video calling
+- ✅ **Voice/audio-only calling**
+- ✅ **Incoming call screen** (accept/decline)
+- ✅ **Call log history** (Calls tab)
 - ✅ Status updates (24h expiry)
 - ✅ Online/offline indicators
 - ✅ Typing indicators
@@ -212,11 +222,10 @@ flutter pub get
 2. Create a new project
 3. Get your **App ID**
 4. (Optional) Set up token server for secure channels
-5. Update configuration:
+5. Update configuration in `lib/services/agora_services.dart`:
    ```dart
-   // lib/utils/agora_config.dart
-   const String appId = "YOUR_AGORA_APP_ID";
-   const String token = ""; // Leave empty if not using token
+   // lib/services/agora_services.dart
+   appId: 'YOUR_AGORA_APP_ID', // Replace with your Agora App ID
    ```
 
 ### 5. Required Permissions
@@ -266,9 +275,16 @@ flutter run -d ios
 
 ### Test Video Calling
 1. **Alice:** Tap search icon → Tap video icon next to Bob's name
-2. **Bob:** Receives push notification → Call screen opens
+2. **Bob:** Receives push notification → Incoming call screen opens → Tap accept
 3. Both devices show live video streams
-4. Test: Mute, video toggle, end call
+4. Test: Mute, video toggle, hold, end call
+5. Check Calls tab on both devices for the call log entry
+
+### Test Voice Calling
+1. **Alice:** Tap search icon → Tap phone icon next to Bob's name
+2. **Bob:** Receives push notification → Incoming call screen opens → Tap accept
+3. Audio-only call connects (no video UI)
+4. Test: Mute, speaker toggle, hold, end call
 
 ### Test Status Feature
 1. **Alice:** Go to Status tab → Tap camera FAB
@@ -408,7 +424,7 @@ flutter build ios --release
 - [ ] Custom themes
 - [ ] Block/report users
 - [ ] Status replies
-- [ ] Call history
+- [x] ~~Call history~~ (implemented in v2 – call logs with duration, type & status)
 - [ ] Message search
 - [ ] Chat backup/restore
 

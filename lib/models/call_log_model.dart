@@ -55,14 +55,18 @@ class CallLogModel {
   // Format duration to human readable string
   String getFormattedDuration() {
     if (durationInSeconds == null || durationInSeconds == 0) {
-      return status == CallStatus.missed ? 'Missed' : 
-             status == CallStatus.declined ? 'Declined' :
-             status == CallStatus.cancelled ? 'Cancelled' : 'No duration';
+      return status == CallStatus.missed
+          ? 'Missed'
+          : status == CallStatus.declined
+              ? 'Declined'
+              : status == CallStatus.cancelled
+                  ? 'Cancelled'
+                  : 'No duration';
     }
-    
+
     final minutes = durationInSeconds! ~/ 60;
     final seconds = durationInSeconds! % 60;
-    
+
     if (minutes > 0) {
       return '${minutes}m ${seconds}s';
     } else {
@@ -144,7 +148,8 @@ class CallLogModel {
       case 'video':
         return CallMediaType.video;
       default:
-        return CallMediaType.video; // Default to video for backward compatibility
+        return CallMediaType
+            .video; // Default to video for backward compatibility
     }
   }
 }

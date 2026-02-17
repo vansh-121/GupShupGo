@@ -110,9 +110,9 @@ class _ChatScreenState extends State<ChatScreen> {
   void _listenToTypingStatus() {
     _typingSubscription = _chatService
         .getTypingStatus(
-          currentUserId: widget.currentUserId,
-          otherUserId: widget.contact.id,
-        )
+      currentUserId: widget.currentUserId,
+      otherUserId: widget.contact.id,
+    )
         .listen((isTyping) {
       if (mounted && _isOtherUserTyping != isTyping) {
         setState(() {
@@ -215,7 +215,8 @@ class _ChatScreenState extends State<ChatScreen> {
           'Initiating audio call to ${widget.contact.name} on channel $channelId');
 
       await FCMService().sendCallNotification(
-          widget.contact.id, widget.currentUserId, channelId, isAudioOnly: true);
+          widget.contact.id, widget.currentUserId, channelId,
+          isAudioOnly: true);
 
       Navigator.push(
         context,

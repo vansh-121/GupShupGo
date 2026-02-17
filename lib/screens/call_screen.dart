@@ -63,13 +63,13 @@ class _CallScreenState extends State<CallScreen> {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
       _currentUserId = currentUser.uid;
-      
+
       // Fetch current user details from Firestore
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
-      
+
       if (userDoc.exists) {
         _currentUserName = userDoc.data()?['name'] ?? 'Unknown';
         _currentUserPhotoUrl = userDoc.data()?['photoUrl'];
@@ -81,7 +81,7 @@ class _CallScreenState extends State<CallScreen> {
             .collection('users')
             .doc(widget.calleeId)
             .get();
-        
+
         if (calleeDoc.exists) {
           _calleePhotoUrl = calleeDoc.data()?['photoUrl'];
         }
@@ -93,7 +93,7 @@ class _CallScreenState extends State<CallScreen> {
     try {
       // Set initial call start time to avoid null errors
       _callStartTime = DateTime.now();
-      
+
       // Initialize Agora engine
       _engine = await AgoraService.initAgora(isAudioOnly: widget.isAudioOnly);
 
@@ -166,7 +166,9 @@ class _CallScreenState extends State<CallScreen> {
       print("Error initializing Agora: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to initialize ${widget.isAudioOnly ? "audio" : "video"} call: $e')),
+          SnackBar(
+              content: Text(
+                  'Failed to initialize ${widget.isAudioOnly ? "audio" : "video"} call: $e')),
         );
       }
     }
@@ -177,7 +179,7 @@ class _CallScreenState extends State<CallScreen> {
     _callTimer?.cancel();
     // Create call log (fire and forget for cases like back button press)
     _createCallLog();
-    
+
     // Use proper release method with cleanup tracking
     AgoraService.releaseEngine(_engine);
     super.dispose();
@@ -208,28 +210,26 @@ class _CallScreenState extends State<CallScreen> {
     // Prevent duplicate call logs
     if (_callLogCreated) return;
     _callLogCreated = true;
-    
+
     print('=== Creating Call Log ===');
     print('_currentUserId: $_currentUserId');
     print('_currentUserName: $_currentUserName');
     print('widget.calleeId: ${widget.calleeId}');
     print('widget.calleeName: ${widget.calleeName}');
     print('_callStartTime: $_callStartTime');
-    
+
     // Only create log if we have necessary information
-    if (_currentUserId == null || 
-        _currentUserName == null || 
-        widget.calleeId == null || 
+    if (_currentUserId == null ||
+        _currentUserName == null ||
+        widget.calleeId == null ||
         widget.calleeName == null) {
       print('⚠️ Cannot create call log - missing required fields');
       return;
     }
-    
-    // Use current time as fallback if _callStartTime is somehow null
-    final callStartTime = _callStartTime ?? DateTime.now();
 
-    // Calculate call duration
-    final durationInSeconds = DateTime.now().difference(callStartTime).inSeconds;
+    // Use _callDurationSeconds for accurate talk time (excludes ringing/waiting time)
+    // _callDurationSeconds starts only when the remote user joins the channel
+    final durationInSeconds = _callDurationSeconds;
 
     // Determine call status
     CallStatus status;
@@ -243,20 +243,25 @@ class _CallScreenState extends State<CallScreen> {
     // Determine call type based on whether this user is caller or callee
     final callType = widget.isCaller ? CallType.outgoing : CallType.incoming;
 
-    print('Creating log: callType=$callType, status=$status, duration=$durationInSeconds');
-    
+    print(
+        'Creating log: callType=$callType, status=$status, duration=$durationInSeconds');
+
     try {
       await _callLogService.createCallLog(
         callerId: widget.isCaller ? _currentUserId! : widget.calleeId!,
         callerName: widget.isCaller ? _currentUserName! : widget.calleeName!,
-        callerPhotoUrl: widget.isCaller ? _currentUserPhotoUrl : _calleePhotoUrl,
+        callerPhotoUrl:
+            widget.isCaller ? _currentUserPhotoUrl : _calleePhotoUrl,
         calleeId: widget.isCaller ? widget.calleeId! : _currentUserId!,
         calleeName: widget.isCaller ? widget.calleeName! : _currentUserName!,
-        calleePhotoUrl: widget.isCaller ? _calleePhotoUrl : _currentUserPhotoUrl,
+        calleePhotoUrl:
+            widget.isCaller ? _calleePhotoUrl : _currentUserPhotoUrl,
         channelId: widget.channelId,
         status: status,
-        mediaType: widget.isAudioOnly ? CallMediaType.audio : CallMediaType.video,
-        durationInSeconds: status == CallStatus.answered ? durationInSeconds : 0,
+        mediaType:
+            widget.isAudioOnly ? CallMediaType.audio : CallMediaType.video,
+        durationInSeconds:
+            status == CallStatus.answered ? durationInSeconds : 0,
       );
       print('✅ Call log created successfully');
     } catch (e) {
@@ -373,7 +378,9 @@ class _CallScreenState extends State<CallScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       _buildControlButton(
-                        icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_up_outlined,
+                        icon: _isSpeakerOn
+                            ? Icons.volume_up
+                            : Icons.volume_up_outlined,
                         label: 'Speaker',
                         isActive: _isSpeakerOn,
                         onTap: () {
@@ -495,7 +502,7 @@ class _CallScreenState extends State<CallScreen> {
         body: _buildAudioCallUI(),
       );
     }
-    
+
     // Video call UI
     return Scaffold(
       backgroundColor: Colors.black,
@@ -574,7 +581,9 @@ class _CallScreenState extends State<CallScreen> {
                 // Speaker button
                 Container(
                   decoration: BoxDecoration(
-                    color: _isSpeakerOn ? Colors.white : Colors.white.withOpacity(0.2),
+                    color: _isSpeakerOn
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
@@ -624,7 +633,7 @@ class _CallScreenState extends State<CallScreen> {
                     ),
                     onPressed: () async {
                       await _createCallLog();
-                      
+
                       Provider.of<CallStateNotifier>(context, listen: false)
                           .updateState(CallState.Ended);
                       Navigator.pop(context);
@@ -654,7 +663,9 @@ class _CallScreenState extends State<CallScreen> {
                 // Video on/off button
                 Container(
                   decoration: BoxDecoration(
-                    color: !_localVideoEnabled ? Colors.white : Colors.white.withOpacity(0.2),
+                    color: !_localVideoEnabled
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
@@ -681,7 +692,8 @@ class _CallScreenState extends State<CallScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.calleeName ?? (widget.isCaller ? 'Calling...' : 'Incoming Call'),
+                  widget.calleeName ??
+                      (widget.isCaller ? 'Calling...' : 'Incoming Call'),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,

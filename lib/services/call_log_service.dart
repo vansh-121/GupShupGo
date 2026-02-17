@@ -20,10 +20,10 @@ class CallLogService {
   }) async {
     try {
       final timestamp = DateTime.now();
-      
+
       // Create log for both users with appropriate call types
       final logId = _firestore.collection(_callLogsCollection).doc().id;
-      
+
       final logData = {
         'id': logId,
         'callerId': callerId,
@@ -40,7 +40,7 @@ class CallLogService {
       };
 
       await _firestore.collection(_callLogsCollection).doc(logId).set(logData);
-      
+
       print('Call log created: $logId');
     } catch (e) {
       print('Error creating call log: $e');
@@ -109,7 +109,7 @@ class CallLogService {
       // Combine and sort by timestamp
       final allLogs = [...callerLogs, ...calleeLogs];
       allLogs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      
+
       return allLogs.take(50).toList();
     });
   }
@@ -133,7 +133,7 @@ class CallLogService {
           .collection(_callLogsCollection)
           .where('callerId', isEqualTo: userId)
           .get();
-      
+
       for (var doc in callerLogs.docs) {
         await doc.reference.delete();
       }
@@ -143,7 +143,7 @@ class CallLogService {
           .collection(_callLogsCollection)
           .where('calleeId', isEqualTo: userId)
           .get();
-      
+
       for (var doc in calleeLogs.docs) {
         await doc.reference.delete();
       }

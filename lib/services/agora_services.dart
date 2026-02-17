@@ -3,14 +3,14 @@ import 'package:permission_handler/permission_handler.dart';
 
 class AgoraService {
   static bool _isReleasing = false;
-  
+
   static Future<RtcEngine> initAgora({bool isAudioOnly = false}) async {
     // Wait if previous engine is still being released
     if (_isReleasing) {
       print('Waiting for previous engine to release...');
       await Future.delayed(Duration(milliseconds: 500));
     }
-    
+
     RtcEngine engine = createAgoraRtcEngine();
 
     await engine.initialize(const RtcEngineContext(
@@ -43,11 +43,11 @@ class AgoraService {
 
   static Future<bool> requestPermissions({bool isAudioOnly = false}) async {
     List<Permission> permissions = [Permission.microphone];
-    
+
     if (!isAudioOnly) {
       permissions.add(Permission.camera);
     }
-    
+
     Map<Permission, PermissionStatus> statuses = await permissions.request();
 
     bool allGranted = statuses.values.every(
@@ -67,10 +67,10 @@ class AgoraService {
     // For now, return null to use no-token mode (testing only)
     return null;
   }
-  
+
   static Future<void> releaseEngine(RtcEngine? engine) async {
     if (engine == null) return;
-    
+
     _isReleasing = true;
     try {
       await engine.leaveChannel();
