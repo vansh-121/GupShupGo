@@ -15,14 +15,15 @@ class CallLogService {
     String? calleePhotoUrl,
     required String channelId,
     required CallStatus status,
+    CallMediaType mediaType = CallMediaType.video,
     int? durationInSeconds,
   }) async {
     try {
       final timestamp = DateTime.now();
-      
+
       // Create log for both users with appropriate call types
       final logId = _firestore.collection(_callLogsCollection).doc().id;
-      
+
       final logData = {
         'id': logId,
         'callerId': callerId,
@@ -33,12 +34,13 @@ class CallLogService {
         'calleePhotoUrl': calleePhotoUrl,
         'channelId': channelId,
         'status': status.toString().split('.').last,
+        'mediaType': mediaType.toString().split('.').last,
         'timestamp': Timestamp.fromDate(timestamp),
         'durationInSeconds': durationInSeconds ?? 0,
       };
 
       await _firestore.collection(_callLogsCollection).doc(logId).set(logData);
-      
+
       print('Call log created: $logId');
     } catch (e) {
       print('Error creating call log: $e');
@@ -70,6 +72,7 @@ class CallLogService {
           channelId: log.channelId,
           callType: CallType.outgoing,
           status: log.status,
+          mediaType: log.mediaType,
           timestamp: log.timestamp,
           durationInSeconds: log.durationInSeconds,
         );
@@ -97,6 +100,7 @@ class CallLogService {
           channelId: log.channelId,
           callType: CallType.incoming,
           status: log.status,
+          mediaType: log.mediaType,
           timestamp: log.timestamp,
           durationInSeconds: log.durationInSeconds,
         );
@@ -105,7 +109,7 @@ class CallLogService {
       // Combine and sort by timestamp
       final allLogs = [...callerLogs, ...calleeLogs];
       allLogs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      
+
       return allLogs.take(50).toList();
     });
   }
@@ -129,7 +133,7 @@ class CallLogService {
           .collection(_callLogsCollection)
           .where('callerId', isEqualTo: userId)
           .get();
-      
+
       for (var doc in callerLogs.docs) {
         await doc.reference.delete();
       }
@@ -139,7 +143,7 @@ class CallLogService {
           .collection(_callLogsCollection)
           .where('calleeId', isEqualTo: userId)
           .get();
-      
+
       for (var doc in calleeLogs.docs) {
         await doc.reference.delete();
       }

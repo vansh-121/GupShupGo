@@ -121,8 +121,9 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      _fcmService.onCallReceived((callerId, channelId) {
-        print('Incoming call from $callerId on channel $channelId');
+      _fcmService.onCallReceived((callerId, channelId, isAudioOnly) {
+        print(
+            'Incoming call from $callerId on channel $channelId (${isAudioOnly ? 'Audio' : 'Video'})');
         callState.updateState(CallState.Ringing);
 
         _userService.getUserById(callerId).then((caller) {
@@ -135,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen>
                   isCaller: false,
                   calleeId: callerId,
                   calleeName: caller?.name ?? 'Unknown',
+                  isAudioOnly: isAudioOnly,
                 ),
               ),
             );
@@ -722,36 +724,37 @@ class _HomeScreenState extends State<HomeScreen>
           itemCount: callLogs.length,
           itemBuilder: (context, index) {
             final log = callLogs[index];
-            
+
             // Get the other person's information
             final otherPersonName = log.getOtherPersonName(_currentUserId!);
-            final otherPersonPhotoUrl = log.getOtherPersonPhotoUrl(_currentUserId!);
-            final otherPersonId = log.callerId == _currentUserId ? log.calleeId : log.callerId;
-            
+            final otherPersonPhotoUrl =
+                log.getOtherPersonPhotoUrl(_currentUserId!);
+            final otherPersonId =
+                log.callerId == _currentUserId ? log.calleeId : log.callerId;
+
             // Determine icon and color based on call type and status
             IconData callIcon;
             Color callIconColor;
-            
+
             if (log.callType == CallType.incoming) {
               callIcon = Icons.call_received;
-              callIconColor = log.status == CallStatus.missed 
-                  ? Colors.red 
-                  : Colors.green;
+              callIconColor =
+                  log.status == CallStatus.missed ? Colors.red : Colors.green;
             } else if (log.callType == CallType.outgoing) {
               callIcon = Icons.call_made;
-              callIconColor = log.status == CallStatus.cancelled 
-                  ? Colors.red 
+              callIconColor = log.status == CallStatus.cancelled
+                  ? Colors.red
                   : Colors.green;
             } else {
               callIcon = Icons.call_missed;
               callIconColor = Colors.red;
             }
-            
+
             // Format timestamp (e.g., "Today", "Yesterday", or date)
             String formatTimestamp(DateTime timestamp) {
               final now = DateTime.now();
               final difference = now.difference(timestamp);
-              
+
               if (difference.inDays == 0) {
                 final hour = timestamp.hour.toString().padLeft(2, '0');
                 final minute = timestamp.minute.toString().padLeft(2, '0');
@@ -787,8 +790,8 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   SizedBox(width: 4),
                   Text(
-                    log.status == CallStatus.answered 
-                        ? log.getFormattedDuration() 
+                    log.status == CallStatus.answered
+                        ? log.getFormattedDuration()
                         : log.status.toString().split('.').last.capitalize(),
                     style: TextStyle(color: Colors.grey[600], fontSize: 14),
                   ),

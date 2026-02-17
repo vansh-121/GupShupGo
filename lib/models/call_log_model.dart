@@ -4,6 +4,8 @@ enum CallType { incoming, outgoing, missed }
 
 enum CallStatus { answered, declined, missed, cancelled }
 
+enum CallMediaType { audio, video }
+
 class CallLogModel {
   final String id;
   final String callerId;
@@ -15,6 +17,7 @@ class CallLogModel {
   final String channelId;
   final CallType callType; // From perspective of the user viewing this log
   final CallStatus status;
+  final CallMediaType mediaType; // audio or video
   final DateTime timestamp;
   final int? durationInSeconds;
 
@@ -29,6 +32,7 @@ class CallLogModel {
     required this.channelId,
     required this.callType,
     required this.status,
+    required this.mediaType,
     required this.timestamp,
     this.durationInSeconds,
   });
@@ -51,14 +55,18 @@ class CallLogModel {
   // Format duration to human readable string
   String getFormattedDuration() {
     if (durationInSeconds == null || durationInSeconds == 0) {
-      return status == CallStatus.missed ? 'Missed' : 
-             status == CallStatus.declined ? 'Declined' :
-             status == CallStatus.cancelled ? 'Cancelled' : 'No duration';
+      return status == CallStatus.missed
+          ? 'Missed'
+          : status == CallStatus.declined
+              ? 'Declined'
+              : status == CallStatus.cancelled
+                  ? 'Cancelled'
+                  : 'No duration';
     }
-    
+
     final minutes = durationInSeconds! ~/ 60;
     final seconds = durationInSeconds! % 60;
-    
+
     if (minutes > 0) {
       return '${minutes}m ${seconds}s';
     } else {
@@ -79,6 +87,7 @@ class CallLogModel {
       'channelId': channelId,
       'callType': callType.toString().split('.').last,
       'status': status.toString().split('.').last,
+      'mediaType': mediaType.toString().split('.').last,
       'timestamp': Timestamp.fromDate(timestamp),
       'durationInSeconds': durationInSeconds,
     };
@@ -98,6 +107,7 @@ class CallLogModel {
       channelId: data['channelId'] ?? '',
       callType: _parseCallType(data['callType']),
       status: _parseCallStatus(data['status']),
+      mediaType: _parseMediaType(data['mediaType']),
       timestamp: (data['timestamp'] as Timestamp).toDate(),
       durationInSeconds: data['durationInSeconds'],
     );
@@ -128,6 +138,18 @@ class CallLogModel {
         return CallStatus.cancelled;
       default:
         return CallStatus.missed;
+    }
+  }
+
+  static CallMediaType _parseMediaType(String? type) {
+    switch (type) {
+      case 'audio':
+        return CallMediaType.audio;
+      case 'video':
+        return CallMediaType.video;
+      default:
+        return CallMediaType
+            .video; // Default to video for backward compatibility
     }
   }
 }
