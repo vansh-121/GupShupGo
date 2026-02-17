@@ -121,8 +121,8 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _setupCallListener() async {
     try {
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      _fcmService.onCallReceived((callerId, channelId) {
-        print('Incoming call from $callerId on channel $channelId');
+      _fcmService.onCallReceived((callerId, channelId, isAudioOnly) {
+        print('Incoming call from $callerId on channel $channelId (${isAudioOnly ? 'Audio' : 'Video'})');
         callState.updateState(CallState.Ringing);
 
         _userService.getUserById(callerId).then((caller) {
@@ -135,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen>
                   isCaller: false,
                   calleeId: callerId,
                   calleeName: caller?.name ?? 'Unknown',
+                  isAudioOnly: isAudioOnly,
                 ),
               ),
             );

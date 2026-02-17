@@ -15,6 +15,7 @@ class CallLogService {
     String? calleePhotoUrl,
     required String channelId,
     required CallStatus status,
+    CallMediaType mediaType = CallMediaType.video,
     int? durationInSeconds,
   }) async {
     try {
@@ -33,6 +34,7 @@ class CallLogService {
         'calleePhotoUrl': calleePhotoUrl,
         'channelId': channelId,
         'status': status.toString().split('.').last,
+        'mediaType': mediaType.toString().split('.').last,
         'timestamp': Timestamp.fromDate(timestamp),
         'durationInSeconds': durationInSeconds ?? 0,
       };
@@ -70,6 +72,7 @@ class CallLogService {
           channelId: log.channelId,
           callType: CallType.outgoing,
           status: log.status,
+          mediaType: log.mediaType,
           timestamp: log.timestamp,
           durationInSeconds: log.durationInSeconds,
         );
@@ -97,6 +100,7 @@ class CallLogService {
           channelId: log.channelId,
           callType: CallType.incoming,
           status: log.status,
+          mediaType: log.mediaType,
           timestamp: log.timestamp,
           durationInSeconds: log.durationInSeconds,
         );
