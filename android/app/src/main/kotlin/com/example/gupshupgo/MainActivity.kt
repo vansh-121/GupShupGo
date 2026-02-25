@@ -1,4 +1,4 @@
-package com.example.gupshupgo
+package com.gupshupgo.app
 
 import android.app.Activity
 import android.content.Intent
@@ -11,7 +11,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
-    private val CHANNEL = "com.example.gupshupgo/phone_verification"
+    private val CHANNEL = "com.gupshupgo.app/phone_verification"
     private val PHONE_HINT_REQUEST_CODE = 1001
     private var pendingResult: MethodChannel.Result? = null
 

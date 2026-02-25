@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 /// shares their SIM phone number, then verifies it with the carrier.
 class PhoneVerificationService {
   static const MethodChannel _channel =
-      MethodChannel('com.example.gupshupgo/phone_verification');
+      MethodChannel('com.gupshupgo.app/phone_verification');
 
   /// Requests the phone number hint from the Android system.
   /// Shows a bottom sheet dialog: "Share your phone number with GupShupGo"

@@ -32,6 +32,25 @@
           "other_platform_oauth_client": []
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:472390926327:android:b7e86c4a0a25efe819f8f2",
+        "android_client_info": {
+          "package_name": "com.gupshupgo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCG_rtmzG9BSCF6AQ7qfij3iah3UO39nDQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     }
   ],
   "configuration_version": "1"

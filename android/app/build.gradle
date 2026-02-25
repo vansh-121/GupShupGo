@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.gupshupgo"
+    namespace = "com.gupshupgo.app"
     compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
@@ -30,9 +30,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.gupshupgo"
+        applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         minSdkVersion = 24
