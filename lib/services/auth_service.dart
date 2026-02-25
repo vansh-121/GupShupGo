@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/phone_verification_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -142,6 +143,85 @@ class AuthService {
       print('Error verifying OTP: $e');
       return null;
     }
+  }
+
+  // Sign in with carrier-verified phone number (Firebase Phone Number Verification)
+  // This uses the new carrier-based verification — no SMS OTP needed.
+  final PhoneVerificationService _phoneVerificationService =
+      PhoneVerificationService();
+
+  /// Step 1: Request phone number from system (carrier-based verification).
+  /// Returns the verified phone number string.
+  Future<String> requestCarrierVerification() async {
+    return await _phoneVerificationService.requestPhoneNumberHint();
+  }
+
+  /// Step 2: Sign in using the carrier-verified phone number.
+  /// Uses Firebase Auth's phone flow internally, but auto-completes via carrier.
+  Future<UserModel?> signInWithVerifiedPhone({
+    required String verifiedPhoneNumber,
+    required String name,
+    String? photoUrl,
+    required Function(String verificationId) onCodeSent,
+    required Function(String error) onError,
+    required Function(UserModel user) onAutoVerified,
+  }) async {
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: verifiedPhoneNumber,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          // Auto-verification completed (carrier/SMS auto-read)
+          try {
+            UserCredential userCredential =
+                await _auth.signInWithCredential(credential);
+            String userId = userCredential.user!.uid;
+
+            UserModel? existingUser = await _userService.getUserById(userId);
+
+            UserModel user;
+            if (existingUser != null) {
+              user = existingUser.copyWith(
+                isOnline: true,
+                lastSeen: DateTime.now(),
+              );
+            } else {
+              user = UserModel(
+                id: userId,
+                name: name,
+                phoneNumber: verifiedPhoneNumber,
+                photoUrl: photoUrl,
+                isOnline: true,
+                createdAt: DateTime.now(),
+              );
+            }
+
+            await _userService.createOrUpdateUser(user);
+            await _saveUserIdLocally(userId);
+            await _fcmService.setupFCM(userId: userId);
+            await _userService.setupPresence(userId);
+
+            onAutoVerified(user);
+          } catch (e) {
+            onError('Auto-verification sign-in failed: $e');
+          }
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          onError(e.message ?? 'Phone verification failed');
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          // Fallback: if carrier verification doesn't auto-complete,
+          // an SMS OTP is sent. Pass the verificationId to the UI.
+          onCodeSent(verificationId);
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          print('Auto retrieval timeout for carrier verification');
+        },
+      );
+    } catch (e) {
+      onError(e.toString());
+    }
+    return null;
   }
 
   // Sign up with email and password

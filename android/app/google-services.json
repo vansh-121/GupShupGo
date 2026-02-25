@@ -12,26 +12,16 @@
           "package_name": "com.example.gupshupgo"
         }
       },
-      "oauth_client": [],
-      "api_key": [
+      "oauth_client": [
         {
-          "current_key": "AIzaSyCG_rtmzG9BSCF6AQ7qfij3iah3UO39nDQ"
+          "client_id": "472390926327-jqhbujngn5h39jc0gcr83fslbjk5i3ev.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gupshupgo",
+            "certificate_hash": "85a4e63d4df05a356ff0f4a097fc0c14f93abbdb"
+          }
         }
       ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:472390926327:android:247ed5d221c6c6e919f8f2",
-        "android_client_info": {
-          "package_name": "com.example.video_call_app"
-        }
-      },
-      "oauth_client": [],
       "api_key": [
         {
           "current_key": "AIzaSyCG_rtmzG9BSCF6AQ7qfij3iah3UO39nDQ"

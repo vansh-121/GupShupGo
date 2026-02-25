@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
+import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -418,6 +419,32 @@ class _LoginScreenState extends State<LoginScreen> {
                   Expanded(child: Divider()),
                 ],
               ),
+              SizedBox(height: 16),
+
+              // Phone number verification (carrier-based)
+              ElevatedButton.icon(
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => PhoneAuthScreen()),
+                        );
+                      },
+                icon: Icon(Icons.phone_android, color: Colors.white),
+                label: Text(
+                  'Sign in with Phone',
+                  style: TextStyle(fontSize: 16, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+
               SizedBox(height: 16),
 
               // Guest sign in section
