@@ -28,6 +28,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Patch Java home for Linux
+        run: sed -i "s|org.gradle.java.home=.*|org.gradle.java.home=$JAVA_HOME|" android/gradle.properties
+
       - name: Get Flutter dependencies
         run: flutter pub get
 
@@ -53,8 +56,6 @@ jobs:
 
       - name: Build Release APK
         run: flutter build apk --release
-        env:
-          JAVA_TOOL_OPTIONS: "-Xmx2048m"
 
       - name: Build Release AAB
         run: flutter build appbundle --release
