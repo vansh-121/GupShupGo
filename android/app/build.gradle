@@ -42,6 +42,47 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         minSdkVersion = 24
+        // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
+        resConfigs "en"
+    }
+
+    packagingOptions {
+        // Deduplicate shared native libs that appear in multiple AARs
+        pickFirst 'lib/x86/libc++_shared.so'
+        pickFirst 'lib/x86_64/libc++_shared.so'
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+
+        // ── Agora extension pruning ────────────────────────────────────────
+        // This app only uses enableAudio() + enableVideo() (basic RTC).
+        // None of the AI/feature extensions are loaded; excluding them saves
+        // ~29 MB per ABI (~87 MB across 3 ABIs in the fat APK).
+
+        // AI visual effects — not used
+        exclude 'lib/*/libagora_lip_sync_extension.so'
+        exclude 'lib/*/libagora_clear_vision_extension.so'
+        exclude 'lib/*/libagora_face_capture_extension.so'
+        exclude 'lib/*/libagora_segmentation_extension.so'
+        exclude 'lib/*/libagora_face_detection_extension.so'
+
+        // 3-D / spatial audio — not used
+        exclude 'lib/*/libagora_spatial_audio_extension.so'
+
+        // AI audio processing — not explicitly enabled in code
+        exclude 'lib/*/libagora_audio_beauty_extension.so'
+
+        // Content moderation — not used
+        exclude 'lib/*/libagora_content_inspect_extension.so'
+
+        // Video quality analyzer — not used
+        exclude 'lib/*/libagora_video_quality_analyzer_extension.so'
+
+        // AV1 codec — app uses default H.264 (no setVideoEncoderConfiguration(AV1))
+        exclude 'lib/*/libagora_video_av1_encoder_extension.so'
+        exclude 'lib/*/libagora_video_av1_decoder_extension.so'
+
+        // Screen capture — no screen-share feature in app
+        exclude 'lib/*/libagora_screen_capture_extension.so'
     }
 
     buildTypes {
@@ -54,7 +95,7 @@ android {
         }
     }
 
-    // Generate per-ABI APKs — arm64-v8a alone covers 90 %+ of modern devices.
+    // Generate per-ABI APKs. x86 is emulator-only — no real device needs it.
     // Run: flutter build apk --split-per-abi
     splits {
         abi {
@@ -72,7 +113,8 @@ dependencies {
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-messaging'
     implementation 'com.google.firebase:firebase-appcheck-playintegrity'
-    implementation 'com.google.firebase:firebase-appcheck-debug'
+    // Debug AppCheck provider must NOT ship in the release APK
+    debugImplementation 'com.google.firebase:firebase-appcheck-debug'
 
     // Google Play Services Identity — for Phone Number Hint API (carrier-based verification)
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
