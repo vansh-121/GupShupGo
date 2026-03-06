@@ -108,8 +108,25 @@ class AuthService {
         smsCode: otp,
       );
 
-      UserCredential userCredential =
-          await _auth.signInWithCredential(credential);
+      // If user is already signed in (email/Google session), link phone to
+      // that account so both providers share the same UID.
+      final User? currentUser = _auth.currentUser;
+      UserCredential userCredential;
+      if (currentUser != null && currentUser.phoneNumber == null) {
+        try {
+          userCredential = await currentUser.linkWithCredential(credential);
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'credential-already-in-use' ||
+              e.code == 'account-exists-with-different-credential') {
+            // Phone already tied to its own account – sign into that one.
+            userCredential = await _auth.signInWithCredential(credential);
+          } else {
+            rethrow;
+          }
+        }
+      } else {
+        userCredential = await _auth.signInWithCredential(credential);
+      }
       String userId = userCredential.user!.uid;
       String? phoneNumber = userCredential.user!.phoneNumber;
 
@@ -175,8 +192,23 @@ class AuthService {
         verificationCompleted: (PhoneAuthCredential credential) async {
           // Auto-verification completed (carrier/SMS auto-read)
           try {
-            UserCredential userCredential =
-                await _auth.signInWithCredential(credential);
+            final User? currentUser = _auth.currentUser;
+            UserCredential userCredential;
+            if (currentUser != null && currentUser.phoneNumber == null) {
+              try {
+                userCredential =
+                    await currentUser.linkWithCredential(credential);
+              } on FirebaseAuthException catch (e) {
+                if (e.code == 'credential-already-in-use' ||
+                    e.code == 'account-exists-with-different-credential') {
+                  userCredential = await _auth.signInWithCredential(credential);
+                } else {
+                  rethrow;
+                }
+              }
+            } else {
+              userCredential = await _auth.signInWithCredential(credential);
+            }
             String userId = userCredential.user!.uid;
 
             UserModel? existingUser = await _userService.getUserById(userId);
@@ -240,8 +272,26 @@ class AuthService {
         idToken: googleAuth.idToken,
       );
 
-      UserCredential userCredential =
-          await _auth.signInWithCredential(credential);
+      // If user is already signed in (phone session), link Google to that
+      // account so both providers share the same UID.
+      final User? currentUser = _auth.currentUser;
+      UserCredential userCredential;
+      if (currentUser != null &&
+          !currentUser.providerData
+              .any((p) => p.providerId == GoogleAuthProvider.PROVIDER_ID)) {
+        try {
+          userCredential = await currentUser.linkWithCredential(credential);
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'credential-already-in-use' ||
+              e.code == 'account-exists-with-different-credential') {
+            userCredential = await _auth.signInWithCredential(credential);
+          } else {
+            rethrow;
+          }
+        }
+      } else {
+        userCredential = await _auth.signInWithCredential(credential);
+      }
 
       if (userCredential.user == null) return null;
 
@@ -257,7 +307,9 @@ class AuthService {
       } else {
         user = UserModel(
           id: userId,
-          name: userCredential.user!.displayName ?? googleUser.displayName ?? 'User',
+          name: userCredential.user!.displayName ??
+              googleUser.displayName ??
+              'User',
           email: userCredential.user!.email ?? googleUser.email,
           photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
           isOnline: true,
@@ -291,11 +343,32 @@ class AuthService {
     try {
       print('Starting email sign up...');
 
-      UserCredential userCredential =
-          await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      // If user is already signed in (phone session), link email to that
+      // account so both providers share the same UID.
+      final User? currentUser = _auth.currentUser;
+      UserCredential userCredential;
+      if (currentUser != null && currentUser.email == null) {
+        final emailCredential =
+            EmailAuthProvider.credential(email: email, password: password);
+        try {
+          userCredential =
+              await currentUser.linkWithCredential(emailCredential);
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use' ||
+              e.code == 'credential-already-in-use') {
+            // Email already has its own account – sign into it.
+            userCredential = await _auth.signInWithEmailAndPassword(
+                email: email, password: password);
+          } else {
+            rethrow;
+          }
+        }
+      } else {
+        userCredential = await _auth.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
 
       if (userCredential.user == null) {
         print('Error: User credential is null');
@@ -351,10 +424,31 @@ class AuthService {
     try {
       print('Starting email sign in...');
 
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      // If user is already signed in (phone session), attempt to link this
+      // email credential to that account before falling back to a normal sign-in.
+      final User? currentUser = _auth.currentUser;
+      UserCredential userCredential;
+      if (currentUser != null && currentUser.email == null) {
+        final emailCredential =
+            EmailAuthProvider.credential(email: email, password: password);
+        try {
+          userCredential =
+              await currentUser.linkWithCredential(emailCredential);
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use' ||
+              e.code == 'credential-already-in-use') {
+            userCredential = await _auth.signInWithEmailAndPassword(
+                email: email, password: password);
+          } else {
+            rethrow;
+          }
+        }
+      } else {
+        userCredential = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
 
       if (userCredential.user == null) {
         print('Error: User credential is null');
@@ -410,6 +504,93 @@ class AuthService {
       print('Stack trace: $stackTrace');
       rethrow;
     }
+  }
+
+  // ─── Account Linking (called while phone session is already active) ─────────
+
+  // Link a Google account to the currently signed-in user (phone).
+  // NEVER falls back to a regular sign-in — throws on conflict.
+  Future<UserModel?> linkGoogleProvider() async {
+    final User? currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('No active session to link to.');
+
+    final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) return null; // user cancelled
+
+    final GoogleSignInAuthentication googleAuth =
+        await googleUser.authentication;
+    final OAuthCredential credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    // This will throw FirebaseAuthException (credential-already-in-use)
+    // if this Google account already belongs to a separate Firebase Auth user.
+    // Let the UI handle that error — we never silently create a second account.
+    final UserCredential userCredential =
+        await currentUser.linkWithCredential(credential);
+
+    final String userId = userCredential.user!.uid;
+    UserModel? existingUser = await _userService.getUserById(userId);
+    UserModel user;
+    if (existingUser != null) {
+      user = existingUser.copyWith(
+        email: userCredential.user!.email ?? existingUser.email,
+        photoUrl: userCredential.user!.photoURL ?? existingUser.photoUrl,
+      );
+    } else {
+      user = UserModel(
+        id: userId,
+        name: userCredential.user!.displayName ?? 'User',
+        email: userCredential.user!.email,
+        photoUrl: userCredential.user!.photoURL,
+        isOnline: true,
+        createdAt: DateTime.now(),
+      );
+    }
+    await _userService.createOrUpdateUser(user);
+    return user;
+  }
+
+  // Link an email/password to the currently signed-in user (phone).
+  // NEVER falls back to createUserWithEmailAndPassword — throws on conflict.
+  Future<UserModel?> linkEmailProvider({
+    required String email,
+    required String password,
+  }) async {
+    final User? currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('No active session to link to.');
+
+    final AuthCredential emailCredential =
+        EmailAuthProvider.credential(email: email, password: password);
+
+    final UserCredential userCredential =
+        await currentUser.linkWithCredential(emailCredential);
+
+    final String userId = userCredential.user!.uid;
+    UserModel? existingUser = await _userService.getUserById(userId);
+    UserModel user;
+    if (existingUser != null) {
+      user = existingUser.copyWith(email: email);
+    } else {
+      user = UserModel(
+        id: userId,
+        name: userCredential.user!.displayName ??
+            currentUser.displayName ??
+            'User',
+        email: email,
+        isOnline: true,
+        createdAt: DateTime.now(),
+      );
+    }
+    await _userService.createOrUpdateUser(user);
+    return user;
+  }
+
+  // Get list of currently linked provider IDs (e.g. 'phone', 'google.com', 'password')
+  List<String> getLinkedProviders() {
+    return _auth.currentUser?.providerData.map((p) => p.providerId).toList() ??
+        [];
   }
 
   // Reset password

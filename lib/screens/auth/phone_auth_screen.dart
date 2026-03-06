@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
-import 'package:video_chat_app/screens/home_screen.dart';
+import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
   @override
@@ -72,7 +72,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
             _carrierVerifying = false;
           });
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomeScreen()),
+            MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: user)),
           );
         },
         onCodeSent: (verificationId) {
@@ -216,7 +216,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
     if (user != null) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeScreen()),
+        MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: user)),
       );
     } else {
       setState(() {
@@ -248,7 +248,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
     if (user != null) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeScreen()),
+        MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: user)),
       );
     } else {
       setState(() {
@@ -620,4 +620,3 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     );
   }
 }
-

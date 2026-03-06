@@ -234,7 +234,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-
   String _getErrorMessage(String code) {
     switch (code) {
       case 'user-not-found':
@@ -269,7 +268,8 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 32),
 
               // ── Branding ──────────────────────────────────────────────
-              const Icon(Icons.chat_bubble_rounded, size: 72, color: Colors.blue),
+              const Icon(Icons.chat_bubble_rounded,
+                  size: 72, color: Colors.blue),
               const SizedBox(height: 20),
               const Text(
                 'GupShupGo',
@@ -334,8 +334,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(width: 8),
                           const Text(
                             'Continue with Google',
-                            style: TextStyle(
-                                fontSize: 16, color: Colors.black87),
+                            style:
+                                TextStyle(fontSize: 16, color: Colors.black87),
                           ),
                         ],
                       ),
@@ -350,8 +350,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Text(
                       'or sign in with email',
-                      style:
-                          TextStyle(color: Colors.grey[500], fontSize: 13),
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
                     ),
                   ),
                   const Expanded(child: Divider()),
@@ -362,8 +361,7 @@ class _LoginScreenState extends State<LoginScreen> {
               // ── TERTIARY: Email/Password (collapsible) ────────────────
               if (!_showEmailForm)
                 TextButton.icon(
-                  onPressed: () =>
-                      setState(() => _showEmailForm = true),
+                  onPressed: () => setState(() => _showEmailForm = true),
                   icon: const Icon(Icons.email_outlined),
                   label: const Text('Use Email & Password'),
                   style: TextButton.styleFrom(
@@ -441,8 +439,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
                       ),
-                      onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
