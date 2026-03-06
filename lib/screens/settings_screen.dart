@@ -45,8 +45,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Log Out',
-                  style: TextStyle(color: Colors.red))),
+              child:
+                  const Text('Log Out', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -251,8 +251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: OutlinedButton.icon(
               onPressed: _signOut,
-              icon:
-                  const Icon(Icons.logout, color: Colors.red),
+              icon: const Icon(Icons.logout, color: Colors.red),
               label: const Text('Log Out',
                   style: TextStyle(color: Colors.red, fontSize: 15)),
               style: OutlinedButton.styleFrom(
@@ -275,8 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: () async {
         final updated = await Navigator.push<UserModel>(
           context,
-          MaterialPageRoute(
-              builder: (_) => ProfileScreen(currentUser: _user)),
+          MaterialPageRoute(builder: (_) => ProfileScreen(currentUser: _user)),
         );
         if (updated != null) setState(() => _user = updated);
       },
@@ -300,10 +298,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 4),
                   Text(
-                    _user.about ??
-                        'Hey there! I am using GupShupGo.',
-                    style: TextStyle(
-                        color: Colors.grey[600], fontSize: 13),
+                    _user.about ?? 'Hey there! I am using GupShupGo.',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -338,7 +334,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _divider() => Divider(height: 1, indent: 56, color: Colors.grey.shade100);
+  Widget _divider() =>
+      Divider(height: 1, indent: 56, color: Colors.grey.shade100);
 
   Widget _buildTile({
     required IconData icon,
@@ -361,8 +358,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       subtitle: Text(subtitle,
           style: TextStyle(color: Colors.grey[500], fontSize: 12)),
       trailing: onTap != null
-          ? const Icon(Icons.chevron_right,
-              color: Colors.grey, size: 20)
+          ? const Icon(Icons.chevron_right, color: Colors.grey, size: 20)
           : null,
     );
   }

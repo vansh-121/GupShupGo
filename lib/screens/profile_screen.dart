@@ -36,10 +36,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController =
-        TextEditingController(text: widget.currentUser.name);
-    _aboutController = TextEditingController(
-        text: widget.currentUser.about ?? _defaultAbout);
+    _nameController = TextEditingController(text: widget.currentUser.name);
+    _aboutController =
+        TextEditingController(text: widget.currentUser.about ?? _defaultAbout);
     _photoUrl = widget.currentUser.photoUrl;
   }
 
@@ -52,8 +51,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _pickAndUploadPhoto() async {
     try {
-      final XFile? picked =
-          await _picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+      final XFile? picked = await _picker.pickImage(
+          source: ImageSource.gallery, imageQuality: 70);
       if (picked == null) return;
 
       setState(() => _isUploadingPhoto = true);
@@ -96,15 +95,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _userService.createOrUpdateUser(updatedUser);
 
       // Also update Firebase Auth display name
-      await FirebaseAuth.instance.currentUser
-          ?.updateDisplayName(name);
+      await FirebaseAuth.instance.currentUser?.updateDisplayName(name);
 
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('Profile updated'),
-              backgroundColor: Colors.green),
+              content: Text('Profile updated'), backgroundColor: Colors.green),
         );
         Navigator.of(context).pop(updatedUser);
       }
@@ -187,10 +184,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 hintText: 'Enter your name',
-                counterStyle:
-                    TextStyle(color: Colors.grey[400], fontSize: 12),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                counterStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: AppColors.primary),
@@ -208,10 +204,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               maxLines: 2,
               decoration: InputDecoration(
                 hintText: 'What\'s on your mind?',
-                counterStyle:
-                    TextStyle(color: Colors.grey[400], fontSize: 12),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                counterStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: AppColors.primary),
@@ -261,8 +256,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                         child: Text(_errorMessage!,
-                            style:
-                                TextStyle(color: Colors.red[700]))),
+                            style: TextStyle(color: Colors.red[700]))),
                   ],
                 ),
               ),
@@ -345,23 +339,18 @@ class _LinkedProvidersCard extends StatelessWidget {
                     color: item.color.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child:
-                      Icon(item.icon, color: item.color, size: 20),
+                  child: Icon(item.icon, color: item.color, size: 20),
                 ),
-                title: Text(item.label,
-                    style: const TextStyle(fontSize: 14)),
+                title: Text(item.label, style: const TextStyle(fontSize: 14)),
                 trailing: linked
                     ? const Icon(Icons.check_circle,
                         color: Colors.green, size: 20)
                     : Text('Not linked',
-                        style: TextStyle(
-                            color: Colors.grey[400], fontSize: 12)),
+                        style:
+                            TextStyle(color: Colors.grey[400], fontSize: 12)),
               ),
               if (i < items.length - 1)
-                Divider(
-                    height: 1,
-                    indent: 56,
-                    color: Colors.grey.shade100),
+                Divider(height: 1, indent: 56, color: Colors.grey.shade100),
             ],
           );
         }).toList(),

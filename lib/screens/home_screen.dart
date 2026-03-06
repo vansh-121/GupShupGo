@@ -344,13 +344,14 @@ class _HomeScreenState extends State<HomeScreen>
                   return ListTile(
                     leading: CircleAvatar(
                       radius: 28,
-                      backgroundColor: Colors.grey[300],
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      backgroundColor: AppColors.primaryLt,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.primary),
                     ),
                     title: Container(
                       height: 16,
                       width: 100,
-                      color: Colors.grey[200],
+                      color: AppColors.divider,
                     ),
                   );
                 }
@@ -489,9 +490,7 @@ class _HomeScreenState extends State<HomeScreen>
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
-                            unreadCount > 99
-                                ? '99+'
-                                : unreadCount.toString(),
+                            unreadCount > 99 ? '99+' : unreadCount.toString(),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 11,
@@ -514,13 +513,17 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildMessageStatusIcon(MessageStatus? status) {
     switch (status) {
       case MessageStatus.sent:
-        return const Icon(Icons.done_rounded, size: 14, color: AppColors.textLow);
+        return const Icon(Icons.done_rounded,
+            size: 14, color: AppColors.textLow);
       case MessageStatus.delivered:
-        return const Icon(Icons.done_all_rounded, size: 14, color: AppColors.textLow);
+        return const Icon(Icons.done_all_rounded,
+            size: 14, color: AppColors.textLow);
       case MessageStatus.read:
-        return const Icon(Icons.done_all_rounded, size: 14, color: AppColors.primary);
+        return const Icon(Icons.done_all_rounded,
+            size: 14, color: AppColors.primary);
       default:
-        return const Icon(Icons.done_rounded, size: 14, color: AppColors.textLow);
+        return const Icon(Icons.done_rounded,
+            size: 14, color: AppColors.textLow);
     }
   }
 
@@ -663,14 +666,18 @@ class _HomeScreenState extends State<HomeScreen>
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
-                child: const Icon(Icons.add_rounded, color: Colors.white, size: 14),
+                child: const Icon(Icons.add_rounded,
+                    color: Colors.white, size: 14),
               ),
             ),
         ],
       ),
       title: Text(
         'My Status',
-        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
+        style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            color: AppColors.textHigh),
       ),
       subtitle: Text(
         hasMyStatus
@@ -726,7 +733,10 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       title: Text(
         status.userName,
-        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
+        style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            color: AppColors.textHigh),
       ),
       subtitle: Text(
         _formatStatusTime(status.lastUpdated),
@@ -855,15 +865,15 @@ class _HomeScreenState extends State<HomeScreen>
             if (log.callType == CallType.incoming) {
               callIcon = Icons.call_received;
               callIconColor =
-                  log.status == CallStatus.missed ? Colors.red : Colors.green;
+                  log.status == CallStatus.missed ? AppColors.error : AppColors.online;
             } else if (log.callType == CallType.outgoing) {
               callIcon = Icons.call_made;
               callIconColor = log.status == CallStatus.cancelled
-                  ? Colors.red
-                  : Colors.green;
+                  ? AppColors.error
+                  : AppColors.online;
             } else {
               callIcon = Icons.call_missed;
-              callIconColor = Colors.red;
+              callIconColor = AppColors.error;
             }
 
             // Format timestamp (e.g., "Today", "Yesterday", or date)
@@ -885,7 +895,8 @@ class _HomeScreenState extends State<HomeScreen>
             }
 
             return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: CircleAvatar(
                 radius: 28,
                 backgroundImage: NetworkImage(
@@ -896,7 +907,10 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               title: Text(
                 otherPersonName,
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    color: AppColors.textHigh),
               ),
               subtitle: Row(
                 children: [
@@ -910,7 +924,8 @@ class _HomeScreenState extends State<HomeScreen>
                     log.status == CallStatus.answered
                         ? log.getFormattedDuration()
                         : log.status.toString().split('.').last.capitalize(),
-                    style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
+                    style: GoogleFonts.poppins(
+                        color: AppColors.textMid, fontSize: 13),
                   ),
                 ],
               ),
@@ -919,11 +934,13 @@ class _HomeScreenState extends State<HomeScreen>
                 children: [
                   Text(
                     formatTimestamp(log.timestamp),
-                    style: GoogleFonts.poppins(color: AppColors.textLow, fontSize: 12),
+                    style: GoogleFonts.poppins(
+                        color: AppColors.textLow, fontSize: 12),
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    icon: const Icon(Icons.videocam_rounded, color: AppColors.primary),
+                    icon: const Icon(Icons.videocam_rounded,
+                        color: AppColors.primary),
                     onPressed: () {
                       final contact = Contact(
                         id: otherPersonId,
@@ -959,17 +976,33 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     if (!_isInitialized) {
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.primaryLt,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Colors.blue),
-              SizedBox(height: 20),
-              Text('Initializing...',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontFamily: GoogleFonts.poppins().fontFamily)),
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.asset(
+                    'assets/icon/app_icon.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    color: AppColors.primary, strokeWidth: 2.5),
+              ),
             ],
           ),
         ),
@@ -977,16 +1010,31 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        title: Text(
-          'GupShupGo',
-          style: GoogleFonts.poppins(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: AppColors.textHigh,
-            letterSpacing: -0.5,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/icon/app_icon.png',
+                width: 30,
+                height: 30,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'GupShupGo',
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textHigh,
+                letterSpacing: -0.5,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -1044,7 +1092,8 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'profile',
                   child: Row(
                     children: [
-                      Icon(Icons.person_outline_rounded, color: AppColors.primary, size: 20),
+                      Icon(Icons.person_outline_rounded,
+                          color: AppColors.primary, size: 20),
                       const SizedBox(width: 12),
                       const Text('Profile'),
                     ],
@@ -1054,7 +1103,8 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'settings',
                   child: Row(
                     children: [
-                      Icon(Icons.settings_outlined, color: AppColors.textMid, size: 20),
+                      Icon(Icons.settings_outlined,
+                          color: AppColors.textMid, size: 20),
                       const SizedBox(width: 12),
                       const Text('Settings'),
                     ],
@@ -1064,9 +1114,11 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'logout',
                   child: Row(
                     children: [
-                      const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
+                      const Icon(Icons.logout_rounded,
+                          color: AppColors.error, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Log out', style: TextStyle(color: AppColors.error)),
+                      const Text('Log out',
+                          style: TextStyle(color: AppColors.error)),
                     ],
                   ),
                 ),
@@ -1115,7 +1167,8 @@ class _HomeScreenState extends State<HomeScreen>
                     _navigateToAddStatus();
                   }
                 },
-                child: const Icon(Icons.edit_rounded, color: AppColors.primary, size: 20),
+                child: const Icon(Icons.edit_rounded,
+                    color: AppColors.primary, size: 20),
               ),
               const SizedBox(height: 12),
               FloatingActionButton(
@@ -1134,7 +1187,7 @@ class _HomeScreenState extends State<HomeScreen>
         // Chats & Calls tabs - show message FAB
         return FloatingActionButton(
           heroTag: 'chatFab',
-          backgroundColor: Colors.blue,
+          backgroundColor: AppColors.primary,
           onPressed: () {
             if (_currentUserId != null) {
               Navigator.push(
@@ -1148,7 +1201,7 @@ class _HomeScreenState extends State<HomeScreen>
               );
             }
           },
-          child: Icon(Icons.message, color: Colors.white),
+          child: const Icon(Icons.message_rounded, color: Colors.white),
         );
       },
     );

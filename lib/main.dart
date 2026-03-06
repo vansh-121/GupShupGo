@@ -19,9 +19,8 @@ void main() async {
   // Uses Debug provider in debug mode, Play Integrity in release
   try {
     await FirebaseAppCheck.instance.activate(
-      androidProvider: kDebugMode
-          ? AndroidProvider.debug
-          : AndroidProvider.playIntegrity,
+      androidProvider:
+          kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
       appleProvider: AppleProvider.deviceCheck,
     );
 
@@ -105,10 +104,14 @@ class _SplashScreen extends StatelessWidget {
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(26),
                 ),
-                child: const Icon(
-                  Icons.chat_bubble_rounded,
-                  size: 50,
-                  color: Colors.white,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: Image.asset(
+                    'assets/icon/app_icon.png',
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
               const SizedBox(height: 22),

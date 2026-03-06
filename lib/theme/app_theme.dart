@@ -6,35 +6,35 @@ class AppColors {
   AppColors._();
 
   // ── Brand ──────────────────────────────────────────────────────────
-  static const Color primary    = Color(0xFF6C5CE7); // vibrant purple-indigo
-  static const Color primaryDk  = Color(0xFF5246BE);
-  static const Color primaryLt  = Color(0xFFEDE9FE); // soft lavender tint
+  static const Color primary = Color(0xFF6C5CE7); // vibrant purple-indigo
+  static const Color primaryDk = Color(0xFF5246BE);
+  static const Color primaryLt = Color(0xFFEDE9FE); // soft lavender tint
 
   // ── Bubbles ────────────────────────────────────────────────────────
-  static const Color sent       = Color(0xFF6C5CE7);
-  static const Color received   = Color(0xFFF0EFF8);
+  static const Color sent = Color(0xFF6C5CE7);
+  static const Color received = Color(0xFFF0EFF8);
 
   // ── Status indicator ──────────────────────────────────────────────
-  static const Color online     = Color(0xFF10B981);
+  static const Color online = Color(0xFF10B981);
 
   // ── Surface / Background ──────────────────────────────────────────
-  static const Color surface    = Color(0xFFFFFFFF);
+  static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceAlt = Color(0xFFF5F3FF); // settings rows / inputs
-  static const Color chatBg     = Color(0xFFF2F1FA); // chat body
+  static const Color chatBg = Color(0xFFF2F1FA); // chat body
 
   // ── Text ──────────────────────────────────────────────────────────
-  static const Color textHigh   = Color(0xFF1E293B); // main text
-  static const Color textMid    = Color(0xFF64748B); // secondary text
-  static const Color textLow    = Color(0xFF94A3B8); // placeholder / muted
+  static const Color textHigh = Color(0xFF1E293B); // main text
+  static const Color textMid = Color(0xFF64748B); // secondary text
+  static const Color textLow = Color(0xFF94A3B8); // placeholder / muted
 
   // ── Stroke / Divider ──────────────────────────────────────────────
-  static const Color border     = Color(0xFFE4E1F5);
-  static const Color divider    = Color(0xFFF1F0F9);
+  static const Color border = Color(0xFFE4E1F5);
+  static const Color divider = Color(0xFFF1F0F9);
 
   // ── Semantic ──────────────────────────────────────────────────────
-  static const Color error      = Color(0xFFEF4444);
-  static const Color success    = Color(0xFF10B981);
-  static const Color warning    = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFEF4444);
+  static const Color success = Color(0xFF10B981);
+  static const Color warning = Color(0xFFF59E0B);
 }
 
 class AppTheme {
@@ -43,32 +43,32 @@ class AppTheme {
   static ThemeData get light {
     const cs = ColorScheme(
       brightness: Brightness.light,
-      primary:              AppColors.primary,
-      onPrimary:            Colors.white,
-      primaryContainer:     AppColors.primaryLt,
-      onPrimaryContainer:   AppColors.primaryDk,
-      secondary:            Color(0xFF8B5CF6),
-      onSecondary:          Colors.white,
-      secondaryContainer:   AppColors.primaryLt,
+      primary: AppColors.primary,
+      onPrimary: Colors.white,
+      primaryContainer: AppColors.primaryLt,
+      onPrimaryContainer: AppColors.primaryDk,
+      secondary: Color(0xFF8B5CF6),
+      onSecondary: Colors.white,
+      secondaryContainer: AppColors.primaryLt,
       onSecondaryContainer: AppColors.primaryDk,
-      tertiary:             AppColors.online,
-      onTertiary:           Colors.white,
-      error:                AppColors.error,
-      onError:              Colors.white,
-      errorContainer:       Color(0xFFFEE2E2),
-      onErrorContainer:     Color(0xFFB91C1C),
-      surface:              AppColors.surface,
-      onSurface:            AppColors.textHigh,
-      surfaceVariant:       AppColors.surfaceAlt,
-      onSurfaceVariant:     AppColors.textMid,
-      outline:              AppColors.border,
-      outlineVariant:       AppColors.divider,
-      shadow:               Color(0xFF000000),
-      scrim:                Color(0xFF000000),
-      inverseSurface:       AppColors.textHigh,
-      onInverseSurface:     Colors.white,
-      inversePrimary:       AppColors.primaryLt,
-      surfaceTint:          Color(0x0A6C5CE7),
+      tertiary: AppColors.online,
+      onTertiary: Colors.white,
+      error: AppColors.error,
+      onError: Colors.white,
+      errorContainer: Color(0xFFFEE2E2),
+      onErrorContainer: Color(0xFFB91C1C),
+      surface: AppColors.surface,
+      onSurface: AppColors.textHigh,
+      surfaceVariant: AppColors.surfaceAlt,
+      onSurfaceVariant: AppColors.textMid,
+      outline: AppColors.border,
+      outlineVariant: AppColors.divider,
+      shadow: Color(0xFF000000),
+      scrim: Color(0xFF000000),
+      inverseSurface: AppColors.textHigh,
+      onInverseSurface: Colors.white,
+      inversePrimary: AppColors.primaryLt,
+      surfaceTint: Color(0x0A6C5CE7),
     );
 
     return ThemeData(
@@ -85,8 +85,9 @@ class AppTheme {
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textHigh,
         surfaceTintColor: Colors.transparent,
-        iconTheme:        const IconThemeData(color: AppColors.textHigh, size: 22),
-        actionsIconTheme: const IconThemeData(color: AppColors.textHigh, size: 22),
+        iconTheme: const IconThemeData(color: AppColors.textHigh, size: 22),
+        actionsIconTheme:
+            const IconThemeData(color: AppColors.textHigh, size: 22),
         titleTextStyle: GoogleFonts.poppins(
           color: AppColors.textHigh,
           fontSize: 20,
@@ -108,8 +109,10 @@ class AppTheme {
         overlayColor: MaterialStateProperty.all(
           AppColors.primaryLt.withOpacity(0.3),
         ),
-        labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
-        unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w500, fontSize: 14),
+        labelStyle:
+            GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+        unselectedLabelStyle:
+            GoogleFonts.poppins(fontWeight: FontWeight.w500, fontSize: 14),
       ),
 
       // ── FAB ─────────────────────────────────────────────────────
@@ -127,9 +130,11 @@ class AppTheme {
           foregroundColor: Colors.white,
           elevation: 0,
           shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          textStyle: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle:
+              GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600),
         ),
       ),
 
@@ -138,9 +143,11 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.textHigh,
           side: const BorderSide(color: AppColors.border, width: 1.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          textStyle: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle:
+              GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600),
         ),
       ),
 
@@ -148,7 +155,8 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.primary,
-          textStyle: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+          textStyle:
+              GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
 
@@ -172,7 +180,8 @@ class AppTheme {
         labelStyle: const TextStyle(color: AppColors.textMid),
         prefixIconColor: AppColors.textMid,
         suffixIconColor: AppColors.textMid,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
 
       // ── Switch ──────────────────────────────────────────────────
@@ -211,7 +220,8 @@ class AppTheme {
       // ── SnackBar ────────────────────────────────────────────────
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AppColors.textHigh,
-        contentTextStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+        contentTextStyle:
+            GoogleFonts.poppins(color: Colors.white, fontSize: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         behavior: SnackBarBehavior.floating,
         elevation: 4,

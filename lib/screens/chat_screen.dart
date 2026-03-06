@@ -352,8 +352,10 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(18),
             topRight: const Radius.circular(18),
-            bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-            bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
+            bottomLeft:
+                isMe ? const Radius.circular(18) : const Radius.circular(4),
+            bottomRight:
+                isMe ? const Radius.circular(4) : const Radius.circular(18),
           ),
           boxShadow: [
             BoxShadow(
@@ -403,10 +405,11 @@ class _ChatScreenState extends State<ChatScreen> {
       case MessageStatus.sent:
         return const Icon(Icons.done_rounded, size: 14, color: Colors.white70);
       case MessageStatus.delivered:
-        return const Icon(Icons.done_all_rounded, size: 14, color: Colors.white70);
+        return const Icon(Icons.done_all_rounded,
+            size: 14, color: Colors.white70);
       case MessageStatus.read:
-        return const Icon(Icons.done_all_rounded, size: 14,
-            color: Color(0xFFA5F3FC));
+        return const Icon(Icons.done_all_rounded,
+            size: 14, color: Color(0xFFA5F3FC));
     }
   }
 
@@ -484,7 +487,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       backgroundColor: AppColors.chatBg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
         foregroundColor: AppColors.textHigh,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
@@ -585,14 +587,23 @@ class _ChatScreenState extends State<ChatScreen> {
             onSelected: (value) {},
             itemBuilder: (BuildContext context) {
               return [
-                PopupMenuItem(value: 'info', child: Text('Contact info', style: GoogleFonts.poppins())),
-                PopupMenuItem(value: 'media', child: Text('Media & docs', style: GoogleFonts.poppins())),
-                PopupMenuItem(value: 'search', child: Text('Search', style: GoogleFonts.poppins())),
-                PopupMenuItem(value: 'mute', child: Text('Mute notifications', style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                  value: 'block',
-                  child: Text('Block contact',
-                      style: GoogleFonts.poppins(color: AppColors.error))),
+                    value: 'info',
+                    child: Text('Contact info', style: GoogleFonts.poppins())),
+                PopupMenuItem(
+                    value: 'media',
+                    child: Text('Media & docs', style: GoogleFonts.poppins())),
+                PopupMenuItem(
+                    value: 'search',
+                    child: Text('Search', style: GoogleFonts.poppins())),
+                PopupMenuItem(
+                    value: 'mute',
+                    child: Text('Mute notifications',
+                        style: GoogleFonts.poppins())),
+                PopupMenuItem(
+                    value: 'block',
+                    child: Text('Block contact',
+                        style: GoogleFonts.poppins(color: AppColors.error))),
               ];
             },
           ),
@@ -613,8 +624,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
                         return const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary));
+                            child: CircularProgressIndicator(
+                                color: AppColors.primary));
                       }
 
                       if (snapshot.hasError) {
@@ -656,13 +667,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 // ── Message input bar ────────────────────────────────
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     border: Border(
-                      top: BorderSide(
-                          color: AppColors.divider, width: 1),
+                      top: BorderSide(color: AppColors.divider, width: 1),
                     ),
                   ),
                   child: SafeArea(
@@ -675,8 +685,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           onPressed: () {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                  content:
-                                      Text('Attachments coming soon!')),
+                                  content: Text('Attachments coming soon!')),
                             );
                           },
                         ),
@@ -685,8 +694,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             decoration: BoxDecoration(
                               color: AppColors.surfaceAlt,
                               borderRadius: BorderRadius.circular(24),
-                              border: Border.all(
-                                  color: AppColors.border, width: 1),
+                              border:
+                                  Border.all(color: AppColors.border, width: 1),
                             ),
                             child: TextField(
                               controller: _messageController,
@@ -699,16 +708,14 @@ class _ChatScreenState extends State<ChatScreen> {
                                 focusedBorder: InputBorder.none,
                                 fillColor: Colors.transparent,
                                 filled: false,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 10),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
                               ),
                               style: GoogleFonts.poppins(
                                   fontSize: 14, color: AppColors.textHigh),
                               maxLines: 5,
                               minLines: 1,
-                              textCapitalization:
-                                  TextCapitalization.sentences,
+                              textCapitalization: TextCapitalization.sentences,
                               onSubmitted: (_) => _sendMessage(),
                             ),
                           ),
@@ -717,8 +724,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         GestureDetector(
                           onTap: _isSending ? null : _sendMessage,
                           child: AnimatedContainer(
-                            duration:
-                                const Duration(milliseconds: 200),
+                            duration: const Duration(milliseconds: 200),
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
@@ -855,7 +861,7 @@ class _TypingDotsIndicatorState extends State<_TypingDotsIndicator>
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: Colors.grey[500],
+                    color: AppColors.textLow,
                     shape: BoxShape.circle,
                   ),
                 ),

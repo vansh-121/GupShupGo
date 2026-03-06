@@ -217,7 +217,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   Widget _buildSearchResults() {
     if (_isSearching) {
-      return Center(child: CircularProgressIndicator());
+      return Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_searchResults.isEmpty) {
@@ -225,11 +226,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLt,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.search_off_rounded,
+                  size: 40, color: AppColors.primary),
+            ),
+            const SizedBox(height: 16),
             Text(
               'No users found',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textHigh),
             ),
           ],
         ),
@@ -249,7 +261,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
       stream: _userService.getAllUsers(widget.currentUserId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+          return Center(
+              child: CircularProgressIndicator(color: AppColors.primary));
         }
 
         if (snapshot.hasError) {
@@ -265,11 +278,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryLt,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.people_alt_rounded,
+                      size: 40, color: AppColors.primary),
+                ),
+                const SizedBox(height: 16),
                 Text(
                   'No users available',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textHigh),
                 ),
               ],
             ),
@@ -284,10 +308,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
         return ListView.separated(
           itemCount: users.length,
-          separatorBuilder: (context, index) => Divider(
+          separatorBuilder: (context, index) => const Divider(
             height: 1,
             indent: 72,
             endIndent: 16,
+            color: AppColors.divider,
           ),
           itemBuilder: (context, index) {
             return _buildUserTile(users[index]);

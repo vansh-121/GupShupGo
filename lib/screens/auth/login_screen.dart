@@ -284,14 +284,21 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               children: [
                 Container(
-                  width: 72,
-                  height: 72,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(22),
                   ),
-                  child: const Icon(Icons.chat_bubble_rounded,
-                      size: 38, color: Colors.white),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      width: 56,
+                      height: 56,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -364,8 +371,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -388,19 +394,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Divider ──────────────────────────────────────────
                   Row(
                     children: [
-                      const Expanded(
-                          child: Divider(color: AppColors.divider)),
+                      const Expanded(child: Divider(color: AppColors.divider)),
                       Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 14),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Text(
                           'or sign in with email',
                           style: GoogleFonts.poppins(
                               color: AppColors.textLow, fontSize: 13),
                         ),
                       ),
-                      const Expanded(
-                          child: Divider(color: AppColors.divider)),
+                      const Expanded(child: Divider(color: AppColors.divider)),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -408,8 +411,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── TERTIARY: Email/Password (collapsible) ───────────
                   if (!_showEmailForm)
                     OutlinedButton.icon(
-                      onPressed: () =>
-                          setState(() => _showEmailForm = true),
+                      onPressed: () => setState(() => _showEmailForm = true),
                       icon: const Icon(Icons.email_outlined,
                           color: AppColors.primary),
                       label: Text(
@@ -420,8 +422,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: AppColors.primary),
                       ),
                       style: OutlinedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         side: const BorderSide(color: AppColors.primary),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
@@ -527,13 +528,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ElevatedButton(
                       onPressed: _isLoading
                           ? null
-                          : (_isSignUp
-                              ? _signUpWithEmail
-                              : _signInWithEmail),
+                          : (_isSignUp ? _signUpWithEmail : _signInWithEmail),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
@@ -584,8 +582,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline,
-                              color: Colors.red),
+                          const Icon(Icons.error_outline, color: Colors.red),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
