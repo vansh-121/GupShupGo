@@ -7,6 +7,7 @@ class UserModel {
   final String? email;
   final String? photoUrl;
   final String? fcmToken;
+  final String? about;
   final bool isOnline;
   final DateTime? lastSeen;
   final DateTime? createdAt;
@@ -18,6 +19,7 @@ class UserModel {
     this.email,
     this.photoUrl,
     this.fcmToken,
+    this.about,
     this.isOnline = false,
     this.lastSeen,
     this.createdAt,
@@ -32,6 +34,7 @@ class UserModel {
       'email': email,
       'photoUrl': photoUrl,
       'fcmToken': fcmToken,
+      'about': about,
       'isOnline': isOnline,
       'lastSeen': lastSeen?.millisecondsSinceEpoch,
       'createdAt': createdAt?.millisecondsSinceEpoch,
@@ -47,6 +50,7 @@ class UserModel {
       email: map['email'],
       photoUrl: map['photoUrl'],
       fcmToken: map['fcmToken'],
+      about: map['about'],
       isOnline: map['isOnline'] ?? false,
       lastSeen: map['lastSeen'] != null
           ? _parseDateTime(map['lastSeen'])
@@ -80,6 +84,7 @@ class UserModel {
     String? email,
     String? photoUrl,
     String? fcmToken,
+    String? about,
     bool? isOnline,
     DateTime? lastSeen,
     DateTime? createdAt,
@@ -91,6 +96,7 @@ class UserModel {
       email: email ?? this.email,
       photoUrl: photoUrl ?? this.photoUrl,
       fcmToken: fcmToken ?? this.fcmToken,
+      about: about ?? this.about,
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       createdAt: createdAt ?? this.createdAt,

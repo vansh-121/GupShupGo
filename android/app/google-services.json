@@ -12,7 +12,28 @@
           "package_name": "com.example.gupshupgo"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "472390926327-4ji9tb1pv0pbt36mdlsvolfjjkimpj9o.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gupshupgo",
+            "certificate_hash": "ba285d172e038c3b9a53643696cad7753a8a5a27"
+          }
+        },
+        {
+          "client_id": "472390926327-jqhbujngn5h39jc0gcr83fslbjk5i3ev.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gupshupgo",
+            "certificate_hash": "85a4e63d4df05a356ff0f4a097fc0c14f93abbdb"
+          }
+        },
+        {
+          "client_id": "472390926327-0bri1361e9en25mn1g0pu4peb33jqs9c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCG_rtmzG9BSCF6AQ7qfij3iah3UO39nDQ"
@@ -20,18 +41,52 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "472390926327-0bri1361e9en25mn1g0pu4peb33jqs9c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:472390926327:android:247ed5d221c6c6e919f8f2",
+        "mobilesdk_app_id": "1:472390926327:android:b7e86c4a0a25efe819f8f2",
         "android_client_info": {
-          "package_name": "com.example.video_call_app"
+          "package_name": "com.gupshupgo.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "472390926327-0rmbd5ff051cvbt4p5uh2iodov8b7uvo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gupshupgo.app",
+            "certificate_hash": "ba285d172e038c3b9a53643696cad7753a8a5a27"
+          }
+        },
+        {
+          "client_id": "472390926327-7fset5fvbhuepupqpdssu5sat7mggmt0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gupshupgo.app",
+            "certificate_hash": "641a974fe8eff1de322aa98cdc3c4a569a5599b4"
+          }
+        },
+        {
+          "client_id": "472390926327-l81qpb4btb7bvhns7j17posr6b6fblcj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gupshupgo.app",
+            "certificate_hash": "85a4e63d4df05a356ff0f4a097fc0c14f93abbdb"
+          }
+        },
+        {
+          "client_id": "472390926327-0bri1361e9en25mn1g0pu4peb33jqs9c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCG_rtmzG9BSCF6AQ7qfij3iah3UO39nDQ"
@@ -39,7 +94,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "472390926327-0bri1361e9en25mn1g0pu4peb33jqs9c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
