@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
@@ -66,12 +67,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=4CAF50&color=fff&size=128';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.surfaceAlt,
       appBar: AppBar(
         title: const Text('Settings'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
       ),
       body: ListView(
         children: [
@@ -84,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildTile(
               icon: Icons.person_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Profile',
               subtitle: 'Name, about, photo',
               onTap: () async {
@@ -141,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _divider(),
             _buildSwitchTile(
               icon: Icons.done_all,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Read receipts',
               subtitle: 'Show blue ticks when you\'ve read messages',
               value: _showReadReceipts,
@@ -163,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildSwitchTile(
               icon: Icons.chat_bubble_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Messages',
               subtitle: 'Notifications for new messages',
               value: _messageNotifications,
@@ -203,7 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _divider(),
             _buildTile(
               icon: Icons.backup_outlined,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Chat backup',
               subtitle: 'Back up chats to Google Drive',
               onTap: () => _showComingSoon('Chat backup'),
@@ -224,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildTile(
               icon: Icons.help_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Help Center',
               subtitle: 'FAQs and support',
               onTap: () => _showComingSoon('Help Center'),
@@ -392,7 +390,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       trailing: Switch(
         value: value,
         onChanged: onChanged,
-        activeColor: Colors.blue,
+        activeColor: AppColors.primary,
       ),
     );
   }

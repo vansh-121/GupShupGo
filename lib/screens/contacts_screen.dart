@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
@@ -113,7 +114,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               user.photoUrl ??
                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
             ),
-            backgroundColor: Colors.grey[300],
+            backgroundColor: AppColors.primaryLt,
           ),
           if (user.isOnline)
             Positioned(
@@ -123,7 +124,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 width: 16,
                 height: 16,
                 decoration: BoxDecoration(
-                  color: Colors.green,
+                  color: AppColors.online,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
@@ -142,7 +143,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ? 'Last seen ${_formatLastSeen(user.lastSeen!)}'
                 : 'Offline',
         style: TextStyle(
-          color: user.isOnline ? Colors.green : Colors.grey[600],
+          color: user.isOnline ? AppColors.online : AppColors.textMid,
           fontSize: 14,
         ),
       ),
@@ -150,11 +151,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            icon: Icon(Icons.videocam, color: Colors.blue),
+            icon: Icon(Icons.videocam_rounded, color: AppColors.primary),
             onPressed: () => _initiateCall(user),
           ),
           IconButton(
-            icon: Icon(Icons.message, color: Colors.blue),
+            icon: Icon(Icons.message_rounded, color: AppColors.primary),
             onPressed: () => _openChat(user),
           ),
         ],
@@ -182,9 +183,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        title: Text('Contacts'),
+        title: const Text('Contacts'),
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(60),
           child: Padding(
@@ -196,7 +197,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 hintText: 'Search by name or phone...',
                 prefixIcon: Icon(Icons.search),
                 filled: true,
-                fillColor: Colors.grey[200],
+                fillColor: AppColors.surfaceAlt,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(25),
                   borderSide: BorderSide.none,

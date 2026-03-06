@@ -21,6 +21,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -177,48 +178,11 @@ class _HomeScreenState extends State<HomeScreen>
       lastMessage: 'Tap to chat',
       time: '',
       avatarUrl: user.photoUrl ??
-          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=6C5CE7&color=fff&size=128',
       isOnline: user.isOnline,
     );
 
-    return ListTile(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: Stack(
-        children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundImage: NetworkImage(contact.avatarUrl),
-            backgroundColor: Colors.grey[300],
-          ),
-          if (contact.isOnline)
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                ),
-              ),
-            ),
-        ],
-      ),
-      title: Text(
-        user.name,
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-      ),
-      subtitle: Text(
-        contact.lastMessage,
-        style: TextStyle(color: Colors.grey[600], fontSize: 14),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: user.isOnline
-          ? Icon(Icons.circle, color: Colors.green, size: 12)
-          : null,
+    return InkWell(
       onTap: () {
         Navigator.push(
           context,
@@ -231,6 +195,61 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundColor: AppColors.primaryLt,
+                ),
+                if (contact.isOnline)
+                  Positioned(
+                    bottom: 1,
+                    right: 1,
+                    child: Container(
+                      width: 13,
+                      height: 13,
+                      decoration: BoxDecoration(
+                        color: AppColors.online,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                user.name,
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    color: AppColors.textHigh),
+              ),
+            ),
+            if (user.isOnline)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.online.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Online',
+                  style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: AppColors.online,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -250,42 +269,66 @@ class _HomeScreenState extends State<HomeScreen>
 
         if (chatRooms.isEmpty) {
           return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
-                Text(
-                  'No recent chats',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                ),
-                SizedBox(height: 8),
-                TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ContactsScreen(
-                          currentUserId: _currentUserId!,
-                          currentUserName: _currentUser?.name,
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLt,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.chat_bubble_outline_rounded,
+                      size: 48,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'No chats yet',
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Start a conversation by tapping the button below',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: AppColors.textMid,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ContactsScreen(
+                            currentUserId: _currentUserId!,
+                            currentUserName: _currentUser?.name,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                  child: Text('Start a conversation'),
-                ),
-              ],
+                      );
+                    },
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('New chat'),
+                  ),
+                ],
+              ),
             ),
           );
         }
 
-        return ListView.separated(
+        return ListView.builder(
           itemCount: chatRooms.length,
-          separatorBuilder: (context, index) => Divider(
-            height: 1,
-            indent: 72,
-            endIndent: 16,
-          ),
           itemBuilder: (context, index) {
             final chatRoom = chatRooms[index];
             // Get the other participant's ID
@@ -334,92 +377,11 @@ class _HomeScreenState extends State<HomeScreen>
           ? _formatChatTime(chatRoom.lastMessageTime!)
           : '',
       avatarUrl: user.photoUrl ??
-          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=6C5CE7&color=fff&size=128',
       isOnline: user.isOnline,
     );
 
-    return ListTile(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: Stack(
-        children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundImage: NetworkImage(contact.avatarUrl),
-            backgroundColor: Colors.grey[300],
-          ),
-          if (contact.isOnline)
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                ),
-              ),
-            ),
-        ],
-      ),
-      title: Text(
-        user.name,
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-      ),
-      subtitle: Row(
-        children: [
-          if (chatRoom.lastMessageSenderId == _currentUserId)
-            Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: _buildMessageStatusIcon(chatRoom.lastMessageStatus),
-            ),
-          Expanded(
-            child: Text(
-              contact.lastMessage,
-              style: TextStyle(
-                color: unreadCount > 0 ? Colors.black87 : Colors.grey[600],
-                fontSize: 14,
-                fontWeight:
-                    unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            contact.time,
-            style: TextStyle(
-              color: unreadCount > 0 ? Colors.blue : Colors.grey[600],
-              fontSize: 12,
-            ),
-          ),
-          if (unreadCount > 0) ...[
-            SizedBox(height: 4),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.blue,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                unreadCount > 99 ? '99+' : unreadCount.toString(),
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+    return InkWell(
       onTap: () {
         Navigator.push(
           context,
@@ -432,19 +394,133 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundColor: AppColors.primaryLt,
+                ),
+                if (contact.isOnline)
+                  Positioned(
+                    bottom: 1,
+                    right: 1,
+                    child: Container(
+                      width: 13,
+                      height: 13,
+                      decoration: BoxDecoration(
+                        color: AppColors.online,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          user.name,
+                          style: GoogleFonts.poppins(
+                            fontWeight: unreadCount > 0
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                            fontSize: 15,
+                            color: AppColors.textHigh,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        contact.time,
+                        style: GoogleFonts.poppins(
+                          color: unreadCount > 0
+                              ? AppColors.primary
+                              : AppColors.textLow,
+                          fontSize: 11,
+                          fontWeight: unreadCount > 0
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      if (chatRoom.lastMessageSenderId == _currentUserId)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: _buildMessageStatusIcon(
+                              chatRoom.lastMessageStatus),
+                        ),
+                      Expanded(
+                        child: Text(
+                          contact.lastMessage,
+                          style: GoogleFonts.poppins(
+                            color: unreadCount > 0
+                                ? AppColors.textHigh
+                                : AppColors.textMid,
+                            fontSize: 13,
+                            fontWeight: unreadCount > 0
+                                ? FontWeight.w500
+                                : FontWeight.w400,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (unreadCount > 0) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            unreadCount > 99
+                                ? '99+'
+                                : unreadCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildMessageStatusIcon(MessageStatus? status) {
     switch (status) {
       case MessageStatus.sent:
-        return Icon(Icons.done, size: 16, color: Colors.grey);
+        return const Icon(Icons.done_rounded, size: 14, color: AppColors.textLow);
       case MessageStatus.delivered:
-        return Icon(Icons.done_all, size: 16, color: Colors.grey);
+        return const Icon(Icons.done_all_rounded, size: 14, color: AppColors.textLow);
       case MessageStatus.read:
-        return Icon(Icons.done_all, size: 16, color: Colors.blue);
+        return const Icon(Icons.done_all_rounded, size: 14, color: AppColors.primary);
       default:
-        return Icon(Icons.done, size: 16, color: Colors.grey);
+        return const Icon(Icons.done_rounded, size: 14, color: AppColors.textLow);
     }
   }
 
@@ -491,13 +567,14 @@ class _HomeScreenState extends State<HomeScreen>
             // Divider
             if (otherStatuses.isNotEmpty)
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: Text(
                   'Recent updates',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textMid,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
                   ),
                 ),
               ),
@@ -508,25 +585,38 @@ class _HomeScreenState extends State<HomeScreen>
             // Empty state
             if (otherStatuses.isEmpty)
               Padding(
-                padding: EdgeInsets.only(top: 48),
+                padding: const EdgeInsets.only(top: 60),
                 child: Center(
                   child: Column(
                     children: [
-                      Icon(Icons.update, size: 64, color: Colors.grey[300]),
-                      SizedBox(height: 16),
-                      Text(
-                        'No status updates yet',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[500],
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primaryLt,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.auto_stories_rounded,
+                          size: 40,
+                          color: AppColors.primary,
                         ),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 20),
                       Text(
-                        'Tap the pencil icon to share a status',
-                        style: TextStyle(
+                        'No updates yet',
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textHigh,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Tap the camera icon to share a status',
+                        style: GoogleFonts.poppins(
                           fontSize: 13,
-                          color: Colors.grey[400],
+                          color: AppColors.textMid,
                         ),
                       ),
                     ],
@@ -541,10 +631,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildMyStatusTile(StatusModel? myStatus, bool hasMyStatus) {
     final avatarUrl = _currentUser?.photoUrl ??
-        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=4CAF50&color=fff&size=128';
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=6C5CE7&color=fff&size=128';
 
     return ListTile(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Stack(
         children: [
           Container(
@@ -552,13 +642,13 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: hasMyStatus
                 ? BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.blue, width: 2),
+                    border: Border.all(color: AppColors.primary, width: 2.5),
                   )
                 : null,
             child: CircleAvatar(
               radius: 28,
               backgroundImage: NetworkImage(avatarUrl),
-              backgroundColor: Colors.grey[300],
+              backgroundColor: AppColors.primaryLt,
             ),
           ),
           if (!hasMyStatus)
@@ -569,24 +659,24 @@ class _HomeScreenState extends State<HomeScreen>
                 width: 22,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: Colors.blue,
+                  color: AppColors.primary,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
-                child: Icon(Icons.add, color: Colors.white, size: 14),
+                child: const Icon(Icons.add_rounded, color: Colors.white, size: 14),
               ),
             ),
         ],
       ),
       title: Text(
         'My Status',
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
       ),
       subtitle: Text(
         hasMyStatus
-            ? '${myStatus!.activeStatusItems.length} status update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to add status update',
-        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
+            : 'Tap to add a status update',
+        style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
       ),
       onTap: () {
         if (hasMyStatus) {
@@ -609,38 +699,38 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildStatusTile(StatusModel status) {
     final activeItems = status.activeStatusItems;
-    if (activeItems.isEmpty) return SizedBox.shrink();
+    if (activeItems.isEmpty) return const SizedBox.shrink();
 
     final allViewed =
         activeItems.every((item) => item.viewedBy.contains(_currentUserId));
 
     final avatarUrl = status.userPhotoUrl ??
-        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(status.userName)}&background=4CAF50&color=fff&size=128';
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(status.userName)}&background=6C5CE7&color=fff&size=128';
 
     return ListTile(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: Container(
-        padding: EdgeInsets.all(2),
+        padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: allViewed ? Colors.grey[400]! : Colors.blue,
-            width: 2,
+            color: allViewed ? AppColors.textLow : AppColors.primary,
+            width: 2.5,
           ),
         ),
         child: CircleAvatar(
           radius: 26,
           backgroundImage: NetworkImage(avatarUrl),
-          backgroundColor: Colors.grey[300],
+          backgroundColor: AppColors.primaryLt,
         ),
       ),
       title: Text(
         status.userName,
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
       ),
       subtitle: Text(
         _formatStatusTime(status.lastUpdated),
-        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+        style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
       ),
       onTap: () {
         Navigator.push(
@@ -710,11 +800,35 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.call, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryLt,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.call_outlined,
+                    size: 48,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(height: 24),
                 Text(
                   'No call history',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textHigh,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Your recent calls will appear here',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: AppColors.textMid,
+                  ),
                 ),
               ],
             ),
@@ -771,31 +885,32 @@ class _HomeScreenState extends State<HomeScreen>
             }
 
             return ListTile(
-              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: CircleAvatar(
                 radius: 28,
                 backgroundImage: NetworkImage(
                   otherPersonPhotoUrl ??
-                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=4CAF50&color=fff&size=128',
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=6C5CE7&color=fff&size=128',
                 ),
+                backgroundColor: AppColors.primaryLt,
               ),
               title: Text(
                 otherPersonName,
-                style: TextStyle(fontWeight: FontWeight.w600),
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15, color: AppColors.textHigh),
               ),
               subtitle: Row(
                 children: [
                   Icon(
                     callIcon,
-                    size: 16,
+                    size: 15,
                     color: callIconColor,
                   ),
-                  SizedBox(width: 4),
+                  const SizedBox(width: 4),
                   Text(
                     log.status == CallStatus.answered
                         ? log.getFormattedDuration()
                         : log.status.toString().split('.').last.capitalize(),
-                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
                   ),
                 ],
               ),
@@ -804,11 +919,11 @@ class _HomeScreenState extends State<HomeScreen>
                 children: [
                   Text(
                     formatTimestamp(log.timestamp),
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    style: GoogleFonts.poppins(color: AppColors.textLow, fontSize: 12),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 4),
                   IconButton(
-                    icon: Icon(Icons.videocam, color: Colors.blue),
+                    icon: const Icon(Icons.videocam_rounded, color: AppColors.primary),
                     onPressed: () {
                       final contact = Contact(
                         id: otherPersonId,
@@ -864,20 +979,18 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        elevation: 1,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
         title: Text(
-          'Messages',
-          style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-              fontFamily: GoogleFonts.poppins().fontFamily),
+          'GupShupGo',
+          style: GoogleFonts.poppins(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textHigh,
+            letterSpacing: -0.5,
+          ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.search, color: Colors.black),
+            icon: const Icon(Icons.search_rounded),
             onPressed: () {
               if (_currentUserId != null) {
                 Navigator.push(
@@ -893,7 +1006,13 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: Colors.black),
+            icon: _currentUser?.photoUrl != null
+                ? CircleAvatar(
+                    radius: 16,
+                    backgroundImage: NetworkImage(_currentUser!.photoUrl!),
+                    backgroundColor: AppColors.primaryLt,
+                  )
+                : const Icon(Icons.more_vert),
             onSelected: (value) async {
               if (value == 'profile') {
                 if (_currentUser != null) {
@@ -925,9 +1044,9 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'profile',
                   child: Row(
                     children: [
-                      Icon(Icons.person, color: Colors.black),
-                      SizedBox(width: 12),
-                      Text('Profile'),
+                      Icon(Icons.person_outline_rounded, color: AppColors.primary, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Profile'),
                     ],
                   ),
                 ),
@@ -935,9 +1054,9 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'settings',
                   child: Row(
                     children: [
-                      Icon(Icons.settings, color: Colors.black),
-                      SizedBox(width: 12),
-                      Text('Settings'),
+                      Icon(Icons.settings_outlined, color: AppColors.textMid, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Settings'),
                     ],
                   ),
                 ),
@@ -945,9 +1064,9 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'logout',
                   child: Row(
                     children: [
-                      Icon(Icons.logout, color: Colors.red),
-                      SizedBox(width: 12),
-                      Text('Logout', style: TextStyle(color: Colors.red)),
+                      const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Log out', style: TextStyle(color: AppColors.error)),
                     ],
                   ),
                 ),
@@ -957,22 +1076,10 @@ class _HomeScreenState extends State<HomeScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: Colors.blue,
-          labelColor: Colors.blue,
-          unselectedLabelColor: Colors.grey,
-          tabs: [
-            Tab(
-                child: Text('Chats',
-                    style: TextStyle(
-                        fontFamily: GoogleFonts.poppins().fontFamily))),
-            Tab(
-                child: Text('Status',
-                    style: TextStyle(
-                        fontFamily: GoogleFonts.poppins().fontFamily))),
-            Tab(
-                child: Text('Calls',
-                    style: TextStyle(
-                        fontFamily: GoogleFonts.poppins().fontFamily))),
+          tabs: const [
+            Tab(text: 'Chats'),
+            Tab(text: 'Status'),
+            Tab(text: 'Calls'),
           ],
         ),
       ),
@@ -1002,17 +1109,18 @@ class _HomeScreenState extends State<HomeScreen>
                 heroTag: 'statusTextBtn',
                 mini: true,
                 backgroundColor: Colors.white,
+                elevation: 2,
                 onPressed: () {
                   if (_currentUserId != null) {
                     _navigateToAddStatus();
                   }
                 },
-                child: Icon(Icons.edit, color: Colors.blue, size: 20),
+                child: const Icon(Icons.edit_rounded, color: AppColors.primary, size: 20),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               FloatingActionButton(
                 heroTag: 'statusCameraBtn',
-                backgroundColor: Colors.blue,
+                backgroundColor: AppColors.primary,
                 onPressed: () {
                   if (_currentUserId != null) {
                     _navigateToAddMediaStatus();
