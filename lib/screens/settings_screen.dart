@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
@@ -44,8 +45,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Log Out',
-                  style: TextStyle(color: Colors.red))),
+              child:
+                  const Text('Log Out', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -66,12 +67,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=4CAF50&color=fff&size=128';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.surfaceAlt,
       appBar: AppBar(
         title: const Text('Settings'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
       ),
       body: ListView(
         children: [
@@ -84,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildTile(
               icon: Icons.person_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Profile',
               subtitle: 'Name, about, photo',
               onTap: () async {
@@ -141,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _divider(),
             _buildSwitchTile(
               icon: Icons.done_all,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Read receipts',
               subtitle: 'Show blue ticks when you\'ve read messages',
               value: _showReadReceipts,
@@ -163,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildSwitchTile(
               icon: Icons.chat_bubble_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Messages',
               subtitle: 'Notifications for new messages',
               value: _messageNotifications,
@@ -203,7 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _divider(),
             _buildTile(
               icon: Icons.backup_outlined,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Chat backup',
               subtitle: 'Back up chats to Google Drive',
               onTap: () => _showComingSoon('Chat backup'),
@@ -224,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildCard(children: [
             _buildTile(
               icon: Icons.help_outline,
-              iconColor: Colors.blue,
+              iconColor: AppColors.primary,
               title: 'Help Center',
               subtitle: 'FAQs and support',
               onTap: () => _showComingSoon('Help Center'),
@@ -253,8 +251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: OutlinedButton.icon(
               onPressed: _signOut,
-              icon:
-                  const Icon(Icons.logout, color: Colors.red),
+              icon: const Icon(Icons.logout, color: Colors.red),
               label: const Text('Log Out',
                   style: TextStyle(color: Colors.red, fontSize: 15)),
               style: OutlinedButton.styleFrom(
@@ -277,8 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: () async {
         final updated = await Navigator.push<UserModel>(
           context,
-          MaterialPageRoute(
-              builder: (_) => ProfileScreen(currentUser: _user)),
+          MaterialPageRoute(builder: (_) => ProfileScreen(currentUser: _user)),
         );
         if (updated != null) setState(() => _user = updated);
       },
@@ -302,10 +298,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 4),
                   Text(
-                    _user.about ??
-                        'Hey there! I am using GupShupGo.',
-                    style: TextStyle(
-                        color: Colors.grey[600], fontSize: 13),
+                    _user.about ?? 'Hey there! I am using GupShupGo.',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -325,22 +319,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 16, 4),
       child: Text(label,
-          style: TextStyle(
-              color: Colors.grey[500],
+          style: const TextStyle(
+              color: AppColors.primary,
               fontSize: 11,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0.8)),
     );
   }
 
   Widget _buildCard({required List<Widget> children}) {
     return Container(
-      color: Colors.white,
+      color: AppColors.surface,
       child: Column(children: children),
     );
   }
 
-  Widget _divider() => Divider(height: 1, indent: 56, color: Colors.grey.shade100);
+  Widget _divider() => const Divider(
+      height: 1, indent: 56, endIndent: 0, color: AppColors.divider);
 
   Widget _buildTile({
     required IconData icon,
@@ -359,12 +354,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title, style: const TextStyle(fontSize: 15)),
+      title: Text(title,
+          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
       subtitle: Text(subtitle,
-          style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
       trailing: onTap != null
-          ? const Icon(Icons.chevron_right,
-              color: Colors.grey, size: 20)
+          ? const Icon(Icons.chevron_right_rounded,
+              color: AppColors.textLow, size: 20)
           : null,
     );
   }
@@ -386,13 +382,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title, style: const TextStyle(fontSize: 15)),
+      title: Text(title,
+          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
       subtitle: Text(subtitle,
-          style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: Colors.blue,
+          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
+      trailing: Transform.scale(
+        scale: 0.82,
+        child: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: AppColors.primary,
+          activeTrackColor: AppColors.primaryLt,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
@@ -113,7 +114,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               user.photoUrl ??
                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
             ),
-            backgroundColor: Colors.grey[300],
+            backgroundColor: AppColors.primaryLt,
           ),
           if (user.isOnline)
             Positioned(
@@ -123,7 +124,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 width: 16,
                 height: 16,
                 decoration: BoxDecoration(
-                  color: Colors.green,
+                  color: AppColors.online,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
@@ -142,7 +143,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ? 'Last seen ${_formatLastSeen(user.lastSeen!)}'
                 : 'Offline',
         style: TextStyle(
-          color: user.isOnline ? Colors.green : Colors.grey[600],
+          color: user.isOnline ? AppColors.online : AppColors.textMid,
           fontSize: 14,
         ),
       ),
@@ -150,11 +151,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            icon: Icon(Icons.videocam, color: Colors.blue),
+            icon: Icon(Icons.videocam_rounded, color: AppColors.primary),
             onPressed: () => _initiateCall(user),
           ),
           IconButton(
-            icon: Icon(Icons.message, color: Colors.blue),
+            icon: Icon(Icons.message_rounded, color: AppColors.primary),
             onPressed: () => _openChat(user),
           ),
         ],
@@ -182,9 +183,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        title: Text('Contacts'),
+        title: const Text('Contacts'),
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(60),
           child: Padding(
@@ -196,7 +197,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 hintText: 'Search by name or phone...',
                 prefixIcon: Icon(Icons.search),
                 filled: true,
-                fillColor: Colors.grey[200],
+                fillColor: AppColors.surfaceAlt,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(25),
                   borderSide: BorderSide.none,
@@ -216,7 +217,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   Widget _buildSearchResults() {
     if (_isSearching) {
-      return Center(child: CircularProgressIndicator());
+      return Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_searchResults.isEmpty) {
@@ -224,11 +225,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLt,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.search_off_rounded,
+                  size: 40, color: AppColors.primary),
+            ),
+            const SizedBox(height: 16),
             Text(
               'No users found',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textHigh),
             ),
           ],
         ),
@@ -248,7 +260,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
       stream: _userService.getAllUsers(widget.currentUserId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+          return Center(
+              child: CircularProgressIndicator(color: AppColors.primary));
         }
 
         if (snapshot.hasError) {
@@ -264,11 +277,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryLt,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.people_alt_rounded,
+                      size: 40, color: AppColors.primary),
+                ),
+                const SizedBox(height: 16),
                 Text(
                   'No users available',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textHigh),
                 ),
               ],
             ),
@@ -283,10 +307,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
         return ListView.separated(
           itemCount: users.length,
-          separatorBuilder: (context, index) => Divider(
+          separatorBuilder: (context, index) => const Divider(
             height: 1,
             indent: 72,
             endIndent: 16,
+            color: AppColors.divider,
           ),
           itemBuilder: (context, index) {
             return _buildUserTile(users[index]);

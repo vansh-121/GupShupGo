@@ -1,0 +1,184 @@
+PRIVACY POLICY
+GupShupGo
+Last Updated: February 20, 2026
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. INTRODUCTION
+
+GupShupGo ("we", "our", or "us") is an open-source, production-ready
+Flutter communication application. This Privacy Policy explains how we
+collect, use, store, and protect your personal information when you use
+the GupShupGo mobile application ("App").
+
+By using GupShupGo, you agree to the terms outlined in this Privacy
+Policy. If you do not agree, please discontinue use of the App.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. INFORMATION WE COLLECT
+
+2.1 Information You Provide
+─────────────────────────────
+- Phone Number: Used for OTP-based authentication via Firebase.
+- Display Name & Profile Photo: Shown to other users within the app.
+- Messages: Text messages and media you send to other users.
+- Status Updates: Text, images, or videos you post as statuses.
+
+2.2 Information Collected Automatically
+────────────────────────────────────────
+- Device Token (FCM): Used to deliver push notifications for incoming
+  calls and messages. Stored in Firestore against your user profile.
+- Online/Offline Status: Your presence status (online/offline) is
+  updated in real-time to allow other users to see your availability.
+- Call Logs: Type of call (audio/video), duration, timestamp, and
+  call status (answered, missed, cancelled) are stored per user.
+- Read Receipts: Message delivery and read timestamps are stored in
+  Firestore to display seen/delivered indicators.
+
+2.3 Media & Files
+──────────────────
+- Images, videos, and files you share in chats are uploaded to
+  Firebase Storage and linked within Firestore messages.
+- Status media (images/videos) is stored in Firebase Storage and
+  automatically expires after 24 hours.
+
+2.4 Guest Login
+────────────────
+- If you sign in as a Guest, Firebase creates an anonymous UID.
+  No phone number or personal data is collected in this mode.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. HOW WE USE YOUR INFORMATION
+
+We use the information collected solely to operate the App:
+
+- Authenticate your identity and maintain your session.
+- Deliver messages, calls, and notifications to you and recipients.
+- Display your profile, online status, and statuses to other users.
+- Maintain call log history for your reference.
+- Enable real-time communication features via Agora RTC Engine.
+- Provide technical support and resolve issues.
+
+We do NOT use your data for advertising, analytics profiling, or sell
+it to any third parties.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. THIRD-PARTY SERVICES
+
+GupShupGo integrates the following third-party services. Each has its
+own privacy policy:
+
+- Firebase (Google LLC)
+  Auth, Firestore, Storage, Cloud Messaging
+  Policy: https://firebase.google.com/support/privacy
+
+- Agora.io
+  Real-time audio/video transmission
+  Policy: https://www.agora.io/en/privacy-policy/
+
+By using GupShupGo, you also agree to the policies of these services.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. DATA STORAGE & RETENTION
+
+- All data is stored on Firebase infrastructure (Google Cloud).
+  Servers may be located in any region supported by Firebase.
+- Messages and call logs are retained until you delete them or your
+  account is deleted.
+- Status updates (media) are automatically deleted from Firebase
+  Storage after 24 hours of posting.
+- Expired status metadata may persist briefly in Firestore until
+  the next cleanup cycle.
+- Guest accounts may be deleted after prolonged inactivity.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. DATA SECURITY
+
+- Firestore security rules restrict data access so that only
+  authenticated users can read/write their own data.
+- Firebase Storage rules restrict file access to the intended sender
+  and recipient.
+- All data in transit is protected by TLS/HTTPS encryption.
+- Agora RTC channels use encrypted audio/video streams.
+- We recommend users enable device lock/biometrics for additional
+  protection of their device.
+
+Despite these measures, no system is 100% secure. Use the App at your
+own risk.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. PERMISSIONS REQUESTED
+
+GupShupGo requests the following device permissions:
+
+Permission              | Purpose
+────────────────────────|──────────────────────────────────────────────
+CAMERA                  | Video calls and capturing status media
+RECORD_AUDIO            | Voice/audio calls
+READ_EXTERNAL_STORAGE   | Selecting images/videos from gallery
+WRITE_EXTERNAL_STORAGE  | Saving received media files
+POST_NOTIFICATIONS      | Incoming call and message notifications
+FOREGROUND_SERVICE      | Handling calls while app is in background
+INTERNET                | Connect to Firebase and Agora servers
+WAKE_LOCK               | Keep device active during active calls
+
+Permissions are only used for the stated purposes and are not accessed
+in the background beyond what is required for core functionality.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8. CHILDREN'S PRIVACY
+
+GupShupGo is not intended for users under the age of 13. We do not
+knowingly collect personal information from children under 13. If you
+believe a child has provided us with personal data, please contact us
+and we will delete that information promptly.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. YOUR RIGHTS
+
+You have the right to:
+- Access the personal data we hold about you.
+- Request correction of inaccurate data.
+- Request deletion of your account and associated data.
+- Withdraw consent for specific data processing activities.
+
+To exercise these rights, contact us at the email below. We will
+respond within 30 days.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+10. OPEN SOURCE DISCLOSURE
+
+GupShupGo is open-source software licensed under the MIT License. The
+source code is publicly available at:
+https://github.com/vansh-121/GupShupGo
+
+If you self-host or fork this project, you are responsible for your
+own data handling and must update this policy accordingly.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+11. CHANGES TO THIS POLICY
+
+We may update this Privacy Policy from time to time. The "Last Updated"
+date at the top will reflect the most recent revision. Continued use of
+the App after changes constitutes acceptance of the updated policy.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+12. CONTACT
+
+For privacy-related inquiries, data deletion requests, or concerns:
+
+  GitHub: https://github.com/vansh-121
+  Repository: https://github.com/vansh-121/GupShupGo/issues
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

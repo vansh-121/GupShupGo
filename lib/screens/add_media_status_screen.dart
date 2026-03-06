@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Screen for capturing / picking image or video and posting as a status.
 /// Launched from the camera FAB or from the status type selector.
@@ -110,7 +111,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     color: Colors.blue.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.camera_alt, color: Colors.blue),
+                  child:
+                      Icon(Icons.camera_alt_rounded, color: AppColors.primary),
                 ),
                 title: Text('Camera',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -124,10 +126,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                 leading: Container(
                   padding: EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
+                    color: AppColors.online.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.photo_library, color: Colors.green),
+                  child: Icon(Icons.photo_library_rounded,
+                      color: AppColors.online),
                 ),
                 title: Text('Gallery Photo',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -144,7 +147,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     color: Colors.orange.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.videocam, color: Colors.orange),
+                  child: Icon(Icons.videocam_rounded, color: Colors.orange),
                 ),
                 title: Text('Record Video',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -158,10 +161,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                 leading: Container(
                   padding: EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.purple.withOpacity(0.1),
+                    color: AppColors.primaryLt,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.video_library, color: Colors.purple),
+                  child: Icon(Icons.video_library_rounded,
+                      color: AppColors.primary),
                 ),
                 title: Text('Gallery Video',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -438,48 +442,46 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     icon: Icon(Icons.add_photo_alternate, color: Colors.white),
                     onPressed: _isUploading ? null : _showMediaSourcePicker,
                   ),
-                  // Caption input
+                  // Caption input — no box, just plain text on gradient
                   Expanded(
-                    child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(24),
+                    child: TextField(
+                      controller: _captionController,
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                      decoration: InputDecoration(
+                        filled: false,
+                        hintText: 'Add a caption...',
+                        hintStyle: const TextStyle(color: Colors.white60),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 4),
                       ),
-                      child: TextField(
-                        controller: _captionController,
-                        style: TextStyle(color: Colors.white, fontSize: 15),
-                        decoration: InputDecoration(
-                          hintText: 'Add a caption...',
-                          hintStyle: TextStyle(color: Colors.white60),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        textCapitalization: TextCapitalization.sentences,
-                        enabled: !_isUploading,
-                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      enabled: !_isUploading,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   // Send button
                   GestureDetector(
                     onTap: _isUploading ? null : _uploadStatus,
                     child: Container(
                       width: 48,
                       height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
                         shape: BoxShape.circle,
                       ),
                       child: _isUploading
-                          ? Padding(
+                          ? const Padding(
                               padding: EdgeInsets.all(12),
                               child: CircularProgressIndicator(
                                 strokeWidth: 2.5,
                                 color: Colors.white,
                               ),
                             )
-                          : Icon(Icons.send, color: Colors.white, size: 22),
+                          : const Icon(Icons.send_rounded,
+                              color: Colors.white, size: 22),
                     ),
                   ),
                 ],

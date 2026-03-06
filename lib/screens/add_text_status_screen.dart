@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
   final String userId;
@@ -28,17 +29,17 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   int _currentColorIndex = 0;
 
   final List<String> _backgroundColors = [
-    '#075E54', // WhatsApp dark green
-    '#128C7E', // WhatsApp teal
+    '#6C5CE7', // Brand primary (default)
+    '#5246BE', // Brand dark
+    '#9B8FF0', // Brand light
+    '#10B981', // Emerald green
     '#25D366', // WhatsApp green
     '#1E88E5', // Blue
     '#E53935', // Red
-    '#8E24AA', // Purple
     '#FB8C00', // Orange
+    '#D81B60', // Pink
     '#3949AB', // Indigo
     '#00897B', // Teal
-    '#D81B60', // Pink
-    '#5E35B1', // Deep purple
     '#43A047', // Green
     '#F4511E', // Deep orange
     '#1565C0', // Dark blue
@@ -102,6 +103,9 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   @override
   Widget build(BuildContext context) {
     final bgColor = _parseColor(_backgroundColors[_currentColorIndex]);
+    final isDark = bgColor.computeLuminance() < 0.4;
+    final onBg = isDark ? Colors.white : Colors.black87;
+    final onBgMuted = isDark ? Colors.white60 : Colors.black38;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -109,20 +113,20 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.close, color: Colors.white),
+          icon: Icon(Icons.close_rounded, color: onBg),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.emoji_emotions_outlined, color: Colors.white),
+            icon: Icon(Icons.emoji_emotions_outlined, color: onBg),
             onPressed: () {},
           ),
           IconButton(
-            icon: Icon(Icons.text_fields, color: Colors.white),
+            icon: Icon(Icons.text_fields_rounded, color: onBg),
             onPressed: () {},
           ),
           IconButton(
-            icon: Icon(Icons.palette, color: Colors.white),
+            icon: Icon(Icons.palette_rounded, color: onBg),
             onPressed: _cycleColor,
             tooltip: 'Change background color',
           ),
@@ -130,24 +134,27 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
       ),
       body: Center(
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 32),
           child: TextField(
             controller: _textController,
             autofocus: true,
             textAlign: TextAlign.center,
             style: GoogleFonts.poppins(
-              color: Colors.white,
+              color: onBg,
               fontSize: 24,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
             ),
             decoration: InputDecoration(
-              hintText: 'Type a status',
+              filled: false,
+              hintText: 'Type a status...',
               hintStyle: GoogleFonts.poppins(
-                color: Colors.white54,
+                color: onBgMuted,
                 fontSize: 24,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w400,
               ),
               border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
             ),
             maxLines: null,
             textCapitalization: TextCapitalization.sentences,
@@ -156,17 +163,18 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.white,
+        elevation: 4,
         onPressed: _isUploading ? null : _uploadStatus,
         child: _isUploading
             ? SizedBox(
-                width: 24,
-                height: 24,
+                width: 22,
+                height: 22,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
+                  strokeWidth: 2.5,
                   color: bgColor,
                 ),
               )
-            : Icon(Icons.send, color: bgColor),
+            : Icon(Icons.send_rounded, color: bgColor),
       ),
     );
   }

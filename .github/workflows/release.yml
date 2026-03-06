@@ -1,0 +1,82 @@
+name: Release APK on PR Merge
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.0'
+          channel: stable
+          cache: true
+
+      - name: Get Flutter dependencies
+        working-directory: gupshupgo
+        run: flutter pub get
+
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > gupshupgo/android/app/release.keystore
+
+      - name: Create key.properties
+        run: |
+          cat > gupshupgo/android/key.properties <<EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=release.keystore
+          EOF
+
+      - name: Get version from pubspec.yaml
+        id: version
+        working-directory: gupshupgo
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION%+*}" >> $GITHUB_OUTPUT
+
+      - name: Build Release APK
+        working-directory: gupshupgo
+        run: flutter build apk --release
+
+      - name: Build Release AAB
+        working-directory: gupshupgo
+        run: flutter build appbundle --release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}-${{ github.run_number }}
+          name: "GupShupGo ${{ steps.version.outputs.tag }} (Build ${{ github.run_number }})"
+          body: |
+            ## Release — ${{ steps.version.outputs.tag }} (Build ${{ github.run_number }})
+
+            Automatically generated from commit: ${{ github.sha }}
+
+            ### Downloads
+            - **APK** — Direct install on Android devices
+            - **AAB** — For Google Play Store upload
+          files: |
+            gupshupgo/build/app/outputs/flutter-apk/app-release.apk
+            gupshupgo/build/app/outputs/bundle/release/app-release.aab
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
