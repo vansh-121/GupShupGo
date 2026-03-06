@@ -19,6 +19,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -52,6 +53,8 @@ jobs:
 
       - name: Build Release APK
         run: flutter build apk --release
+        env:
+          JAVA_TOOL_OPTIONS: "-Xmx2048m"
 
       - name: Build Release AAB
         run: flutter build appbundle --release
