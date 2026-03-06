@@ -28,16 +28,15 @@ jobs:
           cache: true
 
       - name: Get Flutter dependencies
-        working-directory: gupshupgo
         run: flutter pub get
 
       - name: Decode Keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > gupshupgo/android/app/release.keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
 
       - name: Create key.properties
         run: |
-          cat > gupshupgo/android/key.properties <<EOF
+          cat > android/key.properties <<EOF
           storePassword=${{ secrets.KEYSTORE_PASSWORD }}
           keyPassword=${{ secrets.KEY_PASSWORD }}
           keyAlias=${{ secrets.KEY_ALIAS }}
@@ -46,18 +45,15 @@ jobs:
 
       - name: Get version from pubspec.yaml
         id: version
-        working-directory: gupshupgo
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d '[:space:]')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION%+*}" >> $GITHUB_OUTPUT
 
       - name: Build Release APK
-        working-directory: gupshupgo
         run: flutter build apk --release
 
       - name: Build Release AAB
-        working-directory: gupshupgo
         run: flutter build appbundle --release
 
       - name: Create GitHub Release
@@ -74,8 +70,8 @@ jobs:
             - **APK** — Direct install on Android devices
             - **AAB** — For Google Play Store upload
           files: |
-            gupshupgo/build/app/outputs/flutter-apk/app-release.apk
-            gupshupgo/build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
           draft: false
           prerelease: false
         env:
