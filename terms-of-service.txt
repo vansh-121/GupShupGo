@@ -1,0 +1,282 @@
+TERMS OF SERVICE
+GupShupGo
+Last Updated: February 20, 2026
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ACCEPTANCE OF TERMS
+
+By downloading, installing, or using the GupShupGo application ("App"),
+you agree to be bound by these Terms of Service ("Terms"). If you do not
+agree to these Terms, do not use the App.
+
+GupShupGo is developed and maintained by vansh-121 ("Developer") as an
+open-source project available at:
+https://github.com/vansh-121/GupShupGo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. DESCRIPTION OF SERVICE
+
+GupShupGo is a mobile communication application that provides:
+
+- Real-time one-to-one text messaging
+- HD video calling and audio-only voice calling via Agora RTC
+- WhatsApp-style 24-hour status updates (text, image, video)
+- Push notifications for messages and incoming calls
+- Call log history
+- Phone number-based authentication via Firebase
+- Guest login mode for testing purposes
+
+The App is provided as open-source software under the MIT License. It
+may be self-hosted, forked, or modified by any individual or entity
+under the terms of that license.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. ELIGIBILITY
+
+You must be at least 13 years of age to use this App. By using
+GupShupGo, you represent and warrant that:
+
+- You are at least 13 years old.
+- You have the legal capacity to enter into these Terms.
+- Your use of the App complies with all applicable local, national,
+  and international laws and regulations.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. USER ACCOUNTS
+
+4.1 Registration
+─────────────────
+To use GupShupGo, you must register using a valid phone number. OTP
+verification is required to complete registration. You may also sign in
+as a Guest for limited functionality.
+
+4.2 Account Responsibility
+───────────────────────────
+You are solely responsible for:
+- All activity that occurs under your account.
+- Maintaining the confidentiality of your device and session.
+- Notifying us immediately of any unauthorized use of your account.
+
+4.3 Accurate Information
+─────────────────────────
+You agree to provide accurate, current, and complete information during
+registration and to keep your profile updated.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. ACCEPTABLE USE
+
+You agree to use GupShupGo only for lawful, respectful, and personal
+communication purposes. You agree NOT to:
+
+5.1 Prohibited Content
+───────────────────────
+- Send, share, or post content that is illegal, obscene, defamatory,
+  threatening, harassing, hateful, or abusive.
+- Share child sexual abuse material (CSAM) or any content that
+  exploits minors in any way.
+- Distribute spam, unsolicited bulk messages, or commercial
+  solicitations.
+- Share malware, viruses, or any harmful code via messages or media.
+- Impersonate another person, entity, or organization.
+
+5.2 Prohibited Actions
+───────────────────────
+- Attempt to reverse-engineer, decompile, or tamper with the App's
+  Firebase credentials, Agora App ID, or backend configuration.
+- Exploit vulnerabilities in Firestore security rules or Storage rules
+  to access other users' data without authorization.
+- Use automated bots, scrapers, or scripts to interact with the App or
+  its backend.
+- Misuse the Guest login feature to circumvent account restrictions.
+- Interfere with or disrupt the App's servers or connected services.
+- Use the App to facilitate illegal surveillance or unauthorized
+  recording of communications.
+
+5.3 Call Conduct
+─────────────────
+- You may only initiate calls to users who have consented to receive
+  them.
+- Recording calls without explicit consent from all parties may be
+  illegal in your jurisdiction. GupShupGo does not facilitate call
+  recording, and you are solely responsible for compliance with
+  applicable wiretapping and recording laws.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. CONTENT OWNERSHIP & LICENSE
+
+6.1 Your Content
+─────────────────
+You retain ownership of all messages, media, and statuses you create
+and share through GupShupGo. By using the App, you grant us a limited,
+non-exclusive, royalty-free license to store and transmit your content
+solely for the purpose of operating the App's features.
+
+6.2 No Monitoring
+──────────────────
+We do not actively moderate, curate, or read user messages. You are
+solely responsible for the content you send. However, we reserve the
+right to take action on reports of abuse or legal violations.
+
+6.3 Status Content
+───────────────────
+Status updates expire after 24 hours. You are responsible for ensuring
+that any media you post in statuses does not violate third-party
+copyrights or these Terms.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. THIRD-PARTY SERVICES
+
+GupShupGo relies on the following third-party platforms:
+
+Service        | Provider      | Purpose
+───────────────|────────────────|──────────────────────────────────────
+Firebase Auth  | Google LLC    | Phone OTP authentication
+Firestore      | Google LLC    | Database for messages, users, logs
+Firebase Storage| Google LLC   | Media file storage
+FCM            | Google LLC    | Push notifications
+Agora RTC      | Agora.io      | Real-time audio/video streaming
+
+Your use of these services is also subject to their respective terms
+and privacy policies. We are not responsible for the availability,
+accuracy, or conduct of these third-party services.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8. OPEN SOURCE LICENSE
+
+GupShupGo source code is released under the MIT License.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files, to deal in
+the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+Full license text: https://github.com/vansh-121/GupShupGo/blob/main/LICENSE
+
+Note: The MIT License applies to the source code only. These Terms of
+Service govern your use of the running application, not the codebase.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. DISCLAIMERS
+
+9.1 "AS IS" Provision
+──────────────────────
+GUPSHUPGO IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF
+ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO:
+- MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE
+- UNINTERRUPTED OR ERROR-FREE OPERATION
+- SECURITY OR FREEDOM FROM BUGS OR VIRUSES
+- ACCURACY OR RELIABILITY OF ANY CONTENT
+
+9.2 Communication Quality
+──────────────────────────
+Call quality, message delivery speed, and media upload performance
+depend on your network conditions and Agora/Firebase infrastructure.
+We do not guarantee specific quality-of-service levels.
+
+9.3 Open Source Project
+────────────────────────
+This project is maintained by an individual developer and is not backed
+by a company or commercial entity. Feature development, bug fixes, and
+support are provided on a best-effort basis.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+10. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE DEVELOPER SHALL
+NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
+PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO:
+
+- Loss of data, messages, or call records
+- Unauthorized access to your account or messages
+- Service interruptions or downtime
+- Damages arising from your reliance on information transmitted via
+  the App
+
+IN NO EVENT SHALL THE DEVELOPER'S TOTAL LIABILITY TO YOU EXCEED THE
+AMOUNT YOU PAID TO USE THE APP (WHICH IS ZERO, AS THE APP IS FREE).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+11. INDEMNIFICATION
+
+You agree to indemnify, defend, and hold harmless the Developer, its
+contributors, and affiliates from any claims, damages, losses, or
+expenses (including legal fees) arising from:
+
+- Your use or misuse of the App
+- Your violation of these Terms
+- Your violation of any third party's rights
+- Any content you post, share, or transmit through the App
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+12. ACCOUNT TERMINATION
+
+12.1 By You
+────────────
+You may stop using the App at any time. To delete your account and
+associated data, contact us via GitHub Issues.
+
+12.2 By Us
+───────────
+We reserve the right to suspend or terminate access to the App for
+users who:
+- Violate these Terms or our Acceptable Use Policy (Section 5)
+- Engage in fraudulent, abusive, or illegal activity
+- Compromise the security or integrity of the App or its users
+
+12.3 Effect of Termination
+───────────────────────────
+Upon termination, your right to use the App ceases. Data associated
+with your account may be retained for a limited period as required by
+Firebase's infrastructure before full deletion is processed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+13. CHANGES TO THESE TERMS
+
+We reserve the right to modify these Terms at any time. If we make
+material changes, the "Last Updated" date will be revised. Your
+continued use of the App after changes are posted constitutes your
+acceptance of the revised Terms. If you disagree with the changes, you
+should stop using the App.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+14. GOVERNING LAW
+
+These Terms shall be governed by and construed in accordance with the
+laws applicable to the Developer's jurisdiction. Any disputes arising
+from these Terms or your use of the App shall be resolved through
+mutual discussion or, if necessary, in the appropriate courts of that
+jurisdiction.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+15. CONTACT
+
+For questions, abuse reports, or legal inquiries regarding these Terms:
+
+  GitHub Issues: https://github.com/vansh-121/GupShupGo/issues
+  GitHub Profile: https://github.com/vansh-121
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+By using GupShupGo, you acknowledge that you have read, understood,
+and agreed to these Terms of Service.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
