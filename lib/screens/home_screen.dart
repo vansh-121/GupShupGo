@@ -13,6 +13,8 @@ import 'package:video_chat_app/screens/add_text_status_screen.dart';
 import 'package:video_chat_app/screens/add_media_status_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/screens/profile_screen.dart';
+import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -892,11 +894,27 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: Colors.black),
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'profile') {
-                // Show profile screen
+                if (_currentUser != null) {
+                  final updated = await Navigator.push<UserModel>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            ProfileScreen(currentUser: _currentUser!)),
+                  );
+                  if (updated != null) setState(() => _currentUser = updated);
+                }
               } else if (value == 'settings') {
-                // Show settings screen
+                if (_currentUser != null) {
+                  final updated = await Navigator.push<UserModel>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            SettingsScreen(currentUser: _currentUser!)),
+                  );
+                  if (updated != null) setState(() => _currentUser = updated);
+                }
               } else if (value == 'logout') {
                 _signOut();
               }
