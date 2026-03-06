@@ -217,8 +217,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   Widget _buildSearchResults() {
     if (_isSearching) {
-      return Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+      return Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_searchResults.isEmpty) {

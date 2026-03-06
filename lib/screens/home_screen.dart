@@ -864,8 +864,9 @@ class _HomeScreenState extends State<HomeScreen>
 
             if (log.callType == CallType.incoming) {
               callIcon = Icons.call_received;
-              callIconColor =
-                  log.status == CallStatus.missed ? AppColors.error : AppColors.online;
+              callIconColor = log.status == CallStatus.missed
+                  ? AppColors.error
+                  : AppColors.online;
             } else if (log.callType == CallType.outgoing) {
               callIcon = Icons.call_made;
               callIconColor = log.status == CallStatus.cancelled

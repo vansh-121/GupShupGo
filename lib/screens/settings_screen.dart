@@ -319,23 +319,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 16, 4),
       child: Text(label,
-          style: TextStyle(
-              color: Colors.grey[500],
+          style: const TextStyle(
+              color: AppColors.primary,
               fontSize: 11,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0.8)),
     );
   }
 
   Widget _buildCard({required List<Widget> children}) {
     return Container(
-      color: Colors.white,
+      color: AppColors.surface,
       child: Column(children: children),
     );
   }
 
-  Widget _divider() =>
-      Divider(height: 1, indent: 56, color: Colors.grey.shade100);
+  Widget _divider() => const Divider(
+      height: 1, indent: 56, endIndent: 0, color: AppColors.divider);
 
   Widget _buildTile({
     required IconData icon,
@@ -354,11 +354,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title, style: const TextStyle(fontSize: 15)),
+      title: Text(title,
+          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
       subtitle: Text(subtitle,
-          style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
       trailing: onTap != null
-          ? const Icon(Icons.chevron_right, color: Colors.grey, size: 20)
+          ? const Icon(Icons.chevron_right_rounded,
+              color: AppColors.textLow, size: 20)
           : null,
     );
   }
@@ -380,13 +382,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title, style: const TextStyle(fontSize: 15)),
+      title: Text(title,
+          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
       subtitle: Text(subtitle,
-          style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: AppColors.primary,
+          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
+      trailing: Transform.scale(
+        scale: 0.82,
+        child: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: AppColors.primary,
+          activeTrackColor: AppColors.primaryLt,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
       ),
     );
   }
