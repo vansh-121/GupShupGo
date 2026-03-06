@@ -10,16 +10,54 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
+/// Small pill-shaped toggle chip used for Sign In / Sign Up switcher.
+class _ModeChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ModeChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? Colors.blue : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: selected ? Colors.blue : Colors.grey.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : Colors.grey[600],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _guestNameController = TextEditingController();
 
   bool _isLoading = false;
   bool _isSignUp = false;
   bool _obscurePassword = true;
+  bool _showEmailForm = false;
   String? _errorMessage;
 
   @override
@@ -27,8 +65,34 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
-    _guestNameController.dispose();
     super.dispose();
+  }
+
+  void _goHome() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => HomeScreen()),
+    );
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      UserModel? user = await _authService.signInWithGoogle();
+      setState(() => _isLoading = false);
+      if (user != null) {
+        _goHome();
+      } else {
+        setState(() => _errorMessage = 'Google sign-in was cancelled.');
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Google sign-in failed. Please try again.';
+      });
+    }
   }
 
   String? _validateEmail(String email) {
@@ -52,14 +116,12 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
-  Future<void> _signIn() async {
-    // Validate inputs
+  Future<void> _signInWithEmail() async {
     final emailError = _validateEmail(_emailController.text.trim());
     if (emailError != null) {
       setState(() => _errorMessage = emailError);
       return;
     }
-
     final passwordError = _validatePassword(_passwordController.text);
     if (passwordError != null) {
       setState(() => _errorMessage = passwordError);
@@ -76,17 +138,11 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-
       setState(() => _isLoading = false);
-
       if (user != null) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomeScreen()),
-        );
+        _goHome();
       } else {
-        setState(() {
-          _errorMessage = 'Failed to sign in. Please try again.';
-        });
+        setState(() => _errorMessage = 'Failed to sign in. Please try again.');
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
@@ -101,19 +157,16 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _signUp() async {
-    // Validate inputs
+  Future<void> _signUpWithEmail() async {
     if (_nameController.text.trim().isEmpty) {
       setState(() => _errorMessage = 'Please enter your name');
       return;
     }
-
     final emailError = _validateEmail(_emailController.text.trim());
     if (emailError != null) {
       setState(() => _errorMessage = emailError);
       return;
     }
-
     final passwordError = _validatePassword(_passwordController.text);
     if (passwordError != null) {
       setState(() => _errorMessage = passwordError);
@@ -131,17 +184,11 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
         name: _nameController.text.trim(),
       );
-
       setState(() => _isLoading = false);
-
       if (user != null) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomeScreen()),
-        );
+        _goHome();
       } else {
-        setState(() {
-          _errorMessage = 'Failed to sign up. Please try again.';
-        });
+        setState(() => _errorMessage = 'Failed to sign up. Please try again.');
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
@@ -187,41 +234,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _signInAsGuest() async {
-    if (_guestNameController.text.trim().isEmpty) {
-      setState(
-          () => _errorMessage = 'Please enter your name to continue as guest');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      UserModel? user = await _authService.signInAnonymously(
-        _guestNameController.text.trim(),
-      );
-
-      setState(() => _isLoading = false);
-
-      if (user != null) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomeScreen()),
-        );
-      } else {
-        setState(() {
-          _errorMessage = 'Failed to sign in. Please try again.';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'An error occurred. Please try again.';
-      });
-    }
-  }
 
   String _getErrorMessage(String code) {
     switch (code) {
@@ -250,237 +262,249 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(height: 40),
-              Icon(
-                Icons.chat_bubble_outline,
-                size: 80,
-                color: Colors.blue,
-              ),
-              SizedBox(height: 24),
-              Text(
-                'Welcome to GupShupGo',
+              const SizedBox(height: 32),
+
+              // ── Branding ──────────────────────────────────────────────
+              const Icon(Icons.chat_bubble_rounded, size: 72, color: Colors.blue),
+              const SizedBox(height: 20),
+              const Text(
+                'GupShupGo',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 28,
+                  fontSize: 30,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black,
+                  color: Colors.black87,
                 ),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
-                _isSignUp
-                    ? 'Create an account to get started'
-                    : 'Sign in to continue',
+                'Stay connected with everyone',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 15, color: Colors.grey[600]),
               ),
-              SizedBox(height: 40),
+              const SizedBox(height: 40),
 
-              // Name field (for sign up and guest)
-              if (_isSignUp) ...[
-                TextField(
-                  controller: _nameController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
-                    labelText: 'Your Name',
-                    prefixIcon: Icon(Icons.person),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
+              // ── PRIMARY: Phone OTP ────────────────────────────────────
+              ElevatedButton.icon(
+                onPressed: _isLoading
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => PhoneAuthScreen()),
+                        ),
+                icon: const Icon(Icons.phone_android, color: Colors.white),
+                label: const Text(
+                  'Continue with Phone Number',
+                  style: TextStyle(fontSize: 16, color: Colors.white),
                 ),
-                SizedBox(height: 16),
-              ],
-
-              // Email field
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                autocorrect: false,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-              SizedBox(height: 16),
-
-              // Password field
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility
-                          : Icons.visibility_off,
-                    ),
-                    onPressed: () {
-                      setState(() => _obscurePassword = !_obscurePassword);
-                    },
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-
-              // Forgot password (only for sign in)
-              if (!_isSignUp) ...[
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: _isLoading ? null : _resetPassword,
-                    child: Text('Forgot Password?'),
-                  ),
-                ),
-              ] else ...[
-                SizedBox(height: 24),
-              ],
-
-              // Sign in / Sign up button
-              ElevatedButton(
-                onPressed: _isLoading ? null : (_isSignUp ? _signUp : _signIn),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  padding: EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: const Color(0xFF25D366),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── SECONDARY: Google Sign-In ─────────────────────────────
+              OutlinedButton(
+                onPressed: _isLoading ? null : _signInWithGoogle,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: BorderSide(color: Colors.grey.shade300),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: _isLoading
-                    ? SizedBox(
+                    ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(
-                        _isSignUp ? 'Sign Up' : 'Sign In',
-                        style: TextStyle(fontSize: 16, color: Colors.white),
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.g_mobiledata,
+                              size: 26, color: Colors.red),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Continue with Google',
+                            style: TextStyle(
+                                fontSize: 16, color: Colors.black87),
+                          ),
+                        ],
                       ),
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 28),
 
-              // Toggle sign in / sign up
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _isSignUp
-                        ? 'Already have an account?'
-                        : "Don't have an account?",
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                  TextButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () {
-                            setState(() {
-                              _isSignUp = !_isSignUp;
-                              _errorMessage = null;
-                            });
-                          },
-                    child: Text(
-                      _isSignUp ? 'Sign In' : 'Sign Up',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Divider
-              SizedBox(height: 16),
+              // ── Divider ───────────────────────────────────────────────
               Row(
                 children: [
-                  Expanded(child: Divider()),
+                  const Expanded(child: Divider()),
                   Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Text(
-                      'OR',
-                      style: TextStyle(color: Colors.grey[600]),
+                      'or sign in with email',
+                      style:
+                          TextStyle(color: Colors.grey[500], fontSize: 13),
                     ),
                   ),
-                  Expanded(child: Divider()),
+                  const Expanded(child: Divider()),
                 ],
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 20),
 
-              // Phone number verification (carrier-based)
-              ElevatedButton.icon(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => PhoneAuthScreen()),
-                        );
-                      },
-                icon: Icon(Icons.phone_android, color: Colors.white),
-                label: Text(
-                  'Sign in with Phone',
-                  style: TextStyle(fontSize: 16, color: Colors.white),
+              // ── TERTIARY: Email/Password (collapsible) ────────────────
+              if (!_showEmailForm)
+                TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _showEmailForm = true),
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('Use Email & Password'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                )
+              else ...[
+                // Mode toggle
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _ModeChip(
+                      label: 'Sign In',
+                      selected: !_isSignUp,
+                      onTap: () => setState(() {
+                        _isSignUp = false;
+                        _errorMessage = null;
+                      }),
+                    ),
+                    const SizedBox(width: 12),
+                    _ModeChip(
+                      label: 'Sign Up',
+                      selected: _isSignUp,
+                      onTap: () => setState(() {
+                        _isSignUp = true;
+                        _errorMessage = null;
+                      }),
+                    ),
+                  ],
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 20),
+
+                // Name field (sign up only)
+                if (_isSignUp) ...[
+                  TextField(
+                    controller: _nameController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: 'Your Name',
+                      prefixIcon: const Icon(Icons.person_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // Email field
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: const Icon(Icons.email_outlined),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(height: 16),
 
-              SizedBox(height: 16),
-
-              // Guest sign in section
-              TextField(
-                controller: _guestNameController,
-                textCapitalization: TextCapitalization.words,
-                decoration: InputDecoration(
-                  labelText: 'Your Name (for Guest)',
-                  prefixIcon: Icon(Icons.person_outline),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  helperText: 'Guest accounts are not saved after uninstall',
-                ),
-              ),
-              SizedBox(height: 16),
-
-              OutlinedButton(
-                onPressed: _isLoading ? null : _signInAsGuest,
-                style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                // Password field
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                      onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword),
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
-                child: Text(
-                  'Continue as Guest',
-                  style: TextStyle(fontSize: 16),
+
+                // Forgot password
+                if (!_isSignUp)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _resetPassword,
+                      child: const Text('Forgot Password?'),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 24),
+
+                // Submit button
+                ElevatedButton(
+                  onPressed: _isLoading
+                      ? null
+                      : (_isSignUp ? _signUpWithEmail : _signInWithEmail),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          _isSignUp ? 'Create Account' : 'Sign In',
+                          style: const TextStyle(
+                              fontSize: 16, color: Colors.white),
+                        ),
                 ),
-              ),
+
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _showEmailForm = false;
+                    _errorMessage = null;
+                  }),
+                  child: const Text('Hide email options'),
+                ),
+              ],
 
               // Error message
               if (_errorMessage != null) ...[
-                SizedBox(height: 16),
+                const SizedBox(height: 16),
                 Container(
-                  padding: EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -488,8 +512,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: Colors.red),
-                      SizedBox(width: 8),
+                      const Icon(Icons.error_outline, color: Colors.red),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
@@ -500,7 +524,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ],
-              SizedBox(height: 40),
+
+              const SizedBox(height: 40),
             ],
           ),
         ),

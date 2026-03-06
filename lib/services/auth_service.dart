@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -9,6 +10,7 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   // Get current user
   User? getCurrentUser() {
@@ -224,6 +226,61 @@ class AuthService {
     return null;
   }
 
+  // Sign in with Google
+  Future<UserModel?> signInWithGoogle() async {
+    try {
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return null; // user cancelled
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      UserCredential userCredential =
+          await _auth.signInWithCredential(credential);
+
+      if (userCredential.user == null) return null;
+
+      final String userId = userCredential.user!.uid;
+      UserModel? existingUser = await _userService.getUserById(userId);
+
+      UserModel user;
+      if (existingUser != null) {
+        user = existingUser.copyWith(
+          isOnline: true,
+          lastSeen: DateTime.now(),
+        );
+      } else {
+        user = UserModel(
+          id: userId,
+          name: userCredential.user!.displayName ?? googleUser.displayName ?? 'User',
+          email: userCredential.user!.email ?? googleUser.email,
+          photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
+          isOnline: true,
+          createdAt: DateTime.now(),
+        );
+      }
+
+      await _userService.createOrUpdateUser(user);
+      await _saveUserIdLocally(userId);
+      try {
+        await _fcmService.setupFCM(userId: userId);
+      } catch (e) {
+        print('FCM setup failed (non-critical): $e');
+      }
+      await _userService.setupPresence(userId);
+
+      return user;
+    } catch (e) {
+      print('Error signing in with Google: $e');
+      rethrow;
+    }
+  }
+
   // Sign up with email and password
   Future<UserModel?> signUpWithEmail({
     required String email,
@@ -373,6 +430,7 @@ class AuthService {
       if (userId != null) {
         await _userService.updateOnlineStatus(userId, false);
       }
+      await _googleSignIn.signOut();
       await _auth.signOut();
       await _clearUserIdLocally();
     } catch (e) {
