@@ -69,6 +69,8 @@ class AppTheme {
       onInverseSurface: Colors.white,
       inversePrimary: AppColors.primaryLt,
       surfaceTint: Color(0x0A6C5CE7),
+      background: AppColors.surface,
+      onBackground: AppColors.textHigh,
     );
 
     return ThemeData(
