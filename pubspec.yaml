@@ -41,7 +41,7 @@ dependencies:
   agora_rtc_engine: ^6.3.1
   audioplayers: ^5.2.1
 
- google_fonts: ^6.2.0
+  google_fonts: ^6.2.0
 
   # Permissions
   permission_handler: ^11.1.0
