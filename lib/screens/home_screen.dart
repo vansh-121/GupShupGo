@@ -5,9 +5,7 @@ import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/status_model.dart';
-import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
-import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
 import 'package:video_chat_app/screens/add_text_status_screen.dart';
@@ -168,33 +166,18 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _setupCallListener() async {
-    try {
-      final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      _fcmService.onCallReceived((callerId, channelId, isAudioOnly) {
-        print(
-            'Incoming call from $callerId on channel $channelId (${isAudioOnly ? 'Audio' : 'Video'})');
-        callState.updateState(CallState.Ringing);
-
-        _userService.getUserById(callerId).then((caller) {
-          if (mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => CallScreen(
-                  channelId: channelId,
-                  isCaller: false,
-                  calleeId: callerId,
-                  calleeName: caller?.name ?? 'Unknown',
-                  isAudioOnly: isAudioOnly,
-                ),
-              ),
-            );
-          }
-        });
-      });
-    } catch (e) {
-      print('Error setting up call listener: $e');
-    }
+    // ── Call acceptance/decline is now handled globally ──────────────────
+    // The CallKit event listener in main.dart handles accept/decline/timeout
+    // for ALL app states (foreground, background, killed). No per-screen
+    // listener is needed anymore.
+    //
+    // Foreground FCM data messages → CallKit notification (handled in
+    // FCMService.setupFCM via onMessage listener).
+    // Background FCM data messages → CallKit notification (handled in
+    // FCMService._firebaseMessagingBackgroundHandler).
+    // Accept tap → CallScreen navigation (handled in main.dart
+    // _handleCallAccepted via navigatorKey).
+    print('Call listener: handled globally by CallKit in main.dart');
   }
 
   Future<void> _signOut() async {

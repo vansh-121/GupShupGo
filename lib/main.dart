@@ -2,11 +2,14 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
+import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -15,6 +18,10 @@ import 'screens/home_screen.dart';
 
 /// Globally cached SharedPreferences instance — initialised once in main().
 late final SharedPreferences sharedPrefs;
+
+/// Global navigator key — used by CallKit to navigate from outside the
+/// widget tree (e.g., when accepting a call from the lock screen).
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +38,12 @@ void main() async {
   // ── App Check: fire-and-forget (don't block startup) ──
   _initAppCheck();
 
+  // ── Register CallKit event listener BEFORE runApp() ──────────────────
+  // This catches accept/decline/timeout events even when the app is cold-
+  // started from a notification tap (the user tapped "Accept" on the lock
+  // screen, which launched the app).
+  _setupCallKitListener();
+
   runApp(
     MultiProvider(
       providers: [
@@ -40,8 +53,158 @@ void main() async {
       child: MyApp(),
     ),
   );
+
+  // ── Cold-start: check for calls accepted while the app was dead ────────
+  // When the user taps "Accept" on the native CallKit notification and the
+  // app was killed, the actionCallAccept event fires BEFORE our listener is
+  // registered. We catch that case here by querying active calls after the
+  // navigator is mounted.
+  _checkPendingAcceptedCalls();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CallKit event listener — handles Accept / Decline / Timeout / End
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void _setupCallKitListener() {
+  FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
+    if (event == null) return;
+
+    print('CallKit event: ${event.event} | body: ${event.body}');
+
+    switch (event.event) {
+      case Event.actionCallAccept:
+        _handleCallAccepted(event.body);
+        break;
+      case Event.actionCallDecline:
+        print('Call declined by user');
+        // CallKit auto-dismisses; nothing else needed.
+        break;
+      case Event.actionCallTimeout:
+        print('Call timed out (not answered)');
+        // CallKit auto-shows "Missed call" notification.
+        break;
+      case Event.actionCallEnded:
+        print('Call ended');
+        break;
+      default:
+        break;
+    }
+  });
+}
+
+/// Navigates to CallScreen when the user taps "Accept" on the CallKit UI.
+///
+/// Works in all scenarios:
+/// - App in foreground → navigates immediately
+/// - App in background → brings app to foreground, then navigates
+/// - App killed → app launches, then navigates once the navigator is ready
+void _handleCallAccepted(dynamic body) {
+  if (body == null) return;
+
+  // flutter_callkit_incoming returns body as Map<String, dynamic>.
+  // The CallKitParams.extra map is nested inside body['extra'].
+  final Map<String, dynamic> data =
+      body is Map ? Map<String, dynamic>.from(body) : {};
+
+  final rawExtra = data['extra'];
+  final Map<String, dynamic> extra = rawExtra is Map
+      ? Map<String, dynamic>.from(rawExtra)
+      : <String, dynamic>{};
+
+  final channelId =
+      extra['channelId'] as String? ?? data['id'] as String? ?? '';
+  final callerId = extra['callerId'] as String? ?? '';
+  final isAudioOnly = extra['isAudioOnly'] == 'true';
+  final callerName = data['nameCaller'] as String? ?? 'Unknown';
+
+  if (channelId.isEmpty) {
+    print('Cannot navigate to call: channelId is empty');
+    return;
+  }
+
+  print('Accepting call → channelId: $channelId, caller: $callerName');
+
+  // Use a post-frame callback to ensure the navigator is mounted.
+  // This handles the cold-start case where the widget tree isn't built yet.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final nav = navigatorKey.currentState;
+    if (nav != null) {
+      nav.push(
+        MaterialPageRoute(
+          builder: (_) => CallScreen(
+            channelId: channelId,
+            isCaller: false,
+            calleeId: callerId,
+            calleeName: callerName,
+            isAudioOnly: isAudioOnly,
+          ),
+        ),
+      );
+    } else {
+      print('Navigator not ready — cannot navigate to call screen');
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Cold-start handler — checks if the app was launched by accepting a call
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// On cold-start (app was killed), the CallKit "Accept" event fires BEFORE
+/// our Dart listener is registered. This function runs after the first frame
+/// and checks [FlutterCallkitIncoming.activeCalls()] for any call that was
+/// accepted. If found, it navigates to CallScreen.
+void _checkPendingAcceptedCalls() {
+  // Wait for the navigator to be mounted (first frame)
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    try {
+      final dynamic calls = await FlutterCallkitIncoming.activeCalls();
+      print('Active calls on startup: $calls');
+
+      if (calls == null || calls is! List || calls.isEmpty) return;
+
+      // Take the most recent active call
+      final Map<String, dynamic> call = Map<String, dynamic>.from(calls.last);
+
+      final rawExtra = call['extra'];
+      final Map<String, dynamic> extra = rawExtra is Map
+          ? Map<String, dynamic>.from(rawExtra)
+          : <String, dynamic>{};
+
+      final channelId =
+          extra['channelId'] as String? ?? call['id'] as String? ?? '';
+      final callerId = extra['callerId'] as String? ?? '';
+      final isAudioOnly = extra['isAudioOnly'] == 'true';
+      final callerName = call['nameCaller'] as String? ?? 'Unknown';
+
+      if (channelId.isEmpty) return;
+
+      print('Cold-start: found pending call → $channelId from $callerName');
+
+      // End the CallKit notification (stop ringtone if still playing)
+      await FlutterCallkitIncoming.endCall(channelId);
+
+      // Navigate to CallScreen
+      final nav = navigatorKey.currentState;
+      if (nav != null) {
+        nav.push(
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              channelId: channelId,
+              isCaller: false,
+              calleeId: callerId,
+              calleeName: callerName,
+              isAudioOnly: isAudioOnly,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error checking pending calls: $e');
+    }
+  });
+}
 /// Runs App Check activation in the background — never blocks the UI.
 void _initAppCheck() async {
   try {
@@ -76,6 +239,7 @@ class MyApp extends StatelessWidget {
     final bool isLoggedIn = _authService.isUserLoggedIn();
 
     return MaterialApp(
+      navigatorKey: navigatorKey, // Enables navigation from CallKit handler
       title: 'GupShupGo',
       theme: AppTheme.light,
       home: isLoggedIn ? HomeScreen() : LoginScreen(),
