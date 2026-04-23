@@ -52,6 +52,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _isLoading = true;
   bool _isSending = false;
+  int _lastMessageCount = 0;
 
   // ─── Online status state (real-time from Firestore) ───────────────
   late bool _isContactOnline;
@@ -608,24 +609,31 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            onSelected: (value) {},
+            onSelected: (value) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${value[0].toUpperCase()}${value.substring(1)} — coming soon!'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
             itemBuilder: (BuildContext context) {
               return [
                 PopupMenuItem(
-                    value: 'info',
+                    value: 'contact info',
                     child: Text('Contact info', style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'media',
+                    value: 'media & docs',
                     child: Text('Media & docs', style: GoogleFonts.poppins())),
                 PopupMenuItem(
                     value: 'search',
                     child: Text('Search', style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'mute',
+                    value: 'mute notifications',
                     child: Text('Mute notifications',
                         style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'block',
+                    value: 'block contact',
                     child: Text('Block contact',
                         style: GoogleFonts.poppins(color: AppColors.error))),
               ];
@@ -681,8 +689,13 @@ class _ChatScreenState extends State<ChatScreen> {
                         _markNewMessagesAsRead();
                       }
 
+                      // Only auto-scroll when genuinely new messages arrive,
+                      // not on status updates (sent→delivered→read).
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (messages.isNotEmpty) _scrollToBottom();
+                        if (messages.length > _lastMessageCount) {
+                          _scrollToBottom();
+                        }
+                        _lastMessageCount = messages.length;
                       });
 
                       return _buildMessagesList(messages);

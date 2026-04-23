@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -45,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
+  StreamSubscription? _recentContactsSub;
   bool _isRefreshingUsers = false; // debounce for background user refresh
 
   @override
@@ -57,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    _recentContactsSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     if (_currentUserId != null) {
@@ -205,7 +208,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _loadRecentContacts() {
     if (_currentUserId == null) return;
-    _userService.getAllUsers(_currentUserId!).listen((users) {
+    _recentContactsSub?.cancel();
+    _recentContactsSub = _userService.getAllUsers(_currentUserId!).listen((users) {
       if (mounted) {
         setState(() {
           _recentContacts = users.take(10).toList();
@@ -887,7 +891,9 @@ class _HomeScreenState extends State<HomeScreen>
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
     if (diff.inHours < 24) return '${diff.inHours} hours ago';
-    return 'Yesterday';
+    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
   }
 
   void _navigateToAddStatus() {

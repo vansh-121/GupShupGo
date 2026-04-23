@@ -2,16 +2,16 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
 
 class FCMService {
-  static const _fcmScope = 'https://www.googleapis.com/auth/firebase.messaging';
-  static const _fcmEndpoint =
-      'https://fcm.googleapis.com/v1/projects/videocallapp-81166/messages:send';
+  // ── Cloud Function endpoints (no service account key needed) ────────────
+  static const _callFunctionUrl =
+      'https://sendcallnotification-luh3g2lkma-uc.a.run.app';
+  static const _messageFunctionUrl =
+      'https://sendmessagenotification-luh3g2lkma-uc.a.run.app';
 
   Future<void> setupFCM({required String userId}) async {
     try {
@@ -38,24 +38,10 @@ class FCMService {
       }
       FirebaseMessaging.onBackgroundMessage(
           _firebaseMessagingBackgroundHandler);
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('Foreground message received: ${message.data}');
-        String messageType = message.data['type'] ?? '';
-
-        // Only show call notification for call type messages
-        if (messageType == 'call' ||
-            messageType == 'incoming_call' ||
-            messageType.isEmpty && message.data['channelId'] != null) {
-          String callerId = message.data['callerId'] ?? 'Unknown';
-          String channelId = message.data['channelId'] ?? '';
-          bool isAudioOnly = message.data['isAudioOnly'] == 'true';
-          if (channelId.isNotEmpty) {
-            _showCallNotification(callerId, channelId,
-                isAudioOnly: isAudioOnly);
-          }
-        }
-        // Chat messages are handled by the StreamBuilder in chat_screen.dart
-      });
+      // NOTE: Foreground call messages are handled by onCallReceived() in
+      // HomeScreen. Chat messages are handled by StreamBuilder. No extra
+      // onMessage listener is needed here — adding one would cause duplicate
+      // navigations for incoming calls.
     } catch (e) {
       print('FCM setup error: $e');
     }
@@ -82,98 +68,32 @@ class FCMService {
     });
   }
 
-  Future<String> _getAccessToken() async {
-    try {
-      final serviceAccountJson =
-          await rootBundle.loadString('assets/service-account.json');
-      final accountCredentials =
-          ServiceAccountCredentials.fromJson(serviceAccountJson);
-      final client = http.Client();
-      final accessCredentials = await obtainAccessCredentialsViaServiceAccount(
-        accountCredentials,
-        [_fcmScope],
-        client,
-      );
-      client.close();
-      return accessCredentials.accessToken.data;
-    } catch (e) {
-      print('Error getting access token: $e');
-      rethrow;
-    }
-  }
-
+  /// Send call notification via Cloud Function (no service account needed).
   Future<void> sendCallNotification(
       String calleeId, String callerId, String channelId,
       {bool isAudioOnly = false}) async {
     try {
-      print('Sending notification to $calleeId for channel $channelId');
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(calleeId)
-          .get();
-
-      if (!doc.exists) {
-        print('User $calleeId not found in database');
-        return;
-      }
-
-      String? fcmToken = doc['fcmToken'];
-      if (fcmToken == null) {
-        print('No FCM token found for $calleeId');
-        return;
-      }
-
-      final accessToken = await _getAccessToken();
+      print('Sending call notification to $calleeId via Cloud Function');
       final response = await http.post(
-        Uri.parse(_fcmEndpoint),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(_callFunctionUrl),
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'message': {
-            'token': fcmToken,
-            'data': {
-              'callerId': callerId,
-              'channelId': channelId,
-              'type': 'incoming_call',
-              'isAudioOnly': isAudioOnly.toString(),
-            },
-            'notification': {
-              'title':
-                  isAudioOnly ? 'Incoming Audio Call' : 'Incoming Video Call',
-              'body': 'Call from $callerId',
-            },
-            'android': {
-              'priority': 'high',
-            },
-            'apns': {
-              'headers': {
-                'apns-priority': '10',
-              },
-              'payload': {
-                'aps': {
-                  'alert': {
-                    'title': 'Incoming Call',
-                    'body': 'Call from $callerId',
-                  },
-                  'sound': 'default',
-                },
-              },
-            },
-          },
+          'calleeId': calleeId,
+          'callerId': callerId,
+          'channelId': channelId,
+          'isAudioOnly': isAudioOnly,
         }),
       );
-      print('Notification sent: ${response.statusCode}');
+      print('Call notification response: ${response.statusCode}');
       if (response.statusCode != 200) {
-        print('Failed to send notification: ${response.body}');
+        print('Failed to send call notification: ${response.body}');
       }
     } catch (e) {
-      print('Error sending notification: $e');
+      print('Error sending call notification: $e');
     }
   }
 
-  // Send a chat message notification (for delivery receipts)
+  /// Send chat message notification via Cloud Function.
   Future<void> sendMessageNotification({
     required String receiverId,
     required String senderId,
@@ -182,62 +102,15 @@ class FCMService {
     required String chatRoomId,
   }) async {
     try {
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(receiverId)
-          .get();
-
-      if (!doc.exists) {
-        print('User $receiverId not found in database');
-        return;
-      }
-
-      String? fcmToken = doc['fcmToken'];
-      if (fcmToken == null) {
-        print('No FCM token found for $receiverId');
-        return;
-      }
-
-      final accessToken = await _getAccessToken();
       final response = await http.post(
-        Uri.parse(_fcmEndpoint),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(_messageFunctionUrl),
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'message': {
-            'token': fcmToken,
-            'data': {
-              'type': 'chat_message',
-              'senderId': senderId,
-              'senderName': senderName,
-              'message': message,
-              'chatRoomId': chatRoomId,
-            },
-            'notification': {
-              'title': senderName,
-              'body': message,
-            },
-            'android': {
-              'priority': 'high',
-            },
-            'apns': {
-              'headers': {
-                'apns-priority': '10',
-              },
-              'payload': {
-                'aps': {
-                  'alert': {
-                    'title': senderName,
-                    'body': message,
-                  },
-                  'sound': 'default',
-                  'content-available': 1,
-                },
-              },
-            },
-          },
+          'receiverId': receiverId,
+          'senderId': senderId,
+          'senderName': senderName,
+          'message': message,
+          'chatRoomId': chatRoomId,
         }),
       );
       print('Message notification sent: ${response.statusCode}');
@@ -286,7 +159,8 @@ class FCMService {
             );
 
             await batch.commit();
-            print('Messages and chatRoom marked as delivered for: $chatRoomId');
+            print(
+                'Messages and chatRoom marked as delivered for: $chatRoomId');
           }
         } catch (e) {
           print('Error marking messages as delivered: $e');
@@ -311,7 +185,7 @@ class FCMService {
         CallKitParams(
           id: channelId,
           nameCaller: callerId,
-          appName: 'VideoCallApp',
+          appName: 'GupShupGo',
           type: isAudioOnly ? 0 : 1, // 0 = Audio call, 1 = Video call
           textAccept: 'Accept',
           textDecline: 'Decline',

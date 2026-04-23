@@ -150,17 +150,8 @@ class UserService {
   // Setup presence system (call when app opens)
   Future<void> setupPresence(String userId) async {
     try {
-      // Set user as online
+      // Set user as online (single write — no duplicate)
       await updateOnlineStatus(userId, true);
-
-      // Setup onDisconnect to set user offline when app closes
-      await _firestore
-          .collection(_usersCollection)
-          .doc(userId)
-          .update({
-        'isOnline': true,
-        'lastSeen': FieldValue.serverTimestamp(),
-      });
     } catch (e) {
       print('Error setting up presence: $e');
     }

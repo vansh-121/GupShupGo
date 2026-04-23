@@ -108,7 +108,9 @@ class CallLogModel {
       callType: _parseCallType(data['callType']),
       status: _parseCallStatus(data['status']),
       mediaType: _parseMediaType(data['mediaType']),
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
+      timestamp: data['timestamp'] != null
+          ? (data['timestamp'] as Timestamp).toDate()
+          : DateTime.now(),
       durationInSeconds: data['durationInSeconds'],
     );
   }
