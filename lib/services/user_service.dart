@@ -113,6 +113,21 @@ class UserService {
     });
   }
 
+  /// Returns a real-time stream of a single user's profile (including
+  /// online status). Use this to keep UI in sync without manual refreshes.
+  Stream<UserModel?> getUserStream(String userId) {
+    return _firestore
+        .collection(_usersCollection)
+        .doc(userId)
+        .snapshots()
+        .map((doc) {
+      if (doc.exists) {
+        return UserModel.fromFirestore(doc);
+      }
+      return null;
+    });
+  }
+
   // Check if user exists by phone number
   Future<UserModel?> getUserByPhone(String phoneNumber) async {
     try {
