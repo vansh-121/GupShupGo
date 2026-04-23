@@ -19,6 +19,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -39,10 +40,12 @@ class _HomeScreenState extends State<HomeScreen>
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
   final ChatService _chatService = ChatService();
+  final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
+  bool _isRefreshingUsers = false; // debounce for background user refresh
 
   @override
   void initState() {
@@ -84,32 +87,72 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _initializeApp() async {
-    await _loadUser();
-    await _setupCallListener();
-    _loadRecentContacts();
-    // Mark all messages as delivered on app open
+    _loadUser();
+
+    // ── Load cached user profiles from disk for instant chat list ──
+    _chatCacheService.loadUserCacheFromDisk();
+
+    // ── Upgrade fallback: user_id exists but cached_user doesn't yet ──
+    // This only happens once — on the first launch after the caching update.
+    if (_currentUser == null && _currentUserId == null) {
+      final userId = _authService.getCurrentUser()?.uid;
+      if (userId != null) {
+        _currentUserId = userId;
+        // One-time Firestore read to seed the cache
+        final user = await _authService.refreshUserFromFirestore();
+        if (user != null && mounted) {
+          _currentUser = user;
+        }
+      }
+    }
+
     if (_currentUserId != null) {
-      await _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
-      // Initialize status provider
+      // ── Show UI immediately ──
+      setState(() {
+        _isInitialized = true;
+      });
+
+      // ── Run non-blocking setup concurrently ──
+      _setupCallListener();
+      _loadRecentContacts();
+
       final statusProvider =
           Provider.of<StatusProvider>(context, listen: false);
       statusProvider.initialize(_currentUserId!);
+
+      // ── Background tasks — never block UI ──
+      Future.wait([
+        _fcmService.setupFCM(userId: _currentUserId!).catchError(
+            (e) => print('FCM setup failed (non-critical): $e')),
+        _userService.setupPresence(_currentUserId!).catchError(
+            (e) => print('Presence setup failed (non-critical): $e')),
+        _chatService
+            .markAllMessagesAsDeliveredOnAppOpen(_currentUserId!)
+            .catchError((e) => print('Background delivery sync error: $e')),
+      ]);
+
+      // ── Refresh user profile from Firestore in background ──
+      _authService.refreshUserFromFirestore().then((freshUser) {
+        if (freshUser != null && mounted) {
+          setState(() {
+            _currentUser = freshUser;
+          });
+        }
+      });
+    } else {
+      setState(() {
+        _isInitialized = true;
+      });
     }
-    setState(() {
-      _isInitialized = true;
-    });
   }
 
-  Future<void> _loadUser() async {
+  /// Loads user from local cache (synchronous — no Firestore read).
+  void _loadUser() {
     try {
-      _currentUser = await _authService.getSavedUser();
+      _currentUser = _authService.getSavedUser();
       if (_currentUser != null) {
-        setState(() {
-          _currentUserId = _currentUser!.id;
-        });
-        await _fcmService.setupFCM(userId: _currentUserId!);
-        await _userService.setupPresence(_currentUserId!);
-        print('App initialized for user: ${_currentUser!.name}');
+        _currentUserId = _currentUser!.id;
+        print('User loaded from cache: ${_currentUser!.name}');
       }
     } catch (e) {
       print('Error loading user: $e');
@@ -261,11 +304,22 @@ class _HomeScreenState extends State<HomeScreen>
     return StreamBuilder<List<ChatRoom>>(
       stream: _chatService.getChatRooms(_currentUserId!),
       builder: (context, chatSnapshot) {
-        if (chatSnapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+        // ── Use cached data while Firestore stream is still connecting ──
+        List<ChatRoom> chatRooms;
+        if (chatSnapshot.connectionState == ConnectionState.waiting &&
+            !chatSnapshot.hasData) {
+          chatRooms = _chatCacheService.getCachedChatRooms();
+          if (chatRooms.isEmpty) {
+            // No cache yet — show a brief loading indicator
+            return Center(child: CircularProgressIndicator());
+          }
+        } else {
+          chatRooms = chatSnapshot.data ?? [];
+          // ── Cache the fresh data for next launch ──
+          _chatCacheService.cacheChatRooms(chatRooms);
+          // ── Refresh user profiles (online status) in background ──
+          _refreshChatUsersInBackground(chatRooms);
         }
-
-        final chatRooms = chatSnapshot.data ?? [];
 
         if (chatRooms.isEmpty) {
           return Center(
@@ -331,40 +385,111 @@ class _HomeScreenState extends State<HomeScreen>
           itemCount: chatRooms.length,
           itemBuilder: (context, index) {
             final chatRoom = chatRooms[index];
-            // Get the other participant's ID
             final otherUserId = chatRoom.participants
                 .firstWhere((id) => id != _currentUserId, orElse: () => '');
 
             if (otherUserId.isEmpty) return SizedBox.shrink();
 
+            // ── Try cached user first (instant, no Firestore) ──
+            final cachedUser = _chatCacheService.getCachedUser(otherUserId);
+            if (cachedUser != null) {
+              final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+              return _buildChatRoomItem(cachedUser, chatRoom, unreadCount);
+            }
+
+            // ── No cache yet — fetch once and cache for next time ──
             return FutureBuilder<UserModel?>(
-              future: _userService.getUserById(otherUserId),
+              future: _fetchAndCacheUser(otherUserId),
               builder: (context, userSnapshot) {
                 if (!userSnapshot.hasData) {
-                  return ListTile(
-                    leading: CircleAvatar(
-                      radius: 28,
-                      backgroundColor: AppColors.primaryLt,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.primary),
-                    ),
-                    title: Container(
-                      height: 16,
-                      width: 100,
-                      color: AppColors.divider,
-                    ),
-                  );
+                  return _buildChatRoomPlaceholder();
                 }
 
                 final user = userSnapshot.data!;
                 final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
-
                 return _buildChatRoomItem(user, chatRoom, unreadCount);
               },
             );
           },
         );
       },
+    );
+  }
+
+  /// Fetches a user from Firestore and caches it locally so subsequent
+  /// rebuilds don't hit the network.
+  Future<UserModel?> _fetchAndCacheUser(String userId) async {
+    final user = await _userService.getUserById(userId);
+    if (user != null) {
+      _chatCacheService.cacheUser(user);
+    }
+    return user;
+  }
+
+  /// Refreshes all chat participant profiles (including online status) in the
+  /// background. When done, updates the cache and triggers a rebuild so the
+  /// green online badges reflect real-time state.
+  void _refreshChatUsersInBackground(List<ChatRoom> chatRooms) {
+    if (_isRefreshingUsers) return; // debounce — one refresh at a time
+    _isRefreshingUsers = true;
+    // Collect unique other-user IDs
+    final userIds = <String>{};
+    for (final room in chatRooms) {
+      for (final id in room.participants) {
+        if (id != _currentUserId) userIds.add(id);
+      }
+    }
+
+    // Fetch all in parallel
+    Future.wait(
+      userIds.map((id) => _userService.getUserById(id)),
+    ).then((users) {
+      bool changed = false;
+      for (final user in users) {
+        if (user != null) {
+          final cached = _chatCacheService.getCachedUser(user.id);
+          // Only trigger rebuild if online status actually changed
+          if (cached == null || cached.isOnline != user.isOnline ||
+              cached.name != user.name || cached.photoUrl != user.photoUrl) {
+            changed = true;
+          }
+          _chatCacheService.cacheUser(user);
+        }
+      }
+      if (changed && mounted) {
+        setState(() {}); // Rebuild with fresh online badges
+      }
+      _isRefreshingUsers = false;
+    }).catchError((e) {
+      print('Background user refresh error: $e');
+      _isRefreshingUsers = false;
+    });
+  }
+
+  /// Minimal placeholder while a single user profile is being fetched.
+  Widget _buildChatRoomPlaceholder() {
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 28,
+        backgroundColor: AppColors.primaryLt,
+      ),
+      title: Container(
+        height: 14,
+        width: 120,
+        decoration: BoxDecoration(
+          color: AppColors.divider,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+      subtitle: Container(
+        height: 10,
+        width: 80,
+        margin: const EdgeInsets.only(top: 6),
+        decoration: BoxDecoration(
+          color: AppColors.divider,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
     );
   }
 

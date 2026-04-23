@@ -2,7 +2,9 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/auth_service.dart';
@@ -11,12 +13,37 @@ import 'package:video_chat_app/theme/app_theme.dart';
 
 import 'screens/home_screen.dart';
 
+/// Globally cached SharedPreferences instance — initialised once in main().
+late final SharedPreferences sharedPrefs;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
 
-  // Initialize Firebase App Check
-  // Uses Debug provider in debug mode, Play Integrity in release
+  // ── Disable runtime font fetching — we bundle Poppins locally ──
+  GoogleFonts.config.allowRuntimeFetching = false;
+
+  // ── Run Firebase init and SharedPreferences init in parallel ──
+  await Future.wait([
+    Firebase.initializeApp(),
+    SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
+  ]);
+
+  // ── App Check: fire-and-forget (don't block startup) ──
+  _initAppCheck();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => CallStateNotifier()),
+        ChangeNotifierProvider(create: (_) => StatusProvider()),
+      ],
+      child: MyApp(),
+    ),
+  );
+}
+
+/// Runs App Check activation in the background — never blocks the UI.
+void _initAppCheck() async {
   try {
     await FirebaseAppCheck.instance.activate(
       androidProvider:
@@ -25,7 +52,6 @@ void main() async {
     );
 
     if (kDebugMode) {
-      // Get and print the debug token so you can register it in Firebase Console
       final token = await FirebaseAppCheck.instance.getToken();
       print('═══════════════════════════════════════════════════════');
       print('🔑 APP CHECK DEBUG TOKEN: $token');
@@ -40,16 +66,6 @@ void main() async {
       print('   Phone auth may fall back to reCAPTCHA flow.');
     }
   }
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => CallStateNotifier()),
-        ChangeNotifierProvider(create: (_) => StatusProvider()),
-      ],
-      child: MyApp(),
-    ),
-  );
 }
 
 class MyApp extends StatelessWidget {
@@ -57,23 +73,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isLoggedIn = _authService.isUserLoggedIn();
+
     return MaterialApp(
       title: 'GupShupGo',
       theme: AppTheme.light,
-      home: FutureBuilder<bool>(
-        future: _authService.isUserLoggedIn(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const _SplashScreen();
-          }
-
-          if (snapshot.data == true) {
-            return HomeScreen();
-          } else {
-            return LoginScreen();
-          }
-        },
-      ),
+      home: isLoggedIn ? HomeScreen() : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );
   }
