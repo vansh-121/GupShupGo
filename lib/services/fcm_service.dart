@@ -94,19 +94,9 @@ class FCMService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Step 3: Request CallKit-specific permissions (Android 13+ / 14+)
+    // Step 3: CallKit permissions (notification + full-screen intent)
+    // Handled upfront on LoginScreen — no need to request again here.
     // ═══════════════════════════════════════════════════════════════════════
-    try {
-      FlutterCallkitIncoming.requestNotificationPermission({
-        "rationaleMessagePermission":
-            "Notification permission is required to show incoming calls.",
-        "postNotificationMessageRequired":
-            "Please allow notification permission from settings to receive calls.",
-      });
-      FlutterCallkitIncoming.requestFullIntentPermission();
-    } catch (e) {
-      print('CallKit permission request error (non-fatal): $e');
-    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Step 4: Fetch and store FCM token (isolated — failure is recoverable)

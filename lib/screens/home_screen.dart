@@ -21,6 +21,7 @@ import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -41,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatService _chatService = ChatService();
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
+  final UpdateService _updateService = UpdateService();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -131,6 +133,9 @@ class _HomeScreenState extends State<HomeScreen>
             .markAllMessagesAsDeliveredOnAppOpen(_currentUserId!)
             .catchError((e) => print('Background delivery sync error: $e')),
       ]);
+
+      // ── Check for app updates via Google Play native API ──
+      _updateService.checkAndPromptUpdate();
 
       // ── Refresh user profile from Firestore in background ──
       _authService.refreshUserFromFirestore().then((freshUser) {
