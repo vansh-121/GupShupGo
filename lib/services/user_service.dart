@@ -113,6 +113,21 @@ class UserService {
     });
   }
 
+  /// Returns a real-time stream of a single user's profile (including
+  /// online status). Use this to keep UI in sync without manual refreshes.
+  Stream<UserModel?> getUserStream(String userId) {
+    return _firestore
+        .collection(_usersCollection)
+        .doc(userId)
+        .snapshots()
+        .map((doc) {
+      if (doc.exists) {
+        return UserModel.fromFirestore(doc);
+      }
+      return null;
+    });
+  }
+
   // Check if user exists by phone number
   Future<UserModel?> getUserByPhone(String phoneNumber) async {
     try {
@@ -135,17 +150,8 @@ class UserService {
   // Setup presence system (call when app opens)
   Future<void> setupPresence(String userId) async {
     try {
-      // Set user as online
+      // Set user as online (single write — no duplicate)
       await updateOnlineStatus(userId, true);
-
-      // Setup onDisconnect to set user offline when app closes
-      await _firestore
-          .collection(_usersCollection)
-          .doc(userId)
-          .update({
-        'isOnline': true,
-        'lastSeen': FieldValue.serverTimestamp(),
-      });
     } catch (e) {
       print('Error setting up presence: $e');
     }

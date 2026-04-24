@@ -181,13 +181,20 @@ class ChatService {
       batch.update(doc.reference, {'status': 'read'});
     }
 
-    // Reset unread count for current user and update lastMessageStatus
+    // Reset unread count. Only update lastMessageStatus if the last message
+    // was sent by the OTHER user — otherwise we'd incorrectly show blue ticks
+    // on our own outgoing message.
+    final chatRoomDoc =
+        await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).get();
+    final chatData = chatRoomDoc.data();
+    final updateMap = <String, dynamic>{'unreadCount.$currentUserId': 0};
+    if (chatData != null &&
+        chatData['lastMessageSenderId'] != currentUserId) {
+      updateMap['lastMessageStatus'] = MessageStatus.read.name;
+    }
     batch.update(
       _firestore.collection(_chatRoomsCollection).doc(chatRoomId),
-      {
-        'unreadCount.$currentUserId': 0,
-        'lastMessageStatus': MessageStatus.read.name,
-      },
+      updateMap,
     );
 
     await batch.commit();

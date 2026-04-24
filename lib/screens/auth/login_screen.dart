@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
@@ -63,6 +65,43 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _showEmailForm = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestAllPermissions();
+  }
+
+  /// Requests all permissions the app needs upfront so they're already
+  /// granted by the time the user makes or receives a call.
+  ///
+  /// Permissions requested:
+  /// - Camera & Microphone → video/audio calls
+  /// - Notifications → FCM push notifications (Android 13+)
+  /// - Phone → call state detection
+  /// - CallKit notification + full-screen intent → incoming call UI
+  Future<void> _requestAllPermissions() async {
+    // ── Standard Android permissions via permission_handler ──
+    await [
+      Permission.camera,
+      Permission.microphone,
+      Permission.notification,
+      Permission.phone,
+    ].request();
+
+    // ── CallKit-specific permissions (Android 13+ notification & 14+ full-screen) ──
+    try {
+      FlutterCallkitIncoming.requestNotificationPermission({
+        "rationaleMessagePermission":
+            "Notification permission is required to receive incoming calls.",
+        "postNotificationMessageRequired":
+            "Please allow notification permission from settings to receive calls.",
+      });
+      FlutterCallkitIncoming.requestFullIntentPermission();
+    } catch (e) {
+      print('CallKit permission request error (non-fatal): $e');
+    }
+  }
 
   @override
   void dispose() {

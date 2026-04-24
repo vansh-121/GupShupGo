@@ -8,6 +8,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class Contact {
@@ -47,9 +48,15 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
+  final UserService _userService = UserService();
 
   bool _isLoading = true;
   bool _isSending = false;
+  int _lastMessageCount = 0;
+
+  // ─── Online status state (real-time from Firestore) ───────────────
+  late bool _isContactOnline;
+  StreamSubscription? _onlineStatusSubscription;
 
   // ─── Typing indicator state ───────────────────────────────────────
   Timer? _typingTimer;
@@ -60,6 +67,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _isContactOnline = widget.contact.isOnline; // seed from passed-in value
     _initializeChat();
     _messageController.addListener(_onTextChanged);
   }
@@ -93,6 +101,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Start listening for the other user's typing status
       _listenToTypingStatus();
+
+      // Start listening for real-time online/offline status changes
+      _listenToOnlineStatus();
     } catch (e) {
       print('Error initializing chat: $e');
       setState(() {
@@ -105,6 +116,20 @@ class _ChatScreenState extends State<ChatScreen> {
   void _startReadReceiptListener() {
     // This will be called when new messages arrive via StreamBuilder
     // We'll mark them as read in the stream listener
+  }
+
+  // ─── Online status listener ────────────────────────────────────────
+
+  void _listenToOnlineStatus() {
+    _onlineStatusSubscription = _userService
+        .getUserStream(widget.contact.id)
+        .listen((user) {
+      if (mounted && user != null && _isContactOnline != user.isOnline) {
+        setState(() {
+          _isContactOnline = user.isOnline;
+        });
+      }
+    });
   }
 
   // ─── Typing indicator helpers ──────────────────────────────────────
@@ -519,7 +544,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         )
                       : null,
                 ),
-                if (widget.contact.isOnline)
+                if (_isContactOnline)
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -557,7 +582,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         fontStyle: FontStyle.italic,
                       ),
                     )
-                  else if (widget.contact.isOnline)
+                  else if (_isContactOnline)
                     Text(
                       'Online',
                       style: GoogleFonts.poppins(
@@ -584,24 +609,31 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            onSelected: (value) {},
+            onSelected: (value) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${value[0].toUpperCase()}${value.substring(1)} — coming soon!'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
             itemBuilder: (BuildContext context) {
               return [
                 PopupMenuItem(
-                    value: 'info',
+                    value: 'contact info',
                     child: Text('Contact info', style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'media',
+                    value: 'media & docs',
                     child: Text('Media & docs', style: GoogleFonts.poppins())),
                 PopupMenuItem(
                     value: 'search',
                     child: Text('Search', style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'mute',
+                    value: 'mute notifications',
                     child: Text('Mute notifications',
                         style: GoogleFonts.poppins())),
                 PopupMenuItem(
-                    value: 'block',
+                    value: 'block contact',
                     child: Text('Block contact',
                         style: GoogleFonts.poppins(color: AppColors.error))),
               ];
@@ -657,8 +689,13 @@ class _ChatScreenState extends State<ChatScreen> {
                         _markNewMessagesAsRead();
                       }
 
+                      // Only auto-scroll when genuinely new messages arrive,
+                      // not on status updates (sent→delivered→read).
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (messages.isNotEmpty) _scrollToBottom();
+                        if (messages.length > _lastMessageCount) {
+                          _scrollToBottom();
+                        }
+                        _lastMessageCount = messages.length;
                       });
 
                       return _buildMessagesList(messages);
@@ -791,6 +828,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _stopTyping();
     _typingTimer?.cancel();
     _typingSubscription?.cancel();
+    _onlineStatusSubscription?.cancel();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _scrollController.dispose();

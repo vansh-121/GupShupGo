@@ -1,6 +1,8 @@
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -46,6 +48,7 @@ class AuthService {
 
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
+      await _saveUserLocally(user);
 
       print('Setting up FCM...');
       try {
@@ -154,6 +157,7 @@ class AuthService {
 
       await _userService.createOrUpdateUser(user);
       await _saveUserIdLocally(userId);
+      await _saveUserLocally(user);
       await _fcmService.setupFCM(userId: userId);
       await _userService.setupPresence(userId);
 
@@ -232,6 +236,7 @@ class AuthService {
 
             await _userService.createOrUpdateUser(user);
             await _saveUserIdLocally(userId);
+            await _saveUserLocally(user);
             await _fcmService.setupFCM(userId: userId);
             await _userService.setupPresence(userId);
 
@@ -319,6 +324,7 @@ class AuthService {
 
       await _userService.createOrUpdateUser(user);
       await _saveUserIdLocally(userId);
+      await _saveUserLocally(user);
       try {
         await _fcmService.setupFCM(userId: userId);
       } catch (e) {
@@ -393,6 +399,7 @@ class AuthService {
 
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
+      await _saveUserLocally(user);
 
       print('Setting up FCM...');
       try {
@@ -483,6 +490,7 @@ class AuthService {
 
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
+      await _saveUserLocally(user);
 
       print('Setting up FCM...');
       try {
@@ -619,43 +627,80 @@ class AuthService {
     }
   }
 
-  // Check if user is logged in
-  Future<bool> isUserLoggedIn() async {
+  // Check if user is logged in (synchronous — uses cached SharedPreferences)
+  bool isUserLoggedIn() {
     User? user = getCurrentUser();
-    String? savedUserId = await _getSavedUserId();
+    String? savedUserId = _getSavedUserId();
     return user != null && savedUserId != null;
   }
 
-  // Get saved user from local storage
-  Future<UserModel?> getSavedUser() async {
+  // Get saved user — returns CACHED local copy instantly (no Firestore read).
+  // Call refreshUserFromFirestore() afterwards for a background sync.
+  UserModel? getSavedUser() {
     try {
-      String? userId = await _getSavedUserId();
-      if (userId != null) {
-        return await _userService.getUserById(userId);
-      }
-      return null;
+      String? userId = _getSavedUserId();
+      if (userId == null) return null;
+      return _getCachedUser();
     } catch (e) {
       print('Error getting saved user: $e');
       return null;
     }
   }
 
-  // Save user ID locally
-  Future<void> _saveUserIdLocally(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_id', userId);
+  /// Fetches the latest user profile from Firestore and updates the local cache.
+  /// Call this in the background after the UI is already visible.
+  Future<UserModel?> refreshUserFromFirestore() async {
+    try {
+      String? userId = _getSavedUserId();
+      if (userId == null) return null;
+
+      final user = await _userService.getUserById(userId);
+      if (user != null) {
+        await _saveUserLocally(user);
+      }
+      return user;
+    } catch (e) {
+      print('Error refreshing user from Firestore: $e');
+      return null;
+    }
   }
 
-  // Get saved user ID
-  Future<String?> _getSavedUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('user_id');
+  // Save user ID locally (uses pre-cached sharedPrefs from main.dart)
+  Future<void> _saveUserIdLocally(String userId) async {
+    await sharedPrefs.setString('user_id', userId);
+  }
+
+  // Cache the full UserModel as JSON in SharedPreferences
+  Future<void> _saveUserLocally(UserModel user) async {
+    await sharedPrefs.setString('cached_user', jsonEncode(user.toMap()));
+  }
+
+  /// Cache user profile after any successful sign-in / sign-up.
+  /// Call this after _saveUserIdLocally for complete local caching.
+  Future<void> cacheUser(UserModel user) => _saveUserLocally(user);
+
+  // Read cached user from SharedPreferences (synchronous, no network)
+  UserModel? _getCachedUser() {
+    final json = sharedPrefs.getString('cached_user');
+    if (json == null) return null;
+    try {
+      final map = jsonDecode(json) as Map<String, dynamic>;
+      return UserModel.fromMap(map, map['id'] ?? '');
+    } catch (e) {
+      print('Error parsing cached user: $e');
+      return null;
+    }
+  }
+
+  // Get saved user ID (synchronous — uses pre-cached sharedPrefs)
+  String? _getSavedUserId() {
+    return sharedPrefs.getString('user_id');
   }
 
   // Clear user ID locally
   Future<void> _clearUserIdLocally() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('user_id');
+    await sharedPrefs.remove('user_id');
+    await sharedPrefs.remove('cached_user');
   }
 
   // Update user profile
