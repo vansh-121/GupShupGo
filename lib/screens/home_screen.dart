@@ -48,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen>
   List<UserModel> _recentContacts = [];
   StreamSubscription? _recentContactsSub;
   bool _isRefreshingUsers = false; // debounce for background user refresh
+  List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
 
   @override
   void initState() {
@@ -307,105 +308,146 @@ class _HomeScreenState extends State<HomeScreen>
           }
         } else {
           chatRooms = chatSnapshot.data ?? [];
-          // ── Cache the fresh data for next launch ──
-          _chatCacheService.cacheChatRooms(chatRooms);
-          // ── Refresh user profiles (online status) in background ──
-          _refreshChatUsersInBackground(chatRooms);
+          // ── Cache only when data actually changes (avoids redundant I/O
+          //    on parent rebuilds that don't carry new stream data) ──
+          if (chatRooms != _lastCachedRooms) {
+            _lastCachedRooms = chatRooms;
+            _chatCacheService.cacheChatRooms(chatRooms);
+            // ── Refresh user profiles (online status) in background ──
+            _refreshChatUsersInBackground(chatRooms);
+          }
         }
 
         if (chatRooms.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 96,
-                    height: 96,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryLt,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.chat_bubble_outline_rounded,
-                      size: 48,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'No chats yet',
-                    style: GoogleFonts.poppins(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textHigh,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Start a conversation by tapping the button below',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      color: AppColors.textMid,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ContactsScreen(
-                            currentUserId: _currentUserId!,
-                            currentUserName: _currentUser?.name,
+          return RefreshIndicator(
+            onRefresh: () => _manualRefresh(chatRooms),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(40),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 96,
+                          height: 96,
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryLt,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.chat_bubble_outline_rounded,
+                            size: 48,
+                            color: AppColors.primary,
                           ),
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('New chat'),
+                        const SizedBox(height: 24),
+                        Text(
+                          'No chats yet',
+                          style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textHigh,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Start a conversation by tapping the button below',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            color: AppColors.textMid,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ContactsScreen(
+                                  currentUserId: _currentUserId!,
+                                  currentUserName: _currentUser?.name,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('New chat'),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           );
         }
 
-        return ListView.builder(
-          itemCount: chatRooms.length,
-          itemBuilder: (context, index) {
-            final chatRoom = chatRooms[index];
-            final otherUserId = chatRoom.participants
-                .firstWhere((id) => id != _currentUserId, orElse: () => '');
+        return RefreshIndicator(
+          onRefresh: () => _manualRefresh(chatRooms),
+          child: ListView.builder(
+            itemCount: chatRooms.length,
+            itemBuilder: (context, index) {
+              final chatRoom = chatRooms[index];
+              final otherUserId = chatRoom.participants
+                  .firstWhere((id) => id != _currentUserId, orElse: () => '');
 
-            if (otherUserId.isEmpty) return SizedBox.shrink();
+              if (otherUserId.isEmpty) return SizedBox.shrink();
 
-            // ── Try cached user first (instant, no Firestore) ──
-            final cachedUser = _chatCacheService.getCachedUser(otherUserId);
-            if (cachedUser != null) {
-              final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
-              return _buildChatRoomItem(cachedUser, chatRoom, unreadCount);
-            }
-
-            // ── No cache yet — fetch once and cache for next time ──
-            return FutureBuilder<UserModel?>(
-              future: _fetchAndCacheUser(otherUserId),
-              builder: (context, userSnapshot) {
-                if (!userSnapshot.hasData) {
-                  return _buildChatRoomPlaceholder();
-                }
-
-                final user = userSnapshot.data!;
+              // ── Try cached user first (instant, no Firestore) ──
+              final cachedUser = _chatCacheService.getCachedUser(otherUserId);
+              if (cachedUser != null) {
                 final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
-                return _buildChatRoomItem(user, chatRoom, unreadCount);
-              },
-            );
-          },
+                return _buildChatRoomItem(cachedUser, chatRoom, unreadCount);
+              }
+
+              // ── No cache yet — fetch once and cache for next time ──
+              return FutureBuilder<UserModel?>(
+                future: _fetchAndCacheUser(otherUserId),
+                builder: (context, userSnapshot) {
+                  if (!userSnapshot.hasData) {
+                    return _buildChatRoomPlaceholder();
+                  }
+
+                  final user = userSnapshot.data!;
+                  final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+                  return _buildChatRoomItem(user, chatRoom, unreadCount);
+                },
+              );
+            },
+          ),
         );
       },
     );
+  }
+
+  /// Called by RefreshIndicator — re-fetches all user profiles and
+  /// re-triggers cache on the next stream emission.
+  Future<void> _manualRefresh(List<ChatRoom> chatRooms) async {
+    // Invalidate cache guard so next stream data re-runs caching logic
+    _lastCachedRooms = null;
+    // Re-fetch all user profiles in parallel
+    final userIds = <String>{};
+    for (final room in chatRooms) {
+      for (final id in room.participants) {
+        if (id != _currentUserId) userIds.add(id);
+      }
+    }
+    try {
+      final users = await Future.wait(
+        userIds.map((id) => _userService.getUserById(id)),
+      );
+      for (final user in users) {
+        if (user != null) _chatCacheService.cacheUser(user);
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      print('Manual refresh error: $e');
+    }
   }
 
   /// Fetches a user from Firestore and caches it locally so subsequent

@@ -20,6 +20,19 @@ exports.sendCallNotification = onRequest(
       return;
     }
 
+    // Verify Firebase Auth ID token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return;
+    }
+
     try {
       const { calleeId, callerId, channelId, isAudioOnly } = req.body;
 
@@ -103,6 +116,19 @@ exports.sendMessageNotification = onRequest(
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    // Verify Firebase Auth ID token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
       return;
     }
 

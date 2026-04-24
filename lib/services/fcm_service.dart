@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -152,15 +153,28 @@ class FCMService {
     }
   }
 
+  /// Returns the current user's Firebase ID token, or null if not signed in.
+  Future<String?> _getIdToken() async {
+    try {
+      return await FirebaseAuth.instance.currentUser?.getIdToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Send call notification via Cloud Function (no service account needed).
   Future<void> sendCallNotification(
       String calleeId, String callerId, String channelId,
       {bool isAudioOnly = false}) async {
     try {
       print('Sending call notification to $calleeId via Cloud Function');
+      final idToken = await _getIdToken();
       final response = await http.post(
         Uri.parse(_callFunctionUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (idToken != null) 'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'calleeId': calleeId,
           'callerId': callerId,
@@ -186,9 +200,13 @@ class FCMService {
     required String chatRoomId,
   }) async {
     try {
+      final idToken = await _getIdToken();
       final response = await http.post(
         Uri.parse(_messageFunctionUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (idToken != null) 'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'receiverId': receiverId,
           'senderId': senderId,
