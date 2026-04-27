@@ -67,6 +67,7 @@ dependencies:
 
   # Media picker & video player
   image_picker: ^1.0.7
+  url_launcher: ^6.2.1
   video_player: ^2.8.3
 
   # UI components

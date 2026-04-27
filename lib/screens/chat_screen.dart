@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -54,6 +59,23 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isSending = false;
   int _lastMessageCount = 0;
 
+  // ─── Search state ─────────────────────────────────────────────────
+  bool _isSearchMode = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  // ─── Mute state ───────────────────────────────────────────────────
+  final SettingsService _settingsService = SettingsService();
+  late bool _isMuted;
+
+  // ─── Image picker ─────────────────────────────────────────────────
+  final ImagePicker _imagePicker = ImagePicker();
+  bool _isUploadingImage = false;
+
+  // ─── Block state ──────────────────────────────────────────────────
+  bool _isBlocked = false;      // current user blocked the contact
+  bool _isBlockedByContact = false; // contact blocked the current user
+
   // ─── Online status state (real-time from Firestore) ───────────────
   late bool _isContactOnline;
   StreamSubscription? _onlineStatusSubscription;
@@ -68,12 +90,18 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _isContactOnline = widget.contact.isOnline; // seed from passed-in value
+    final chatRoomId = _chatService.getChatRoomId(
+        widget.currentUserId, widget.contact.id);
+    _isMuted = _settingsService.isChatMuted(chatRoomId);
     _initializeChat();
     _messageController.addListener(_onTextChanged);
   }
 
   Future<void> _initializeChat() async {
     try {
+      // ── Check block status first ───────────────────────────────────
+      await _checkBlockStatus();
+
       // Ensure chat room exists
       await _chatService.getOrCreateChatRoom(
         widget.currentUserId,
@@ -81,16 +109,20 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       // Mark messages as delivered first (in case they were sent)
-      await _chatService.markMessagesAsDelivered(
-        widget.currentUserId,
-        widget.contact.id,
-      );
+      if (!_isBlockedByContact) {
+        await _chatService.markMessagesAsDelivered(
+          widget.currentUserId,
+          widget.contact.id,
+        );
+      }
 
       // Mark messages as read when opening chat (user is viewing them)
-      await _chatService.markMessagesAsRead(
-        widget.currentUserId,
-        widget.contact.id,
-      );
+      if (_settingsService.showReadReceipts && !_isBlocked) {
+        await _chatService.markMessagesAsRead(
+          widget.currentUserId,
+          widget.contact.id,
+        );
+      }
 
       setState(() {
         _isLoading = false;
@@ -99,8 +131,10 @@ class _ChatScreenState extends State<ChatScreen> {
       // Start listening for new messages and mark them as read immediately
       _startReadReceiptListener();
 
-      // Start listening for the other user's typing status
-      _listenToTypingStatus();
+      // Start listening for the other user's typing status (skip if blocked)
+      if (!_isBlocked && !_isBlockedByContact) {
+        _listenToTypingStatus();
+      }
 
       // Start listening for real-time online/offline status changes
       _listenToOnlineStatus();
@@ -109,6 +143,34 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  /// Checks if either user has blocked the other.
+  Future<void> _checkBlockStatus() async {
+    try {
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.currentUserId)
+          .get();
+      final theirDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.contact.id)
+          .get();
+
+      final myBlocked =
+          List<String>.from(myDoc.data()?['blockedUsers'] ?? []);
+      final theirBlocked =
+          List<String>.from(theirDoc.data()?['blockedUsers'] ?? []);
+
+      if (mounted) {
+        setState(() {
+          _isBlocked = myBlocked.contains(widget.contact.id);
+          _isBlockedByContact = theirBlocked.contains(widget.currentUserId);
+        });
+      }
+    } catch (e) {
+      print('Error checking block status: $e');
     }
   }
 
@@ -124,10 +186,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _onlineStatusSubscription = _userService
         .getUserStream(widget.contact.id)
         .listen((user) {
-      if (mounted && user != null && _isContactOnline != user.isOnline) {
-        setState(() {
-          _isContactOnline = user.isOnline;
-        });
+      if (mounted && user != null) {
+        final effectiveOnline =
+            (_isBlocked || _isBlockedByContact) ? false : user.isOnline;
+        if (_isContactOnline != effectiveOnline) {
+          setState(() {
+            _isContactOnline = effectiveOnline;
+          });
+        }
       }
     });
   }
@@ -181,6 +247,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // Call this when new messages arrive while chat is open
   Future<void> _markNewMessagesAsRead() async {
+    // Only send read receipts if the user has enabled them
+    if (!_settingsService.showReadReceipts) return;
     await _chatService.markMessagesAsRead(
       widget.currentUserId,
       widget.contact.id,
@@ -188,6 +256,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initiateVideoCall() async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot call this contact')),
+      );
+      return;
+    }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Cannot call yourself')),
@@ -226,6 +300,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initiateAudioCall() async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot call this contact')),
+      );
+      return;
+    }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Cannot call yourself')),
@@ -268,6 +348,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _isSending) return;
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send messages to this contact')),
+      );
+      return;
+    }
 
     setState(() {
       _isSending = true;
@@ -393,13 +479,57 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              message.text,
-              style: GoogleFonts.poppins(
-                color: isMe ? Colors.white : AppColors.textHigh,
-                fontSize: 14.5,
+            // ── Image message ─────────────────────────────────────
+            if (message.type == MessageType.image &&
+                message.mediaUrl != null) ...[
+              GestureDetector(
+                onTap: () => _showFullScreenImage(
+                    message.mediaUrl!, message.text),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: 220,
+                      maxHeight: 280,
+                    ),
+                    child: Image.network(
+                      message.mediaUrl!,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (_, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          width: 200,
+                          height: 150,
+                          color: Colors.grey[200],
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary),
+                          ),
+                        );
+                      },
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 200,
+                        height: 100,
+                        color: Colors.grey[200],
+                        child: const Center(
+                          child: Icon(Icons.broken_image_rounded,
+                              color: AppColors.textLow),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(height: 4),
+            ] else
+              Text(
+                message.text,
+                style: GoogleFonts.poppins(
+                  color: isMe ? Colors.white : AppColors.textHigh,
+                  fontSize: 14.5,
+                ),
+              ),
             const SizedBox(height: 3),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -420,6 +550,28 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showFullScreenImage(String imageUrl, String caption) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: Text(caption,
+                style: const TextStyle(fontSize: 14, color: Colors.white70)),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              child: Image.network(imageUrl),
+            ),
+          ),
         ),
       ),
     );
@@ -479,12 +631,37 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    // ── Filter by search query when in search mode ────────────────────
+    final displayMessages = _isSearchMode && _searchQuery.isNotEmpty
+        ? messages
+            .where((m) => m.text.toLowerCase().contains(_searchQuery))
+            .toList()
+        : messages;
+
+    if (_isSearchMode && _searchQuery.isNotEmpty && displayMessages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.search_off_rounded,
+                size: 48, color: AppColors.textLow),
+            const SizedBox(height: 12),
+            Text(
+              'No messages found',
+              style: GoogleFonts.poppins(
+                  color: AppColors.textMid, fontSize: 14),
+            ),
+          ],
+        ),
+      );
+    }
+
     // Group messages by date
     List<Widget> messageWidgets = [];
     String? lastDate;
 
-    for (int i = 0; i < messages.length; i++) {
-      final message = messages[i];
+    for (int i = 0; i < displayMessages.length; i++) {
+      final message = displayMessages[i];
       final messageDate = _formatMessageDate(message.timestamp);
 
       if (lastDate != messageDate) {
@@ -597,48 +774,77 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.call_rounded),
-            onPressed: _initiateAudioCall,
-            tooltip: 'Audio Call',
-          ),
-          IconButton(
-            icon: const Icon(Icons.videocam_rounded),
-            onPressed: _initiateVideoCall,
-            tooltip: 'Video Call',
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${value[0].toUpperCase()}${value.substring(1)} — coming soon!'),
-                  duration: const Duration(seconds: 2),
+          if (_isSearchMode)
+            // ── Search bar inline ─────────────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Search messages...',
+                    hintStyle: GoogleFonts.poppins(
+                        color: AppColors.textLow, fontSize: 14),
+                    border: InputBorder.none,
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () {
+                        setState(() {
+                          _isSearchMode = false;
+                          _searchQuery = '';
+                          _searchController.clear();
+                        });
+                      },
+                    ),
+                  ),
+                  style: GoogleFonts.poppins(
+                      fontSize: 14, color: AppColors.textHigh),
+                  onChanged: (query) {
+                    setState(() => _searchQuery = query.trim().toLowerCase());
+                  },
                 ),
-              );
-            },
-            itemBuilder: (BuildContext context) {
-              return [
-                PopupMenuItem(
-                    value: 'contact info',
-                    child: Text('Contact info', style: GoogleFonts.poppins())),
-                PopupMenuItem(
-                    value: 'media & docs',
-                    child: Text('Media & docs', style: GoogleFonts.poppins())),
-                PopupMenuItem(
-                    value: 'search',
-                    child: Text('Search', style: GoogleFonts.poppins())),
-                PopupMenuItem(
-                    value: 'mute notifications',
-                    child: Text('Mute notifications',
-                        style: GoogleFonts.poppins())),
-                PopupMenuItem(
-                    value: 'block contact',
-                    child: Text('Block contact',
-                        style: GoogleFonts.poppins(color: AppColors.error))),
-              ];
-            },
-          ),
+              ),
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.call_rounded),
+              onPressed: _initiateAudioCall,
+              tooltip: 'Audio Call',
+            ),
+            IconButton(
+              icon: const Icon(Icons.videocam_rounded),
+              onPressed: _initiateVideoCall,
+              tooltip: 'Video Call',
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: _onMenuItemSelected,
+              itemBuilder: (BuildContext context) {
+                return [
+                  PopupMenuItem(
+                      value: 'contact info',
+                      child:
+                          Text('Contact info', style: GoogleFonts.poppins())),
+                  PopupMenuItem(
+                      value: 'search',
+                      child: Text('Search', style: GoogleFonts.poppins())),
+                  PopupMenuItem(
+                      value: 'mute notifications',
+                      child: Text(
+                          _isMuted
+                              ? 'Unmute notifications'
+                              : 'Mute notifications',
+                          style: GoogleFonts.poppins())),
+                  PopupMenuItem(
+                      value: 'block contact',
+                      child: Text('Block contact',
+                          style:
+                              GoogleFonts.poppins(color: AppColors.error))),
+                ];
+              },
+            ),
+          ],
         ],
       ),
       body: _isLoading
@@ -702,7 +908,70 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
                 ),
-                // ── Message input bar ────────────────────────────────
+                // ── Message input bar (or blocked banner) ───────────
+                if (_isBlocked || _isBlockedByContact)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      border: Border(
+                        top: BorderSide(
+                            color: AppColors.divider, width: 1),
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.block_rounded,
+                              color: AppColors.textLow, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isBlocked
+                                ? 'You blocked this contact'
+                                : 'You can\'t send messages to this contact',
+                            style: GoogleFonts.poppins(
+                              color: AppColors.textMid,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (_isBlocked) ...[
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () async {
+                                await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(widget.currentUserId)
+                                    .update({
+                                  'blockedUsers': FieldValue.arrayRemove(
+                                      [widget.contact.id]),
+                                });
+                                await _checkBlockStatus();
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          '${widget.contact.name} unblocked'),
+                                    ),
+                                  );
+                                }
+                              },
+                              child: Text(
+                                'Unblock',
+                                style: GoogleFonts.poppins(
+                                  color: AppColors.primary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  )
+                else
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -716,16 +985,22 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.attach_file_rounded,
-                              color: AppColors.textMid, size: 22),
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Attachments coming soon!')),
-                            );
-                          },
-                        ),
+                        _isUploadingImage
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.primary),
+                                ),
+                              )
+                            : IconButton(
+                                icon: const Icon(Icons.attach_file_rounded,
+                                    color: AppColors.textMid, size: 22),
+                                onPressed: _pickAndSendImage,
+                              ),
                         Expanded(
                           child: Container(
                             decoration: BoxDecoration(
@@ -822,6 +1097,223 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  // ─── Menu action handlers ──────────────────────────────────────────
+
+  void _onMenuItemSelected(String value) {
+    switch (value) {
+      case 'contact info':
+        _showContactInfo();
+        break;
+      case 'search':
+        setState(() => _isSearchMode = true);
+        break;
+      case 'mute notifications':
+        _toggleMute();
+        break;
+      case 'block contact':
+        _blockContact();
+        break;
+    }
+  }
+
+  // ─── Contact info bottom sheet ─────────────────────────────────────
+  void _showContactInfo() {
+    _userService.getUserById(widget.contact.id).then((user) {
+      if (!mounted || user == null) return;
+
+      final avatarUrl = user.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=256';
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (_) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              CircleAvatar(
+                radius: 48,
+                backgroundImage: NetworkImage(avatarUrl),
+                backgroundColor: AppColors.primaryLt,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                user.name,
+                style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textHigh),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                user.about ?? 'Hey there! I am using GupShupGo.',
+                style: GoogleFonts.poppins(
+                    fontSize: 13, color: AppColors.textMid),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Divider(),
+              if (user.phoneNumber != null)
+                ListTile(
+                  leading: const Icon(Icons.phone_outlined,
+                      color: AppColors.primary),
+                  title: Text(user.phoneNumber!,
+                      style: GoogleFonts.poppins(fontSize: 14)),
+                  subtitle: Text('Phone',
+                      style: GoogleFonts.poppins(
+                          fontSize: 11, color: AppColors.textMid)),
+                ),
+              if (user.email != null)
+                ListTile(
+                  leading: const Icon(Icons.email_outlined,
+                      color: Colors.orange),
+                  title: Text(user.email!,
+                      style: GoogleFonts.poppins(fontSize: 14)),
+                  subtitle: Text('Email',
+                      style: GoogleFonts.poppins(
+                          fontSize: 11, color: AppColors.textMid)),
+                ),
+              ListTile(
+                leading: Icon(
+                  user.isOnline ? Icons.circle : Icons.circle_outlined,
+                  color: user.isOnline ? AppColors.online : AppColors.textLow,
+                  size: 16,
+                ),
+                title: Text(
+                  user.isOnline ? 'Online' : 'Offline',
+                  style: GoogleFonts.poppins(fontSize: 14),
+                ),
+                subtitle: Text('Status',
+                    style: GoogleFonts.poppins(
+                        fontSize: 11, color: AppColors.textMid)),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
+  // ─── Mute / Unmute ─────────────────────────────────────────────────
+  void _toggleMute() {
+    final chatRoomId = _chatService.getChatRoomId(
+        widget.currentUserId, widget.contact.id);
+    _settingsService.toggleMuteChat(chatRoomId);
+    setState(() => _isMuted = !_isMuted);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            _isMuted ? 'Notifications muted' : 'Notifications unmuted'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ─── Block contact ─────────────────────────────────────────────────
+  Future<void> _blockContact() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Block ${widget.contact.name}?'),
+        content: Text(
+          'Blocked contacts cannot send you messages or call you. '
+          'You can unblock them from Settings → Privacy → Blocked contacts.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  const Text('Block', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.currentUserId)
+          .update({
+        'blockedUsers': FieldValue.arrayUnion([widget.contact.id]),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${widget.contact.name} blocked')),
+        );
+        Navigator.of(context).pop(); // Exit the chat
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to block: $e')),
+        );
+      }
+    }
+  }
+
+  // ─── Image attachment ──────────────────────────────────────────────
+  Future<void> _pickAndSendImage() async {
+    try {
+      final XFile? picked = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+      );
+      if (picked == null) return;
+
+      setState(() => _isUploadingImage = true);
+
+      // Upload to Firebase Storage
+      final chatRoomId = _chatService.getChatRoomId(
+          widget.currentUserId, widget.contact.id);
+      final fileName =
+          '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('chat_images/$chatRoomId/$fileName');
+
+      await ref.putFile(File(picked.path));
+      final imageUrl = await ref.getDownloadURL();
+
+      // Send as an image message
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        text: '📷 Photo',
+        senderName: widget.currentUserName,
+        type: MessageType.image,
+        mediaUrl: imageUrl,
+      );
+
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send image: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
   @override
   void dispose() {
     // Clear typing status so the other user doesn't see a stale indicator
@@ -831,6 +1323,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _onlineStatusSubscription?.cancel();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
+    _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }

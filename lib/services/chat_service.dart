@@ -113,21 +113,42 @@ class ChatService {
     return message;
   }
 
-  // Get messages stream for a chat room
+  // Get messages stream for a chat room.
+  // Respects the per-user `clearedAt` timestamp written by "Clear all chats"
+  // so only messages AFTER the clear time are shown to this user.
   Stream<List<MessageModel>> getMessages(
       String currentUserId, String otherUserId) {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
+    // Combine the chatRoom doc stream (for clearedAt) with the messages stream
     return _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
-        .collection(_messagesCollection)
-        .orderBy('timestamp', descending: false)
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => MessageModel.fromFirestore(doc))
-          .toList();
+        .asyncExpand((chatRoomSnap) {
+      DateTime? clearedAt;
+      if (chatRoomSnap.exists) {
+        final data = chatRoomSnap.data();
+        final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
+        final ts = clearedAtMap?[currentUserId];
+        if (ts is Timestamp) {
+          clearedAt = ts.toDate();
+        }
+      }
+
+      return _firestore
+          .collection(_chatRoomsCollection)
+          .doc(chatRoomId)
+          .collection(_messagesCollection)
+          .orderBy('timestamp', descending: false)
+          .snapshots()
+          .map((snapshot) {
+        return snapshot.docs
+            .map((doc) => MessageModel.fromFirestore(doc))
+            .where((msg) =>
+                clearedAt == null || msg.timestamp.isAfter(clearedAt!))
+            .toList();
+      });
     });
   }
 
@@ -281,15 +302,35 @@ class ChatService {
     }
   }
 
-  // Get chat rooms for a user
+  // Get chat rooms for a user.
+  // Hides chats the user has cleared (via "Clear all chats") unless a new
+  // message arrived after the clear timestamp — in that case the chat
+  // reappears automatically (WhatsApp behaviour).
   Stream<List<ChatRoom>> getChatRooms(String userId) {
     return _firestore
         .collection(_chatRoomsCollection)
         .where('participants', arrayContains: userId)
         .snapshots()
         .map((snapshot) {
-      List<ChatRoom> chatRooms =
-          snapshot.docs.map((doc) => ChatRoom.fromFirestore(doc)).toList();
+      List<ChatRoom> chatRooms = [];
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final chatRoom = ChatRoom.fromMap(data, doc.id);
+
+        // Check per-user clearedAt timestamp
+        final clearedAtMap = data['clearedAt'] as Map<String, dynamic>?;
+        if (clearedAtMap != null && clearedAtMap[userId] != null) {
+          final clearedAt = (clearedAtMap[userId] as Timestamp).toDate();
+          // Hide if no messages exist after clear time
+          if (chatRoom.lastMessageTime == null ||
+              !chatRoom.lastMessageTime!.isAfter(clearedAt)) {
+            continue; // skip this chat room
+          }
+        }
+
+        chatRooms.add(chatRoom);
+      }
 
       // Sort locally to handle null lastMessageTime
       chatRooms.sort((a, b) {
