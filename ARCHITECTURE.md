@@ -1,4 +1,4 @@
-# System Architecture - WhatsApp-Like Calling
+# System Architecture — GupShupGo
 
 ## 🏗️ Architecture Overview
 
@@ -762,11 +762,294 @@ match /statuses/{userId}/{allPaths=**} {
 
 ### Performance Optimizations
 
-1. **Image Compression**: Max 1920x1920, 80% quality
-2. **Video Limits**: 30 seconds max recording
-3. **Lazy Loading**: Only load active statuses (last 24h)
-4. **Caching**: Video player caches loaded videos
-5. **Auto-cleanup**: Expired statuses filtered client-side
+
+## ☁️ Cloud Functions Architecture
+
+FCM notifications are sent **server-side** via Firebase Cloud Functions — no service account is bundled in the client app.
+
+### Notification Flow (Calls)
+
+```
+Caller Device                Cloud Function              Callee Device
+     │                            │                           │
+     │ 1. POST /sendCallNotif     │                           │
+     │   + Bearer <ID Token>      │                           │
+     ├───────────────────────────>│                           │
+     │                            │ 2. Verify ID token        │
+     │                            │    Fetch callee fcmToken  │
+     │                            │    Fetch caller name/photo│
+     │                            │                           │
+     │                            │ 3. Send DATA-ONLY FCM     │
+     │                            ├──────────────────────────>│
+     │                            │   (no "notification" key) │
+     │                            │                           │
+     │                            │                      ┌────┴────┐
+     │                            │                      │ CallKit │
+     │                            │                      │ shows   │
+     │                            │                      │ native  │
+     │                            │                      │ call UI │
+     │                            │                      └─────────┘
+```
+
+> **Key design decision:** Call notifications use DATA-ONLY messages
+> (no `notification` block). This ensures the Dart background handler
+> fires on every app state (foreground, background, killed), allowing
+> CallKit to show the native full-screen call UI.
+
+### Notification Flow (Messages)
+
+```
+Sender Device                Cloud Function              Receiver Device
+     │                            │                           │
+     │ POST /sendMessageNotif     │                           │
+     │  + Bearer <ID Token>       │                           │
+     ├───────────────────────────>│                           │
+     │                            │ Verify token              │
+     │                            │ Fetch receiver fcmToken   │
+     │                            │                           │
+     │                            │ Send FCM with             │
+     │                            │ notification + data       │
+     │                            ├──────────────────────────>│
+     │                            │                           │
+     │                            │                      System tray
+     │                            │                      notification
+```
 
 ---
 
+## 📲 CallKit Integration
+
+### Cold-Start Call Handling
+
+```
+User taps "Accept" on lock screen
+     │
+     ▼
+┌─────────────────────┐
+│ App process starts  │
+│ (was killed)        │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ main() runs:        │
+│ 1. Firebase init    │
+│ 2. SharedPrefs init │
+│ 3. CallKit listener │
+│ 4. runApp()         │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ addPostFrameCallback│
+│ checks activeCalls()│
+└──────────┬──────────┘
+           │
+     ┌─────┴──────┐
+     │            │
+  No calls    Pending call
+     │            │
+     ▼            ▼
+  Normal     ┌────────────────┐
+  home       │ End CallKit    │
+  screen     │ Navigate to    │
+             │ CallScreen     │
+             └────────────────┘
+```
+
+---
+
+## ⚙️ Settings & Caching Architecture
+
+### Settings Service (SharedPreferences)
+
+```
+┌────────────────────────────────────────────────────┐
+│            SettingsService (Singleton)               │
+├────────────────────────────────────────────────────┤
+│                                                      │
+│  Notification Prefs:          Privacy Prefs:         │
+│  ├── messageNotifications     ├── showReadReceipts   │
+│  ├── groupNotifications       └── showLastSeen       │
+│  └── callNotifications                               │
+│                                                      │
+│  Muted Chats:                                        │
+│  ├── mutedChatIds: Set<String>                       │
+│  ├── isChatMuted(chatRoomId)                         │
+│  ├── muteChat(chatRoomId)                            │
+│  └── unmuteChat(chatRoomId)                          │
+│                                                      │
+│  Storage: SharedPreferences (survives app restarts)  │
+└────────────────────────────────────────────────────┘
+```
+
+### Chat Cache Service
+
+```
+App Launch
+    │
+    ▼
+┌───────────────────┐     ┌──────────────────┐
+│ Load cached chat  │────>│ SharedPreferences │
+│ rooms from disk   │     │ (JSON)            │
+└────────┬──────────┘     └──────────────────┘
+         │
+         ▼
+┌───────────────────┐
+│ Render chat list  │  ← Instant, no network delay
+│ immediately       │
+└────────┬──────────┘
+         │
+         ▼  (async)
+┌───────────────────┐     ┌──────────────────┐
+│ Firestore stream  │────>│ Live data arrives │
+│ starts            │     │ replaces cache    │
+└───────────────────┘     └──────────────────┘
+
+User Cache:
+  _userCache: Map<String, UserModel>
+  - Avoids N Firestore reads per frame
+  - Persisted to SharedPreferences
+  - Loaded from disk on startup
+```
+
+---
+
+## 🔄 In-App Update Flow
+
+```
+App starts → HomeScreen.initState
+    │
+    ▼
+┌──────────────────────────┐
+│ UpdateService             │
+│ .checkAndPromptUpdate()  │
+└───────────┬──────────────┘
+            │
+            ▼
+┌──────────────────────────┐
+│ InAppUpdate.checkForUpdate│
+└───────────┬──────────────┘
+            │
+      ┌─────┴──────┐
+      │            │
+  Up to date   Update available
+      │            │
+      ▼            ├── immediateAllowed? ──> Full-screen Play Store UI
+   (no-op)         │                         (user MUST update)
+                   │
+                   └── flexibleAllowed? ──> Background download
+                                            + snackbar install
+```
+
+> Only works when installed from Google Play.
+> `ERROR_API_NOT_AVAILABLE` is expected during debug builds.
+
+---
+
+## 🗂️ Complete Database Schema
+
+### users Collection
+
+```
+Document ID: {userId}
+Fields:
+  id: string
+  name: string
+  phoneNumber: string? (optional)
+  email: string? (optional)
+  about: string? (optional)
+  photoUrl: string? (optional)
+  fcmToken: string
+  isOnline: boolean
+  lastSeen: timestamp
+  createdAt: timestamp
+  blockedUsers: array<string> (optional)
+```
+
+### chatRooms Collection
+
+```
+Document ID: {chatRoomId}
+Fields:
+  participants: array<string>
+  lastMessage: string?
+  lastMessageTime: timestamp?
+  lastMessageSenderId: string?
+  lastMessageStatus: string? (sent/delivered/read)
+  unreadCount: map<userId, int>
+  clearedAt: map<userId, timestamp>  ← per-user chat clearing
+
+  Subcollection: messages/{messageId}
+    senderId: string
+    text: string?
+    imageUrl: string?
+    timestamp: timestamp
+    status: string (sent/delivered/read)
+    type: string (text/image)
+```
+
+### calls Collection
+
+```
+Document ID: {callId}
+Fields:
+  callerId: string
+  calleeId: string
+  channelId: string
+  status: string (ringing/connected/ended/missed)
+  isAudioOnly: boolean
+  startedAt: timestamp
+```
+
+### callLogs Collection
+
+```
+Document ID: {logId}
+Fields:
+  callerId: string
+  calleeId: string
+  callerName: string
+  calleeName: string
+  duration: int (seconds)
+  type: string (audio/video)
+  status: string (answered/missed/cancelled)
+  timestamp: timestamp
+```
+
+### statuses Collection
+
+```
+Document ID: {userId}
+Fields:
+  userId: string
+  userName: string
+  userPhotoUrl: string?
+  lastUpdated: timestamp
+  statusItems: array<StatusItem>
+
+StatusItem:
+  id: string
+  type: "text" | "image" | "video"
+  text: string? (for text)
+  imageUrl: string? (for image)
+  videoUrl: string? (for video)
+  caption: string?
+  backgroundColor: string? (for text)
+  createdAt: timestamp
+  viewedBy: array<string>
+```
+
+---
+
+**This architecture supports:**
+- ✅ Unlimited concurrent users
+- ✅ Real-time presence updates
+- ✅ Secure server-side notification delivery
+- ✅ Native call UI via CallKit
+- ✅ Cold-start call handling
+- ✅ Instant chat list rendering via local cache
+- ✅ Per-user privacy controls
+- ✅ Mandatory in-app updates
+- ✅ Offline capability
+- ✅ Scalable to millions of users
