@@ -524,7 +524,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.0',
+              subtitle: 'Version 1.0.1',
               onTap: () => _showAboutDialog(),
             ),
           ]),
