@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
+import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
@@ -49,6 +50,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => CallStateNotifier()),
         ChangeNotifierProvider(create: (_) => StatusProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: MyApp(),
     ),
@@ -237,11 +239,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isLoggedIn = _authService.isUserLoggedIn();
+    final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
       navigatorKey: navigatorKey, // Enables navigation from CallKit handler
       title: 'GupShupGo',
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeProvider.themeMode,
       home: isLoggedIn ? HomeScreen() : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );

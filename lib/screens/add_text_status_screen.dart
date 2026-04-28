@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/status_service.dart';
-import 'package:video_chat_app/theme/app_theme.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
   final String userId;

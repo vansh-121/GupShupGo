@@ -146,7 +146,7 @@ class ChatService {
         return snapshot.docs
             .map((doc) => MessageModel.fromFirestore(doc))
             .where((msg) =>
-                clearedAt == null || msg.timestamp.isAfter(clearedAt!))
+                clearedAt == null || msg.timestamp.isAfter(clearedAt))
             .toList();
       });
     });

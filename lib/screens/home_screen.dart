@@ -126,8 +126,9 @@ class _HomeScreenState extends State<HomeScreen>
 
       // ── Background tasks — never block UI ──
       Future.wait([
-        _fcmService.setupFCM(userId: _currentUserId!).catchError(
-            (e) => print('FCM setup failed (non-critical): $e')),
+        _fcmService
+            .setupFCM(userId: _currentUserId!)
+            .catchError((e) => print('FCM setup failed (non-critical): $e')),
         _userService.setupPresence(_currentUserId!).catchError(
             (e) => print('Presence setup failed (non-critical): $e')),
         _chatService
@@ -198,7 +199,8 @@ class _HomeScreenState extends State<HomeScreen>
   void _loadRecentContacts() {
     if (_currentUserId == null) return;
     _recentContactsSub?.cancel();
-    _recentContactsSub = _userService.getAllUsers(_currentUserId!).listen((users) {
+    _recentContactsSub =
+        _userService.getAllUsers(_currentUserId!).listen((users) {
       if (mounted) {
         setState(() {
           _recentContacts = users.take(10).toList();
@@ -208,6 +210,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildContactItem(UserModel user) {
+    final c = AppThemeColors.of(context);
     final contact = Contact(
       id: user.id,
       name: user.name,
@@ -240,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen>
                 CircleAvatar(
                   radius: 28,
                   backgroundImage: NetworkImage(contact.avatarUrl),
-                  backgroundColor: AppColors.primaryLt,
+                  backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
                   Positioned(
@@ -250,9 +253,9 @@ class _HomeScreenState extends State<HomeScreen>
                       width: 13,
                       height: 13,
                       decoration: BoxDecoration(
-                        color: AppColors.online,
+                        color: c.online,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
+                        border: Border.all(color: c.surface, width: 2),
                       ),
                     ),
                   ),
@@ -265,21 +268,21 @@ class _HomeScreenState extends State<HomeScreen>
                 style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
-                    color: AppColors.textHigh),
+                    color: c.textHigh),
               ),
             ),
             if (user.isOnline)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppColors.online.withOpacity(0.12),
+                  color: c.online.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   'Online',
                   style: GoogleFonts.poppins(
                       fontSize: 11,
-                      color: AppColors.online,
+                      color: c.online,
                       fontWeight: FontWeight.w600),
                 ),
               ),
@@ -297,6 +300,7 @@ class _HomeScreenState extends State<HomeScreen>
     return StreamBuilder<List<ChatRoom>>(
       stream: _chatService.getChatRooms(_currentUserId!),
       builder: (context, chatSnapshot) {
+        final c = AppThemeColors.of(context);
         // ── Use cached data while Firestore stream is still connecting ──
         List<ChatRoom> chatRooms;
         if (chatSnapshot.connectionState == ConnectionState.waiting &&
@@ -335,13 +339,13 @@ class _HomeScreenState extends State<HomeScreen>
                           width: 96,
                           height: 96,
                           decoration: BoxDecoration(
-                            color: AppColors.primaryLt,
+                            color: c.primaryLt,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.chat_bubble_outline_rounded,
                             size: 48,
-                            color: AppColors.primary,
+                            color: c.primary,
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -350,7 +354,7 @@ class _HomeScreenState extends State<HomeScreen>
                           style: GoogleFonts.poppins(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.textHigh,
+                            color: c.textHigh,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -359,7 +363,7 @@ class _HomeScreenState extends State<HomeScreen>
                           textAlign: TextAlign.center,
                           style: GoogleFonts.poppins(
                             fontSize: 14,
-                            color: AppColors.textMid,
+                            color: c.textMid,
                           ),
                         ),
                         const SizedBox(height: 28),
@@ -483,8 +487,10 @@ class _HomeScreenState extends State<HomeScreen>
         if (user != null) {
           final cached = _chatCacheService.getCachedUser(user.id);
           // Only trigger rebuild if online status actually changed
-          if (cached == null || cached.isOnline != user.isOnline ||
-              cached.name != user.name || cached.photoUrl != user.photoUrl) {
+          if (cached == null ||
+              cached.isOnline != user.isOnline ||
+              cached.name != user.name ||
+              cached.photoUrl != user.photoUrl) {
             changed = true;
           }
           _chatCacheService.cacheUser(user);
@@ -502,16 +508,17 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Minimal placeholder while a single user profile is being fetched.
   Widget _buildChatRoomPlaceholder() {
+    final c = AppThemeColors.of(context);
     return ListTile(
       leading: CircleAvatar(
         radius: 28,
-        backgroundColor: AppColors.primaryLt,
+        backgroundColor: c.primaryLt,
       ),
       title: Container(
         height: 14,
         width: 120,
         decoration: BoxDecoration(
-          color: AppColors.divider,
+          color: c.divider,
           borderRadius: BorderRadius.circular(4),
         ),
       ),
@@ -520,7 +527,7 @@ class _HomeScreenState extends State<HomeScreen>
         width: 80,
         margin: const EdgeInsets.only(top: 6),
         decoration: BoxDecoration(
-          color: AppColors.divider,
+          color: c.divider,
           borderRadius: BorderRadius.circular(4),
         ),
       ),
@@ -529,6 +536,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildChatRoomItem(
       UserModel user, ChatRoom chatRoom, int unreadCount) {
+    final c = AppThemeColors.of(context);
     final contact = Contact(
       id: user.id,
       name: user.name,
@@ -563,7 +571,7 @@ class _HomeScreenState extends State<HomeScreen>
                 CircleAvatar(
                   radius: 28,
                   backgroundImage: NetworkImage(contact.avatarUrl),
-                  backgroundColor: AppColors.primaryLt,
+                  backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
                   Positioned(
@@ -573,9 +581,9 @@ class _HomeScreenState extends State<HomeScreen>
                       width: 13,
                       height: 13,
                       decoration: BoxDecoration(
-                        color: AppColors.online,
+                        color: c.online,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
+                        border: Border.all(color: c.surface, width: 2),
                       ),
                     ),
                   ),
@@ -596,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen>
                                 ? FontWeight.w700
                                 : FontWeight.w600,
                             fontSize: 15,
-                            color: AppColors.textHigh,
+                            color: c.textHigh,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -604,9 +612,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Text(
                         contact.time,
                         style: GoogleFonts.poppins(
-                          color: unreadCount > 0
-                              ? AppColors.primary
-                              : AppColors.textLow,
+                          color: unreadCount > 0 ? c.primary : c.textLow,
                           fontSize: 11,
                           fontWeight: unreadCount > 0
                               ? FontWeight.w600
@@ -628,9 +634,7 @@ class _HomeScreenState extends State<HomeScreen>
                         child: Text(
                           contact.lastMessage,
                           style: GoogleFonts.poppins(
-                            color: unreadCount > 0
-                                ? AppColors.textHigh
-                                : AppColors.textMid,
+                            color: unreadCount > 0 ? c.textHigh : c.textMid,
                             fontSize: 13,
                             fontWeight: unreadCount > 0
                                 ? FontWeight.w500
@@ -645,7 +649,7 @@ class _HomeScreenState extends State<HomeScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppColors.primary,
+                            color: c.primary,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -670,19 +674,16 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildMessageStatusIcon(MessageStatus? status) {
+    final c = AppThemeColors.of(context);
     switch (status) {
       case MessageStatus.sent:
-        return const Icon(Icons.done_rounded,
-            size: 14, color: AppColors.textLow);
+        return Icon(Icons.done_rounded, size: 14, color: c.textLow);
       case MessageStatus.delivered:
-        return const Icon(Icons.done_all_rounded,
-            size: 14, color: AppColors.textLow);
+        return Icon(Icons.done_all_rounded, size: 14, color: c.textLow);
       case MessageStatus.read:
-        return const Icon(Icons.done_all_rounded,
-            size: 14, color: AppColors.primary);
+        return Icon(Icons.done_all_rounded, size: 14, color: c.primary);
       default:
-        return const Icon(Icons.done_rounded,
-            size: 14, color: AppColors.textLow);
+        return Icon(Icons.done_rounded, size: 14, color: c.textLow);
     }
   }
 
@@ -717,6 +718,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Consumer<StatusProvider>(
       builder: (context, statusProvider, child) {
+        final c = AppThemeColors.of(context);
         final myStatus = statusProvider.myStatus;
         final otherStatuses = statusProvider.otherStatuses;
         final hasMyStatus = statusProvider.hasMyStatus;
@@ -733,7 +735,7 @@ class _HomeScreenState extends State<HomeScreen>
                 child: Text(
                   'Recent updates',
                   style: GoogleFonts.poppins(
-                    color: AppColors.textMid,
+                    color: c.textMid,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.5,
@@ -792,6 +794,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildMyStatusTile(StatusModel? myStatus, bool hasMyStatus) {
+    final c = AppThemeColors.of(context);
     final avatarUrl = _currentUser?.photoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=6C5CE7&color=fff&size=128';
 
@@ -804,13 +807,13 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: hasMyStatus
                 ? BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.primary, width: 2.5),
+                    border: Border.all(color: c.primary, width: 2.5),
                   )
                 : null,
             child: CircleAvatar(
               radius: 28,
               backgroundImage: NetworkImage(avatarUrl),
-              backgroundColor: AppColors.primaryLt,
+              backgroundColor: c.primaryLt,
             ),
           ),
           if (!hasMyStatus)
@@ -821,9 +824,9 @@ class _HomeScreenState extends State<HomeScreen>
                 width: 22,
                 height: 22,
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: c.primary,
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
+                  border: Border.all(color: c.surface, width: 2),
                 ),
                 child: const Icon(Icons.add_rounded,
                     color: Colors.white, size: 14),
@@ -834,15 +837,13 @@ class _HomeScreenState extends State<HomeScreen>
       title: Text(
         'My Status',
         style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-            color: AppColors.textHigh),
+            fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
       ),
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
             : 'Tap to add a status update',
-        style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
+        style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
         if (hasMyStatus) {
@@ -864,6 +865,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildStatusTile(StatusModel status) {
+    final c = AppThemeColors.of(context);
     final activeItems = status.activeStatusItems;
     if (activeItems.isEmpty) return const SizedBox.shrink();
 
@@ -880,26 +882,24 @@ class _HomeScreenState extends State<HomeScreen>
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: allViewed ? AppColors.textLow : AppColors.primary,
+            color: allViewed ? c.textLow : c.primary,
             width: 2.5,
           ),
         ),
         child: CircleAvatar(
           radius: 26,
           backgroundImage: NetworkImage(avatarUrl),
-          backgroundColor: AppColors.primaryLt,
+          backgroundColor: c.primaryLt,
         ),
       ),
       title: Text(
         status.userName,
         style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-            color: AppColors.textHigh),
+            fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
       ),
       subtitle: Text(
         _formatStatusTime(status.lastUpdated),
-        style: GoogleFonts.poppins(color: AppColors.textMid, fontSize: 13),
+        style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
         Navigator.push(
@@ -962,6 +962,7 @@ class _HomeScreenState extends State<HomeScreen>
     return StreamBuilder<List<CallLogModel>>(
       stream: _callLogService.getCallLogs(_currentUserId!),
       builder: (context, snapshot) {
+        final c = AppThemeColors.of(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(child: CircularProgressIndicator());
         }
@@ -974,14 +975,14 @@ class _HomeScreenState extends State<HomeScreen>
                 Container(
                   width: 96,
                   height: 96,
-                  decoration: const BoxDecoration(
-                    color: AppColors.primaryLt,
+                  decoration: BoxDecoration(
+                    color: c.primaryLt,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.call_outlined,
                     size: 48,
-                    color: AppColors.primary,
+                    color: c.primary,
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -990,7 +991,7 @@ class _HomeScreenState extends State<HomeScreen>
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.textHigh,
+                    color: c.textHigh,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -998,7 +999,7 @@ class _HomeScreenState extends State<HomeScreen>
                   'Your recent calls will appear here',
                   style: GoogleFonts.poppins(
                     fontSize: 14,
-                    color: AppColors.textMid,
+                    color: c.textMid,
                   ),
                 ),
               ],
@@ -1025,17 +1026,15 @@ class _HomeScreenState extends State<HomeScreen>
 
             if (log.callType == CallType.incoming) {
               callIcon = Icons.call_received;
-              callIconColor = log.status == CallStatus.missed
-                  ? AppColors.error
-                  : AppColors.online;
+              callIconColor =
+                  log.status == CallStatus.missed ? c.error : c.online;
             } else if (log.callType == CallType.outgoing) {
               callIcon = Icons.call_made;
-              callIconColor = log.status == CallStatus.cancelled
-                  ? AppColors.error
-                  : AppColors.online;
+              callIconColor =
+                  log.status == CallStatus.cancelled ? c.error : c.online;
             } else {
               callIcon = Icons.call_missed;
-              callIconColor = AppColors.error;
+              callIconColor = c.error;
             }
 
             // Format timestamp (e.g., "Today", "Yesterday", or date)
@@ -1065,14 +1064,14 @@ class _HomeScreenState extends State<HomeScreen>
                   otherPersonPhotoUrl ??
                       'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=6C5CE7&color=fff&size=128',
                 ),
-                backgroundColor: AppColors.primaryLt,
+                backgroundColor: c.primaryLt,
               ),
               title: Text(
                 otherPersonName,
                 style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
-                    color: AppColors.textHigh),
+                    color: c.textHigh),
               ),
               subtitle: Row(
                 children: [
@@ -1086,8 +1085,7 @@ class _HomeScreenState extends State<HomeScreen>
                     log.status == CallStatus.answered
                         ? log.getFormattedDuration()
                         : log.status.toString().split('.').last.capitalize(),
-                    style: GoogleFonts.poppins(
-                        color: AppColors.textMid, fontSize: 13),
+                    style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
                   ),
                 ],
               ),
@@ -1096,13 +1094,11 @@ class _HomeScreenState extends State<HomeScreen>
                 children: [
                   Text(
                     formatTimestamp(log.timestamp),
-                    style: GoogleFonts.poppins(
-                        color: AppColors.textLow, fontSize: 12),
+                    style: GoogleFonts.poppins(color: c.textLow, fontSize: 12),
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    icon: const Icon(Icons.videocam_rounded,
-                        color: AppColors.primary),
+                    icon: Icon(Icons.videocam_rounded, color: c.primary),
                     onPressed: () {
                       final contact = Contact(
                         id: otherPersonId,
@@ -1136,9 +1132,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     if (!_isInitialized) {
       return Scaffold(
-        backgroundColor: AppColors.primaryLt,
+        backgroundColor: c.primaryLt,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1147,7 +1144,7 @@ class _HomeScreenState extends State<HomeScreen>
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
+                  color: c.primary.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(22),
                 ),
                 child: ClipRRect(
@@ -1163,7 +1160,7 @@ class _HomeScreenState extends State<HomeScreen>
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(
-                    color: AppColors.primary, strokeWidth: 2.5),
+                    color: c.primary, strokeWidth: 2.5),
               ),
             ],
           ),
@@ -1172,8 +1169,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: c.surface,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1192,7 +1190,7 @@ class _HomeScreenState extends State<HomeScreen>
               style: GoogleFonts.poppins(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
-                color: AppColors.textHigh,
+                color: c.textHigh,
                 letterSpacing: -0.5,
               ),
             ),
@@ -1220,7 +1218,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ? CircleAvatar(
                     radius: 16,
                     backgroundImage: NetworkImage(_currentUser!.photoUrl!),
-                    backgroundColor: AppColors.primaryLt,
+                    backgroundColor: c.primaryLt,
                   )
                 : const Icon(Icons.more_vert),
             onSelected: (value) async {
@@ -1255,7 +1253,7 @@ class _HomeScreenState extends State<HomeScreen>
                   child: Row(
                     children: [
                       Icon(Icons.person_outline_rounded,
-                          color: AppColors.primary, size: 20),
+                          color: c.primary, size: 20),
                       const SizedBox(width: 12),
                       const Text('Profile'),
                     ],
@@ -1265,8 +1263,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'settings',
                   child: Row(
                     children: [
-                      Icon(Icons.settings_outlined,
-                          color: AppColors.textMid, size: 20),
+                      Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
                       const Text('Settings'),
                     ],
@@ -1276,11 +1273,10 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'logout',
                   child: Row(
                     children: [
-                      const Icon(Icons.logout_rounded,
-                          color: AppColors.error, size: 20),
+                      Icon(Icons.logout_rounded,
+                          color: c.error, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Log out',
-                          style: TextStyle(color: AppColors.error)),
+                      Text('Log out', style: TextStyle(color: c.error)),
                     ],
                   ),
                 ),
@@ -1310,6 +1306,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildFAB() {
+    final c = AppThemeColors.of(context);
     return AnimatedBuilder2(
       animation: _tabController.animation!,
       builder: (context, child) {
@@ -1322,20 +1319,19 @@ class _HomeScreenState extends State<HomeScreen>
               FloatingActionButton(
                 heroTag: 'statusTextBtn',
                 mini: true,
-                backgroundColor: Colors.white,
+                backgroundColor: c.surface,
                 elevation: 2,
                 onPressed: () {
                   if (_currentUserId != null) {
                     _navigateToAddStatus();
                   }
                 },
-                child: const Icon(Icons.edit_rounded,
-                    color: AppColors.primary, size: 20),
+                child: Icon(Icons.edit_rounded, color: c.primary, size: 20),
               ),
               const SizedBox(height: 12),
               FloatingActionButton(
                 heroTag: 'statusCameraBtn',
-                backgroundColor: AppColors.primary,
+                backgroundColor: c.primary,
                 onPressed: () {
                   if (_currentUserId != null) {
                     _navigateToAddMediaStatus();
@@ -1349,7 +1345,7 @@ class _HomeScreenState extends State<HomeScreen>
         // Chats & Calls tabs - show message FAB
         return FloatingActionButton(
           heroTag: 'chatFab',
-          backgroundColor: AppColors.primary,
+          backgroundColor: c.primary,
           onPressed: () {
             if (_currentUserId != null) {
               Navigator.push(
