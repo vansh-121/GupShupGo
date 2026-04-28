@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/settings_service.dart';
+import 'package:video_chat_app/services/chat_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -18,14 +22,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
+  final SettingsService _settings = SettingsService();
+  final ChatService _chatService = ChatService();
   late UserModel _user;
-
-  // Notification prefs (local only — persisted via SharedPreferences if needed)
-  bool _messageNotifications = true;
-  bool _groupNotifications = true;
-  bool _callNotifications = true;
-  bool _showReadReceipts = true;
-  bool _showLastSeen = true;
 
   @override
   void initState() {
@@ -59,6 +58,303 @@ class _SettingsScreenState extends State<SettingsScreen> {
         (_) => false,
       );
     }
+  }
+
+  // ── Clear all chats ──────────────────────────────────────────────────────
+  Future<void> _clearAllChats() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Clear all chats'),
+        content: const Text(
+          'This will permanently delete all your message history. '
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete All',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      // Show a loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clearing chats...')),
+        );
+      }
+
+      final userId = _user.id;
+      final firestore = FirebaseFirestore.instance;
+
+      // Get all chat rooms the user is part of
+      final chatRoomsSnapshot = await firestore
+          .collection('chatRooms')
+          .where('participants', arrayContains: userId)
+          .get();
+
+      final batch = firestore.batch();
+      for (final chatDoc in chatRoomsSnapshot.docs) {
+        // Set a per-user clearedAt timestamp — messages before this are hidden
+        // for THIS user only (the other participant still sees everything).
+        batch.update(chatDoc.reference, {
+          'clearedAt.$userId': Timestamp.now(),
+          'unreadCount.$userId': 0,
+        });
+      }
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All chats cleared'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to clear chats: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ── Report a problem ─────────────────────────────────────────────────────
+  Future<void> _reportProblem() async {
+    final subjectController = TextEditingController();
+    final bodyController = TextEditingController();
+
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Report a Problem'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: subjectController,
+                decoration: InputDecoration(
+                  hintText: 'Brief summary',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.primary),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bodyController,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  hintText: 'Describe the problem...',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.primary),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Send')),
+        ],
+      ),
+    );
+
+    if (submitted != true) return;
+
+    final subject = subjectController.text.trim().isNotEmpty
+        ? subjectController.text.trim()
+        : 'Bug Report';
+    final body = bodyController.text.trim().isNotEmpty
+        ? bodyController.text.trim()
+        : 'No details provided';
+
+    final mailUri = Uri(
+      scheme: 'mailto',
+      path: 'gupshupgo.support@gmail.com',
+      queryParameters: {
+        'subject': '[GupShupGo] $subject',
+        'body': '$body\n\n---\nUser: ${_user.name}\nID: ${_user.id}',
+      },
+    );
+
+    try {
+      if (await canLaunchUrl(mailUri)) {
+        await launchUrl(mailUri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Report noted — no email app found to send it'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open email app: $e')),
+        );
+      }
+    }
+  }
+
+  // ── Help Center ──────────────────────────────────────────────────────────
+  void _showHelpCenter() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        builder: (context, scrollController) {
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: ListView(
+              controller: scrollController,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const Text(
+                  'Help Center',
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textHigh),
+                ),
+                const SizedBox(height: 20),
+                _buildFAQItem(
+                  'How do I start a new chat?',
+                  'Tap the message icon (💬) at the bottom-right of the Chats tab, '
+                      'or use the search icon in the top bar to find contacts.',
+                ),
+                _buildFAQItem(
+                  'How do I make a voice or video call?',
+                  'Open a chat with the person you want to call. '
+                      'Tap the phone icon (🔊) for an audio call or the '
+                      'camera icon (📹) for a video call in the top bar.',
+                ),
+                _buildFAQItem(
+                  'How do I share a status update?',
+                  'Go to the Status tab and tap the pencil icon for a text status '
+                      'or the camera icon for a photo/video status.',
+                ),
+                _buildFAQItem(
+                  'How do I edit my profile?',
+                  'Tap your profile picture in the top-right menu, then '
+                      'tap your avatar to change your photo, or edit your '
+                      'name and about section.',
+                ),
+                _buildFAQItem(
+                  'How do I block someone?',
+                  'Open a chat with the person, tap the ⋮ menu in the top-right, '
+                      'and select "Block contact".',
+                ),
+                _buildFAQItem(
+                  'Why am I not receiving notifications?',
+                  'Check that notifications are enabled in Settings → Notifications. '
+                      'Also ensure your phone\'s system notification settings '
+                      'allow GupShupGo to send alerts.',
+                ),
+                _buildFAQItem(
+                  'How do I mute a chat?',
+                  'Open the chat, tap the ⋮ menu, and select "Mute notifications". '
+                      'You\'ll still receive messages but won\'t get push notifications.',
+                ),
+                _buildFAQItem(
+                  'How do I log out?',
+                  'Go to Settings (gear icon in menu) and scroll to the bottom. '
+                      'Tap "Log Out".',
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Still need help?',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                      color: AppColors.textHigh),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _reportProblem();
+                  },
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('Contact Support'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFAQItem(String question, String answer) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text(question,
+          style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: AppColors.textHigh)),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(answer,
+              style: const TextStyle(fontSize: 13, color: AppColors.textMid)),
+        ),
+      ],
+    );
   }
 
   @override
@@ -133,8 +429,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: Colors.teal,
               title: 'Last seen',
               subtitle: 'Show when you were last active',
-              value: _showLastSeen,
-              onChanged: (v) => setState(() => _showLastSeen = v),
+              value: _settings.showLastSeen,
+              onChanged: (v) => setState(() => _settings.showLastSeen = v),
             ),
             _divider(),
             _buildSwitchTile(
@@ -142,8 +438,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: AppColors.primary,
               title: 'Read receipts',
               subtitle: 'Show blue ticks when you\'ve read messages',
-              value: _showReadReceipts,
-              onChanged: (v) => setState(() => _showReadReceipts = v),
+              value: _settings.showReadReceipts,
+              onChanged: (v) =>
+                  setState(() => _settings.showReadReceipts = v),
             ),
             _divider(),
             _buildTile(
@@ -151,7 +448,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: Colors.red,
               title: 'Blocked contacts',
               subtitle: 'Manage blocked users',
-              onTap: () => _showComingSoon('Blocked contacts'),
+              onTap: () => _showBlockedContacts(),
             ),
           ]),
           const SizedBox(height: 8),
@@ -164,8 +461,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: AppColors.primary,
               title: 'Messages',
               subtitle: 'Notifications for new messages',
-              value: _messageNotifications,
-              onChanged: (v) => setState(() => _messageNotifications = v),
+              value: _settings.messageNotifications,
+              onChanged: (v) =>
+                  setState(() => _settings.messageNotifications = v),
             ),
             _divider(),
             _buildSwitchTile(
@@ -173,8 +471,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: Colors.green,
               title: 'Group messages',
               subtitle: 'Notifications for group activity',
-              value: _groupNotifications,
-              onChanged: (v) => setState(() => _groupNotifications = v),
+              value: _settings.groupNotifications,
+              onChanged: (v) =>
+                  setState(() => _settings.groupNotifications = v),
             ),
             _divider(),
             _buildSwitchTile(
@@ -182,8 +481,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: Colors.orange,
               title: 'Calls',
               subtitle: 'Notifications for incoming calls',
-              value: _callNotifications,
-              onChanged: (v) => setState(() => _callNotifications = v),
+              value: _settings.callNotifications,
+              onChanged: (v) =>
+                  setState(() => _settings.callNotifications = v),
             ),
           ]),
           const SizedBox(height: 8),
@@ -192,27 +492,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader('CHATS'),
           _buildCard(children: [
             _buildTile(
-              icon: Icons.wallpaper,
-              iconColor: Colors.purple,
-              title: 'Chat wallpaper',
-              subtitle: 'Choose a background for your chats',
-              onTap: () => _showComingSoon('Chat wallpaper'),
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.backup_outlined,
-              iconColor: AppColors.primary,
-              title: 'Chat backup',
-              subtitle: 'Back up chats to Google Drive',
-              onTap: () => _showComingSoon('Chat backup'),
-            ),
-            _divider(),
-            _buildTile(
               icon: Icons.delete_sweep_outlined,
               iconColor: Colors.red,
               title: 'Clear all chats',
               subtitle: 'Delete all message history',
-              onTap: () => _showComingSoon('Clear all chats'),
+              onTap: _clearAllChats,
             ),
           ]),
           const SizedBox(height: 8),
@@ -225,7 +509,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: AppColors.primary,
               title: 'Help Center',
               subtitle: 'FAQs and support',
-              onTap: () => _showComingSoon('Help Center'),
+              onTap: _showHelpCenter,
             ),
             _divider(),
             _buildTile(
@@ -233,14 +517,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: Colors.orange,
               title: 'Report a problem',
               subtitle: 'Something not working?',
-              onTap: () => _showComingSoon('Report a problem'),
+              onTap: _reportProblem,
             ),
             _divider(),
             _buildTile(
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.0',
+              subtitle: 'Version 1.0.1',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -266,6 +550,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  // ── Blocked contacts dialog ────────────────────────────────────────────
+  void _showBlockedContacts() async {
+    final blockedIds = await _getBlockedUserIds();
+
+    if (!mounted) return;
+
+    if (blockedIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No blocked contacts')),
+      );
+      return;
+    }
+
+    // Fetch user details for blocked IDs
+    final firestore = FirebaseFirestore.instance;
+    final List<UserModel> blockedUsers = [];
+    for (final id in blockedIds) {
+      final doc = await firestore.collection('users').doc(id).get();
+      if (doc.exists) {
+        blockedUsers.add(UserModel.fromFirestore(doc));
+      }
+    }
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const Text('Blocked Contacts',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textHigh)),
+            const SizedBox(height: 12),
+            if (blockedUsers.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text('No blocked contacts',
+                      style: TextStyle(color: AppColors.textMid)),
+                ),
+              )
+            else
+              ...blockedUsers.map((user) => ListTile(
+                    leading: CircleAvatar(
+                      backgroundImage: NetworkImage(user.photoUrl ??
+                          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
+                      backgroundColor: Colors.grey[200],
+                    ),
+                    title: Text(user.name),
+                    trailing: TextButton(
+                      onPressed: () async {
+                        await _unblockUser(user.id);
+                        Navigator.pop(context);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text('${user.name} unblocked')),
+                          );
+                        }
+                      },
+                      child: const Text('Unblock',
+                          style: TextStyle(color: AppColors.primary)),
+                    ),
+                  )),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<List<String>> _getBlockedUserIds() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_user.id)
+        .get();
+    if (!doc.exists) return [];
+    final data = doc.data();
+    if (data == null) return [];
+    return List<String>.from(data['blockedUsers'] ?? []);
+  }
+
+  Future<void> _unblockUser(String userId) async {
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_user.id)
+        .update({
+      'blockedUsers': FieldValue.arrayRemove([userId]),
+    });
   }
 
   // ── Profile header card ────────────────────────────────────────────────────
@@ -395,15 +790,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           activeTrackColor: AppColors.primaryLt,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-      ),
-    );
-  }
-
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$feature — coming soon!'),
-        duration: const Duration(seconds: 2),
       ),
     );
   }

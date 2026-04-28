@@ -20,11 +20,23 @@ exports.sendCallNotification = onRequest(
       return;
     }
 
+    // Verify Firebase Auth ID token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
     try {
+      const decodedToken = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
       const { calleeId, callerId, channelId, isAudioOnly } = req.body;
 
       if (!calleeId || !callerId || !channelId) {
         res.status(400).json({ error: "Missing required fields" });
+        return;
+      }
+
+      if (decodedToken.uid !== callerId) {
+        res.status(403).json({ error: "Forbidden: caller identity mismatch" });
         return;
       }
 
@@ -91,8 +103,12 @@ exports.sendCallNotification = onRequest(
       const result = await messaging.send(message);
       res.status(200).json({ success: true, messageId: result });
     } catch (error) {
-      console.error("Error sending call notification:", error);
-      res.status(500).json({ error: error.message });
+      if (error.code && error.code.startsWith("auth/")) {
+        res.status(401).json({ error: "Invalid or expired token" });
+      } else {
+        console.error("Error sending call notification:", error);
+        res.status(500).json({ error: error.message });
+      }
     }
   }
 );
@@ -103,6 +119,19 @@ exports.sendMessageNotification = onRequest(
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    // Verify Firebase Auth ID token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
       return;
     }
 
