@@ -28,16 +28,17 @@ class _ModeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 11),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary : Colors.transparent,
+          color: selected ? c.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: selected ? AppColors.primary : AppColors.border,
+            color: selected ? c.primary : c.border,
             width: 1.5,
           ),
         ),
@@ -46,7 +47,7 @@ class _ModeChip extends StatelessWidget {
           style: GoogleFonts.poppins(
             fontWeight: FontWeight.w600,
             fontSize: 14,
-            color: selected ? Colors.white : AppColors.textMid,
+            color: selected ? Colors.white : c.textMid,
           ),
         ),
       ),
@@ -300,8 +301,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: c.surface,
       body: Column(
         children: [
           // ── Gradient brand header ────────────────────────────────────
@@ -401,7 +403,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: _isLoading ? null : _signInWithGoogle,
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: const BorderSide(color: AppColors.border),
+                      side: BorderSide(color: c.border),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -423,7 +425,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 style: GoogleFonts.poppins(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w500,
-                                    color: AppColors.textHigh),
+                                    color: c.textHigh),
                               ),
                             ],
                           ),
@@ -433,16 +435,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Divider ──────────────────────────────────────────
                   Row(
                     children: [
-                      const Expanded(child: Divider(color: AppColors.divider)),
+                      Expanded(child: Divider(color: c.divider)),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Text(
                           'or sign in with email',
                           style: GoogleFonts.poppins(
-                              color: AppColors.textLow, fontSize: 13),
+                              color: c.textLow, fontSize: 13),
                         ),
                       ),
-                      const Expanded(child: Divider(color: AppColors.divider)),
+                      Expanded(child: Divider(color: c.divider)),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -451,18 +453,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (!_showEmailForm)
                     OutlinedButton.icon(
                       onPressed: () => setState(() => _showEmailForm = true),
-                      icon: const Icon(Icons.email_outlined,
-                          color: AppColors.primary),
+                      icon: Icon(Icons.email_outlined,
+                          color: c.primary),
                       label: Text(
                         'Use Email & Password',
                         style: GoogleFonts.poppins(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
-                            color: AppColors.primary),
+                            color: c.primary),
                       ),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: const BorderSide(color: AppColors.primary),
+                        side: BorderSide(color: c.primary),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
@@ -555,7 +557,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Text(
                             'Forgot Password?',
                             style: GoogleFonts.poppins(
-                                color: AppColors.primary,
+                                color: c.primary,
                                 fontWeight: FontWeight.w500),
                           ),
                         ),
@@ -569,7 +571,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? null
                           : (_isSignUp ? _signUpWithEmail : _signInWithEmail),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: c.primary,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -603,7 +605,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Text(
                         'Hide email options',
                         style: GoogleFonts.poppins(
-                            color: AppColors.textMid,
+                            color: c.textMid,
                             fontWeight: FontWeight.w400),
                       ),
                     ),
@@ -615,18 +617,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
+                        color: c.error.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.red.shade200),
+                        border: Border.all(color: c.error.withOpacity(0.3)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline, color: Colors.red),
+                          Icon(Icons.error_outline, color: c.error),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               _errorMessage!,
-                              style: TextStyle(color: Colors.red[700]),
+                              style: TextStyle(color: c.error),
                             ),
                           ),
                         ],

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Shown once right after phone OTP verification, while the phone session is
 /// still the current Firebase Auth user.  Lets the user link a Google account
@@ -131,6 +132,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     final linkedProviders = _authService.getLinkedProviders();
     final alreadyHasGoogle =
         linkedProviders.contains('google.com') || _googleLinked;
@@ -138,17 +140,16 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
         linkedProviders.contains('password') || _emailLinked;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: c.surface,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: Colors.white,
         elevation: 0,
         actions: [
           TextButton(
             onPressed: _goHome,
-            child: const Text(
+            child: Text(
               'Skip',
-              style: TextStyle(fontSize: 15, color: Colors.grey),
+              style: TextStyle(fontSize: 15, color: c.textMid),
             ),
           ),
         ],
@@ -159,21 +160,21 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.link_rounded, size: 64, color: Colors.blue),
+              Icon(Icons.link_rounded, size: 64, color: c.primary),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Add a backup sign-in method',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87),
+                    color: c.textHigh),
               ),
               const SizedBox(height: 10),
               Text(
                 'Link Google or email so you can sign back in\neven if your SIM is unavailable.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 14, color: c.textMid),
               ),
               const SizedBox(height: 36),
 
@@ -195,13 +196,13 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                         : ElevatedButton(
                             onPressed: _linkGoogle,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Colors.black87,
+                              backgroundColor: c.surface,
+                              foregroundColor: c.textHigh,
                               elevation: 1,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   side:
-                                      BorderSide(color: Colors.grey.shade300)),
+                                      BorderSide(color: c.border)),
                             ),
                             child: const Text('Link'),
                           ),
@@ -262,7 +263,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                 ElevatedButton(
                   onPressed: _isLinkingEmail ? null : _linkEmail,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
+                    backgroundColor: c.primary,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
@@ -284,21 +285,21 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
+                    color: c.warning.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange.shade200),
+                    border: Border.all(color: c.warning.withOpacity(0.3)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.info_outline,
-                          color: Colors.orange.shade700, size: 20),
+                          color: c.warning, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
                           style: TextStyle(
-                              color: Colors.orange.shade800, fontSize: 13),
+                              color: c.textHigh, fontSize: 13),
                         ),
                       ),
                     ],
@@ -312,7 +313,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
               ElevatedButton(
                 onPressed: _goHome,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
+                  backgroundColor: c.primary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
@@ -350,10 +351,11 @@ class _LinkTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -372,11 +374,11 @@ class _LinkTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14, color: c.textHigh)),
                 const SizedBox(height: 2),
                 Text(subtitle,
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                    style: TextStyle(color: c.textMid, fontSize: 12)),
               ],
             ),
           ),

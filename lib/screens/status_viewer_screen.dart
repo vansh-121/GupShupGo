@@ -199,11 +199,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
+        final cs = Theme.of(context).colorScheme;
         return FutureBuilder<List<UserModel>>(
           future: _statusService.getStatusViewers(
             statusOwnerId: widget.statusModel.userId,
@@ -221,7 +221,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.grey[300],
+                        color: cs.outlineVariant,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -229,7 +229,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   SizedBox(height: 16),
                   Row(
                     children: [
-                      Icon(Icons.visibility, color: Colors.grey[600]),
+                      Icon(Icons.visibility, color: cs.onSurfaceVariant),
                       SizedBox(width: 8),
                       Text(
                         'Viewed by ${currentItem.viewedBy.length}',
@@ -254,7 +254,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       child: Center(
                         child: Text(
                           'No views yet',
-                          style: TextStyle(color: Colors.grey[600]),
+                          style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       ),
                     )

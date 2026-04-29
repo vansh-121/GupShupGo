@@ -117,11 +117,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     final avatarUrl = _photoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_nameController.text.isNotEmpty ? _nameController.text : "U")}&background=4CAF50&color=fff&size=256';
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: c.surface,
       appBar: AppBar(
         title: const Text('Edit Profile'),
         actions: [
@@ -132,9 +133,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Save',
+                : Text('Save',
                     style: TextStyle(
-                        color: AppColors.primary, fontWeight: FontWeight.w600)),
+                        color: c.primary, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -152,7 +153,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   CircleAvatar(
                     radius: 60,
                     backgroundImage: NetworkImage(avatarUrl),
-                    backgroundColor: Colors.grey.shade200,
+                    backgroundColor: c.surfaceAlt,
                     child: _isUploadingPhoto
                         ? const CircularProgressIndicator(color: Colors.white)
                         : null,
@@ -160,9 +161,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: AppColors.primary,
+                      color: c.primary,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
+                      border: Border.all(color: c.surface, width: 2),
                     ),
                     child: const Icon(Icons.camera_alt,
                         color: Colors.white, size: 18),
@@ -172,7 +173,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 8),
             Text('Tap to change photo',
-                style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                style: TextStyle(color: c.textMid, fontSize: 12)),
             const SizedBox(height: 32),
 
             // ── Name ────────────────────────────────────────────────────
@@ -184,12 +185,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 hintText: 'Enter your name',
-                counterStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                counterStyle: TextStyle(color: c.textLow, fontSize: 12),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.primary),
+                  borderSide: BorderSide(color: c.primary),
                 ),
               ),
             ),
@@ -204,12 +205,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               maxLines: 2,
               decoration: InputDecoration(
                 hintText: 'What\'s on your mind?',
-                counterStyle: TextStyle(color: Colors.grey[400], fontSize: 12),
+                counterStyle: TextStyle(color: c.textLow, fontSize: 12),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.primary),
+                  borderSide: BorderSide(color: c.primary),
                 ),
               ),
             ),
@@ -246,17 +247,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: c.error.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(color: c.error.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.red),
+                    Icon(Icons.error_outline, color: c.error),
                     const SizedBox(width: 8),
                     Expanded(
                         child: Text(_errorMessage!,
-                            style: TextStyle(color: Colors.red[700]))),
+                            style: TextStyle(color: c.error))),
                   ],
                 ),
               ),
@@ -269,11 +270,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildSectionLabel(String label) {
+    final c = AppThemeColors.of(context);
     return Align(
       alignment: Alignment.centerLeft,
       child: Text(label,
           style: TextStyle(
-              color: Colors.grey[500],
+              color: c.textMid,
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.8)),
@@ -289,18 +291,19 @@ class _ReadOnlyField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: c.surfaceAlt,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [
-          Icon(icon, color: Colors.grey[400], size: 20),
+          Icon(icon, color: c.textMid, size: 20),
           const SizedBox(width: 12),
-          Text(value, style: TextStyle(color: Colors.grey[700])),
+          Text(value, style: TextStyle(color: c.textHigh)),
         ],
       ),
     );
@@ -313,6 +316,7 @@ class _LinkedProvidersCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     final providers = authService.getLinkedProviders();
     final items = <_ProviderInfo>[
       _ProviderInfo('phone', Icons.phone_android, 'Phone', Colors.green),
@@ -322,7 +326,7 @@ class _LinkedProvidersCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -347,10 +351,10 @@ class _LinkedProvidersCard extends StatelessWidget {
                         color: Colors.green, size: 20)
                     : Text('Not linked',
                         style:
-                            TextStyle(color: Colors.grey[400], fontSize: 12)),
+                            TextStyle(color: c.textLow, fontSize: 12)),
               ),
               if (i < items.length - 1)
-                Divider(height: 1, indent: 56, color: Colors.grey.shade100),
+                Divider(height: 1, indent: 56, color: c.divider),
             ],
           );
         }).toList(),

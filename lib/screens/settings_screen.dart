@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
-import 'package:video_chat_app/services/chat_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// WhatsApp-style settings screen.
@@ -23,7 +24,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
   final SettingsService _settings = SettingsService();
-  final ChatService _chatService = ChatService();
   late UserModel _user;
 
   @override
@@ -250,17 +250,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: AppThemeColors.of(context).textLow,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                const Text(
+                Text(
                   'Help Center',
                   style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.textHigh),
+                      color: AppThemeColors.of(context).textHigh),
                 ),
                 const SizedBox(height: 20),
                 _buildFAQItem(
@@ -340,18 +340,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildFAQItem(String question, String answer) {
+    final c = AppThemeColors.of(context);
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       title: Text(question,
-          style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: AppColors.textHigh)),
+          style: TextStyle(
+              fontWeight: FontWeight.w600, fontSize: 14, color: c.textHigh)),
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: Text(answer,
-              style: const TextStyle(fontSize: 13, color: AppColors.textMid)),
+          child: Text(answer, style: TextStyle(fontSize: 13, color: c.textMid)),
         ),
       ],
     );
@@ -359,11 +357,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
     final avatarUrl = _user.photoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=4CAF50&color=fff&size=128';
 
     return Scaffold(
-      backgroundColor: AppColors.surfaceAlt,
+      backgroundColor: c.surfaceAlt,
       appBar: AppBar(
         title: const Text('Settings'),
       ),
@@ -439,8 +438,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Read receipts',
               subtitle: 'Show blue ticks when you\'ve read messages',
               value: _settings.showReadReceipts,
-              onChanged: (v) =>
-                  setState(() => _settings.showReadReceipts = v),
+              onChanged: (v) => setState(() => _settings.showReadReceipts = v),
             ),
             _divider(),
             _buildTile(
@@ -482,8 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Calls',
               subtitle: 'Notifications for incoming calls',
               value: _settings.callNotifications,
-              onChanged: (v) =>
-                  setState(() => _settings.callNotifications = v),
+              onChanged: (v) => setState(() => _settings.callNotifications = v),
             ),
           ]),
           const SizedBox(height: 8),
@@ -498,6 +495,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'Delete all message history',
               onTap: _clearAllChats,
             ),
+          ]),
+          const SizedBox(height: 8),
+
+          // ── Appearance ────────────────────────────────────────────────
+          _buildSectionHeader('APPEARANCE'),
+          _buildCard(children: [
+            _buildAppearanceTile(),
           ]),
           const SizedBox(height: 8),
 
@@ -524,7 +528,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.1',
+              subtitle: 'Version 1.0.2',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -577,6 +581,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (!mounted) return;
 
+    final c = AppThemeColors.of(context);
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -594,23 +599,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: c.textLow,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            const Text('Blocked Contacts',
+            Text('Blocked Contacts',
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.textHigh)),
+                    color: c.textHigh)),
             const SizedBox(height: 12),
             if (blockedUsers.isEmpty)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(20),
                   child: Text('No blocked contacts',
-                      style: TextStyle(color: AppColors.textMid)),
+                      style: TextStyle(color: c.textMid)),
                 ),
               )
             else
@@ -618,7 +623,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     leading: CircleAvatar(
                       backgroundImage: NetworkImage(user.photoUrl ??
                           'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
-                      backgroundColor: Colors.grey[200],
+                      backgroundColor: c.surfaceAlt,
                     ),
                     title: Text(user.name),
                     trailing: TextButton(
@@ -627,13 +632,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Navigator.pop(context);
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text('${user.name} unblocked')),
+                            SnackBar(content: Text('${user.name} unblocked')),
                           );
                         }
                       },
-                      child: const Text('Unblock',
-                          style: TextStyle(color: AppColors.primary)),
+                      child:
+                          Text('Unblock', style: TextStyle(color: c.primary)),
                     ),
                   )),
             const SizedBox(height: 12),
@@ -655,16 +659,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _unblockUser(String userId) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_user.id)
-        .update({
+    await FirebaseFirestore.instance.collection('users').doc(_user.id).update({
       'blockedUsers': FieldValue.arrayRemove([userId]),
     });
   }
 
   // ── Profile header card ────────────────────────────────────────────────────
   Widget _buildProfileCard(String avatarUrl) {
+    final c = AppThemeColors.of(context);
     return GestureDetector(
       onTap: () async {
         final updated = await Navigator.push<UserModel>(
@@ -674,14 +676,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (updated != null) setState(() => _user = updated);
       },
       child: Container(
-        color: Colors.white,
+        color: c.surface,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         child: Row(
           children: [
             CircleAvatar(
               radius: 32,
               backgroundImage: NetworkImage(avatarUrl),
-              backgroundColor: Colors.grey.shade200,
+              backgroundColor: c.surfaceAlt,
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -689,19 +691,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_user.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 18)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: c.textHigh)),
                   const SizedBox(height: 4),
                   Text(
                     _user.about ?? 'Hey there! I am using GupShupGo.',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                    style: TextStyle(color: c.textMid, fontSize: 13),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            Icon(Icons.chevron_right, color: c.textLow),
           ],
         ),
       ),
@@ -710,12 +714,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  Widget _buildAppearanceTile() {
+    final c = AppThemeColors.of(context);
+    final themeProvider = context.watch<ThemeProvider>();
+    final currentMode = themeProvider.themeMode;
+
+    final options = [
+      (ThemeMode.light, Icons.light_mode_outlined, 'Light'),
+      (ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
+      (ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
+    ];
+
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.indigo.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          currentMode == ThemeMode.dark
+              ? Icons.dark_mode_outlined
+              : currentMode == ThemeMode.light
+                  ? Icons.light_mode_outlined
+                  : Icons.brightness_auto_outlined,
+          color: Colors.indigo,
+          size: 20,
+        ),
+      ),
+      title: Text('Theme', style: TextStyle(fontSize: 15, color: c.textHigh)),
+      subtitle: Text(
+        currentMode == ThemeMode.dark
+            ? 'Dark'
+            : currentMode == ThemeMode.light
+                ? 'Light'
+                : 'System default',
+        style: TextStyle(color: c.textMid, fontSize: 12),
+      ),
+      trailing: Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20),
+      onTap: () {
+        showModalBottomSheet(
+          context: context,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (_) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: c.textLow,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 4),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Choose theme',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...options.map((opt) {
+                      final (mode, icon, label) = opt;
+                      final selected = currentMode == mode;
+                      return ListTile(
+                        leading:
+                            Icon(icon, color: selected ? c.primary : c.textMid),
+                        title: Text(label,
+                            style: TextStyle(
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.normal)),
+                        trailing: selected
+                            ? Icon(Icons.check_rounded, color: c.primary)
+                            : null,
+                        onTap: () {
+                          context.read<ThemeProvider>().setThemeMode(mode);
+                          Navigator.pop(context);
+                        },
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildSectionHeader(String label) {
+    final c = AppThemeColors.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 16, 4),
       child: Text(label,
-          style: const TextStyle(
-              color: AppColors.primary,
+          style: TextStyle(
+              color: c.primary,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.8)),
@@ -723,14 +829,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildCard({required List<Widget> children}) {
+    final c = AppThemeColors.of(context);
     return Container(
-      color: AppColors.surface,
+      color: c.surface,
       child: Column(children: children),
     );
   }
 
-  Widget _divider() => const Divider(
-      height: 1, indent: 56, endIndent: 0, color: AppColors.divider);
+  Widget _divider() {
+    final c = AppThemeColors.of(context);
+    return Divider(height: 1, indent: 56, endIndent: 0, color: c.divider);
+  }
 
   Widget _buildTile({
     required IconData icon,
@@ -739,6 +848,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String subtitle,
     required VoidCallback? onTap,
   }) {
+    final c = AppThemeColors.of(context);
     return ListTile(
       onTap: onTap,
       leading: Container(
@@ -749,13 +859,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title,
-          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
-      subtitle: Text(subtitle,
-          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
+      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
+      subtitle:
+          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
       trailing: onTap != null
-          ? const Icon(Icons.chevron_right_rounded,
-              color: AppColors.textLow, size: 20)
+          ? Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20)
           : null,
     );
   }
@@ -768,6 +876,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
+    final c = AppThemeColors.of(context);
     return ListTile(
       leading: Container(
         padding: const EdgeInsets.all(8),
@@ -777,17 +886,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title,
-          style: const TextStyle(fontSize: 15, color: AppColors.textHigh)),
-      subtitle: Text(subtitle,
-          style: const TextStyle(color: AppColors.textMid, fontSize: 12)),
+      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
+      subtitle:
+          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
       trailing: Transform.scale(
         scale: 0.82,
         child: Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: AppColors.primary,
-          activeTrackColor: AppColors.primaryLt,
+          activeColor: c.primary,
+          activeTrackColor: c.primaryLt,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
