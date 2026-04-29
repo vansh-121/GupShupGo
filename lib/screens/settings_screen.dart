@@ -345,14 +345,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       tilePadding: EdgeInsets.zero,
       title: Text(question,
           style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: c.textHigh)),
+              fontWeight: FontWeight.w600, fontSize: 14, color: c.textHigh)),
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: Text(answer,
-              style: TextStyle(fontSize: 13, color: c.textMid)),
+          child: Text(answer, style: TextStyle(fontSize: 13, color: c.textMid)),
         ),
       ],
     );
@@ -441,8 +438,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Read receipts',
               subtitle: 'Show blue ticks when you\'ve read messages',
               value: _settings.showReadReceipts,
-              onChanged: (v) =>
-                  setState(() => _settings.showReadReceipts = v),
+              onChanged: (v) => setState(() => _settings.showReadReceipts = v),
             ),
             _divider(),
             _buildTile(
@@ -484,8 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Calls',
               subtitle: 'Notifications for incoming calls',
               value: _settings.callNotifications,
-              onChanged: (v) =>
-                  setState(() => _settings.callNotifications = v),
+              onChanged: (v) => setState(() => _settings.callNotifications = v),
             ),
           ]),
           const SizedBox(height: 8),
@@ -533,7 +528,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.1',
+              subtitle: 'Version 1.0.2',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -637,13 +632,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Navigator.pop(context);
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text('${user.name} unblocked')),
+                            SnackBar(content: Text('${user.name} unblocked')),
                           );
                         }
                       },
-                      child: Text('Unblock',
-                          style: TextStyle(color: c.primary)),
+                      child:
+                          Text('Unblock', style: TextStyle(color: c.primary)),
                     ),
                   )),
             const SizedBox(height: 12),
@@ -665,10 +659,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _unblockUser(String userId) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_user.id)
-        .update({
+    await FirebaseFirestore.instance.collection('users').doc(_user.id).update({
       'blockedUsers': FieldValue.arrayRemove([userId]),
     });
   }
@@ -701,7 +692,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text(_user.name,
                       style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 18, color: c.textHigh)),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: c.textHigh)),
                   const SizedBox(height: 4),
                   Text(
                     _user.about ?? 'Hey there! I am using GupShupGo.',
@@ -749,8 +742,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           size: 20,
         ),
       ),
-      title: Text('Theme',
-          style: TextStyle(fontSize: 15, color: c.textHigh)),
+      title: Text('Theme', style: TextStyle(fontSize: 15, color: c.textHigh)),
       subtitle: Text(
         currentMode == ThemeMode.dark
             ? 'Dark'
@@ -759,8 +751,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : 'System default',
         style: TextStyle(color: c.textMid, fontSize: 12),
       ),
-      trailing: Icon(Icons.chevron_right_rounded,
-          color: c.textLow, size: 20),
+      trailing: Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20),
       onTap: () {
         showModalBottomSheet(
           context: context,
@@ -784,8 +775,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     Padding(
-                      padding: const
-                          EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 4),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text('Choose theme',
@@ -798,18 +789,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final (mode, icon, label) = opt;
                       final selected = currentMode == mode;
                       return ListTile(
-                        leading: Icon(icon,
-                            color: selected
-                                ? c.primary
-                                : c.textMid),
+                        leading:
+                            Icon(icon, color: selected ? c.primary : c.textMid),
                         title: Text(label,
                             style: TextStyle(
                                 fontWeight: selected
                                     ? FontWeight.w700
                                     : FontWeight.normal)),
                         trailing: selected
-                            ? Icon(Icons.check_rounded,
-                                color: c.primary)
+                            ? Icon(Icons.check_rounded, color: c.primary)
                             : null,
                         onTap: () {
                           context.read<ThemeProvider>().setThemeMode(mode);
@@ -850,8 +838,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _divider() {
     final c = AppThemeColors.of(context);
-    return Divider(
-      height: 1, indent: 56, endIndent: 0, color: c.divider);
+    return Divider(height: 1, indent: 56, endIndent: 0, color: c.divider);
   }
 
   Widget _buildTile({
@@ -872,13 +859,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title,
-          style: TextStyle(fontSize: 15, color: c.textHigh)),
-      subtitle: Text(subtitle,
-          style: TextStyle(color: c.textMid, fontSize: 12)),
+      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
+      subtitle:
+          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
       trailing: onTap != null
-          ? Icon(Icons.chevron_right_rounded,
-              color: c.textLow, size: 20)
+          ? Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20)
           : null,
     );
   }
@@ -901,10 +886,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(title,
-          style: TextStyle(fontSize: 15, color: c.textHigh)),
-      subtitle: Text(subtitle,
-          style: TextStyle(color: c.textMid, fontSize: 12)),
+      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
+      subtitle:
+          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
       trailing: Transform.scale(
         scale: 0.82,
         child: Switch(
