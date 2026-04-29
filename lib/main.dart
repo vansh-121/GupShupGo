@@ -8,10 +8,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -45,12 +48,22 @@ void main() async {
   // screen, which launched the app).
   _setupCallKitListener();
 
+  final connectivityProvider = ConnectivityProvider();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => CallStateNotifier()),
         ChangeNotifierProvider(create: (_) => StatusProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider.value(value: connectivityProvider),
+        ChangeNotifierProvider(
+          create: (_) => MeshNetworkService(
+            currentUserId: '', // Will be updated after auth
+            cacheService: ChatCacheService(),
+            connectivityProvider: connectivityProvider,
+          ),
+        ),
       ],
       child: MyApp(),
     ),

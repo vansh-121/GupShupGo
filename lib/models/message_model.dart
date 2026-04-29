@@ -18,6 +18,16 @@ class MessageModel {
   final MessageStatus status;
   final String? mediaUrl;
 
+  // ─── Offline Mesh Messaging fields ──────────────────────────────────
+  /// Whether this message was sent/received via the mesh network.
+  final bool isOfflineMesh;
+
+  /// Number of peer-to-peer hops this message has traveled (0 = direct).
+  final int meshHops;
+
+  /// True if the message hasn't been synced to Firestore yet.
+  final bool syncPending;
+
   MessageModel({
     required this.id,
     required this.senderId,
@@ -27,6 +37,9 @@ class MessageModel {
     required this.timestamp,
     this.status = MessageStatus.sent,
     this.mediaUrl,
+    this.isOfflineMesh = false,
+    this.meshHops = 0,
+    this.syncPending = false,
   });
 
   // Convenience getters for status
@@ -45,7 +58,46 @@ class MessageModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'status': status.name,
       'mediaUrl': mediaUrl,
+      'isOfflineMesh': isOfflineMesh,
+      'meshHops': meshHops,
+      'syncPending': syncPending,
     };
+  }
+
+  /// Lightweight JSON map (no Firestore types) for mesh/local storage.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'senderId': senderId,
+      'receiverId': receiverId,
+      'text': text,
+      'type': type.name,
+      'timestamp': timestamp.millisecondsSinceEpoch,
+      'status': status.name,
+      'mediaUrl': mediaUrl,
+      'isOfflineMesh': isOfflineMesh,
+      'meshHops': meshHops,
+      'syncPending': syncPending,
+    };
+  }
+
+  /// Create from a plain JSON map (mesh / SharedPreferences).
+  factory MessageModel.fromJson(Map<String, dynamic> map) {
+    return MessageModel(
+      id: map['id'] ?? '',
+      senderId: map['senderId'] ?? '',
+      receiverId: map['receiverId'] ?? '',
+      text: map['text'] ?? '',
+      type: _parseMessageType(map['type']),
+      timestamp: map['timestamp'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'])
+          : DateTime.now(),
+      status: _parseMessageStatus(map['status']),
+      mediaUrl: map['mediaUrl'],
+      isOfflineMesh: map['isOfflineMesh'] ?? false,
+      meshHops: map['meshHops'] ?? 0,
+      syncPending: map['syncPending'] ?? false,
+    );
   }
 
   // Create MessageModel from Firestore document
@@ -59,6 +111,9 @@ class MessageModel {
       timestamp: _parseTimestamp(map['timestamp']),
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
+      isOfflineMesh: map['isOfflineMesh'] ?? false,
+      meshHops: map['meshHops'] ?? 0,
+      syncPending: map['syncPending'] ?? false,
     );
   }
 
@@ -115,6 +170,9 @@ class MessageModel {
     DateTime? timestamp,
     MessageStatus? status,
     String? mediaUrl,
+    bool? isOfflineMesh,
+    int? meshHops,
+    bool? syncPending,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -125,6 +183,9 @@ class MessageModel {
       timestamp: timestamp ?? this.timestamp,
       status: status ?? this.status,
       mediaUrl: mediaUrl ?? this.mediaUrl,
+      isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,
+      meshHops: meshHops ?? this.meshHops,
+      syncPending: syncPending ?? this.syncPending,
     );
   }
 }

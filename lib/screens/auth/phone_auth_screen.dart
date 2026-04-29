@@ -3,7 +3,6 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
-import 'package:video_chat_app/theme/app_theme.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
   @override
@@ -17,10 +16,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   final TextEditingController _nameController = TextEditingController();
 
   bool _isLoading = false;
-  // ignore: unused_field
   bool _otpSent = false;
-  // ignore: unused_field
   bool _carrierVerifying = false;
+
   String? _verificationId;
   String? _errorMessage;
   String? _verifiedPhoneNumber;
@@ -262,9 +260,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppThemeColors.of(context);
     return Scaffold(
-      backgroundColor: c.surface,
+      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
@@ -276,7 +273,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
               Icon(
                 Icons.chat_bubble_outline,
                 size: 80,
-                color: c.primary,
+                color: Colors.blue,
               ),
               SizedBox(height: 24),
               Text(
@@ -285,7 +282,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
-                  color: c.textHigh,
+                  color: Colors.black,
                 ),
               ),
               SizedBox(height: 12),
@@ -297,7 +294,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
-                    color: c.textMid,
+                    color: Colors.grey[600],
                   ),
                 ),
                 SizedBox(height: 8),
@@ -310,7 +307,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      color: c.textMid,
+                      color: Colors.grey[500],
                       height: 1.4,
                     ),
                   ),
@@ -349,7 +346,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                           style: TextStyle(fontSize: 16, color: Colors.white),
                         ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: c.primary,
+                    backgroundColor: Colors.blue,
                     padding: EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -366,7 +363,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       child: Text(
                         'OR use OTP',
                         style: TextStyle(
-                          color: c.textMid,
+                          color: Colors.grey[500],
                           fontSize: 13,
                         ),
                       ),
@@ -413,7 +410,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       child: Text(
                         'OR',
                         style: TextStyle(
-                          color: c.textMid,
+                          color: Colors.grey[600],
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -444,7 +441,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 Icon(
                   Icons.phone_android,
                   size: 64,
-                  color: c.primary,
+                  color: Colors.blue,
                 ),
                 SizedBox(height: 24),
                 Text(
@@ -455,7 +452,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
-                    color: c.textHigh,
+                    color: Colors.black87,
                   ),
                 ),
                 SizedBox(height: 12),
@@ -466,7 +463,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: c.primary,
+                      color: Colors.blue,
                       letterSpacing: 1.2,
                     ),
                   ),
@@ -478,7 +475,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
-                    color: c.textMid,
+                    color: Colors.grey[600],
                     height: 1.4,
                   ),
                 ),
@@ -557,7 +554,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 ElevatedButton(
                   onPressed: _isLoading ? null : _verifyOTP,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: c.primary,
+                    backgroundColor: Colors.blue,
                     padding: EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -597,18 +594,18 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 Container(
                   padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: c.error.withOpacity(0.08),
+                    color: Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: c.error.withOpacity(0.3)),
+                    border: Border.all(color: Colors.red.shade200),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: c.error, size: 20),
+                      Icon(Icons.error_outline, color: Colors.red, size: 20),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: TextStyle(color: c.error),
+                          style: TextStyle(color: Colors.red[700]),
                         ),
                       ),
                     ],

@@ -21,6 +21,7 @@ import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -111,6 +112,10 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     if (_currentUserId != null) {
+      // ── Update MeshNetworkService with authenticated user ID ──
+      Provider.of<MeshNetworkService>(context, listen: false)
+          .updateUserId(_currentUserId!);
+
       // ── Show UI immediately ──
       setState(() {
         _isInitialized = true;

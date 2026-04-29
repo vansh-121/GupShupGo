@@ -9,9 +9,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -86,6 +88,10 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isOtherUserTyping = false;
   StreamSubscription<bool>? _typingSubscription;
 
+  // ─── Mesh messaging state ─────────────────────────────────────────
+  StreamSubscription<MessageModel>? _meshMessageSubscription;
+  final List<MessageModel> _meshMessages = [];
+
   @override
   void initState() {
     super.initState();
@@ -138,11 +144,37 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Start listening for real-time online/offline status changes
       _listenToOnlineStatus();
+
+      // Start listening for mesh messages (offline messaging)
+      _listenToMeshMessages();
     } catch (e) {
       print('Error initializing chat: $e');
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  void _listenToMeshMessages() {
+    try {
+      final meshService =
+          Provider.of<MeshNetworkService>(context, listen: false);
+      _meshMessageSubscription = meshService.meshMessageStream.listen((msg) {
+        // Only show messages for this conversation
+        if ((msg.senderId == widget.contact.id &&
+                msg.receiverId == widget.currentUserId) ||
+            (msg.senderId == widget.currentUserId &&
+                msg.receiverId == widget.contact.id)) {
+          if (mounted) {
+            setState(() {
+              _meshMessages.add(msg);
+            });
+            _scrollToBottom();
+          }
+        }
+      });
+    } catch (_) {
+      // MeshNetworkService might not be in the tree yet
     }
   }
 
@@ -364,14 +396,41 @@ class _ChatScreenState extends State<ChatScreen> {
       // User sent the message — stop typing indicator immediately
       _stopTyping();
 
-      await _chatService.sendMessage(
-        senderId: widget.currentUserId,
-        receiverId: widget.contact.id,
-        text: text,
-        senderName: widget.currentUserName,
-      );
+      // Check connectivity — send via mesh if offline
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
 
-      _scrollToBottom();
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendViaMesh(
+            receiverId: widget.contact.id,
+            text: text,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (_) {
+          // Mesh not available — show error
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No internet & mesh unavailable. Message not sent.')),
+          );
+          _messageController.text = text;
+        }
+      } else {
+        // ── Online: send via Firestore as usual ─────────────────────
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: text,
+          senderName: widget.currentUserName,
+        );
+        _scrollToBottom();
+      }
     } catch (e) {
       print('Error sending message: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -545,6 +604,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     fontSize: 10,
                   ),
                 ),
+                if (message.isOfflineMesh) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.cell_tower_rounded,
+                    size: 11,
+                    color: isMe
+                        ? Colors.white.withOpacity(0.7)
+                        : c.textLow,
+                  ),
+                ],
                 if (isMe) ...[
                   const SizedBox(width: 4),
                   _buildMessageStatusIcon(message),
@@ -856,6 +925,66 @@ class _ChatScreenState extends State<ChatScreen> {
               child: CircularProgressIndicator(color: c.primary))
           : Column(
               children: [
+                // ── Offline / Mesh mode banner ──────────────────────
+                Consumer<ConnectivityProvider>(
+                  builder: (_, connectivity, __) {
+                    if (connectivity.isOnline) return const SizedBox.shrink();
+                    return Consumer<MeshNetworkService>(
+                      builder: (_, mesh, __) => Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        color: const Color(0xFF2D2D2D),
+                        child: Row(
+                          children: [
+                            Icon(
+                              mesh.isActive
+                                  ? Icons.cell_tower_rounded
+                                  : Icons.wifi_off_rounded,
+                              color: mesh.isActive
+                                  ? const Color(0xFF4ADE80)
+                                  : Colors.amber,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                mesh.isActive
+                                    ? 'Mesh Mode  ·  ${mesh.connectedPeers} peer${mesh.connectedPeers == 1 ? '' : 's'} nearby'
+                                    : 'No internet  ·  Tap to enable Mesh',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            if (!mesh.isActive)
+                              GestureDetector(
+                                onTap: () => mesh.start(),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4ADE80),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    'Enable',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.black,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 Expanded(
                   child: StreamBuilder<List<MessageModel>>(
                     stream: _chatService.getMessages(
@@ -890,7 +1019,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         );
                       }
 
-                      final messages = snapshot.data ?? [];
+                      final firestoreMessages = snapshot.data ?? [];
+
+                      // Merge Firestore messages with locally-stored
+                      // mesh messages (dedup by id).
+                      final firestoreIds =
+                          firestoreMessages.map((m) => m.id).toSet();
+                      final uniqueMesh = _meshMessages
+                          .where((m) => !firestoreIds.contains(m.id))
+                          .toList();
+                      final messages = [
+                        ...firestoreMessages,
+                        ...uniqueMesh,
+                      ]..sort(
+                          (a, b) => a.timestamp.compareTo(b.timestamp));
 
                       final hasUnreadMessages = messages.any((m) =>
                           m.receiverId == widget.currentUserId &&
@@ -1327,6 +1469,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingTimer?.cancel();
     _typingSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
+    _meshMessageSubscription?.cancel();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _searchController.dispose();

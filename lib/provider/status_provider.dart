@@ -5,7 +5,7 @@ import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/services/status_service.dart';
 
 class StatusProvider extends ChangeNotifier {
-  final StatusService _statusService = StatusService();
+  final StatusService _statusService;
 
   StatusModel? _myStatus;
   List<StatusModel> _otherStatuses = [];
@@ -22,6 +22,10 @@ class StatusProvider extends ChangeNotifier {
 
   /// Whether the current user has an active status.
   bool get hasMyStatus => _myStatus != null && _myStatus!.hasActiveStatus;
+
+  /// Constructor with optional StatusService dependency injection
+  StatusProvider({StatusService? statusService})
+      : _statusService = statusService ?? StatusService();
 
   /// Initialize listeners for the given user.
   void initialize(String userId) {

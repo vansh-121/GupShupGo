@@ -69,6 +69,12 @@ dependencies:
   url_launcher: ^6.2.1
   video_player: ^2.8.3
 
+  # Connectivity
+  connectivity_plus: ^6.0.3
+
+  # Nearby connections (mesh networking)
+  nearby_connections: ^4.1.0
+
   # UI components
   cupertino_icons: ^1.0.2
 
