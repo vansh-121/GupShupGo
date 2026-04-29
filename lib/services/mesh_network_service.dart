@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nearby_connections/nearby_connections.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
@@ -40,6 +43,19 @@ class _MeshPayload {
   bool get canRelay => hops < ttl;
 }
 
+/// Tracks an incoming file payload until the transfer completes.
+class _PendingFileTransfer {
+  final String messageId;
+  final Map<String, dynamic> messageJson;
+  final String fileName;
+
+  _PendingFileTransfer({
+    required this.messageId,
+    required this.messageJson,
+    required this.fileName,
+  });
+}
+
 /// The MeshNetworkService advertises the current device and discovers nearby
 /// peers using Google Nearby Connections (Bluetooth + WiFi Direct).
 ///
@@ -75,6 +91,16 @@ class MeshNetworkService extends ChangeNotifier {
   final StreamController<MessageModel> _meshMessageController =
       StreamController<MessageModel>.broadcast();
   Stream<MessageModel> get meshMessageStream => _meshMessageController.stream;
+
+  // ─── File transfer tracking ──────────────────────────────────────
+  /// Maps file-payload-id → metadata for incoming file transfers.
+  final Map<int, _PendingFileTransfer> _pendingFileTransfers = {};
+
+  /// Maps file-payload-id → received file URI (from onPayloadReceived).
+  final Map<int, String> _receivedFileUris = {};
+
+  /// Payload IDs whose transfer has completed successfully.
+  final Set<int> _completedFilePayloads = {};
 
   // ─── Dependencies ────────────────────────────────────────────────────
   String _currentUserId;
@@ -215,6 +241,9 @@ class MeshNetworkService extends ChangeNotifier {
       onPayLoadRecieved: (endpointId, payload) {
         _handlePayload(endpointId, payload);
       },
+      onPayloadTransferUpdate: (endpointId, update) {
+        _handlePayloadTransferUpdate(endpointId, update);
+      },
     );
   }
 
@@ -275,6 +304,74 @@ class MeshNetworkService extends ChangeNotifier {
     return message;
   }
 
+  /// Send an image file via the mesh network.
+  /// Returns a [MessageModel] with [localFilePath] set to the picked image.
+  Future<MessageModel> sendImageViaMesh({
+    required String receiverId,
+    required String filePath,
+    String? senderName,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw Exception('Image file does not exist: $filePath');
+    }
+
+    // Copy the image to app-local storage so it survives temp cleanup.
+    final appDir = await getApplicationDocumentsDirectory();
+    final meshImagesDir = Directory('${appDir.path}/mesh_images');
+    if (!meshImagesDir.existsSync()) {
+      meshImagesDir.createSync(recursive: true);
+    }
+    final ext = filePath.contains('.') ? filePath.split('.').last : 'jpg';
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_generateId()}.$ext';
+    final savedFile = await file.copy('${meshImagesDir.path}/$fileName');
+
+    final message = MessageModel(
+      id: _generateId(),
+      senderId: _currentUserId,
+      receiverId: receiverId,
+      text: '📷 Photo',
+      type: MessageType.image,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sent,
+      localFilePath: savedFile.path,
+      isOfflineMesh: true,
+      meshHops: 0,
+      syncPending: true,
+    );
+
+    // Store locally for persistence & Firestore sync
+    _cacheService.storePendingMeshMessage(message);
+    _seenMessageIds.add(message.id);
+
+    // For each connected peer:
+    //  1. Send the FILE payload (returns its payloadId).
+    //  2. Send a BYTES metadata payload so receiver can match file → message.
+    for (final endpoint in _connectedEndpoints) {
+      try {
+        final filePayloadId =
+            await Nearby().sendFilePayload(endpoint, savedFile.path);
+
+        final metadata = <String, dynamic>{
+          'payloadType': 'file_metadata',
+          'filePayloadId': filePayloadId,
+          'fileName': fileName,
+          'messageId': message.id,
+          'messageJson': message.toJson(),
+          'hops': 0,
+          'ttl': maxHops,
+        };
+        final bytes = utf8.encode(jsonEncode(metadata));
+        await Nearby().sendBytesPayload(endpoint, bytes);
+      } catch (e) {
+        debugPrint('[Mesh] Failed to send image to $endpoint: $e');
+      }
+    }
+
+    return message;
+  }
+
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {
     final bytes = utf8.encode(jsonEncode(payload.toJson()));
@@ -292,11 +389,29 @@ class MeshNetworkService extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════
 
   void _handlePayload(String endpointId, Payload payload) {
+    // ── Handle incoming FILE payloads (image data) ────────────────────
+    if (payload.type == PayloadType.FILE) {
+      final uri = payload.uri;
+      if (uri != null) {
+        // Store the URI keyed by payloadId. The file is NOT ready yet —
+        // we must wait for onPayloadTransferUpdate with SUCCESS.
+        _receivedFileUris[payload.id] = uri;
+      }
+      return;
+    }
+
     if (payload.type != PayloadType.BYTES || payload.bytes == null) return;
 
     try {
       final jsonStr = utf8.decode(payload.bytes!);
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+
+      // ── File metadata bytes ─────────────────────────────────────────
+      if (data['payloadType'] == 'file_metadata') {
+        _handleFileMetadata(data);
+        return;
+      }
+
       final meshPayload = _MeshPayload.fromJson(data);
 
       // Dedup: skip if we've already seen this message
@@ -336,6 +451,94 @@ class MeshNetworkService extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // File transfer helpers
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Handle the bytes-metadata that accompanies a file payload.
+  void _handleFileMetadata(Map<String, dynamic> data) {
+    final int filePayloadId = data['filePayloadId'] ?? -1;
+    final String messageId = data['messageId'] ?? '';
+    final String fileName = data['fileName'] ?? '';
+    final Map<String, dynamic> messageJson =
+        Map<String, dynamic>.from(data['messageJson'] ?? {});
+
+    if (filePayloadId == -1 || messageId.isEmpty) return;
+
+    // Dedup
+    if (_seenMessageIds.contains(messageId)) return;
+
+    _pendingFileTransfers[filePayloadId] = _PendingFileTransfer(
+      messageId: messageId,
+      messageJson: messageJson,
+      fileName: fileName,
+    );
+
+    // The file may have already arrived before this metadata.
+    _tryCompleteFileTransfer(filePayloadId);
+  }
+
+  /// Called on every payload transfer progress update.
+  void _handlePayloadTransferUpdate(
+      String endpointId, PayloadTransferUpdate update) {
+    if (update.status == PayloadStatus.SUCCESS) {
+      _completedFilePayloads.add(update.id);
+      _tryCompleteFileTransfer(update.id);
+    } else if (update.status == PayloadStatus.FAILURE ||
+        update.status == PayloadStatus.CANCELED) {
+      _pendingFileTransfers.remove(update.id);
+      _receivedFileUris.remove(update.id);
+      _completedFilePayloads.remove(update.id);
+      debugPrint('[Mesh] File transfer ${update.id} failed/cancelled');
+    }
+  }
+
+  /// Attempt to finalise a file transfer once we have the metadata,
+  /// the file URI, AND the transfer has completed successfully.
+  Future<void> _tryCompleteFileTransfer(int payloadId) async {
+    final meta = _pendingFileTransfers[payloadId];
+    final uri = _receivedFileUris[payloadId];
+    final isComplete = _completedFilePayloads.contains(payloadId);
+    if (meta == null || uri == null || !isComplete) return; // not ready yet
+
+    try {
+      // Move the received file to a permanent app-local directory.
+      final appDir = await getApplicationDocumentsDirectory();
+      final meshImagesDir = Directory('${appDir.path}/mesh_images');
+      if (!meshImagesDir.existsSync()) {
+        meshImagesDir.createSync(recursive: true);
+      }
+      final destPath = '${meshImagesDir.path}/${meta.fileName}';
+
+      await Nearby().copyFileAndDeleteOriginal(uri, destPath);
+
+      // Build the MessageModel with the local file path.
+      final message = MessageModel.fromJson(meta.messageJson).copyWith(
+        localFilePath: destPath,
+        isOfflineMesh: true,
+        meshHops: (meta.messageJson['meshHops'] ?? 0) + 1,
+      );
+
+      _seenMessageIds.add(meta.messageId);
+
+      // Is this message for us?
+      if (message.receiverId == _currentUserId) {
+        _incomingMeshMessages.add(message);
+        _meshMessageController.add(message);
+        _cacheService.storePendingMeshMessage(message);
+        debugPrint('[Mesh] Received image for me: ${meta.fileName}');
+      }
+
+      // Clean up tracking maps.
+      _pendingFileTransfers.remove(payloadId);
+      _receivedFileUris.remove(payloadId);
+      _completedFilePayloads.remove(payloadId);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[Mesh] Error completing file transfer $payloadId: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // Sync pending messages to Firestore when back online
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -351,12 +554,21 @@ class MeshNetworkService extends ChangeNotifier {
       try {
         // Only sync messages that we sent (not relayed ones for other users)
         if (msg.senderId == _currentUserId) {
+          String? mediaUrl = msg.mediaUrl;
+
+          // If this is an image with a local file, upload it first.
+          if (msg.type == MessageType.image &&
+              msg.localFilePath != null &&
+              mediaUrl == null) {
+            mediaUrl = await _uploadLocalImage(msg);
+          }
+
           await _chatService.sendMessage(
             senderId: msg.senderId,
             receiverId: msg.receiverId,
             text: msg.text,
             type: msg.type,
-            mediaUrl: msg.mediaUrl,
+            mediaUrl: mediaUrl,
           );
         }
         synced.add(msg.id);
@@ -369,6 +581,28 @@ class MeshNetworkService extends ChangeNotifier {
       _cacheService.removeSyncedMeshMessages(synced);
       debugPrint('[Mesh] Synced ${synced.length} messages');
       notifyListeners();
+    }
+  }
+
+  /// Upload a locally-stored mesh image to Firebase Storage.
+  Future<String?> _uploadLocalImage(MessageModel msg) async {
+    try {
+      final file = File(msg.localFilePath!);
+      if (!file.existsSync()) return null;
+
+      final chatRoomId =
+          _chatService.getChatRoomId(msg.senderId, msg.receiverId);
+      final fileName =
+          '${msg.timestamp.millisecondsSinceEpoch}_mesh_${msg.id}.jpg';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('chat_images/$chatRoomId/$fileName');
+
+      await ref.putFile(file);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('[Mesh] Failed to upload image for ${msg.id}: $e');
+      return null;
     }
   }
 

@@ -18,6 +18,9 @@ class MessageModel {
   final MessageStatus status;
   final String? mediaUrl;
 
+  /// Local file path for images received/sent via mesh (not yet uploaded).
+  final String? localFilePath;
+
   // ─── Offline Mesh Messaging fields ──────────────────────────────────
   /// Whether this message was sent/received via the mesh network.
   final bool isOfflineMesh;
@@ -37,6 +40,7 @@ class MessageModel {
     required this.timestamp,
     this.status = MessageStatus.sent,
     this.mediaUrl,
+    this.localFilePath,
     this.isOfflineMesh = false,
     this.meshHops = 0,
     this.syncPending = false,
@@ -58,6 +62,7 @@ class MessageModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'status': status.name,
       'mediaUrl': mediaUrl,
+      // localFilePath is intentionally excluded from Firestore — it's local only.
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
@@ -75,6 +80,7 @@ class MessageModel {
       'timestamp': timestamp.millisecondsSinceEpoch,
       'status': status.name,
       'mediaUrl': mediaUrl,
+      'localFilePath': localFilePath,
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
@@ -94,6 +100,7 @@ class MessageModel {
           : DateTime.now(),
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
+      localFilePath: map['localFilePath'],
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
@@ -170,6 +177,7 @@ class MessageModel {
     DateTime? timestamp,
     MessageStatus? status,
     String? mediaUrl,
+    String? localFilePath,
     bool? isOfflineMesh,
     int? meshHops,
     bool? syncPending,
@@ -183,6 +191,7 @@ class MessageModel {
       timestamp: timestamp ?? this.timestamp,
       status: status ?? this.status,
       mediaUrl: mediaUrl ?? this.mediaUrl,
+      localFilePath: localFilePath ?? this.localFilePath,
       isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,
       meshHops: meshHops ?? this.meshHops,
       syncPending: syncPending ?? this.syncPending,

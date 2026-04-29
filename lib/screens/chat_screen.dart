@@ -542,10 +542,11 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             // ── Image message ─────────────────────────────────────
             if (message.type == MessageType.image &&
-                message.mediaUrl != null) ...[
+                (message.mediaUrl != null ||
+                    message.localFilePath != null)) ...[
               GestureDetector(
                 onTap: () => _showFullScreenImage(
-                    message.mediaUrl!, message.text),
+                    message.mediaUrl, message.localFilePath, message.text),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: ConstrainedBox(
@@ -553,32 +554,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       maxWidth: 220,
                       maxHeight: 280,
                     ),
-                    child: Image.network(
-                      message.mediaUrl!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (_, child, progress) {
-                        if (progress == null) return child;
-                        return Container(
-                          width: 200,
-                          height: 150,
-                          color: c.surfaceAlt,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: c.primary),
-                          ),
-                        );
-                      },
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 200,
-                        height: 100,
-                        color: c.surfaceAlt,
-                        child: Center(
-                          child: Icon(Icons.broken_image_rounded,
-                              color: c.textLow),
-                        ),
-                      ),
-                    ),
+                    child: _buildImageWidget(message, c),
                   ),
                 ),
               ),
@@ -626,7 +602,75 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showFullScreenImage(String imageUrl, String caption) {
+  /// Build the correct image widget for a message (network URL or local file).
+  Widget _buildImageWidget(MessageModel message, dynamic c) {
+    // Prefer local file if available (mesh images)
+    if (message.localFilePath != null &&
+        File(message.localFilePath!).existsSync()) {
+      return Image.file(
+        File(message.localFilePath!),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 200,
+          height: 100,
+          color: c.surfaceAlt,
+          child: Center(
+            child: Icon(Icons.broken_image_rounded, color: c.textLow),
+          ),
+        ),
+      );
+    }
+
+    // Fall back to network URL
+    if (message.mediaUrl != null) {
+      return Image.network(
+        message.mediaUrl!,
+        fit: BoxFit.cover,
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            width: 200,
+            height: 150,
+            color: c.surfaceAlt,
+            child: Center(
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: c.primary),
+            ),
+          );
+        },
+        errorBuilder: (_, __, ___) => Container(
+          width: 200,
+          height: 100,
+          color: c.surfaceAlt,
+          child: Center(
+            child: Icon(Icons.broken_image_rounded, color: c.textLow),
+          ),
+        ),
+      );
+    }
+
+    // No image source available
+    return Container(
+      width: 200,
+      height: 100,
+      color: c.surfaceAlt,
+      child: Center(
+        child: Icon(Icons.image_not_supported_rounded, color: c.textLow),
+      ),
+    );
+  }
+
+  void _showFullScreenImage(
+      String? imageUrl, String? localFilePath, String caption) {
+    Widget imageWidget;
+    if (localFilePath != null && File(localFilePath).existsSync()) {
+      imageWidget = Image.file(File(localFilePath));
+    } else if (imageUrl != null) {
+      imageWidget = Image.network(imageUrl);
+    } else {
+      return; // nothing to show
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -640,7 +684,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           body: Center(
             child: InteractiveViewer(
-              child: Image.network(imageUrl),
+              child: imageWidget,
             ),
           ),
         ),
@@ -1419,6 +1463,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send images to this contact')),
+      );
+      return;
+    }
+
     try {
       final XFile? picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -1428,29 +1479,54 @@ class _ChatScreenState extends State<ChatScreen> {
 
       setState(() => _isUploadingImage = true);
 
-      // Upload to Firebase Storage
-      final chatRoomId = _chatService.getChatRoomId(
-          widget.currentUserId, widget.contact.id);
-      final fileName =
-          '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('chat_images/$chatRoomId/$fileName');
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
 
-      await ref.putFile(File(picked.path));
-      final imageUrl = await ref.getDownloadURL();
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendImageViaMesh(
+            receiverId: widget.contact.id,
+            filePath: picked.path,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'No internet & mesh unavailable. Image not sent.')),
+            );
+          }
+        }
+      } else {
+        // ── Online: upload to Firebase Storage ──────────────────────
+        final chatRoomId = _chatService.getChatRoomId(
+            widget.currentUserId, widget.contact.id);
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('chat_images/$chatRoomId/$fileName');
 
-      // Send as an image message
-      await _chatService.sendMessage(
-        senderId: widget.currentUserId,
-        receiverId: widget.contact.id,
-        text: '📷 Photo',
-        senderName: widget.currentUserName,
-        type: MessageType.image,
-        mediaUrl: imageUrl,
-      );
+        await ref.putFile(File(picked.path));
+        final imageUrl = await ref.getDownloadURL();
 
-      _scrollToBottom();
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: '📷 Photo',
+          senderName: widget.currentUserName,
+          type: MessageType.image,
+          mediaUrl: imageUrl,
+        );
+
+        _scrollToBottom();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
