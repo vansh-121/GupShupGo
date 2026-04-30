@@ -1017,8 +1017,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             Expanded(
                               child: Text(
                                 mesh.isActive
-                                    ? 'Mesh Mode  ·  ${mesh.connectedPeers} peer${mesh.connectedPeers == 1 ? '' : 's'} nearby'
-                                    : 'No internet  ·  Tap to enable Mesh',
+                                    ? 'Offline Chat  ·  ${mesh.connectedPeers} device${mesh.connectedPeers == 1 ? '' : 's'} nearby'
+                                    : 'No internet?\nChat offline with nearby devices',
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 12,
