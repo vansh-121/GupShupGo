@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nearby_connections/nearby_connections.dart';
@@ -135,9 +136,18 @@ class MeshNetworkService extends ChangeNotifier {
       Permission.bluetoothScan,
       Permission.bluetoothAdvertise,
       Permission.bluetoothConnect,
-      Permission.nearbyWifiDevices,
       Permission.location, // required by Nearby Connections on Android
     ];
+
+    // NEARBY_WIFI_DEVICES was introduced in Android 13 (API 33).
+    // On Android 12 and below this permission doesn't exist and the
+    // permission_handler plugin will always report it as denied.
+    if (Platform.isAndroid) {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      if (androidInfo.version.sdkInt >= 33) {
+        permissions.add(Permission.nearbyWifiDevices);
+      }
+    }
 
     final statuses = await permissions.request();
 
