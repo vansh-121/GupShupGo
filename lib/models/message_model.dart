@@ -21,6 +21,9 @@ class MessageModel {
   /// Local file path for images received/sent via mesh (not yet uploaded).
   final String? localFilePath;
 
+  /// Duration of audio in seconds (for voice messages).
+  final int? audioDuration;
+
   // ─── Offline Mesh Messaging fields ──────────────────────────────────
   /// Whether this message was sent/received via the mesh network.
   final bool isOfflineMesh;
@@ -41,6 +44,7 @@ class MessageModel {
     this.status = MessageStatus.sent,
     this.mediaUrl,
     this.localFilePath,
+    this.audioDuration,
     this.isOfflineMesh = false,
     this.meshHops = 0,
     this.syncPending = false,
@@ -62,6 +66,7 @@ class MessageModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'status': status.name,
       'mediaUrl': mediaUrl,
+      'audioDuration': audioDuration,
       // localFilePath is intentionally excluded from Firestore — it's local only.
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
@@ -81,6 +86,7 @@ class MessageModel {
       'status': status.name,
       'mediaUrl': mediaUrl,
       'localFilePath': localFilePath,
+      'audioDuration': audioDuration,
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
@@ -101,6 +107,7 @@ class MessageModel {
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
       localFilePath: map['localFilePath'],
+      audioDuration: map['audioDuration'],
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
@@ -118,6 +125,7 @@ class MessageModel {
       timestamp: _parseTimestamp(map['timestamp']),
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
+      audioDuration: map['audioDuration'],
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
@@ -178,6 +186,7 @@ class MessageModel {
     MessageStatus? status,
     String? mediaUrl,
     String? localFilePath,
+    int? audioDuration,
     bool? isOfflineMesh,
     int? meshHops,
     bool? syncPending,
@@ -192,6 +201,7 @@ class MessageModel {
       status: status ?? this.status,
       mediaUrl: mediaUrl ?? this.mediaUrl,
       localFilePath: localFilePath ?? this.localFilePath,
+      audioDuration: audioDuration ?? this.audioDuration,
       isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,
       meshHops: meshHops ?? this.meshHops,
       syncPending: syncPending ?? this.syncPending,

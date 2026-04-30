@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +17,9 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 class Contact {
   final String id;
@@ -70,9 +73,14 @@ class _ChatScreenState extends State<ChatScreen> {
   final SettingsService _settingsService = SettingsService();
   late bool _isMuted;
 
-  // ─── Image picker ─────────────────────────────────────────────────
+  // ── Image picker ─────────────────────────────────────────────────
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingImage = false;
+
+  // ── Voice recording ───────────────────────────────────────────────
+  final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
+  bool _isSendingVoice = false;
+  bool _hasText = false; // tracks if text field has content for mic/send toggle
 
   // ─── Block state ──────────────────────────────────────────────────
   bool _isBlocked = false;      // current user blocked the contact
@@ -250,6 +258,11 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Called every time the text field value changes.
   void _onTextChanged() {
     final hasText = _messageController.text.trim().isNotEmpty;
+
+    // Update the mic/send button toggle
+    if (hasText != _hasText) {
+      setState(() => _hasText = hasText);
+    }
 
     // User started typing — notify Firestore once
     if (hasText && !_isTyping) {
@@ -540,8 +553,18 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Audio / voice message ─────────────────────────────
+            if (message.type == MessageType.audio) ...[
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 200),
+                child: VoiceMessageBubble(
+                  message: message,
+                  isMe: isMe,
+                ),
+              ),
+            ]
             // ── Image message ─────────────────────────────────────
-            if (message.type == MessageType.image &&
+            else if (message.type == MessageType.image &&
                 (message.mediaUrl != null ||
                     message.localFilePath != null)) ...[
               GestureDetector(
@@ -1162,101 +1185,327 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   )
                 else
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: c.surface,
-                    border: Border(
-                      top: BorderSide(color: c.divider, width: 1),
-                    ),
-                  ),
-                  child: SafeArea(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _isUploadingImage
-                            ? Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: c.primary),
-                                ),
-                              )
-                            : IconButton(
-                                icon: Icon(Icons.attach_file_rounded,
-                                    color: c.textMid, size: 22),
-                                onPressed: _pickAndSendImage,
-                              ),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: c.surfaceAlt,
-                              borderRadius: BorderRadius.circular(24),
-                              border:
-                                  Border.all(color: c.border, width: 1),
-                            ),
-                            child: TextField(
-                              controller: _messageController,
-                              decoration: InputDecoration(
-                                hintText: 'Message...',
-                                hintStyle: GoogleFonts.poppins(
-                                    color: c.textLow, fontSize: 14),
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                fillColor: Colors.transparent,
-                                filled: false,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 10),
-                              ),
-                              style: GoogleFonts.poppins(
-                                  fontSize: 14, color: c.textHigh),
-                              maxLines: 5,
-                              minLines: 1,
-                              textCapitalization: TextCapitalization.sentences,
-                              onSubmitted: (_) => _sendMessage(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: _isSending ? null : _sendMessage,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: _isSending
-                                  ? c.textLow
-                                  : c.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: _isSending
-                                ? const Padding(
-                                    padding: EdgeInsets.all(12),
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.send_rounded,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                _buildMessageInputBar(c),
               ],
             ),
     );
+  }
+
+  /// The message input bar — text field + attachment + send/mic button.
+  Widget _buildMessageInputBar(AppThemeColors c) {
+    final isRecording = _voiceRecorder.isRecording;
+
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(
+          top: BorderSide(color: c.divider, width: 1),
+        ),
+      ),
+      child: SafeArea(
+        child: isRecording
+            ? _buildRecordingBar(c)
+            : _buildNormalInputBar(c),
+      ),
+    );
+  }
+
+  /// Normal input: attach + text field + send/mic.
+  Widget _buildNormalInputBar(AppThemeColors c) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        _isUploadingImage
+            ? Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: c.primary),
+                ),
+              )
+            : IconButton(
+                icon: Icon(Icons.attach_file_rounded,
+                    color: c.textMid, size: 22),
+                onPressed: _pickAndSendImage,
+              ),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: c.surfaceAlt,
+              borderRadius: BorderRadius.circular(24),
+              border:
+                  Border.all(color: c.border, width: 1),
+            ),
+            child: TextField(
+              controller: _messageController,
+              decoration: InputDecoration(
+                hintText: 'Message...',
+                hintStyle: GoogleFonts.poppins(
+                    color: c.textLow, fontSize: 14),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                fillColor: Colors.transparent,
+                filled: false,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+              ),
+              style: GoogleFonts.poppins(
+                  fontSize: 14, color: c.textHigh),
+              maxLines: 5,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // ── Send or Mic button ─────────────────────────────────
+        if (_hasText || _isSending)
+          GestureDetector(
+            onTap: _isSending ? null : _sendMessage,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _isSending
+                    ? c.textLow
+                    : c.primary,
+                shape: BoxShape.circle,
+              ),
+              child: _isSending
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.send_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+            ),
+          )
+        else
+          GestureDetector(
+            onLongPressStart: (_) => _startVoiceRecording(),
+            onLongPressMoveUpdate: (details) {
+              // Could track slide-to-cancel offset here
+            },
+            onLongPressEnd: (_) => _stopVoiceRecording(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.primary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.mic_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Recording-active bar: pulsing dot, timer, slide-to-cancel, stop button.
+  Widget _buildRecordingBar(AppThemeColors c) {
+    return Row(
+      children: [
+        // Pulsing red dot
+        _buildPulsingDot(c),
+        const SizedBox(width: 8),
+        // Duration counter
+        ListenableBuilder(
+          listenable: _voiceRecorder,
+          builder: (context, _) {
+            return Text(
+              VoiceRecorderService.formatDuration(_voiceRecorder.elapsed),
+              style: GoogleFonts.poppins(
+                color: c.textHigh,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                fontFeatures: [const FontFeature.tabularFigures()],
+              ),
+            );
+          },
+        ),
+        const Spacer(),
+        // Slide-to-cancel hint
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.chevron_left_rounded, color: c.textLow, size: 18),
+            Text(
+              'Slide to cancel',
+              style: GoogleFonts.poppins(color: c.textLow, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        // Cancel button
+        GestureDetector(
+          onTap: _cancelVoiceRecording,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: c.error.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.delete_outline_rounded,
+                color: c.error, size: 18),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Stop & send button
+        GestureDetector(
+          onTap: _stopVoiceRecording,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: c.primary,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.send_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPulsingDot(AppThemeColors c) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.3, end: 1.0),
+      duration: const Duration(milliseconds: 800),
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: c.error,
+              shape: BoxShape.circle,
+            ),
+          ),
+        );
+      },
+      onEnd: () {
+        // Restart the animation by rebuilding
+        if (_voiceRecorder.isRecording && mounted) setState(() {});
+      },
+    );
+  }
+
+  // ─── Voice recording handlers ─────────────────────────────────────
+
+  Future<void> _startVoiceRecording() async {
+    if (_isBlocked || _isBlockedByContact) return;
+    HapticFeedback.mediumImpact();
+    await _voiceRecorder.startRecording();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _stopVoiceRecording() async {
+    if (!_voiceRecorder.isRecording) return;
+
+    final durationSeconds = _voiceRecorder.elapsed.inSeconds;
+    final path = await _voiceRecorder.stopRecording();
+    if (mounted) setState(() {});
+
+    if (path == null || durationSeconds < 1) return; // too short
+
+    await _sendVoiceMessage(path, durationSeconds);
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    HapticFeedback.heavyImpact();
+    await _voiceRecorder.cancelRecording();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _sendVoiceMessage(String filePath, int durationSeconds) async {
+    setState(() => _isSendingVoice = true);
+
+    try {
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
+
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendAudioViaMesh(
+            receiverId: widget.contact.id,
+            filePath: filePath,
+            durationSeconds: durationSeconds,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'No internet & mesh unavailable. Voice note not sent.')),
+            );
+          }
+        }
+      } else {
+        // ── Online: upload to Firebase Storage ──────────────────────
+        final chatRoomId = _chatService.getChatRoomId(
+            widget.currentUserId, widget.contact.id);
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_voice.m4a';
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('chat_audio/$chatRoomId/$fileName');
+
+        final metadata = SettableMetadata(contentType: 'audio/m4a');
+        await ref.putFile(File(filePath), metadata);
+        final audioUrl = await ref.getDownloadURL();
+
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: '🎤 Voice message',
+          senderName: widget.currentUserName,
+          type: MessageType.audio,
+          mediaUrl: audioUrl,
+          audioDuration: durationSeconds,
+        );
+
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingVoice = false);
+    }
   }
 
   Widget _buildTypingBubble() {
@@ -1546,6 +1795,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
     _meshMessageSubscription?.cancel();
+    _voiceRecorder.dispose();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _searchController.dispose();

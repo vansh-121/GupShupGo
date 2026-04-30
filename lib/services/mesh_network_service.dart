@@ -382,6 +382,77 @@ class MeshNetworkService extends ChangeNotifier {
     return message;
   }
 
+  /// Send an audio voice note via the mesh network.
+  /// Returns a [MessageModel] with [localFilePath] set to the recorded audio.
+  Future<MessageModel> sendAudioViaMesh({
+    required String receiverId,
+    required String filePath,
+    required int durationSeconds,
+    String? senderName,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw Exception('Audio file does not exist: $filePath');
+    }
+
+    // Copy the audio to app-local storage so it survives temp cleanup.
+    final appDir = await getApplicationDocumentsDirectory();
+    final meshAudioDir = Directory('${appDir.path}/mesh_audio');
+    if (!meshAudioDir.existsSync()) {
+      meshAudioDir.createSync(recursive: true);
+    }
+    final ext = filePath.contains('.') ? filePath.split('.').last : 'm4a';
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_generateId()}.$ext';
+    final savedFile = await file.copy('${meshAudioDir.path}/$fileName');
+
+    final message = MessageModel(
+      id: _generateId(),
+      senderId: _currentUserId,
+      receiverId: receiverId,
+      text: '🎤 Voice message',
+      type: MessageType.audio,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sent,
+      localFilePath: savedFile.path,
+      audioDuration: durationSeconds,
+      isOfflineMesh: true,
+      meshHops: 0,
+      syncPending: true,
+    );
+
+    // Store locally for persistence & Firestore sync
+    _cacheService.storePendingMeshMessage(message);
+    _seenMessageIds.add(message.id);
+
+    // For each connected peer:
+    //  1. Send the FILE payload (returns its payloadId).
+    //  2. Send a BYTES metadata payload so receiver can match file → message.
+    for (final endpoint in _connectedEndpoints) {
+      try {
+        final filePayloadId =
+            await Nearby().sendFilePayload(endpoint, savedFile.path);
+
+        final metadata = <String, dynamic>{
+          'payloadType': 'file_metadata',
+          'filePayloadId': filePayloadId,
+          'fileName': fileName,
+          'messageId': message.id,
+          'messageJson': message.toJson(),
+          'hops': 0,
+          'ttl': maxHops,
+        };
+        final bytes = utf8.encode(jsonEncode(metadata));
+        await Nearby().sendBytesPayload(endpoint, bytes);
+      } catch (e) {
+        debugPrint('[Mesh] Failed to send audio to $endpoint: $e');
+      }
+    }
+
+    return message;
+  }
+
+
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {
     final bytes = utf8.encode(jsonEncode(payload.toJson()));
@@ -570,7 +641,14 @@ class MeshNetworkService extends ChangeNotifier {
           if (msg.type == MessageType.image &&
               msg.localFilePath != null &&
               mediaUrl == null) {
-            mediaUrl = await _uploadLocalImage(msg);
+            mediaUrl = await _uploadLocalFile(msg, 'chat_images', 'jpg');
+          }
+
+          // If this is an audio voice note with a local file, upload it.
+          if (msg.type == MessageType.audio &&
+              msg.localFilePath != null &&
+              mediaUrl == null) {
+            mediaUrl = await _uploadLocalFile(msg, 'chat_audio', 'm4a');
           }
 
           await _chatService.sendMessage(
@@ -579,6 +657,7 @@ class MeshNetworkService extends ChangeNotifier {
             text: msg.text,
             type: msg.type,
             mediaUrl: mediaUrl,
+            audioDuration: msg.audioDuration,
           );
         }
         synced.add(msg.id);
@@ -594,8 +673,9 @@ class MeshNetworkService extends ChangeNotifier {
     }
   }
 
-  /// Upload a locally-stored mesh image to Firebase Storage.
-  Future<String?> _uploadLocalImage(MessageModel msg) async {
+  /// Upload a locally-stored mesh file (image / audio) to Firebase Storage.
+  Future<String?> _uploadLocalFile(
+      MessageModel msg, String folder, String fallbackExt) async {
     try {
       final file = File(msg.localFilePath!);
       if (!file.existsSync()) return null;
@@ -603,15 +683,18 @@ class MeshNetworkService extends ChangeNotifier {
       final chatRoomId =
           _chatService.getChatRoomId(msg.senderId, msg.receiverId);
       final fileName =
-          '${msg.timestamp.millisecondsSinceEpoch}_mesh_${msg.id}.jpg';
+          '${msg.timestamp.millisecondsSinceEpoch}_mesh_${msg.id}.$fallbackExt';
       final ref = FirebaseStorage.instance
           .ref()
-          .child('chat_images/$chatRoomId/$fileName');
+          .child('$folder/$chatRoomId/$fileName');
 
-      await ref.putFile(file);
+      final contentType = fallbackExt == 'm4a' ? 'audio/m4a' : 'image/jpeg';
+      final metadata = SettableMetadata(contentType: contentType);
+
+      await ref.putFile(file, metadata);
       return await ref.getDownloadURL();
     } catch (e) {
-      debugPrint('[Mesh] Failed to upload image for ${msg.id}: $e');
+      debugPrint('[Mesh] Failed to upload file for ${msg.id}: $e');
       return null;
     }
   }

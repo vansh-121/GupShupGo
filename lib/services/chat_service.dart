@@ -52,6 +52,7 @@ class ChatService {
     String? senderName,
     MessageType type = MessageType.text,
     String? mediaUrl,
+    int? audioDuration,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
 
@@ -71,6 +72,7 @@ class ChatService {
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
       mediaUrl: mediaUrl,
+      audioDuration: audioDuration,
     );
 
     // Use batch write for consistency
