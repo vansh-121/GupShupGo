@@ -32,18 +32,33 @@ class _MeshNotificationListenerState extends State<MeshNotificationListener> {
   final List<MessageModel> _queue = [];
   // De-dupe across hot reload + duplicate stream emissions.
   final Set<String> _shownIds = {};
+  // Track the last service instance so we can resubscribe if it changes.
+  MeshNetworkService? _mesh;
 
   static const _bannerDuration = Duration(seconds: 4);
 
   @override
   void initState() {
     super.initState();
-    // Subscribe synchronously — Provider is guaranteed to be available
-    // because MultiProvider is above MaterialApp in main.dart. Delaying
-    // this with addPostFrameCallback created a window where the very
-    // first incoming message could slip past unseen.
+    // Actual subscription is set up in didChangeDependencies (called right
+    // after initState) so that re-subscriptions are handled automatically if
+    // the Provider value ever changes.
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-    _sub = mesh.meshMessageStream.listen(_onMessage);
+    if (_mesh == mesh) return; // Already subscribed to this instance.
+    _sub?.cancel();
+    _mesh = mesh;
+    _sub = mesh.meshMessageStream.listen(
+      _onMessage,
+      // Prevent stream errors from silently killing the subscription.
+      onError: (Object e) =>
+          debugPrint('[MeshNotif] Stream error (staying subscribed): $e'),
+      cancelOnError: false,
+    );
   }
 
   @override
@@ -54,28 +69,32 @@ class _MeshNotificationListenerState extends State<MeshNotificationListener> {
   }
 
   void _onMessage(MessageModel msg) {
-    if (!mounted) return;
-    final mesh = Provider.of<MeshNetworkService>(context, listen: false);
+    try {
+      if (!mounted) return;
+      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
 
-    debugPrint(
-      '[MeshNotif] received msg=${msg.id} from=${msg.senderId} '
-      'active=${mesh.activeConversationUserId} current=${_current?.id}',
-    );
+      debugPrint(
+        '[MeshNotif] received msg=${msg.id} from=${msg.senderId} '
+        'active=${mesh.activeConversationUserId} current=${_current?.id}',
+      );
 
-    // Guard against own-loopback (defensive — upstream already filters).
-    if (msg.senderId == mesh.currentUserId) return;
+      // Guard against own-loopback (defensive — upstream already filters).
+      if (msg.senderId == mesh.currentUserId) return;
 
-    // Suppress when the user is already viewing this conversation.
-    if (mesh.activeConversationUserId == msg.senderId) return;
+      // Suppress when the user is already viewing this conversation.
+      if (mesh.activeConversationUserId == msg.senderId) return;
 
-    // Drop duplicates (e.g., relay paths that re-emit before dedup catches).
-    if (_shownIds.contains(msg.id)) return;
-    _shownIds.add(msg.id);
+      // Drop duplicates (e.g., relay paths that re-emit before dedup catches).
+      if (_shownIds.contains(msg.id)) return;
+      _shownIds.add(msg.id);
 
-    if (_current == null) {
-      _showBanner(msg);
-    } else {
-      _queue.add(msg);
+      if (_current == null) {
+        _showBanner(msg);
+      } else {
+        _queue.add(msg);
+      }
+    } catch (e) {
+      debugPrint('[MeshNotif] Error handling message: $e');
     }
   }
 

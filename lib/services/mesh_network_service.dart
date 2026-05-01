@@ -310,6 +310,12 @@ class MeshNetworkService extends ChangeNotifier {
     }
     _connectedEndpoints.clear();
     _peers.clear();
+    // Clear dedup set so restarted sessions accept all messages fresh.
+    _seenMessageIds.clear();
+    // Discard in-flight file transfers — they won't complete after stop.
+    _pendingFileTransfers.clear();
+    _receivedFileUris.clear();
+    _completedFilePayloads.clear();
     _publishPeers();
   }
 
@@ -369,6 +375,7 @@ class MeshNetworkService extends ChangeNotifier {
         },
         onEndpointLost: (endpointId) {
           debugPrint('[Mesh] Lost endpoint: $endpointId');
+          _connectedEndpoints.remove(endpointId);
           _peers.remove(endpointId);
           _publishPeers();
         },
@@ -431,6 +438,30 @@ class MeshNetworkService extends ChangeNotifier {
     _peers.remove(endpointId);
     debugPrint('[Mesh] Disconnected from $endpointId (${connectedPeers} peers)');
     _publishPeers();
+
+    // The Nearby SDK does NOT re-fire onEndpointFound when a connection drops
+    // while the peer is still in range — so auto-reconnect is the only path
+    // back without the peer going fully out of range and returning.
+    if (isActive) _scheduleReconnect(endpointId);
+  }
+
+  void _scheduleReconnect(String endpointId) {
+    Future.delayed(const Duration(seconds: 2), () async {
+      // Bail if mesh was stopped or peer already reconnected via other path.
+      if (!isActive || _connectedEndpoints.contains(endpointId)) return;
+      debugPrint('[Mesh] Auto-reconnect attempt → $endpointId');
+      try {
+        await Nearby().requestConnection(
+          _encodeIdentity(),
+          endpointId,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: _onConnectionResult,
+          onDisconnected: _onDisconnected,
+        );
+      } catch (e) {
+        debugPrint('[Mesh] Auto-reconnect failed for $endpointId: $e');
+      }
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════

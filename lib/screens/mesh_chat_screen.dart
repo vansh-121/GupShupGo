@@ -34,6 +34,12 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
 
+  // Stored during initState so dispose() never needs to call Provider.of(context).
+  // Calling Provider.of in dispose() is unsafe — the context can be in an
+  // invalid state during teardown, causing setActiveConversation(null) to be
+  // silently skipped and permanently suppressing notifications for this peer.
+  late MeshNetworkService _mesh;
+
   StreamSubscription<MessageModel>? _meshSub;
   final List<MessageModel> _messages = [];
 
@@ -44,8 +50,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   @override
   void initState() {
     super.initState();
-    final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-    mesh.setActiveConversation(widget.peer.userId);
+    _mesh = Provider.of<MeshNetworkService>(context, listen: false);
+    _mesh.setActiveConversation(widget.peer.userId);
     _loadPersistedMessages();
     _listenToMesh();
     _messageController.addListener(_onTextChanged);
@@ -61,8 +67,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   }
 
   void _listenToMesh() {
-    final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-    _meshSub = mesh.meshMessageStream.listen((msg) {
+    _meshSub = _mesh.meshMessageStream.listen((msg) {
       // Only show messages exchanged with this peer.
       final peerId = widget.peer.userId;
       final isForThisPeer = (msg.senderId == peerId) ||
@@ -85,8 +90,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     setState(() => _isSending = true);
     try {
       _messageController.clear();
-      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-      final msg = await mesh.sendViaMesh(
+      final msg = await _mesh.sendViaMesh(
         receiverId: widget.peer.userId,
         text: text,
       );
@@ -108,8 +112,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
       );
       if (picked == null) return;
       setState(() => _isUploadingImage = true);
-      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-      final msg = await mesh.sendImageViaMesh(
+      final msg = await _mesh.sendImageViaMesh(
         receiverId: widget.peer.userId,
         filePath: picked.path,
       );
@@ -135,8 +138,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     if (mounted) setState(() {});
     if (path == null || duration < 1) return;
     try {
-      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
-      final msg = await mesh.sendAudioViaMesh(
+      final msg = await _mesh.sendAudioViaMesh(
         receiverId: widget.peer.userId,
         filePath: path,
         durationSeconds: duration,
@@ -173,10 +175,11 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
 
   @override
   void dispose() {
-    // Clear before stream/state teardown so any late notifications fire
-    // through the global banner instead of into a disposed screen.
-    Provider.of<MeshNetworkService>(context, listen: false)
-        .setActiveConversation(null);
+    // Use stored _mesh reference — calling Provider.of(context) in dispose()
+    // is unsafe because the context may already be partially detached,
+    // causing setActiveConversation(null) to silently not run and permanently
+    // suppressing notifications for this peer.
+    _mesh.setActiveConversation(null);
     _meshSub?.cancel();
     _voiceRecorder.dispose();
     _messageController.removeListener(_onTextChanged);
