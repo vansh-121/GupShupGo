@@ -4,17 +4,22 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 class Contact {
   final String id;
@@ -68,9 +73,14 @@ class _ChatScreenState extends State<ChatScreen> {
   final SettingsService _settingsService = SettingsService();
   late bool _isMuted;
 
-  // ─── Image picker ─────────────────────────────────────────────────
+  // ── Image picker ─────────────────────────────────────────────────
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingImage = false;
+
+  // ── Voice recording ───────────────────────────────────────────────
+  final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
+  bool _isSendingVoice = false;
+  bool _hasText = false; // tracks if text field has content for mic/send toggle
 
   // ─── Block state ──────────────────────────────────────────────────
   bool _isBlocked = false;      // current user blocked the contact
@@ -86,6 +96,11 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isOtherUserTyping = false;
   StreamSubscription<bool>? _typingSubscription;
 
+  // ─── Mesh messaging state ─────────────────────────────────────────
+  StreamSubscription<MessageModel>? _meshMessageSubscription;
+  final List<MessageModel> _meshMessages = [];
+  late MeshNetworkService _meshService;
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +108,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final chatRoomId = _chatService.getChatRoomId(
         widget.currentUserId, widget.contact.id);
     _isMuted = _settingsService.isChatMuted(chatRoomId);
+    // Suppress global mesh banners for this conversation while it's open.
+    _meshService = Provider.of<MeshNetworkService>(context, listen: false);
+    _meshService.setActiveConversation(widget.contact.id);
     _initializeChat();
     _messageController.addListener(_onTextChanged);
   }
@@ -138,11 +156,37 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Start listening for real-time online/offline status changes
       _listenToOnlineStatus();
+
+      // Start listening for mesh messages (offline messaging)
+      _listenToMeshMessages();
     } catch (e) {
       print('Error initializing chat: $e');
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  void _listenToMeshMessages() {
+    try {
+      final meshService =
+          Provider.of<MeshNetworkService>(context, listen: false);
+      _meshMessageSubscription = meshService.meshMessageStream.listen((msg) {
+        // Only show messages for this conversation
+        if ((msg.senderId == widget.contact.id &&
+                msg.receiverId == widget.currentUserId) ||
+            (msg.senderId == widget.currentUserId &&
+                msg.receiverId == widget.contact.id)) {
+          if (mounted) {
+            setState(() {
+              _meshMessages.add(msg);
+            });
+            _scrollToBottom();
+          }
+        }
+      });
+    } catch (_) {
+      // MeshNetworkService might not be in the tree yet
     }
   }
 
@@ -218,6 +262,11 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Called every time the text field value changes.
   void _onTextChanged() {
     final hasText = _messageController.text.trim().isNotEmpty;
+
+    // Update the mic/send button toggle
+    if (hasText != _hasText) {
+      setState(() => _hasText = hasText);
+    }
 
     // User started typing — notify Firestore once
     if (hasText && !_isTyping) {
@@ -364,14 +413,41 @@ class _ChatScreenState extends State<ChatScreen> {
       // User sent the message — stop typing indicator immediately
       _stopTyping();
 
-      await _chatService.sendMessage(
-        senderId: widget.currentUserId,
-        receiverId: widget.contact.id,
-        text: text,
-        senderName: widget.currentUserName,
-      );
+      // Check connectivity — send via mesh if offline
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
 
-      _scrollToBottom();
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendViaMesh(
+            receiverId: widget.contact.id,
+            text: text,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (_) {
+          // Mesh not available — show error
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No internet & mesh unavailable. Message not sent.')),
+          );
+          _messageController.text = text;
+        }
+      } else {
+        // ── Online: send via Firestore as usual ─────────────────────
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: text,
+          senderName: widget.currentUserName,
+        );
+        _scrollToBottom();
+      }
     } catch (e) {
       print('Error sending message: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -481,12 +557,23 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Audio / voice message ─────────────────────────────
+            if (message.type == MessageType.audio) ...[
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 200),
+                child: VoiceMessageBubble(
+                  message: message,
+                  isMe: isMe,
+                ),
+              ),
+            ]
             // ── Image message ─────────────────────────────────────
-            if (message.type == MessageType.image &&
-                message.mediaUrl != null) ...[
+            else if (message.type == MessageType.image &&
+                (message.mediaUrl != null ||
+                    message.localFilePath != null)) ...[
               GestureDetector(
                 onTap: () => _showFullScreenImage(
-                    message.mediaUrl!, message.text),
+                    message.mediaUrl, message.localFilePath, message.text),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: ConstrainedBox(
@@ -494,32 +581,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       maxWidth: 220,
                       maxHeight: 280,
                     ),
-                    child: Image.network(
-                      message.mediaUrl!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (_, child, progress) {
-                        if (progress == null) return child;
-                        return Container(
-                          width: 200,
-                          height: 150,
-                          color: c.surfaceAlt,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: c.primary),
-                          ),
-                        );
-                      },
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 200,
-                        height: 100,
-                        color: c.surfaceAlt,
-                        child: Center(
-                          child: Icon(Icons.broken_image_rounded,
-                              color: c.textLow),
-                        ),
-                      ),
-                    ),
+                    child: _buildImageWidget(message, c),
                   ),
                 ),
               ),
@@ -545,6 +607,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     fontSize: 10,
                   ),
                 ),
+                if (message.isOfflineMesh) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.cell_tower_rounded,
+                    size: 11,
+                    color: isMe
+                        ? Colors.white.withOpacity(0.7)
+                        : c.textLow,
+                  ),
+                ],
                 if (isMe) ...[
                   const SizedBox(width: 4),
                   _buildMessageStatusIcon(message),
@@ -557,7 +629,75 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showFullScreenImage(String imageUrl, String caption) {
+  /// Build the correct image widget for a message (network URL or local file).
+  Widget _buildImageWidget(MessageModel message, dynamic c) {
+    // Prefer local file if available (mesh images)
+    if (message.localFilePath != null &&
+        File(message.localFilePath!).existsSync()) {
+      return Image.file(
+        File(message.localFilePath!),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 200,
+          height: 100,
+          color: c.surfaceAlt,
+          child: Center(
+            child: Icon(Icons.broken_image_rounded, color: c.textLow),
+          ),
+        ),
+      );
+    }
+
+    // Fall back to network URL
+    if (message.mediaUrl != null) {
+      return Image.network(
+        message.mediaUrl!,
+        fit: BoxFit.cover,
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            width: 200,
+            height: 150,
+            color: c.surfaceAlt,
+            child: Center(
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: c.primary),
+            ),
+          );
+        },
+        errorBuilder: (_, __, ___) => Container(
+          width: 200,
+          height: 100,
+          color: c.surfaceAlt,
+          child: Center(
+            child: Icon(Icons.broken_image_rounded, color: c.textLow),
+          ),
+        ),
+      );
+    }
+
+    // No image source available
+    return Container(
+      width: 200,
+      height: 100,
+      color: c.surfaceAlt,
+      child: Center(
+        child: Icon(Icons.image_not_supported_rounded, color: c.textLow),
+      ),
+    );
+  }
+
+  void _showFullScreenImage(
+      String? imageUrl, String? localFilePath, String caption) {
+    Widget imageWidget;
+    if (localFilePath != null && File(localFilePath).existsSync()) {
+      imageWidget = Image.file(File(localFilePath));
+    } else if (imageUrl != null) {
+      imageWidget = Image.network(imageUrl);
+    } else {
+      return; // nothing to show
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -571,7 +711,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           body: Center(
             child: InteractiveViewer(
-              child: Image.network(imageUrl),
+              child: imageWidget,
             ),
           ),
         ),
@@ -856,6 +996,66 @@ class _ChatScreenState extends State<ChatScreen> {
               child: CircularProgressIndicator(color: c.primary))
           : Column(
               children: [
+                // ── Offline / Mesh mode banner ──────────────────────
+                Consumer<ConnectivityProvider>(
+                  builder: (_, connectivity, __) {
+                    if (connectivity.isOnline) return const SizedBox.shrink();
+                    return Consumer<MeshNetworkService>(
+                      builder: (_, mesh, __) => Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        color: const Color(0xFF2D2D2D),
+                        child: Row(
+                          children: [
+                            Icon(
+                              mesh.isActive
+                                  ? Icons.cell_tower_rounded
+                                  : Icons.wifi_off_rounded,
+                              color: mesh.isActive
+                                  ? const Color(0xFF4ADE80)
+                                  : Colors.amber,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                mesh.isActive
+                                    ? 'Offline Chat  ·  ${mesh.connectedPeers} device${mesh.connectedPeers == 1 ? '' : 's'} nearby'
+                                    : 'No internet?\nChat offline with nearby devices',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            if (!mesh.isActive)
+                              GestureDetector(
+                                onTap: () => mesh.start(),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4ADE80),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    'Enable',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.black,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 Expanded(
                   child: StreamBuilder<List<MessageModel>>(
                     stream: _chatService.getMessages(
@@ -890,7 +1090,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         );
                       }
 
-                      final messages = snapshot.data ?? [];
+                      final firestoreMessages = snapshot.data ?? [];
+
+                      // Merge Firestore messages with locally-stored
+                      // mesh messages (dedup by id).
+                      final firestoreIds =
+                          firestoreMessages.map((m) => m.id).toSet();
+                      final uniqueMesh = _meshMessages
+                          .where((m) => !firestoreIds.contains(m.id))
+                          .toList();
+                      final messages = [
+                        ...firestoreMessages,
+                        ...uniqueMesh,
+                      ]..sort(
+                          (a, b) => a.timestamp.compareTo(b.timestamp));
 
                       final hasUnreadMessages = messages.any((m) =>
                           m.receiverId == widget.currentUserId &&
@@ -976,101 +1189,327 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   )
                 else
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: c.surface,
-                    border: Border(
-                      top: BorderSide(color: c.divider, width: 1),
-                    ),
-                  ),
-                  child: SafeArea(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _isUploadingImage
-                            ? Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: c.primary),
-                                ),
-                              )
-                            : IconButton(
-                                icon: Icon(Icons.attach_file_rounded,
-                                    color: c.textMid, size: 22),
-                                onPressed: _pickAndSendImage,
-                              ),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: c.surfaceAlt,
-                              borderRadius: BorderRadius.circular(24),
-                              border:
-                                  Border.all(color: c.border, width: 1),
-                            ),
-                            child: TextField(
-                              controller: _messageController,
-                              decoration: InputDecoration(
-                                hintText: 'Message...',
-                                hintStyle: GoogleFonts.poppins(
-                                    color: c.textLow, fontSize: 14),
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                fillColor: Colors.transparent,
-                                filled: false,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 10),
-                              ),
-                              style: GoogleFonts.poppins(
-                                  fontSize: 14, color: c.textHigh),
-                              maxLines: 5,
-                              minLines: 1,
-                              textCapitalization: TextCapitalization.sentences,
-                              onSubmitted: (_) => _sendMessage(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: _isSending ? null : _sendMessage,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: _isSending
-                                  ? c.textLow
-                                  : c.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: _isSending
-                                ? const Padding(
-                                    padding: EdgeInsets.all(12),
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.send_rounded,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                _buildMessageInputBar(c),
               ],
             ),
     );
+  }
+
+  /// The message input bar — text field + attachment + send/mic button.
+  Widget _buildMessageInputBar(AppThemeColors c) {
+    final isRecording = _voiceRecorder.isRecording;
+
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(
+          top: BorderSide(color: c.divider, width: 1),
+        ),
+      ),
+      child: SafeArea(
+        child: isRecording
+            ? _buildRecordingBar(c)
+            : _buildNormalInputBar(c),
+      ),
+    );
+  }
+
+  /// Normal input: attach + text field + send/mic.
+  Widget _buildNormalInputBar(AppThemeColors c) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        _isUploadingImage
+            ? Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: c.primary),
+                ),
+              )
+            : IconButton(
+                icon: Icon(Icons.attach_file_rounded,
+                    color: c.textMid, size: 22),
+                onPressed: _pickAndSendImage,
+              ),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: c.surfaceAlt,
+              borderRadius: BorderRadius.circular(24),
+              border:
+                  Border.all(color: c.border, width: 1),
+            ),
+            child: TextField(
+              controller: _messageController,
+              decoration: InputDecoration(
+                hintText: 'Message...',
+                hintStyle: GoogleFonts.poppins(
+                    color: c.textLow, fontSize: 14),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                fillColor: Colors.transparent,
+                filled: false,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+              ),
+              style: GoogleFonts.poppins(
+                  fontSize: 14, color: c.textHigh),
+              maxLines: 5,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // ── Send or Mic button ─────────────────────────────────
+        if (_hasText || _isSending)
+          GestureDetector(
+            onTap: _isSending ? null : _sendMessage,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _isSending
+                    ? c.textLow
+                    : c.primary,
+                shape: BoxShape.circle,
+              ),
+              child: _isSending
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.send_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+            ),
+          )
+        else
+          GestureDetector(
+            onLongPressStart: (_) => _startVoiceRecording(),
+            onLongPressMoveUpdate: (details) {
+              // Could track slide-to-cancel offset here
+            },
+            onLongPressEnd: (_) => _stopVoiceRecording(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.primary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.mic_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Recording-active bar: pulsing dot, timer, slide-to-cancel, stop button.
+  Widget _buildRecordingBar(AppThemeColors c) {
+    return Row(
+      children: [
+        // Pulsing red dot
+        _buildPulsingDot(c),
+        const SizedBox(width: 8),
+        // Duration counter
+        ListenableBuilder(
+          listenable: _voiceRecorder,
+          builder: (context, _) {
+            return Text(
+              VoiceRecorderService.formatDuration(_voiceRecorder.elapsed),
+              style: GoogleFonts.poppins(
+                color: c.textHigh,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                fontFeatures: [const FontFeature.tabularFigures()],
+              ),
+            );
+          },
+        ),
+        const Spacer(),
+        // Slide-to-cancel hint
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.chevron_left_rounded, color: c.textLow, size: 18),
+            Text(
+              'Slide to cancel',
+              style: GoogleFonts.poppins(color: c.textLow, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        // Cancel button
+        GestureDetector(
+          onTap: _cancelVoiceRecording,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: c.error.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.delete_outline_rounded,
+                color: c.error, size: 18),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Stop & send button
+        GestureDetector(
+          onTap: _stopVoiceRecording,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: c.primary,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.send_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPulsingDot(AppThemeColors c) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.3, end: 1.0),
+      duration: const Duration(milliseconds: 800),
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: c.error,
+              shape: BoxShape.circle,
+            ),
+          ),
+        );
+      },
+      onEnd: () {
+        // Restart the animation by rebuilding
+        if (_voiceRecorder.isRecording && mounted) setState(() {});
+      },
+    );
+  }
+
+  // ─── Voice recording handlers ─────────────────────────────────────
+
+  Future<void> _startVoiceRecording() async {
+    if (_isBlocked || _isBlockedByContact) return;
+    HapticFeedback.mediumImpact();
+    await _voiceRecorder.startRecording();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _stopVoiceRecording() async {
+    if (!_voiceRecorder.isRecording) return;
+
+    final durationSeconds = _voiceRecorder.elapsed.inSeconds;
+    final path = await _voiceRecorder.stopRecording();
+    if (mounted) setState(() {});
+
+    if (path == null || durationSeconds < 1) return; // too short
+
+    await _sendVoiceMessage(path, durationSeconds);
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    HapticFeedback.heavyImpact();
+    await _voiceRecorder.cancelRecording();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _sendVoiceMessage(String filePath, int durationSeconds) async {
+    setState(() => _isSendingVoice = true);
+
+    try {
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
+
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendAudioViaMesh(
+            receiverId: widget.contact.id,
+            filePath: filePath,
+            durationSeconds: durationSeconds,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'No internet & mesh unavailable. Voice note not sent.')),
+            );
+          }
+        }
+      } else {
+        // ── Online: upload to Firebase Storage ──────────────────────
+        final chatRoomId = _chatService.getChatRoomId(
+            widget.currentUserId, widget.contact.id);
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_voice.m4a';
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('chat_audio/$chatRoomId/$fileName');
+
+        final metadata = SettableMetadata(contentType: 'audio/m4a');
+        await ref.putFile(File(filePath), metadata);
+        final audioUrl = await ref.getDownloadURL();
+
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: '🎤 Voice message',
+          senderName: widget.currentUserName,
+          type: MessageType.audio,
+          mediaUrl: audioUrl,
+          audioDuration: durationSeconds,
+        );
+
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingVoice = false);
+    }
   }
 
   Widget _buildTypingBubble() {
@@ -1277,6 +1716,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send images to this contact')),
+      );
+      return;
+    }
+
     try {
       final XFile? picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -1286,29 +1732,54 @@ class _ChatScreenState extends State<ChatScreen> {
 
       setState(() => _isUploadingImage = true);
 
-      // Upload to Firebase Storage
-      final chatRoomId = _chatService.getChatRoomId(
-          widget.currentUserId, widget.contact.id);
-      final fileName =
-          '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('chat_images/$chatRoomId/$fileName');
+      final connectivity =
+          Provider.of<ConnectivityProvider>(context, listen: false);
 
-      await ref.putFile(File(picked.path));
-      final imageUrl = await ref.getDownloadURL();
+      if (!connectivity.isOnline) {
+        // ── Offline: send via mesh network ──────────────────────────
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendImageViaMesh(
+            receiverId: widget.contact.id,
+            filePath: picked.path,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'No internet & mesh unavailable. Image not sent.')),
+            );
+          }
+        }
+      } else {
+        // ── Online: upload to Firebase Storage ──────────────────────
+        final chatRoomId = _chatService.getChatRoomId(
+            widget.currentUserId, widget.contact.id);
+        final fileName =
+            '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('chat_images/$chatRoomId/$fileName');
 
-      // Send as an image message
-      await _chatService.sendMessage(
-        senderId: widget.currentUserId,
-        receiverId: widget.contact.id,
-        text: '📷 Photo',
-        senderName: widget.currentUserName,
-        type: MessageType.image,
-        mediaUrl: imageUrl,
-      );
+        await ref.putFile(File(picked.path));
+        final imageUrl = await ref.getDownloadURL();
 
-      _scrollToBottom();
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: '📷 Photo',
+          senderName: widget.currentUserName,
+          type: MessageType.image,
+          mediaUrl: imageUrl,
+        );
+
+        _scrollToBottom();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1324,9 +1795,12 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     // Clear typing status so the other user doesn't see a stale indicator
     _stopTyping();
+    _meshService.setActiveConversation(null);
     _typingTimer?.cancel();
     _typingSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
+    _meshMessageSubscription?.cancel();
+    _voiceRecorder.dispose();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
     _searchController.dispose();

@@ -7,6 +7,7 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
 import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
+import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -431,6 +432,41 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                   ),
                   const SizedBox(height: 28),
+
+                  // ── Offline Chat (no internet needed) ────────────────
+                  OutlinedButton.icon(
+                    onPressed: _isLoading
+                        ? null
+                        : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const NearbyPeersScreen()),
+                            ),
+                    icon: Icon(Icons.cell_tower_rounded,
+                        color: c.primary, size: 20),
+                    label: Text(
+                      'No internet? Use Offline Chat',
+                      style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: c.primary),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: BorderSide(color: c.primary.withOpacity(0.5)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Chat with people nearby without signing in.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                        fontSize: 12, color: c.textLow),
+                  ),
+                  const SizedBox(height: 24),
 
                   // ── Divider ──────────────────────────────────────────
                   Row(

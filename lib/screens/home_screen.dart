@@ -12,6 +12,7 @@ import 'package:video_chat_app/screens/add_text_status_screen.dart';
 import 'package:video_chat_app/screens/add_media_status_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -21,8 +22,10 @@ import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -111,9 +114,25 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     if (_currentUserId != null) {
+      // ── Update MeshNetworkService with the authenticated identity ──
+      // Applies userId + displayName together so peers see the user's real
+      // name (not the pre-auth "Guest XXXX" placeholder), and re-broadcasts
+      // if mesh was already running from the pre-auth flow.
+      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
+      final name = (_currentUser?.name ?? '').trim();
+      mesh.applyIdentity(
+        userId: _currentUserId!,
+        displayName: name.isEmpty ? mesh.displayName : name,
+      );
+
       // ── Show UI immediately ──
       setState(() {
         _isInitialized = true;
+      });
+
+      // ── Show "What's New" dialog on first launch after an update ──
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) maybeShowWhatsNew(context);
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -145,6 +164,11 @@ class _HomeScreenState extends State<HomeScreen>
           setState(() {
             _currentUser = freshUser;
           });
+          // Keep mesh display name in sync if the canonical name changed.
+          final freshName = freshUser.name.trim();
+          if (freshName.isNotEmpty) {
+            mesh.applyIdentity(userId: freshUser.id, displayName: freshName);
+          }
         }
       });
     } else {
@@ -1197,6 +1221,15 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cell_tower_rounded),
+            tooltip: 'Offline Chat — talk to people nearby',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const NearbyPeersScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
             onPressed: () {

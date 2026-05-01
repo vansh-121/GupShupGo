@@ -3,6 +3,8 @@ package com.gupshupgo.app
 import android.app.Activity
 import android.content.Intent
 import android.content.IntentSender
+import android.media.MediaRecorder
+import android.os.Build
 import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
 import com.google.android.gms.auth.api.identity.Identity
 import io.flutter.embedding.android.FlutterActivity
@@ -12,8 +14,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.gupshupgo.app/phone_verification"
+    private val AUDIO_CHANNEL = "com.gupshupgo.app/audio_recorder"
     private val PHONE_HINT_REQUEST_CODE = 1001
     private var pendingResult: MethodChannel.Result? = null
+
+    private var mediaRecorder: MediaRecorder? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -28,7 +33,85 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        // ── Audio recorder method channel ──────────────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startRecording" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("INVALID_ARG", "Missing 'path' argument", null)
+                        return@setMethodCallHandler
+                    }
+                    startRecording(path, result)
+                }
+                "stopRecording" -> {
+                    stopRecording(result)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
     }
+
+    // ── Audio recording helpers ────────────────────────────────────────
+
+    private fun startRecording(path: String, result: MethodChannel.Result) {
+        try {
+            stopRecordingSilently() // stop any existing recording
+
+            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(this)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+
+            mediaRecorder?.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(128000)
+                setAudioSamplingRate(44100)
+                setAudioChannels(1)
+                setOutputFile(path)
+                prepare()
+                start()
+            }
+
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("RECORD_ERROR", "Failed to start recording: ${e.message}", null)
+        }
+    }
+
+    private fun stopRecording(result: MethodChannel.Result) {
+        try {
+            stopRecordingSilently()
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("RECORD_ERROR", "Failed to stop recording: ${e.message}", null)
+        }
+    }
+
+    private fun stopRecordingSilently() {
+        mediaRecorder?.let { recorder ->
+            try {
+                recorder.stop()
+            } catch (_: Exception) {
+                // Already stopped or in an invalid state — ignore
+            }
+            try {
+                recorder.release()
+            } catch (_: Exception) {
+                // Already released or in an invalid state — ignore
+            }
+        }
+        mediaRecorder = null
+    }
+
+    // ── Phone number hint ──────────────────────────────────────────────
 
     private fun requestPhoneNumberHint(result: MethodChannel.Result) {
         pendingResult = result

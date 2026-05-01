@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -8,12 +10,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 
 import 'screens/home_screen.dart';
 
@@ -45,12 +51,28 @@ void main() async {
   // screen, which launched the app).
   _setupCallKitListener();
 
+  final connectivityProvider = ConnectivityProvider();
+
+  // ── Stable per-install ID + display name for mesh, used both pre-auth
+  //    (guest mesh chat from the login screen) and as the default before
+  //    the real userId is wired in via updateUserId() on home screen entry.
+  final meshIdentity = _ensureMeshGuestIdentity();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => CallStateNotifier()),
         ChangeNotifierProvider(create: (_) => StatusProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider.value(value: connectivityProvider),
+        ChangeNotifierProvider(
+          create: (_) => MeshNetworkService(
+            currentUserId: meshIdentity.guestId,
+            displayName: meshIdentity.displayName,
+            cacheService: ChatCacheService(),
+            connectivityProvider: connectivityProvider,
+          ),
+        ),
       ],
       child: MyApp(),
     ),
@@ -207,6 +229,35 @@ void _checkPendingAcceptedCalls() {
     }
   });
 }
+/// Stable identity for the mesh service, kept in SharedPreferences so it
+/// persists across launches even before (or without) signing in.
+class _MeshGuestIdentity {
+  final String guestId;
+  final String displayName;
+  const _MeshGuestIdentity(this.guestId, this.displayName);
+}
+
+_MeshGuestIdentity _ensureMeshGuestIdentity() {
+  const idKey = 'mesh_guest_id';
+  const nameKey = 'mesh_guest_name';
+
+  String? id = sharedPrefs.getString(idKey);
+  if (id == null || id.isEmpty) {
+    final rng = Random.secure();
+    final bytes = List<int>.generate(8, (_) => rng.nextInt(256));
+    final hex = bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    id = 'g_$hex';
+    sharedPrefs.setString(idKey, id);
+  }
+
+  String name = sharedPrefs.getString(nameKey) ?? '';
+  if (name.isEmpty) name = 'Guest ${id.substring(2, 6)}';
+
+  return _MeshGuestIdentity(id, name);
+}
+
 /// Runs App Check activation in the background — never blocks the UI.
 void _initAppCheck() async {
   try {
@@ -247,6 +298,10 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
+      // Wraps every route so incoming offline-mesh messages can surface a
+      // top banner regardless of which screen the user is on.
+      builder: (context, child) =>
+          MeshNotificationListener(child: child ?? const SizedBox.shrink()),
       home: isLoggedIn ? HomeScreen() : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );

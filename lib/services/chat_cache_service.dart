@@ -9,6 +9,7 @@ import 'package:video_chat_app/models/user_model.dart';
 class ChatCacheService {
   static const _chatListKey = 'cached_chat_list';
   static const _userCacheKey = 'cached_chat_users';
+  static const _pendingMeshKey = 'pending_mesh_messages';
 
   // ─── In-memory user cache (populated from disk or Firestore) ────────
 
@@ -122,4 +123,52 @@ class ChatCacheService {
     }
     return MessageStatus.sent;
   }
+
+  // ─── Mesh message queue (offline store-and-forward) ────────────────
+
+  /// Store a message that was sent/received via the mesh network and
+  /// hasn't been synced to Firestore yet.
+  void storePendingMeshMessage(MessageModel message) {
+    try {
+      final pending = getPendingMeshMessages();
+      // Dedup by id
+      if (pending.any((m) => m.id == message.id)) return;
+      pending.add(message);
+      final list = pending.map((m) => m.toJson()).toList();
+      sharedPrefs.setString(_pendingMeshKey, jsonEncode(list));
+    } catch (e) {
+      print('Error storing pending mesh message: $e');
+    }
+  }
+
+  /// Get all messages waiting to be synced to Firestore.
+  List<MessageModel> getPendingMeshMessages() {
+    try {
+      final json = sharedPrefs.getString(_pendingMeshKey);
+      if (json == null) return [];
+      final list = jsonDecode(json) as List;
+      return list
+          .map((e) =>
+              MessageModel.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      print('Error reading pending mesh messages: $e');
+      return [];
+    }
+  }
+
+  /// Remove messages that have been successfully synced to Firestore.
+  void removeSyncedMeshMessages(List<String> syncedIds) {
+    try {
+      final pending = getPendingMeshMessages();
+      pending.removeWhere((m) => syncedIds.contains(m.id));
+      final list = pending.map((m) => m.toJson()).toList();
+      sharedPrefs.setString(_pendingMeshKey, jsonEncode(list));
+    } catch (e) {
+      print('Error removing synced mesh messages: $e');
+    }
+  }
+
+  /// Count of messages waiting to sync.
+  int get pendingMeshCount => getPendingMeshMessages().length;
 }
