@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(flutter analyze *)",
-      "Bash(dart analyze *)"
+      "Bash(dart analyze *)",
+      "Bash(Get-ChildItem -Path \"e:\\\\GupShupGo\\\\gupshupgo\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(Head -30)"
     ]
   }
 }

@@ -114,9 +114,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('All chats cleared'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: const Text('All chats cleared'),
+            backgroundColor: AppThemeColors.of(context).success,
           ),
         );
       }
@@ -126,7 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to clear chats: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppThemeColors.of(context).error,
           ),
         );
       }
@@ -309,12 +309,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Still need help?',
                   style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 16,
-                      color: AppColors.textHigh),
+                      color: AppThemeColors.of(context).textHigh),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
@@ -326,7 +326,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: const Text('Contact Support'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(color: AppColors.primary),
+                    side: BorderSide(color: AppThemeColors.of(context).primary),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
