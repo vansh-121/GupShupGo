@@ -12,6 +12,7 @@ import 'package:video_chat_app/screens/add_text_status_screen.dart';
 import 'package:video_chat_app/screens/add_media_status_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -1202,6 +1203,15 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cell_tower_rounded),
+            tooltip: 'Offline Chat — talk to people nearby',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const NearbyPeersScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
             onPressed: () {

@@ -57,6 +57,30 @@ class _PendingFileTransfer {
   });
 }
 
+/// Public-facing record of a peer discovered or connected via mesh.
+class MeshPeer {
+  final String endpointId;
+  final String userId;
+  final String displayName;
+  final bool isConnected;
+
+  const MeshPeer({
+    required this.endpointId,
+    required this.userId,
+    required this.displayName,
+    required this.isConnected,
+  });
+
+  MeshPeer copyWith({String? endpointId, String? userId, String? displayName, bool? isConnected}) {
+    return MeshPeer(
+      endpointId: endpointId ?? this.endpointId,
+      userId: userId ?? this.userId,
+      displayName: displayName ?? this.displayName,
+      isConnected: isConnected ?? this.isConnected,
+    );
+  }
+}
+
 /// The MeshNetworkService advertises the current device and discovers nearby
 /// peers using Google Nearby Connections (Bluetooth + WiFi Direct).
 ///
@@ -93,6 +117,20 @@ class MeshNetworkService extends ChangeNotifier {
       StreamController<MessageModel>.broadcast();
   Stream<MessageModel> get meshMessageStream => _meshMessageController.stream;
 
+  // ─── Peer discovery state ────────────────────────────────────────────
+  /// Peers discovered (or connected) via mesh, keyed by endpointId.
+  final Map<String, MeshPeer> _peers = {};
+  List<MeshPeer> get peers => List.unmodifiable(_peers.values);
+
+  /// Emits whenever the peer list changes.
+  final StreamController<List<MeshPeer>> _peersController =
+      StreamController<List<MeshPeer>>.broadcast();
+  Stream<List<MeshPeer>> get peersStream => _peersController.stream;
+
+  /// Friendly name shown to other devices when advertising.
+  String _displayName = 'Anonymous';
+  String get displayName => _displayName;
+
   // ─── File transfer tracking ──────────────────────────────────────
   /// Maps file-payload-id → metadata for incoming file transfers.
   final Map<int, _PendingFileTransfer> _pendingFileTransfers = {};
@@ -113,9 +151,11 @@ class MeshNetworkService extends ChangeNotifier {
     required String currentUserId,
     required ChatCacheService cacheService,
     required ConnectivityProvider connectivityProvider,
+    String displayName = 'Anonymous',
   })  : _currentUserId = currentUserId,
         _cacheService = cacheService,
-        _connectivityProvider = connectivityProvider {
+        _connectivityProvider = connectivityProvider,
+        _displayName = displayName {
     // When connectivity is restored, sync pending mesh messages to Firestore.
     _connectivityProvider.addOnBackOnlineCallback(_syncPendingToFirestore);
   }
@@ -123,6 +163,36 @@ class MeshNetworkService extends ChangeNotifier {
   /// Update the current user ID (called after auth completes).
   void updateUserId(String userId) {
     _currentUserId = userId;
+  }
+
+  /// Update the friendly display name shown to other devices.
+  /// If mesh is already running, callers should restart it for the new name
+  /// to take effect on the advertising side.
+  void updateDisplayName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == _displayName) return;
+    _displayName = trimmed;
+    notifyListeners();
+  }
+
+  /// Resolve the userId for a given peer endpoint, or null if unknown.
+  String? userIdForEndpoint(String endpointId) =>
+      _peers[endpointId]?.userId;
+
+  /// Encode userId + displayName into the single string Nearby Connections
+  /// uses for the advertising / discovering identity.
+  String _encodeIdentity() => '$_currentUserId|$_displayName';
+
+  /// Parse an advertised identity back into (userId, displayName).
+  ({String userId, String displayName}) _decodeIdentity(String raw) {
+    final i = raw.indexOf('|');
+    if (i < 0) return (userId: raw, displayName: raw);
+    return (userId: raw.substring(0, i), displayName: raw.substring(i + 1));
+  }
+
+  void _publishPeers() {
+    _peersController.add(peers);
+    notifyListeners();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -186,7 +256,15 @@ class MeshNetworkService extends ChangeNotifier {
       _isDiscovering = false;
     }
     _connectedEndpoints.clear();
-    notifyListeners();
+    _peers.clear();
+    _publishPeers();
+  }
+
+  /// Restart advertising + discovering — needed when displayName changes
+  /// after [start] has already been called.
+  Future<void> restart() async {
+    await stop();
+    await start();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -196,7 +274,7 @@ class MeshNetworkService extends ChangeNotifier {
   Future<void> _startAdvertising() async {
     try {
       _isAdvertising = await Nearby().startAdvertising(
-        _currentUserId,
+        _encodeIdentity(),
         _strategy,
         onConnectionInitiated: _onConnectionInitiated,
         onConnectionResult: _onConnectionResult,
@@ -216,12 +294,20 @@ class MeshNetworkService extends ChangeNotifier {
   Future<void> _startDiscovering() async {
     try {
       _isDiscovering = await Nearby().startDiscovery(
-        _currentUserId,
+        _encodeIdentity(),
         _strategy,
         onEndpointFound: (endpointId, endpointName, serviceId) {
-          debugPrint('[Mesh] Found peer: $endpointName ($endpointId)');
+          final id = _decodeIdentity(endpointName);
+          debugPrint('[Mesh] Found peer: ${id.displayName} ($endpointId)');
+          _peers[endpointId] = MeshPeer(
+            endpointId: endpointId,
+            userId: id.userId,
+            displayName: id.displayName,
+            isConnected: false,
+          );
+          _publishPeers();
           Nearby().requestConnection(
-            _currentUserId,
+            _encodeIdentity(),
             endpointId,
             onConnectionInitiated: _onConnectionInitiated,
             onConnectionResult: _onConnectionResult,
@@ -230,6 +316,8 @@ class MeshNetworkService extends ChangeNotifier {
         },
         onEndpointLost: (endpointId) {
           debugPrint('[Mesh] Lost endpoint: $endpointId');
+          _peers.remove(endpointId);
+          _publishPeers();
         },
         serviceId: _serviceId,
       );
@@ -245,6 +333,18 @@ class MeshNetworkService extends ChangeNotifier {
 
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
     debugPrint('[Mesh] Connection initiated with ${info.endpointName}');
+    // Capture peer identity from the advertised name (covers the advertiser
+    // side, where onEndpointFound never fires).
+    final id = _decodeIdentity(info.endpointName);
+    final existing = _peers[endpointId];
+    _peers[endpointId] = MeshPeer(
+      endpointId: endpointId,
+      userId: id.userId,
+      displayName: id.displayName,
+      isConnected: existing?.isConnected ?? false,
+    );
+    _publishPeers();
+
     // Auto-accept all connections for mesh relay
     Nearby().acceptConnection(
       endpointId,
@@ -260,18 +360,24 @@ class MeshNetworkService extends ChangeNotifier {
   void _onConnectionResult(String endpointId, Status status) {
     if (status == Status.CONNECTED) {
       _connectedEndpoints.add(endpointId);
+      final existing = _peers[endpointId];
+      if (existing != null) {
+        _peers[endpointId] = existing.copyWith(isConnected: true);
+      }
       debugPrint('[Mesh] Connected to $endpointId (${connectedPeers} peers)');
     } else {
       _connectedEndpoints.remove(endpointId);
+      _peers.remove(endpointId);
       debugPrint('[Mesh] Connection failed with $endpointId: $status');
     }
-    notifyListeners();
+    _publishPeers();
   }
 
   void _onDisconnected(String endpointId) {
     _connectedEndpoints.remove(endpointId);
+    _peers.remove(endpointId);
     debugPrint('[Mesh] Disconnected from $endpointId (${connectedPeers} peers)');
-    notifyListeners();
+    _publishPeers();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -717,6 +823,7 @@ class MeshNetworkService extends ChangeNotifier {
     stop();
     _connectivityProvider.removeOnBackOnlineCallback(_syncPendingToFirestore);
     _meshMessageController.close();
+    _peersController.close();
     super.dispose();
   }
 }

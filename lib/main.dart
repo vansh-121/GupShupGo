@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -50,6 +52,11 @@ void main() async {
 
   final connectivityProvider = ConnectivityProvider();
 
+  // ── Stable per-install ID + display name for mesh, used both pre-auth
+  //    (guest mesh chat from the login screen) and as the default before
+  //    the real userId is wired in via updateUserId() on home screen entry.
+  final meshIdentity = _ensureMeshGuestIdentity();
+
   runApp(
     MultiProvider(
       providers: [
@@ -59,7 +66,8 @@ void main() async {
         ChangeNotifierProvider.value(value: connectivityProvider),
         ChangeNotifierProvider(
           create: (_) => MeshNetworkService(
-            currentUserId: '', // Will be updated after auth
+            currentUserId: meshIdentity.guestId,
+            displayName: meshIdentity.displayName,
             cacheService: ChatCacheService(),
             connectivityProvider: connectivityProvider,
           ),
@@ -220,6 +228,35 @@ void _checkPendingAcceptedCalls() {
     }
   });
 }
+/// Stable identity for the mesh service, kept in SharedPreferences so it
+/// persists across launches even before (or without) signing in.
+class _MeshGuestIdentity {
+  final String guestId;
+  final String displayName;
+  const _MeshGuestIdentity(this.guestId, this.displayName);
+}
+
+_MeshGuestIdentity _ensureMeshGuestIdentity() {
+  const idKey = 'mesh_guest_id';
+  const nameKey = 'mesh_guest_name';
+
+  String? id = sharedPrefs.getString(idKey);
+  if (id == null || id.isEmpty) {
+    final rng = Random.secure();
+    final bytes = List<int>.generate(8, (_) => rng.nextInt(256));
+    final hex = bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    id = 'g_$hex';
+    sharedPrefs.setString(idKey, id);
+  }
+
+  String name = sharedPrefs.getString(nameKey) ?? '';
+  if (name.isEmpty) name = 'Guest ${id.substring(2, 6)}';
+
+  return _MeshGuestIdentity(id, name);
+}
+
 /// Runs App Check activation in the background — never blocks the UI.
 void _initAppCheck() async {
   try {
