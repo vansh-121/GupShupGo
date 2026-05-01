@@ -57,6 +57,14 @@ class _PendingFileTransfer {
   });
 }
 
+/// Reason the most recent [MeshNetworkService.start] call did not result
+/// in an active session — used by the UI to surface actionable error states.
+enum MeshStartError {
+  none,
+  permissionsDenied,
+  unknown,
+}
+
 /// Public-facing record of a peer discovered or connected via mesh.
 class MeshPeer {
   final String endpointId;
@@ -131,6 +139,24 @@ class MeshNetworkService extends ChangeNotifier {
   String _displayName = 'Anonymous';
   String get displayName => _displayName;
 
+  /// Outcome of the last [start] attempt. Reset to [MeshStartError.none]
+  /// every time [start] succeeds.
+  MeshStartError _startError = MeshStartError.none;
+  MeshStartError get startError => _startError;
+
+  /// userId of the conversation the user is currently viewing. While set,
+  /// the global notification listener suppresses banners for messages from
+  /// this peer (the chat screen already shows them in-line).
+  String? _activeConversationUserId;
+  String? get activeConversationUserId => _activeConversationUserId;
+  void setActiveConversation(String? userId) {
+    _activeConversationUserId = userId;
+  }
+
+  /// Currently signed-in (or guest) userId — exposed read-only for the
+  /// global notification listener which needs to filter own messages.
+  String get currentUserId => _currentUserId;
+
   // ─── File transfer tracking ──────────────────────────────────────
   /// Maps file-payload-id → metadata for incoming file transfers.
   final Map<int, _PendingFileTransfer> _pendingFileTransfers = {};
@@ -166,13 +192,29 @@ class MeshNetworkService extends ChangeNotifier {
   }
 
   /// Update the friendly display name shown to other devices.
-  /// If mesh is already running, callers should restart it for the new name
-  /// to take effect on the advertising side.
-  void updateDisplayName(String name) {
+  /// Returns true when the name actually changed — callers can use this to
+  /// decide whether to [restart] the mesh so the new name re-broadcasts.
+  bool updateDisplayName(String name) {
     final trimmed = name.trim();
-    if (trimmed.isEmpty || trimmed == _displayName) return;
+    if (trimmed.isEmpty || trimmed == _displayName) return false;
     _displayName = trimmed;
     notifyListeners();
+    return true;
+  }
+
+  /// Update both userId and displayName atomically and restart mesh if
+  /// it was active so the new identity takes effect on the wire.
+  Future<void> applyIdentity({
+    required String userId,
+    required String displayName,
+  }) async {
+    final wasActive = isActive;
+    final userIdChanged = _currentUserId != userId;
+    final nameChanged = updateDisplayName(displayName);
+    if (userIdChanged) _currentUserId = userId;
+    if (wasActive && (userIdChanged || nameChanged)) {
+      await restart();
+    }
   }
 
   /// Resolve the userId for a given peer endpoint, or null if unknown.
@@ -232,17 +274,28 @@ class MeshNetworkService extends ChangeNotifier {
 
   /// Start advertising + discovering nearby peers simultaneously.
   Future<void> start() async {
-    if (_isAdvertising && _isDiscovering) return;
+    if (_isAdvertising && _isDiscovering) {
+      _startError = MeshStartError.none;
+      return;
+    }
 
     // Request runtime permissions first (Android 12+)
     final granted = await _requestPermissions();
     if (!granted) {
       debugPrint('[Mesh] Cannot start — permissions not granted');
+      _startError = MeshStartError.permissionsDenied;
+      notifyListeners();
       return;
     }
 
     await _startAdvertising();
     await _startDiscovering();
+
+    if (!_isAdvertising && !_isDiscovering) {
+      _startError = MeshStartError.unknown;
+    } else {
+      _startError = MeshStartError.none;
+    }
     notifyListeners();
   }
 

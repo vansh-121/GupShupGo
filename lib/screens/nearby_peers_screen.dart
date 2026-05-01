@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/mesh_chat_screen.dart';
@@ -224,6 +225,9 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen> {
   Widget _buildPeerList(AppThemeColors c, MeshNetworkService mesh) {
     final peers = mesh.peers;
     if (peers.isEmpty) {
+      if (mesh.startError == MeshStartError.permissionsDenied) {
+        return _buildPermissionsDeniedState(c, mesh);
+      }
       return Padding(
         padding: const EdgeInsets.all(32),
         child: Center(
@@ -270,6 +274,61 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen> {
       separatorBuilder: (_, __) =>
           Divider(height: 1, color: c.divider, indent: 72),
       itemBuilder: (_, i) => _buildPeerTile(peers[i], c),
+    );
+  }
+
+  Widget _buildPermissionsDeniedState(
+      AppThemeColors c, MeshNetworkService mesh) {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: c.error.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.lock_outline_rounded,
+                  size: 48, color: c.error),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Permissions needed',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.textHigh,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Offline chat needs nearby-device and location access to find people around you. Grant access to continue.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 12,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () => mesh.start(),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Try again'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => openAppSettings(),
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  label: const Text('Open settings'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -322,17 +381,32 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen> {
           color: peer.isConnected ? c.online : c.textMid,
         ),
       ),
-      trailing: Icon(Icons.chevron_right_rounded, color: c.textLow),
-      onTap: peer.isConnected
-          ? () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MeshChatScreen(peer: peer),
-                ),
-              );
-            }
-          : null,
+      trailing: peer.isConnected
+          ? Icon(Icons.chevron_right_rounded, color: c.textLow)
+          : SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: c.textLow),
+            ),
+      onTap: () {
+        if (peer.isConnected) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MeshChatScreen(peer: peer),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Still connecting to ${peer.displayName}. Try again in a moment.'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
     );
   }
 }

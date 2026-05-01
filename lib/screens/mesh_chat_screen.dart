@@ -44,6 +44,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   @override
   void initState() {
     super.initState();
+    final mesh = Provider.of<MeshNetworkService>(context, listen: false);
+    mesh.setActiveConversation(widget.peer.userId);
     _loadPersistedMessages();
     _listenToMesh();
     _messageController.addListener(_onTextChanged);
@@ -171,6 +173,10 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
 
   @override
   void dispose() {
+    // Clear before stream/state teardown so any late notifications fire
+    // through the global banner instead of into a disposed screen.
+    Provider.of<MeshNetworkService>(context, listen: false)
+        .setActiveConversation(null);
     _meshSub?.cancel();
     _voiceRecorder.dispose();
     _messageController.removeListener(_onTextChanged);

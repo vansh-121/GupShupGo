@@ -107,6 +107,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final chatRoomId = _chatService.getChatRoomId(
         widget.currentUserId, widget.contact.id);
     _isMuted = _settingsService.isChatMuted(chatRoomId);
+    // Suppress global mesh banners for this conversation while it's open.
+    Provider.of<MeshNetworkService>(context, listen: false)
+        .setActiveConversation(widget.contact.id);
     _initializeChat();
     _messageController.addListener(_onTextChanged);
   }
@@ -1791,6 +1794,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     // Clear typing status so the other user doesn't see a stale indicator
     _stopTyping();
+    Provider.of<MeshNetworkService>(context, listen: false)
+        .setActiveConversation(null);
     _typingTimer?.cancel();
     _typingSubscription?.cancel();
     _onlineStatusSubscription?.cancel();

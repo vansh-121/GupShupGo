@@ -113,9 +113,16 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     if (_currentUserId != null) {
-      // ── Update MeshNetworkService with authenticated user ID ──
-      Provider.of<MeshNetworkService>(context, listen: false)
-          .updateUserId(_currentUserId!);
+      // ── Update MeshNetworkService with the authenticated identity ──
+      // Applies userId + displayName together so peers see the user's real
+      // name (not the pre-auth "Guest XXXX" placeholder), and re-broadcasts
+      // if mesh was already running from the pre-auth flow.
+      final mesh = Provider.of<MeshNetworkService>(context, listen: false);
+      final name = (_currentUser?.name ?? '').trim();
+      mesh.applyIdentity(
+        userId: _currentUserId!,
+        displayName: name.isEmpty ? mesh.displayName : name,
+      );
 
       // ── Show UI immediately ──
       setState(() {
@@ -151,6 +158,11 @@ class _HomeScreenState extends State<HomeScreen>
           setState(() {
             _currentUser = freshUser;
           });
+          // Keep mesh display name in sync if the canonical name changed.
+          final freshName = freshUser.name.trim();
+          if (freshName.isNotEmpty) {
+            mesh.applyIdentity(userId: freshUser.id, displayName: freshName);
+          }
         }
       });
     } else {

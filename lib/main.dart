@@ -19,6 +19,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 
 import 'screens/home_screen.dart';
 
@@ -297,6 +298,10 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
+      // Wraps every route so incoming offline-mesh messages can surface a
+      // top banner regardless of which screen the user is on.
+      builder: (context, child) =>
+          MeshNotificationListener(child: child ?? const SizedBox.shrink()),
       home: isLoggedIn ? HomeScreen() : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );
