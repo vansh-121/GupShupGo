@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,7 +15,6 @@ import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
-import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
@@ -285,25 +285,49 @@ void _initAppCheck() async {
 }
 
 class MyApp extends StatelessWidget {
-  final AuthService _authService = AuthService();
-
   @override
   Widget build(BuildContext context) {
-    final bool isLoggedIn = _authService.isUserLoggedIn();
     final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
-      navigatorKey: navigatorKey, // Enables navigation from CallKit handler
+      navigatorKey: navigatorKey,
       title: 'GupShupGo',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
-      // Wraps every route so incoming offline-mesh messages can surface a
-      // top banner regardless of which screen the user is on.
       builder: (context, child) =>
           MeshNotificationListener(child: child ?? const SizedBox.shrink()),
-      home: isLoggedIn ? HomeScreen() : LoginScreen(),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // Firebase is still restoring the persisted auth token — wait.
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const _SplashScreen();
+          }
+          // Firebase user present AND local profile cache exists → go home.
+          final hasLocalUser = sharedPrefs.getString('user_id') != null;
+          if (snapshot.hasData && hasLocalUser) {
+            return HomeScreen();
+          }
+          return LoginScreen();
+        },
+      ),
       debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF1A1A2E) : const Color(0xFF6C63FF),
+      body: const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
     );
   }
 }
