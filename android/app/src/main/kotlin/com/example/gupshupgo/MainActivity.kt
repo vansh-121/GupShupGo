@@ -96,13 +96,17 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun stopRecordingSilently() {
-        try {
-            mediaRecorder?.apply {
-                stop()
-                release()
+        mediaRecorder?.let { recorder ->
+            try {
+                recorder.stop()
+            } catch (_: Exception) {
+                // Already stopped or in an invalid state — ignore
             }
-        } catch (_: Exception) {
-            // Already stopped or never started — ignore
+            try {
+                recorder.release()
+            } catch (_: Exception) {
+                // Already released or in an invalid state — ignore
+            }
         }
         mediaRecorder = null
     }
