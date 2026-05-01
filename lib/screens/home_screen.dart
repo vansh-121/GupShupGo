@@ -25,6 +25,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -127,6 +128,11 @@ class _HomeScreenState extends State<HomeScreen>
       // ── Show UI immediately ──
       setState(() {
         _isInitialized = true;
+      });
+
+      // ── Show "What's New" dialog on first launch after an update ──
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) maybeShowWhatsNew(context);
       });
 
       // ── Run non-blocking setup concurrently ──
