@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -341,22 +342,47 @@ class _AuthGateState extends State<_AuthGate> {
       return;
     }
 
-    // 2) No Firebase user. If local prefs claim we're logged in, the prefs
-    //    were either restored by Auto Backup onto a fresh install, OR the
-    //    device wiped Firebase's internal store (MIUI/HyperOS force-stop).
-    //    Either way, try silent re-auth — it works for Google users.
+    // 2) No Firebase user, but local prefs say we're logged in. Three cases:
+    //    (a) Drive Auto Backup restored prefs onto a fresh install — stale.
+    //    (b) MIUI/HyperOS wiped Firebase's internal store on force-stop.
+    //    (c) Device is offline and Firebase couldn't rehydrate.
+    //    We can only distinguish (a) vs (b)/(c) by attempting silent re-auth,
+    //    which requires network. So: only clear prefs if we are ONLINE and
+    //    silent re-auth fails — otherwise trust the local cache and let the
+    //    user into Home in degraded/offline mode (offline chat, cached chats,
+    //    etc. all still work without a live Firebase session).
     if (sharedPrefs.getString('user_id') != null) {
+      final online = await _hasInternet();
+      if (!online) {
+        _setResolved(true);
+        return;
+      }
+
       final ok = await widget.authService.attemptSilentReauth();
       if (ok) {
         _setResolved(true);
         return;
       }
-      // Silent re-auth failed — prefs are stale (no live session, no Google
-      // account on device, or non-Google account). Clear and route to login.
+      // Online + silent re-auth failed → prefs really are stale. Clear and
+      // route to login.
       await widget.authService.signOut();
     }
 
     _setResolved(false);
+  }
+
+  /// One-shot connectivity check. Returns false when there is no network
+  /// transport at all — note that "has transport" doesn't guarantee real
+  /// internet, but is a reliable signal for "definitely offline."
+  Future<bool> _hasInternet() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      // Treat plugin failure as offline — safer to admit than to bounce
+      // a legitimate user to login.
+      return false;
+    }
   }
 
   void _setResolved(bool loggedIn) {
