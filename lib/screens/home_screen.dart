@@ -336,9 +336,21 @@ class _HomeScreenState extends State<HomeScreen>
           }
         } else {
           chatRooms = chatSnapshot.data ?? [];
-          // ── Cache only when data actually changes (avoids redundant I/O
-          //    on parent rebuilds that don't carry new stream data) ──
-          if (chatRooms != _lastCachedRooms) {
+          // ── Auth-loss safety net ─────────────────────────────────────
+          // If Firebase Auth has no session (typical on MIUI/HyperOS after
+          // force-stop wipes Firebase's persistence), Firestore returns an
+          // empty list because security rules deny unauthenticated reads.
+          // Don't let that empty result overwrite a non-empty cached list —
+          // keep showing the cache until either re-auth succeeds or the
+          // stream emits real data again.
+          if (chatRooms.isEmpty && !_authService.hasFirebaseSession) {
+            final cached = _chatCacheService.getCachedChatRooms();
+            if (cached.isNotEmpty) {
+              chatRooms = cached;
+            }
+          } else if (chatRooms != _lastCachedRooms) {
+            // ── Cache only when data actually changes (avoids redundant I/O
+            //    on parent rebuilds that don't carry new stream data) ──
             _lastCachedRooms = chatRooms;
             _chatCacheService.cacheChatRooms(chatRooms);
             // ── Refresh user profiles (online status) in background ──

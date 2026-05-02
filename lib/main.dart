@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:math';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -289,7 +292,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isLoggedIn = _authService.isUserLoggedIn();
     final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
@@ -298,12 +300,160 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
-      // Wraps every route so incoming offline-mesh messages can surface a
-      // top banner regardless of which screen the user is on.
       builder: (context, child) =>
           MeshNotificationListener(child: child ?? const SizedBox.shrink()),
-      home: isLoggedIn ? HomeScreen() : LoginScreen(),
+      home: _AuthGate(authService: _authService),
       debugShowCheckedModeBanner: false,
     );
+  }
+}
+
+/// Decides Home vs. Login on launch and on auth state changes.
+///
+/// Decision flow:
+///   • Firebase Auth has a hydrated user → HomeScreen.
+///   • Firebase Auth is empty AND local prefs say we're logged in
+///     (e.g. cached user_id, possibly restored from Drive Auto Backup on a
+///     fresh install) → try [attemptSilentReauth]. Succeeds for Google
+///     users; for phone-only users it returns false, in which case the
+///     prefs are stale → clear them and show LoginScreen.
+///   • Otherwise → LoginScreen.
+class _AuthGate extends StatefulWidget {
+  final AuthService authService;
+  const _AuthGate({required this.authService});
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  // null = still resolving the initial auth state.
+  bool? _resolvedLoggedIn;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  // True iff the gate let the user into Home without a live Firebase session
+  // (offline cold start). We need to repair that session as soon as the
+  // network is back, otherwise every Firestore query stays permission-denied.
+  bool _needsReauthOnReconnect = false;
+  bool _reauthInFlight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveInitialAuth();
+    _connectivitySub = Connectivity()
+        .onConnectivityChanged
+        .listen(_onConnectivityChanged);
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    super.dispose();
+  }
+
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final isOnline = results.any((r) => r != ConnectivityResult.none);
+    if (!isOnline) return;
+    if (!_needsReauthOnReconnect) return;
+    if (_reauthInFlight) return;
+    if (FirebaseAuth.instance.currentUser != null) {
+      _needsReauthOnReconnect = false;
+      return;
+    }
+    _repairSessionAfterReconnect();
+  }
+
+  Future<void> _repairSessionAfterReconnect() async {
+    _reauthInFlight = true;
+    try {
+      final ok = await widget.authService.attemptSilentReauth();
+      if (ok) {
+        // Firebase Auth restored. Firestore SDK auto-resubscribes any open
+        // streams once the new ID token is in hand, so existing screens
+        // recover on their own. One-shot FutureBuilders (e.g. Contacts)
+        // recover on their next "Try again" / pull-to-refresh.
+        _needsReauthOnReconnect = false;
+      }
+      // Silent re-auth failed (phone-only user, or no matching Google account
+      // on device). We deliberately do NOT sign the user out or redirect to
+      // login here — that destroys context and wipes cached chats they were
+      // in the middle of reading. The user stays on Home with whatever cached
+      // data we have. Live queries (new chats, contacts list) will keep
+      // failing with permission-denied until they sign in again, but they
+      // can still browse history and use offline mesh chat in the meantime.
+      // Leave _needsReauthOnReconnect true so we'll retry on the next
+      // connectivity bounce — no harm in trying again.
+    } finally {
+      _reauthInFlight = false;
+    }
+  }
+
+  Future<void> _resolveInitialAuth() async {
+    // 1) Firebase Auth already has a user — fast path, no work needed.
+    if (FirebaseAuth.instance.currentUser != null) {
+      _setResolved(true);
+      return;
+    }
+
+    // 2) No Firebase user, but local prefs say we're logged in. Three cases:
+    //    (a) Drive Auto Backup restored prefs onto a fresh install — stale.
+    //    (b) MIUI/HyperOS wiped Firebase's internal store on force-stop.
+    //    (c) Device is offline and Firebase couldn't rehydrate.
+    //    We can only distinguish (a) vs (b)/(c) by attempting silent re-auth,
+    //    which requires network. So: only clear prefs if we are ONLINE and
+    //    silent re-auth fails — otherwise trust the local cache and let the
+    //    user into Home in degraded/offline mode (offline chat, cached chats,
+    //    etc. all still work without a live Firebase session).
+    if (sharedPrefs.getString('user_id') != null) {
+      final online = await _hasInternet();
+      if (!online) {
+        // Let the user into Home in degraded/offline mode, but flag that
+        // we still owe a session repair the moment the network is back.
+        _needsReauthOnReconnect = true;
+        _setResolved(true);
+        return;
+      }
+
+      final ok = await widget.authService.attemptSilentReauth();
+      if (ok) {
+        _setResolved(true);
+        return;
+      }
+      // Online + silent re-auth failed → prefs really are stale. Clear and
+      // route to login.
+      await widget.authService.signOut();
+    }
+
+    _setResolved(false);
+  }
+
+  /// One-shot connectivity check. Returns false when there is no network
+  /// transport at all — note that "has transport" doesn't guarantee real
+  /// internet, but is a reliable signal for "definitely offline."
+  Future<bool> _hasInternet() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      // Treat plugin failure as offline — safer to admit than to bounce
+      // a legitimate user to login.
+      return false;
+    }
+  }
+
+  void _setResolved(bool loggedIn) {
+    if (!mounted) return;
+    setState(() => _resolvedLoggedIn = loggedIn);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_resolvedLoggedIn == null) {
+      // Tiny splash while we resolve auth — usually a single frame.
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return _resolvedLoggedIn! ? HomeScreen() : LoginScreen();
   }
 }
