@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
@@ -627,11 +629,107 @@ class AuthService {
     }
   }
 
-  // Check if user is logged in (synchronous — uses cached SharedPreferences)
+  /// Returns true iff Firebase Auth currently has a hydrated user. Different
+  /// from [isUserLoggedIn], which only checks the local cache. Used by UI to
+  /// decide whether an empty Firestore stream result is real ("no chats")
+  /// vs. a side-effect of a missing Firebase session ("queries denied").
+  bool get hasFirebaseSession => _auth.currentUser != null;
+
+  /// Attempts to silently restore a Firebase Auth session without any UI.
+  ///
+  /// Use case: SharedPreferences says we're logged in but [hasFirebaseSession]
+  /// is false (typical on MIUI/HyperOS Redmi devices that wipe Firebase Auth's
+  /// internal store on aggressive force-stop). For users who originally signed
+  /// in with Google we can re-issue a Firebase credential entirely in the
+  /// background. For phone-auth users this is impossible without an OTP and
+  /// the call returns false — the caller should then surface a "Tap to verify"
+  /// affordance.
+  ///
+  /// Returns true iff [_auth.currentUser] is non-null after the attempt.
+  Future<bool> attemptSilentReauth() async {
+    if (_auth.currentUser != null) return true;
+    final savedUserId = _getSavedUserId();
+    if (savedUserId == null) return false;
+
+    try {
+      // signInSilently uses the cached Google account on the device — no UI.
+      final GoogleSignInAccount? googleUser =
+          await _googleSignIn.signInSilently();
+      if (googleUser == null) return false;
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+      final restoredUid = userCredential.user?.uid;
+
+      // Critical: only accept the silent re-auth if it restored the SAME
+      // Firebase user as the cached user_id. If the device's default Google
+      // account happens to be a *different* account (very common: the user
+      // originally signed up via phone), signInWithCredential would log them
+      // in as that other account and Firestore queries would still fail
+      // because rules check uid == cached user_id. Bail out cleanly.
+      if (restoredUid == null || restoredUid != savedUserId) {
+        await _googleSignIn.signOut();
+        await _auth.signOut();
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      print('Silent re-auth failed: $e');
+      return false;
+    }
+  }
+
+  // Check if user is logged in (synchronous — uses cached SharedPreferences).
+  //
+  // IMPORTANT: We trust SharedPreferences as the sole source of truth here.
+  // Firebase Auth restores its persisted user from disk *asynchronously* after
+  // Firebase.initializeApp() returns; on slower devices (notably MIUI / HyperOS
+  // Redmi handsets) that disk read can lose the race against the first build()
+  // pass, making `_auth.currentUser` falsely null on cold start and bouncing
+  // the user back to the login screen even though they are signed in.
+  //
+  // A genuinely-revoked session is handled separately by listenForAuthInvalidation()
+  // — that fires only after Firebase has had a chance to rehydrate and still
+  // reports no user, at which point we explicitly sign out.
   bool isUserLoggedIn() {
-    User? user = getCurrentUser();
-    String? savedUserId = _getSavedUserId();
-    return user != null && savedUserId != null;
+    return _getSavedUserId() != null;
+  }
+
+  /// Watches Firebase Auth state and signs us out **only** if a previously
+  /// observed (non-null) user transitions to null while the app is running —
+  /// i.e. a real revocation, deletion, or programmatic signOut().
+  ///
+  /// Crucially, we do NOT treat the cold-start "no Firebase user" state as a
+  /// revocation. On some devices (notably MIUI / HyperOS Redmi handsets) the
+  /// SDK's persisted user file can be inaccessible or slow to restore, leaving
+  /// `currentUser` null indefinitely even though local prefs (and the server)
+  /// still consider the user signed in. WhatsApp's behaviour: trust local
+  /// state, let API calls re-auth lazily, never auto-bounce on cold start.
+  void listenForAuthInvalidation({
+    required VoidCallback onSignedOut,
+  }) {
+    if (_getSavedUserId() == null) return;
+
+    bool sawUserThisSession = false;
+    _auth.authStateChanges().listen((User? user) async {
+      if (user != null) {
+        sawUserThisSession = true;
+        return;
+      }
+      // user == null. Only act if we previously saw a real user this session.
+      if (!sawUserThisSession) return;
+      if (_getSavedUserId() == null) return;
+
+      await _clearUserIdLocally();
+      onSignedOut();
+    });
   }
 
   // Get saved user — returns CACHED local copy instantly (no Firestore read).

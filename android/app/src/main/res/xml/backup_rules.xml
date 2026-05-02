@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules (Android <= 11). We explicitly include SharedPreferences
+  so the user's auth state (user_id, cached_user) survives Drive backup/restore.
+-->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+</full-backup-content>

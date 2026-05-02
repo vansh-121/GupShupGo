@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -289,7 +290,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isLoggedIn = _authService.isUserLoggedIn();
     final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
@@ -298,12 +298,80 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
-      // Wraps every route so incoming offline-mesh messages can surface a
-      // top banner regardless of which screen the user is on.
       builder: (context, child) =>
           MeshNotificationListener(child: child ?? const SizedBox.shrink()),
-      home: isLoggedIn ? HomeScreen() : LoginScreen(),
+      home: _AuthGate(authService: _authService),
       debugShowCheckedModeBanner: false,
     );
+  }
+}
+
+/// Decides Home vs. Login on launch and on auth state changes.
+///
+/// Decision flow:
+///   • Firebase Auth has a hydrated user → HomeScreen.
+///   • Firebase Auth is empty AND local prefs say we're logged in
+///     (e.g. cached user_id, possibly restored from Drive Auto Backup on a
+///     fresh install) → try [attemptSilentReauth]. Succeeds for Google
+///     users; for phone-only users it returns false, in which case the
+///     prefs are stale → clear them and show LoginScreen.
+///   • Otherwise → LoginScreen.
+class _AuthGate extends StatefulWidget {
+  final AuthService authService;
+  const _AuthGate({required this.authService});
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  // null = still resolving the initial auth state.
+  bool? _resolvedLoggedIn;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveInitialAuth();
+  }
+
+  Future<void> _resolveInitialAuth() async {
+    // 1) Firebase Auth already has a user — fast path, no work needed.
+    if (FirebaseAuth.instance.currentUser != null) {
+      _setResolved(true);
+      return;
+    }
+
+    // 2) No Firebase user. If local prefs claim we're logged in, the prefs
+    //    were either restored by Auto Backup onto a fresh install, OR the
+    //    device wiped Firebase's internal store (MIUI/HyperOS force-stop).
+    //    Either way, try silent re-auth — it works for Google users.
+    if (sharedPrefs.getString('user_id') != null) {
+      final ok = await widget.authService.attemptSilentReauth();
+      if (ok) {
+        _setResolved(true);
+        return;
+      }
+      // Silent re-auth failed — prefs are stale (no live session, no Google
+      // account on device, or non-Google account). Clear and route to login.
+      await widget.authService.signOut();
+    }
+
+    _setResolved(false);
+  }
+
+  void _setResolved(bool loggedIn) {
+    if (!mounted) return;
+    setState(() => _resolvedLoggedIn = loggedIn);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_resolvedLoggedIn == null) {
+      // Tiny splash while we resolve auth — usually a single frame.
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return _resolvedLoggedIn! ? HomeScreen() : LoginScreen();
   }
 }
