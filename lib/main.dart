@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -328,11 +329,63 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   // null = still resolving the initial auth state.
   bool? _resolvedLoggedIn;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  // True iff the gate let the user into Home without a live Firebase session
+  // (offline cold start). We need to repair that session as soon as the
+  // network is back, otherwise every Firestore query stays permission-denied.
+  bool _needsReauthOnReconnect = false;
+  bool _reauthInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _resolveInitialAuth();
+    _connectivitySub = Connectivity()
+        .onConnectivityChanged
+        .listen(_onConnectivityChanged);
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    super.dispose();
+  }
+
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final isOnline = results.any((r) => r != ConnectivityResult.none);
+    if (!isOnline) return;
+    if (!_needsReauthOnReconnect) return;
+    if (_reauthInFlight) return;
+    if (FirebaseAuth.instance.currentUser != null) {
+      _needsReauthOnReconnect = false;
+      return;
+    }
+    _repairSessionAfterReconnect();
+  }
+
+  Future<void> _repairSessionAfterReconnect() async {
+    _reauthInFlight = true;
+    try {
+      final ok = await widget.authService.attemptSilentReauth();
+      if (ok) {
+        // Firebase Auth restored. Firestore SDK auto-resubscribes any open
+        // streams once the new ID token is in hand, so existing screens
+        // recover on their own. One-shot FutureBuilders (e.g. Contacts)
+        // recover on their next "Try again" / pull-to-refresh.
+        _needsReauthOnReconnect = false;
+      }
+      // Silent re-auth failed (phone-only user, or no matching Google account
+      // on device). We deliberately do NOT sign the user out or redirect to
+      // login here — that destroys context and wipes cached chats they were
+      // in the middle of reading. The user stays on Home with whatever cached
+      // data we have. Live queries (new chats, contacts list) will keep
+      // failing with permission-denied until they sign in again, but they
+      // can still browse history and use offline mesh chat in the meantime.
+      // Leave _needsReauthOnReconnect true so we'll retry on the next
+      // connectivity bounce — no harm in trying again.
+    } finally {
+      _reauthInFlight = false;
+    }
   }
 
   Future<void> _resolveInitialAuth() async {
@@ -354,6 +407,9 @@ class _AuthGateState extends State<_AuthGate> {
     if (sharedPrefs.getString('user_id') != null) {
       final online = await _hasInternet();
       if (!online) {
+        // Let the user into Home in degraded/offline mode, but flag that
+        // we still owe a session repair the moment the network is back.
+        _needsReauthOnReconnect = true;
         _setResolved(true);
         return;
       }
