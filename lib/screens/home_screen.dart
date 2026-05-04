@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -53,16 +54,30 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isRefreshingUsers = false; // debounce for background user refresh
   List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
 
+  // Tracks Firebase Auth presence so we can show a non-blocking re-verify
+  // banner when the local session exists but Firebase has no user (typical
+  // for phone-auth users on MIUI/HyperOS Redmi devices that wiped Firebase's
+  // internal store, where there is no silent re-auth path).
+  StreamSubscription<User?>? _authSub;
+  bool _hasFirebaseSession = FirebaseAuth.instance.currentUser != null;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addObserver(this);
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      final has = user != null;
+      if (mounted && has != _hasFirebaseSession) {
+        setState(() => _hasFirebaseSession = has);
+      }
+    });
     _initializeApp();
   }
 
   @override
   void dispose() {
+    _authSub?.cancel();
     _recentContactsSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
@@ -209,6 +224,43 @@ class _HomeScreenState extends State<HomeScreen>
     // Accept tap → CallScreen navigation (handled in main.dart
     // _handleCallAccepted via navigatorKey).
     print('Call listener: handled globally by CallKit in main.dart');
+  }
+
+  /// Non-blocking strip shown above the tabs when Firebase Auth has no
+  /// session but local prefs still consider the user logged in (typical
+  /// for phone-auth users after MIUI/HyperOS clears Firebase's internal
+  /// store on aggressive force-stop). Tapping it routes to the login flow
+  /// for re-verification; cached chats and offline mesh remain accessible
+  /// in the meantime.
+  Widget _buildReverifyBanner() {
+    final c = AppThemeColors.of(context);
+    return Material(
+      color: c.primary.withOpacity(0.10),
+      child: InkWell(
+        onTap: _signOut,
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.sync_problem_rounded, color: c.primary, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Reconnect — tap to verify and receive new messages',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: c.textHigh,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.primary, size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _signOut() async {
@@ -1338,12 +1390,19 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildChatsTab(),
-          _buildStatusTab(),
-          _buildCallsTab(),
+          if (!_hasFirebaseSession) _buildReverifyBanner(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildChatsTab(),
+                _buildStatusTab(),
+                _buildCallsTab(),
+              ],
+            ),
+          ),
         ],
       ),
       floatingActionButton: _buildFAB(),

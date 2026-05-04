@@ -112,6 +112,14 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
     
+    // ==================== DEVICE SESSIONS ====================
+    // Used by issueDeviceSession / exchangeDeviceSession / revokeDeviceSession
+    // Cloud Functions only. Clients must NEVER read or write here directly —
+    // tokens are bearer credentials and the Admin SDK enforces all access.
+    match /deviceSessions/{tokenHash} {
+      allow read, write: if false;
+    }
+
     // ==================== CALL LOGS ====================
     match /callLogs/{logId} {
       // Only participants can read their call logs

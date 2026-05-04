@@ -389,55 +389,28 @@ class _AuthGateState extends State<_AuthGate> {
   }
 
   Future<void> _resolveInitialAuth() async {
-    // 1) Firebase Auth already has a user — fast path, no work needed.
-    if (FirebaseAuth.instance.currentUser != null) {
-      _setResolved(true);
-      return;
-    }
+    // Auto Backup is disabled (AndroidManifest android:allowBackup="false"),
+    // so SharedPreferences cannot be restored from Drive onto a fresh install.
+    // That makes "user_id is in prefs" a reliable signal that this user
+    // actually signed in on THIS install — and we can trust it as the sole
+    // source of truth for routing without any network round-trip.
+    final hasLocalSession = sharedPrefs.getString('user_id') != null;
+    _setResolved(hasLocalSession);
 
-    // 2) No Firebase user, but local prefs say we're logged in. Three cases:
-    //    (a) Drive Auto Backup restored prefs onto a fresh install — stale.
-    //    (b) MIUI/HyperOS wiped Firebase's internal store on force-stop.
-    //    (c) Device is offline and Firebase couldn't rehydrate.
-    //    We can only distinguish (a) vs (b)/(c) by attempting silent re-auth,
-    //    which requires network. So: only clear prefs if we are ONLINE and
-    //    silent re-auth fails — otherwise trust the local cache and let the
-    //    user into Home in degraded/offline mode (offline chat, cached chats,
-    //    etc. all still work without a live Firebase session).
-    if (sharedPrefs.getString('user_id') != null) {
-      final online = await _hasInternet();
-      if (!online) {
-        // Let the user into Home in degraded/offline mode, but flag that
-        // we still owe a session repair the moment the network is back.
-        _needsReauthOnReconnect = true;
-        _setResolved(true);
-        return;
-      }
+    if (!hasLocalSession) return;
 
-      final ok = await widget.authService.attemptSilentReauth();
-      if (ok) {
-        _setResolved(true);
-        return;
-      }
-      // Online + silent re-auth failed → prefs really are stale. Clear and
-      // route to login.
-      await widget.authService.signOut();
-    }
-
-    _setResolved(false);
-  }
-
-  /// One-shot connectivity check. Returns false when there is no network
-  /// transport at all — note that "has transport" doesn't guarantee real
-  /// internet, but is a reliable signal for "definitely offline."
-  Future<bool> _hasInternet() async {
-    try {
-      final results = await Connectivity().checkConnectivity();
-      return results.any((r) => r != ConnectivityResult.none);
-    } catch (_) {
-      // Treat plugin failure as offline — safer to admit than to bounce
-      // a legitimate user to login.
-      return false;
+    // If Firebase Auth has no user (MIUI cleared the store, or app was
+    // killed before currentUser hydrated, etc.), try a silent re-auth in
+    // the background. Works for Google users; for phone-only users the
+    // attempt is a no-op and the re-verify banner on Home invites them
+    // to re-verify when convenient.
+    if (FirebaseAuth.instance.currentUser == null) {
+      _needsReauthOnReconnect = true;
+      // Fire-and-forget — never blocks Home from showing.
+      // ignore: discarded_futures
+      widget.authService.attemptSilentReauth().then((ok) {
+        if (ok) _needsReauthOnReconnect = false;
+      });
     }
   }
 
