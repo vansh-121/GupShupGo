@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 
@@ -13,6 +16,7 @@ class AuthService {
   final UserService _userService = UserService();
   final FCMService _fcmService = FCMService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final DeviceSessionService _deviceSession = DeviceSessionService();
 
   // Get current user
   User? getCurrentUser() {
@@ -49,6 +53,11 @@ class AuthService {
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
       await _saveUserLocally(user);
+      // Issue a "remember this device" token now that we hold a fresh
+      // Firebase ID token. On future cold starts where Firebase Auth's
+      // own session has been wiped (Redmi/MIUI force-stop), this token
+      // is exchanged for a Firebase custom token in attemptSilentReauth().
+      await _deviceSession.issueAndPersist();
 
       print('Setting up FCM...');
       try {
@@ -158,6 +167,11 @@ class AuthService {
       await _userService.createOrUpdateUser(user);
       await _saveUserIdLocally(userId);
       await _saveUserLocally(user);
+      // Issue a "remember this device" token now that we hold a fresh
+      // Firebase ID token. On future cold starts where Firebase Auth's
+      // own session has been wiped (Redmi/MIUI force-stop), this token
+      // is exchanged for a Firebase custom token in attemptSilentReauth().
+      await _deviceSession.issueAndPersist();
       await _fcmService.setupFCM(userId: userId);
       await _userService.setupPresence(userId);
 
@@ -237,6 +251,9 @@ class AuthService {
             await _userService.createOrUpdateUser(user);
             await _saveUserIdLocally(userId);
             await _saveUserLocally(user);
+            // See note in other sign-in paths — issue device session token
+            // so this user stays signed in across MIUI force-stops, etc.
+            await _deviceSession.issueAndPersist();
             await _fcmService.setupFCM(userId: userId);
             await _userService.setupPresence(userId);
 
@@ -325,6 +342,11 @@ class AuthService {
       await _userService.createOrUpdateUser(user);
       await _saveUserIdLocally(userId);
       await _saveUserLocally(user);
+      // Issue a "remember this device" token now that we hold a fresh
+      // Firebase ID token. On future cold starts where Firebase Auth's
+      // own session has been wiped (Redmi/MIUI force-stop), this token
+      // is exchanged for a Firebase custom token in attemptSilentReauth().
+      await _deviceSession.issueAndPersist();
       try {
         await _fcmService.setupFCM(userId: userId);
       } catch (e) {
@@ -400,6 +422,11 @@ class AuthService {
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
       await _saveUserLocally(user);
+      // Issue a "remember this device" token now that we hold a fresh
+      // Firebase ID token. On future cold starts where Firebase Auth's
+      // own session has been wiped (Redmi/MIUI force-stop), this token
+      // is exchanged for a Firebase custom token in attemptSilentReauth().
+      await _deviceSession.issueAndPersist();
 
       print('Setting up FCM...');
       try {
@@ -491,6 +518,11 @@ class AuthService {
       print('Saving user ID locally...');
       await _saveUserIdLocally(userId);
       await _saveUserLocally(user);
+      // Issue a "remember this device" token now that we hold a fresh
+      // Firebase ID token. On future cold starts where Firebase Auth's
+      // own session has been wiped (Redmi/MIUI force-stop), this token
+      // is exchanged for a Firebase custom token in attemptSilentReauth().
+      await _deviceSession.issueAndPersist();
 
       print('Setting up FCM...');
       try {
@@ -619,6 +651,11 @@ class AuthService {
       if (userId != null) {
         await _userService.updateOnlineStatus(userId, false);
       }
+      // Revoke the server-side device session token BEFORE signing out of
+      // Firebase Auth — revocation can use the still-valid ID token to prove
+      // the request is from the legitimate user. revokeAndClear() always
+      // clears local state, even if the network call fails.
+      await _deviceSession.revokeAndClear();
       await _googleSignIn.signOut();
       await _auth.signOut();
       await _clearUserIdLocally();
@@ -627,11 +664,128 @@ class AuthService {
     }
   }
 
-  // Check if user is logged in (synchronous — uses cached SharedPreferences)
+  /// Returns true iff Firebase Auth currently has a hydrated user. Different
+  /// from [isUserLoggedIn], which only checks the local cache. Used by UI to
+  /// decide whether an empty Firestore stream result is real ("no chats")
+  /// vs. a side-effect of a missing Firebase session ("queries denied").
+  bool get hasFirebaseSession => _auth.currentUser != null;
+
+  /// Attempts to silently restore a Firebase Auth session without any UI.
+  ///
+  /// Use case: SharedPreferences says we're logged in but [hasFirebaseSession]
+  /// is false (typical on MIUI/HyperOS Redmi devices that wipe Firebase Auth's
+  /// internal store on aggressive force-stop). For users who originally signed
+  /// in with Google we can re-issue a Firebase credential entirely in the
+  /// background. For phone-auth users this is impossible without an OTP and
+  /// the call returns false — the caller should then surface a "Tap to verify"
+  /// affordance.
+  ///
+  /// Returns true iff [_auth.currentUser] is non-null after the attempt.
+  Future<bool> attemptSilentReauth() async {
+    if (_auth.currentUser != null) return true;
+    final savedUserId = _getSavedUserId();
+    if (savedUserId == null) return false;
+
+    // ── Path A: device session token (works for ALL sign-in methods) ──────
+    // If we hold a token issued the last time this device signed in, trade
+    // it for a Firebase custom token. This is uid-bound on the server, so
+    // there's no way for it to log us in as the wrong user.
+    try {
+      final restoredUid = await _deviceSession.exchangeAndSignIn();
+      if (restoredUid != null) {
+        if (restoredUid == savedUserId) return true;
+        // Server returned a uid that doesn't match local prefs. Shouldn't
+        // happen in practice (we only stored a token for the user whose
+        // uid is in prefs), but be defensive — sign out and fall through.
+        await _auth.signOut();
+      }
+    } catch (e) {
+      print('Device session exchange failed (will try Google fallback): $e');
+    }
+
+    // ── Path B: Google silent sign-in (legacy fallback) ──────────────────
+    // For users who installed an older build that didn't issue a device
+    // session token, this still recovers Google accounts. Phone-only users
+    // who never had a token will simply get false here, which lets the
+    // re-verify banner take over.
+    try {
+      final GoogleSignInAccount? googleUser =
+          await _googleSignIn.signInSilently();
+      if (googleUser == null) return false;
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+      final restoredUid = userCredential.user?.uid;
+
+      // Same uid-match guard as before: if the device's default Google
+      // account is a different identity than the cached user_id, undo.
+      if (restoredUid == null || restoredUid != savedUserId) {
+        await _googleSignIn.signOut();
+        await _auth.signOut();
+        return false;
+      }
+
+      // Opportunistically upgrade this user to the device-session-token
+      // path so subsequent cold starts don't even need Google round-trips.
+      await _deviceSession.issueAndPersist();
+
+      return true;
+    } catch (e) {
+      print('Silent re-auth failed: $e');
+      return false;
+    }
+  }
+
+  // Check if user is logged in (synchronous — uses cached SharedPreferences).
+  //
+  // IMPORTANT: We trust SharedPreferences as the sole source of truth here.
+  // Firebase Auth restores its persisted user from disk *asynchronously* after
+  // Firebase.initializeApp() returns; on slower devices (notably MIUI / HyperOS
+  // Redmi handsets) that disk read can lose the race against the first build()
+  // pass, making `_auth.currentUser` falsely null on cold start and bouncing
+  // the user back to the login screen even though they are signed in.
+  //
+  // A genuinely-revoked session is handled separately by listenForAuthInvalidation()
+  // — that fires only after Firebase has had a chance to rehydrate and still
+  // reports no user, at which point we explicitly sign out.
   bool isUserLoggedIn() {
-    User? user = getCurrentUser();
-    String? savedUserId = _getSavedUserId();
-    return user != null && savedUserId != null;
+    return _getSavedUserId() != null;
+  }
+
+  /// Watches Firebase Auth state and signs us out **only** if a previously
+  /// observed (non-null) user transitions to null while the app is running —
+  /// i.e. a real revocation, deletion, or programmatic signOut().
+  ///
+  /// Crucially, we do NOT treat the cold-start "no Firebase user" state as a
+  /// revocation. On some devices (notably MIUI / HyperOS Redmi handsets) the
+  /// SDK's persisted user file can be inaccessible or slow to restore, leaving
+  /// `currentUser` null indefinitely even though local prefs (and the server)
+  /// still consider the user signed in. WhatsApp's behaviour: trust local
+  /// state, let API calls re-auth lazily, never auto-bounce on cold start.
+  void listenForAuthInvalidation({
+    required VoidCallback onSignedOut,
+  }) {
+    if (_getSavedUserId() == null) return;
+
+    bool sawUserThisSession = false;
+    _auth.authStateChanges().listen((User? user) async {
+      if (user != null) {
+        sawUserThisSession = true;
+        return;
+      }
+      // user == null. Only act if we previously saw a real user this session.
+      if (!sawUserThisSession) return;
+      if (_getSavedUserId() == null) return;
+
+      await _clearUserIdLocally();
+      onSignedOut();
+    });
   }
 
   // Get saved user — returns CACHED local copy instantly (no Firestore read).
