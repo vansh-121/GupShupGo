@@ -19,6 +19,7 @@ import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -147,6 +148,15 @@ void _handleCallAccepted(dynamic body) {
 
   if (channelId.isEmpty) {
     print('Cannot navigate to call: channelId is empty');
+    return;
+  }
+
+  // When the app is in the foreground, IncomingCallScreen is already showing
+  // and will handle the accept itself (pushReplacement → CallScreen).
+  // If we ALSO push CallScreen here, we get a duplicate.  Skip this path
+  // when IncomingCallScreen is active.
+  if (FCMService.isIncomingCallScreenShowing) {
+    print('IncomingCallScreen is handling this accept — skipping global handler');
     return;
   }
 

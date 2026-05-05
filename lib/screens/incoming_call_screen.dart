@@ -58,7 +58,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       if (mounted) _dismissScreen();
     });
 
-    // Listen for CallKit events to auto-dismiss when:
+    // Listen for CallKit events:
+    // - User accepts from notification → trigger our own _acceptCall()
     // - Caller hangs up (actionCallEnded)
     // - Call times out (actionCallTimeout)
     // - User declines from notification (actionCallDecline)
@@ -66,7 +67,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
       if (event == null || !mounted) return;
 
-      if (event.event == Event.actionCallDecline ||
+      if (event.event == Event.actionCallAccept) {
+        // User accepted from the system notification — handle it here so the
+        // global listener in main.dart doesn't create a duplicate CallScreen.
+        _acceptCall();
+      } else if (event.event == Event.actionCallDecline ||
           event.event == Event.actionCallTimeout ||
           event.event == Event.actionCallEnded) {
         _dismissScreen();
@@ -107,7 +112,14 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     }
   }
 
+  bool _isAccepting = false;
+
   void _acceptCall() {
+    // Guard against double-invocation (e.g. user taps in-app Accept AND
+    // CallKit fires actionCallAccept almost simultaneously).
+    if (_isAccepting) return;
+    _isAccepting = true;
+
     // Cancel listeners FIRST — endCall fires actionCallEnded which
     // would otherwise trigger _dismissScreen and kill the navigation.
     _callKitSubscription?.cancel();

@@ -189,6 +189,10 @@ class _CallScreenState extends State<CallScreen> {
     _signalingSubscription?.cancel();
     _noAnswerTimer?.cancel();
 
+    // Fire-and-forget: delete the signaling document so it can't interfere
+    // with future calls (especially important when channelId is reused).
+    CallSignalingService.deleteCallDocument(widget.channelId);
+
     if (mounted) {
       Provider.of<CallStateNotifier>(context, listen: false)
           .updateState(CallState.Ended);

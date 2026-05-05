@@ -27,6 +27,10 @@ class FCMService {
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
 
+  /// Public getter so the global CallKit listener in main.dart can check
+  /// whether IncomingCallScreen is already handling the accept flow.
+  static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
+
   Future<void> setupFCM({required String userId}) async {
     print('Setting up FCM for user: $userId');
     final FirebaseMessaging messaging = FirebaseMessaging.instance;

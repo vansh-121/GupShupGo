@@ -323,7 +323,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      final channelId = '${widget.currentUserId}_to_${widget.contact.id}';
+      final channelId = '${widget.currentUserId}_to_${widget.contact.id}_${DateTime.now().millisecondsSinceEpoch}';
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       callState.updateState(CallState.Calling);
 
@@ -374,7 +374,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      final channelId = '${widget.currentUserId}_${widget.contact.id}_a';
+      final channelId = '${widget.currentUserId}_${widget.contact.id}_a_${DateTime.now().millisecondsSinceEpoch}';
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       callState.updateState(CallState.Calling);
 
