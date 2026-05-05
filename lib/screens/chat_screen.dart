@@ -14,6 +14,7 @@ import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
@@ -329,6 +330,13 @@ class _ChatScreenState extends State<ChatScreen> {
       print(
           'Initiating video call to ${widget.contact.name} on channel $channelId');
 
+      // Create the Firestore signaling document BEFORE sending the push.
+      await CallSignalingService.createCallDocument(
+        channelId: channelId,
+        callerId: widget.currentUserId,
+        calleeId: widget.contact.id,
+      );
+
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId);
 
@@ -372,6 +380,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
       print(
           'Initiating audio call to ${widget.contact.name} on channel $channelId');
+
+      // Create the Firestore signaling document BEFORE sending the push.
+      await CallSignalingService.createCallDocument(
+        channelId: channelId,
+        callerId: widget.currentUserId,
+        calleeId: widget.contact.id,
+      );
 
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId,

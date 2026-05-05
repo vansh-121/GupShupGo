@@ -5,6 +5,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
@@ -57,6 +58,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void _initiateCall(UserModel user) async {
     String channelId =
         '${widget.currentUserId}_${user.id}_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Create the Firestore signaling document BEFORE sending the push.
+    await CallSignalingService.createCallDocument(
+      channelId: channelId,
+      callerId: widget.currentUserId,
+      calleeId: user.id,
+    );
 
     // Send call notification to the user
     await _fcmService.sendCallNotification(

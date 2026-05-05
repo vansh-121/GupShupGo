@@ -95,8 +95,10 @@ service cloud.firestore {
         && (resource.data.callerId == request.auth.uid 
             || resource.data.calleeId == request.auth.uid);
       
-      // Prevent deletion of call records
-      allow delete: if false;
+      // Allow deletion by participants (cleanup after call ends)
+      allow delete: if request.auth != null
+        && (resource.data.callerId == request.auth.uid 
+            || resource.data.calleeId == request.auth.uid);
     }
     
     // ==================== STATUSES ====================
