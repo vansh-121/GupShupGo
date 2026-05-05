@@ -941,6 +941,7 @@ class _HomeScreenState extends State<HomeScreen>
               builder: (_) => StatusViewerScreen(
                 statusModel: myStatus!,
                 currentUserId: _currentUserId!,
+                currentUserName: _currentUser?.name,
                 isMyStatus: true,
               ),
             ),
@@ -996,6 +997,7 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (_) => StatusViewerScreen(
               statusModel: status,
               currentUserId: _currentUserId!,
+              currentUserName: _currentUser?.name,
             ),
           ),
         );

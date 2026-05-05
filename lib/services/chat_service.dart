@@ -55,11 +55,11 @@ class ChatService {
     int? audioDuration,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
+    final chatRoomRef =
+        _firestore.collection(_chatRoomsCollection).doc(chatRoomId);
 
     // Create message document reference
-    DocumentReference messageRef = _firestore
-        .collection(_chatRoomsCollection)
-        .doc(chatRoomId)
+    DocumentReference messageRef = chatRoomRef
         .collection(_messagesCollection)
         .doc();
 
@@ -82,15 +82,19 @@ class ChatService {
     batch.set(messageRef, message.toMap());
 
     // Update chat room with last message info
-    batch.update(
-      _firestore.collection(_chatRoomsCollection).doc(chatRoomId),
+    batch.set(
+      chatRoomRef,
       {
+        'id': chatRoomId,
+        'participants': [senderId, receiverId]..sort(),
         'lastMessage': text,
         'lastMessageTime': Timestamp.fromDate(message.timestamp),
         'lastMessageSenderId': senderId,
         'lastMessageStatus': MessageStatus.sent.name,
+        'unreadCount.$senderId': FieldValue.increment(0),
         'unreadCount.$receiverId': FieldValue.increment(1),
       },
+      SetOptions(merge: true),
     );
 
     await batch.commit();

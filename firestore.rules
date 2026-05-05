@@ -101,12 +101,20 @@ service cloud.firestore {
     
     // ==================== STATUSES ====================
     match /statuses/{userId} {
+      function isViewerStatusViewUpdate() {
+        return request.auth != null
+          && request.auth.uid != userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statusItems']);
+      }
+
       // Anyone authenticated can read statuses
       allow read: if request.auth != null;
       
-      // Users can only create/update their own status
+      // Users can create/update their own status. Other authenticated users may
+      // update statusItems only so their view can be recorded.
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null
+        && (request.auth.uid == userId || isViewerStatusViewUpdate());
       
       // Users can only delete their own status
       allow delete: if request.auth != null && request.auth.uid == userId;

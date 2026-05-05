@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 
 class StatusViewerScreen extends StatefulWidget {
   final StatusModel statusModel;
   final String currentUserId;
+  final String? currentUserName;
   final bool isMyStatus;
 
   const StatusViewerScreen({
     Key? key,
     required this.statusModel,
     required this.currentUserId,
+    this.currentUserName,
     this.isMyStatus = false,
   }) : super(key: key);
 
@@ -25,10 +28,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   late PageController _pageController;
   late AnimationController _progressController;
   final StatusService _statusService = StatusService();
+  final ChatService _chatService = ChatService();
+  final TextEditingController _replyController = TextEditingController();
 
   int _currentIndex = 0;
   late List<StatusItem> _activeItems;
   bool _isPaused = false;
+  bool _isSendingReply = false;
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
 
@@ -154,6 +160,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   void _onTapUp(TapUpDetails details) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    if (!widget.isMyStatus && details.globalPosition.dy > screenHeight - 96) {
+      return;
+    }
+
     _isPaused = false;
     final screenWidth = MediaQuery.of(context).size.width;
     final tapX = details.globalPosition.dx;
@@ -325,12 +336,77 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     );
   }
 
+  String _statusReplyPreview(StatusItem item) {
+    if (item.type == 'text') {
+      final text = (item.text ?? '').trim();
+      return text.isEmpty ? 'text status' : text;
+    }
+    if (item.type == 'image') {
+      final caption = (item.caption ?? '').trim();
+      return caption.isEmpty ? 'photo status' : caption;
+    }
+    final caption = (item.caption ?? '').trim();
+    return caption.isEmpty ? 'video status' : caption;
+  }
+
+  Future<void> _sendStatusReply() async {
+    final reply = _replyController.text.trim();
+    if (reply.isEmpty ||
+        _isSendingReply ||
+        widget.isMyStatus ||
+        _activeItems.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isSendingReply = true;
+    });
+    _progressController.stop();
+    _videoController?.pause();
+
+    final currentItem = _activeItems[_currentIndex];
+    final preview = _statusReplyPreview(currentItem);
+    final message = 'Reply to status\n"$preview"\n\n$reply';
+
+    try {
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.statusModel.userId,
+        text: message,
+        senderName: widget.currentUserName,
+      );
+      _replyController.clear();
+      FocusScope.of(context).unfocus();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reply sent')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send reply: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingReply = false;
+        });
+        _isPaused = false;
+        _progressController.forward();
+        _videoController?.play();
+      }
+    }
+  }
+
   @override
   void dispose() {
     _progressController.removeStatusListener(_onProgressStatus);
     _progressController.dispose();
     _pageController.dispose();
     _disposeVideoController();
+    _replyController.dispose();
     super.dispose();
   }
 
@@ -500,7 +576,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 currentItem.caption != null &&
                 currentItem.caption!.isNotEmpty)
               Positioned(
-                bottom: 0,
+                bottom: widget.isMyStatus ? 0 : 70,
                 left: 0,
                 right: 0,
                 child: Container(
@@ -554,8 +630,83 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   ),
                 ),
               ),
+
+            if (!widget.isMyStatus)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: MediaQuery.of(context).padding.bottom + 10,
+                child: _buildReplyBar(),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildReplyBar() {
+    return Material(
+      color: Colors.transparent,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.45),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.35)),
+              ),
+              child: TextField(
+                controller: _replyController,
+                minLines: 1,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                textCapitalization: TextCapitalization.sentences,
+                onTap: () {
+                  _isPaused = true;
+                  _progressController.stop();
+                  _videoController?.pause();
+                },
+                onSubmitted: (_) => _sendStatusReply(),
+                decoration: InputDecoration(
+                  hintText: 'Reply...',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  border: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _isSendingReply ? null : _sendStatusReply,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _isSendingReply
+                    ? Colors.white.withOpacity(0.35)
+                    : Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: _isSendingReply
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.send_rounded,
+                      color: Colors.black,
+                      size: 20,
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }
