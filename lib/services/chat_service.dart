@@ -52,6 +52,15 @@ class ChatService {
     String? senderName,
     MessageType type = MessageType.text,
     String? mediaUrl,
+    String? statusReplyOwnerId,
+    String? statusReplyItemId,
+    String? statusReplyOwnerName,
+    String? statusReplyOwnerPhotoUrl,
+    String? statusReplyType,
+    String? statusReplyText,
+    String? statusReplyMediaUrl,
+    String? statusReplyCaption,
+    String? statusReplyBackgroundColor,
     int? audioDuration,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
@@ -72,8 +81,20 @@ class ChatService {
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
       mediaUrl: mediaUrl,
+      statusReplyOwnerId: statusReplyOwnerId,
+      statusReplyItemId: statusReplyItemId,
+      statusReplyOwnerName: statusReplyOwnerName,
+      statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+      statusReplyType: statusReplyType,
+      statusReplyText: statusReplyText,
+      statusReplyMediaUrl: statusReplyMediaUrl,
+      statusReplyCaption: statusReplyCaption,
+      statusReplyBackgroundColor: statusReplyBackgroundColor,
       audioDuration: audioDuration,
     );
+    final lastMessagePreview = statusReplyOwnerId != null
+        ? 'Replied to status: $text'
+        : text;
 
     // Use batch write for consistency
     WriteBatch batch = _firestore.batch();
@@ -87,7 +108,7 @@ class ChatService {
       {
         'id': chatRoomId,
         'participants': [senderId, receiverId]..sort(),
-        'lastMessage': text,
+        'lastMessage': lastMessagePreview,
         'lastMessageTime': Timestamp.fromDate(message.timestamp),
         'lastMessageSenderId': senderId,
         'lastMessageStatus': MessageStatus.sent.name,

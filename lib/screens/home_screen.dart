@@ -493,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen>
               // ── Try cached user first (instant, no Firestore) ──
               final cachedUser = _chatCacheService.getCachedUser(otherUserId);
               if (cachedUser != null) {
-                final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+                final unreadCount = _effectiveUnreadCount(chatRoom);
                 return _buildChatRoomItem(cachedUser, chatRoom, unreadCount);
               }
 
@@ -506,7 +506,7 @@ class _HomeScreenState extends State<HomeScreen>
                   }
 
                   final user = userSnapshot.data!;
-                  final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+                  final unreadCount = _effectiveUnreadCount(chatRoom);
                   return _buildChatRoomItem(user, chatRoom, unreadCount);
                 },
               );
@@ -620,6 +620,19 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       ),
     );
+  }
+
+  int _effectiveUnreadCount(ChatRoom chatRoom) {
+    final storedUnread = chatRoom.unreadCount[_currentUserId] ?? 0;
+    if (storedUnread > 0) return storedUnread;
+
+    final isIncomingLastMessage = chatRoom.lastMessageSenderId != null &&
+        chatRoom.lastMessageSenderId != _currentUserId;
+    final isUnreadLastMessage =
+        chatRoom.lastMessageStatus == MessageStatus.sent ||
+            chatRoom.lastMessageStatus == MessageStatus.delivered;
+
+    return isIncomingLastMessage && isUnreadLastMessage ? 1 : 0;
   }
 
   Widget _buildChatRoomItem(

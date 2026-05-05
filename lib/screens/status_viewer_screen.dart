@@ -10,6 +10,7 @@ class StatusViewerScreen extends StatefulWidget {
   final String currentUserId;
   final String? currentUserName;
   final bool isMyStatus;
+  final String? initialStatusItemId;
 
   const StatusViewerScreen({
     Key? key,
@@ -17,6 +18,7 @@ class StatusViewerScreen extends StatefulWidget {
     required this.currentUserId,
     this.currentUserName,
     this.isMyStatus = false,
+    this.initialStatusItemId,
   }) : super(key: key);
 
   @override
@@ -42,7 +44,15 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   void initState() {
     super.initState();
     _activeItems = widget.statusModel.activeStatusItems;
-    _pageController = PageController();
+    if (widget.initialStatusItemId != null) {
+      final initialIndex = _activeItems.indexWhere(
+        (item) => item.id == widget.initialStatusItemId,
+      );
+      if (initialIndex >= 0) {
+        _currentIndex = initialIndex;
+      }
+    }
+    _pageController = PageController(initialPage: _currentIndex);
     _progressController = AnimationController(
       vsync: this,
       duration: Duration(seconds: 5),
@@ -336,19 +346,6 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     );
   }
 
-  String _statusReplyPreview(StatusItem item) {
-    if (item.type == 'text') {
-      final text = (item.text ?? '').trim();
-      return text.isEmpty ? 'text status' : text;
-    }
-    if (item.type == 'image') {
-      final caption = (item.caption ?? '').trim();
-      return caption.isEmpty ? 'photo status' : caption;
-    }
-    final caption = (item.caption ?? '').trim();
-    return caption.isEmpty ? 'video status' : caption;
-  }
-
   Future<void> _sendStatusReply() async {
     final reply = _replyController.text.trim();
     if (reply.isEmpty ||
@@ -365,15 +362,25 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _videoController?.pause();
 
     final currentItem = _activeItems[_currentIndex];
-    final preview = _statusReplyPreview(currentItem);
-    final message = 'Reply to status\n"$preview"\n\n$reply';
+    final mediaUrl = currentItem.type == 'image'
+        ? currentItem.imageUrl
+        : currentItem.thumbnailUrl ?? currentItem.videoUrl;
 
     try {
       await _chatService.sendMessage(
         senderId: widget.currentUserId,
         receiverId: widget.statusModel.userId,
-        text: message,
+        text: reply,
         senderName: widget.currentUserName,
+        statusReplyOwnerId: widget.statusModel.userId,
+        statusReplyItemId: currentItem.id,
+        statusReplyOwnerName: widget.statusModel.userName,
+        statusReplyOwnerPhotoUrl: widget.statusModel.userPhotoUrl,
+        statusReplyType: currentItem.type,
+        statusReplyText: currentItem.text,
+        statusReplyMediaUrl: mediaUrl,
+        statusReplyCaption: currentItem.caption,
+        statusReplyBackgroundColor: currentItem.backgroundColor,
       );
       _replyController.clear();
       FocusScope.of(context).unfocus();

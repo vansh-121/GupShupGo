@@ -216,6 +216,15 @@ class StatusService {
     });
   }
 
+  /// Get a user's status document once.
+  Future<StatusModel?> getStatusByUserId(String userId) async {
+    final doc =
+        await _firestore.collection(_statusCollection).doc(userId).get();
+    if (!doc.exists) return null;
+    final status = StatusModel.fromFirestore(doc);
+    return status.hasActiveStatus ? status : null;
+  }
+
   /// Get all statuses from other users (contacts' statuses).
   Stream<List<StatusModel>> getAllStatuses(String currentUserId) {
     // Get statuses updated in the last 24 hours
