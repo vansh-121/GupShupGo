@@ -71,8 +71,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         // User accepted from the system notification — handle it here so the
         // global listener in main.dart doesn't create a duplicate CallScreen.
         _acceptCall();
-      } else if (event.event == Event.actionCallDecline ||
-          event.event == Event.actionCallTimeout ||
+      } else if (event.event == Event.actionCallDecline) {
+        // User declined from the system notification — signal Firestore so
+        // the caller sees "Call Declined".
+        _declineCall();
+      } else if (event.event == Event.actionCallTimeout ||
           event.event == Event.actionCallEnded) {
         _dismissScreen();
       }
