@@ -98,6 +98,9 @@ class _HomeScreenState extends State<HomeScreen>
           _userService.updateOnlineStatus(_currentUserId!, true);
           // Mark all messages as delivered when app comes to foreground
           _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+          // Keep this device's FCM token fresh after reinstall, data clear,
+          // Play Services recovery, or token rotation.
+          unawaited(_fcmService.setupFCM(userId: _currentUserId!));
           break;
         case AppLifecycleState.paused:
         case AppLifecycleState.inactive:

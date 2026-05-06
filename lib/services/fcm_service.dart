@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -9,6 +12,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
@@ -26,6 +30,9 @@ class FCMService {
 
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
+  static StreamSubscription<String>? _tokenRefreshSubscription;
+  static const _deviceIdKey = 'gsg_fcm_device_id_v1';
+  static const _secureStorage = FlutterSecureStorage();
 
   /// Public getter so the global CallKit listener in main.dart can check
   /// whether IncomingCallScreen is already handling the accept flow.
@@ -138,23 +145,72 @@ class FCMService {
     // Step 5: Listen for token refreshes (handles initial failure + rotations)
     // If Step 4 failed, this will catch the token when Play Services recovers.
     // ═══════════════════════════════════════════════════════════════════════
-    messaging.onTokenRefresh.listen((String newToken) async {
+    _tokenRefreshSubscription ??=
+        messaging.onTokenRefresh.listen((String newToken) async {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? userId;
       print('FCM token refreshed: $newToken');
-      await _storeToken(userId, newToken);
+      await _storeToken(currentUserId, newToken);
     });
   }
 
   /// Stores the FCM token in Firestore for the given user.
   static Future<void> _storeToken(String userId, String token) async {
     try {
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(
-        {'fcmToken': token, 'lastUpdated': FieldValue.serverTimestamp()},
+      final deviceId = await _getOrCreateDeviceId();
+      final deviceInfo = await _getDeviceInfo();
+      final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+
+      await userRef.collection('devices').doc(deviceId).set(
+        {
+          'deviceId': deviceId,
+          'fcmToken': token,
+          'platform': Platform.operatingSystem,
+          'deviceModel': deviceInfo,
+          'tokenUpdatedAt': FieldValue.serverTimestamp(),
+          'lastSeenAt': FieldValue.serverTimestamp(),
+        },
         SetOptions(merge: true),
       );
-      print('FCM token stored for user: $userId');
+
+      // Kept only as a migration fallback for already deployed functions.
+      // New Cloud Functions read the per-device token registry above.
+      await userRef.set(
+        {
+          'fcmToken': token,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e) {
       print('Error storing FCM token: $e');
     }
+  }
+
+  static Future<String> _getOrCreateDeviceId() async {
+    final existing = await _secureStorage.read(key: _deviceIdKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final deviceId =
+        FirebaseFirestore.instance.collection('_localDeviceIds').doc().id;
+    await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+    return deviceId;
+  }
+
+  static Future<String> _getDeviceInfo() async {
+    try {
+      final plugin = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final info = await plugin.androidInfo;
+        return '${info.manufacturer} ${info.model}'.trim();
+      }
+      if (Platform.isIOS) {
+        final info = await plugin.iosInfo;
+        return info.utsname.machine;
+      }
+    } catch (_) {}
+    return Platform.operatingSystem;
   }
 
   /// Returns the current user's Firebase ID token, or null if not signed in.

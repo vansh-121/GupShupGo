@@ -6,6 +6,122 @@ admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
 const auth = admin.auth();
+const FieldValue = admin.firestore.FieldValue;
+
+const INVALID_FCM_TOKEN_CODES = new Set([
+  "messaging/invalid-registration-token",
+  "messaging/registration-token-not-registered",
+]);
+
+function isInvalidFcmTokenError(error) {
+  if (!error) return false;
+  if (INVALID_FCM_TOKEN_CODES.has(error.code)) return true;
+  return String(error.message || "").includes("Requested entity was not found");
+}
+
+async function getNotificationTargets(userId) {
+  const userRef = db.collection("users").doc(userId);
+  const userDoc = await userRef.get();
+  if (!userDoc.exists) {
+    return { exists: false, targets: [] };
+  }
+
+  const targets = [];
+  const seenTokens = new Set();
+  const devicesSnap = await userRef.collection("devices").get();
+
+  devicesSnap.forEach((doc) => {
+    const token = doc.data().fcmToken;
+    if (typeof token === "string" && token && !seenTokens.has(token)) {
+      seenTokens.add(token);
+      targets.push({ token, ref: doc.ref, source: "device" });
+    }
+  });
+
+  const legacyToken = userDoc.data().fcmToken;
+  if (typeof legacyToken === "string" && legacyToken && !seenTokens.has(legacyToken)) {
+    targets.push({ token: legacyToken, ref: userRef, source: "legacy" });
+  }
+
+  return { exists: true, targets };
+}
+
+async function removeNotificationTarget(target) {
+  try {
+    if (target.source === "device") {
+      await target.ref.delete();
+    } else {
+      await target.ref.update({
+        fcmToken: FieldValue.delete(),
+        lastUpdated: FieldValue.serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    console.error("Error removing invalid FCM token:", error);
+  }
+}
+
+async function sendToUserDevices(userId, buildMessage) {
+  const { exists, targets } = await getNotificationTargets(userId);
+  if (!exists) {
+    return { ok: false, status: 404, body: { error: `User ${userId} not found` } };
+  }
+  if (targets.length === 0) {
+    return { ok: false, status: 404, body: { error: `No FCM tokens for user ${userId}` } };
+  }
+
+  const messages = targets.map((target) => buildMessage(target.token));
+  const response = await messaging.sendEach(messages);
+  const cleanup = [];
+  let successCount = 0;
+  const failures = [];
+
+  response.responses.forEach((result, index) => {
+    if (result.success) {
+      successCount += 1;
+      return;
+    }
+
+    const error = result.error;
+    failures.push({
+      tokenSource: targets[index].source,
+      code: error && error.code,
+      message: error && error.message,
+    });
+
+    if (isInvalidFcmTokenError(error)) {
+      cleanup.push(removeNotificationTarget(targets[index]));
+    }
+  });
+
+  await Promise.all(cleanup);
+
+  if (successCount > 0) {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        success: true,
+        successCount,
+        failureCount: response.failureCount,
+        cleanedTokenCount: cleanup.length,
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    status: cleanup.length > 0 ? 410 : 500,
+    body: {
+      error: cleanup.length > 0
+        ? "All known FCM tokens were invalid and have been removed"
+        : "Failed to send notification to any registered device",
+      failureCount: response.failureCount,
+      cleanedTokenCount: cleanup.length,
+      failures,
+    },
+  };
+}
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
 // IMPORTANT: This sends a DATA-ONLY message (no "notification" block).
@@ -42,18 +158,6 @@ exports.sendCallNotification = onRequest(
         return;
       }
 
-      const userDoc = await db.collection("users").doc(calleeId).get();
-      if (!userDoc.exists) {
-        res.status(404).json({ error: `User ${calleeId} not found` });
-        return;
-      }
-
-      const fcmToken = userDoc.data().fcmToken;
-      if (!fcmToken) {
-        res.status(404).json({ error: `No FCM token for user ${calleeId}` });
-        return;
-      }
-
       // Fetch caller details for display in the CallKit UI
       let callerName = callerId;
       let callerPhotoUrl = "";
@@ -72,7 +176,7 @@ exports.sendCallNotification = onRequest(
       // This guarantees the Dart background handler fires on every platform
       // state (foreground, background, killed) so CallKit can display the
       // native full-screen call UI with Accept / Decline buttons.
-      const message = {
+      const result = await sendToUserDevices(calleeId, (fcmToken) => ({
         token: fcmToken,
         data: {
           callerId: callerId,
@@ -100,10 +204,9 @@ exports.sendCallNotification = onRequest(
             },
           },
         },
-      };
+      }));
 
-      const result = await messaging.send(message);
-      res.status(200).json({ success: true, messageId: result });
+      res.status(result.status).json(result.body);
     } catch (error) {
       if (error.code && error.code.startsWith("auth/")) {
         res.status(401).json({ error: "Invalid or expired token" });
@@ -145,19 +248,7 @@ exports.sendMessageNotification = onRequest(
         return;
       }
 
-      const userDoc = await db.collection("users").doc(receiverId).get();
-      if (!userDoc.exists) {
-        res.status(404).json({ error: `User ${receiverId} not found` });
-        return;
-      }
-
-      const fcmToken = userDoc.data().fcmToken;
-      if (!fcmToken) {
-        res.status(404).json({ error: `No FCM token for user ${receiverId}` });
-        return;
-      }
-
-      const fcmMessage = {
+      const result = await sendToUserDevices(receiverId, (fcmToken) => ({
         token: fcmToken,
         data: {
           type: "chat_message",
@@ -181,10 +272,9 @@ exports.sendMessageNotification = onRequest(
             },
           },
         },
-      };
+      }));
 
-      const result = await messaging.send(fcmMessage);
-      res.status(200).json({ success: true, messageId: result });
+      res.status(result.status).json(result.body);
     } catch (error) {
       console.error("Error sending message notification:", error);
       res.status(500).json({ error: error.message });

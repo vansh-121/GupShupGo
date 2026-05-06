@@ -13,6 +13,14 @@ service cloud.firestore {
       
       // Prevent users from deleting profiles
       allow delete: if false;
+
+      // Each signed-in app install stores its own FCM token here. This avoids
+      // one device overwriting another and lets Cloud Functions clean up only
+      // the stale device token that Firebase rejects.
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if request.auth != null
+          && request.auth.uid == userId;
+      }
     }
     
     // ==================== CHAT ROOMS ====================
