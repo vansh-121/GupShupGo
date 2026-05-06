@@ -8,6 +8,7 @@ import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -52,11 +53,27 @@ class _CallScreenState extends State<CallScreen> {
   String? _currentUserPhotoUrl;
   String? _calleePhotoUrl;
 
+  // ── Signaling: Firestore call document listener ─────────────────────────
+  StreamSubscription<CallSignalStatus?>? _signalingSubscription;
+  Timer? _noAnswerTimer;
+  bool _isEndingCall = false; // prevents double-close race conditions
+  String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
+
   @override
   void initState() {
     super.initState();
     _initializeUserInfo();
     _initAgora();
+    _listenToSignaling();
+
+    // Caller-only: auto-end if callee never answers within 60 seconds.
+    if (widget.isCaller) {
+      _noAnswerTimer = Timer(const Duration(seconds: 60), () {
+        if (!_remoteUserJoined && mounted && !_isEndingCall) {
+          _handleRemoteNoAnswer();
+        }
+      });
+    }
   }
 
   Future<void> _initializeUserInfo() async {
@@ -89,6 +106,100 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Firestore call-signaling listener
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  void _listenToSignaling() {
+    _signalingSubscription =
+        CallSignalingService.listenToCallStatus(widget.channelId)
+            .listen((status) {
+      if (status == null || !mounted || _isEndingCall) return;
+
+      switch (status) {
+        case CallSignalStatus.declined:
+          // Callee declined — caller should see feedback and close.
+          if (widget.isCaller) {
+            _autoCloseWithReason('Call Declined');
+          }
+          break;
+
+        case CallSignalStatus.missed:
+          // Timeout triggered (by caller or by the other device).
+          if (!_remoteUserJoined) {
+            _autoCloseWithReason('No Answer');
+          }
+          break;
+
+        case CallSignalStatus.ended:
+          // The OTHER party pressed end-call. Close this screen.
+          // (If WE triggered the end, _isEndingCall is already true and
+          // the listener guard at the top of this callback will skip it.)
+          _autoCloseWithReason('Call Ended');
+          break;
+
+        case CallSignalStatus.answered:
+          // Callee answered — cancel the no-answer timer.
+          _noAnswerTimer?.cancel();
+          break;
+
+        case CallSignalStatus.ringing:
+          // Still ringing — nothing to do.
+          break;
+      }
+    });
+  }
+
+  /// Shows a brief message and auto-closes the screen after a short delay.
+  void _autoCloseWithReason(String reason) {
+    if (_isEndingCall || !mounted) return;
+    _isEndingCall = true;
+    _noAnswerTimer?.cancel();
+
+    setState(() {
+      _endReasonText = reason;
+    });
+
+    // Give the user a moment to read the message, then close.
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      _cleanupAndPop();
+    });
+  }
+
+  /// Called when the caller's 60-second no-answer timer fires.
+  void _handleRemoteNoAnswer() {
+    if (_isEndingCall || !mounted) return;
+    _isEndingCall = true;
+
+    // Mark as missed in Firestore so the callee's device also gets notified.
+    CallSignalingService.missCall(widget.channelId);
+
+    setState(() {
+      _endReasonText = 'No Answer';
+    });
+
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      _cleanupAndPop();
+    });
+  }
+
+  /// Centralised cleanup: create call log, update provider, pop navigator.
+  Future<void> _cleanupAndPop() async {
+    await _createCallLog();
+    _signalingSubscription?.cancel();
+    _noAnswerTimer?.cancel();
+
+    // Fire-and-forget: delete the signaling document so it can't interfere
+    // with future calls (especially important when channelId is reused).
+    CallSignalingService.deleteCallDocument(widget.channelId);
+
+    if (mounted) {
+      Provider.of<CallStateNotifier>(context, listen: false)
+          .updateState(CallState.Ended);
+      Navigator.pop(context);
+    }
+  }
+
   Future<void> _initAgora() async {
     try {
       // Set initial call start time to avoid null errors
@@ -118,14 +229,23 @@ class _CallScreenState extends State<CallScreen> {
               _remoteUid = remoteUid;
               _remoteUserJoined = true;
             });
+            _noAnswerTimer?.cancel(); // Remote user joined — cancel no-answer timer
             _startCallTimer();
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
               UserOfflineReasonType reason) {
-            print("Remote user left: $remoteUid");
+            print("Remote user left: $remoteUid (reason: $reason)");
             setState(() {
               _remoteUid = null;
             });
+
+            // ── KEY FIX: When the remote user leaves the Agora channel,
+            // end the call for this side too (WhatsApp behavior). ──
+            if (_remoteUserJoined && !_isEndingCall) {
+              // The remote user was in the call and left — end it.
+              CallSignalingService.endCall(widget.channelId);
+              _autoCloseWithReason('Call Ended');
+            }
           },
           onTokenPrivilegeWillExpire: (RtcConnection connection, String token) {
             print("Token will expire, should refresh token");
@@ -177,8 +297,17 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void dispose() {
     _callTimer?.cancel();
+    _noAnswerTimer?.cancel();
+    _signalingSubscription?.cancel();
+
     // Create call log (fire and forget for cases like back button press)
     _createCallLog();
+
+    // If we're being disposed without having explicitly ended the call
+    // (e.g. back button, system kill), mark it as ended in Firestore.
+    if (!_isEndingCall) {
+      CallSignalingService.endCall(widget.channelId);
+    }
 
     // Use proper release method with cleanup tracking
     AgoraService.releaseEngine(_engine);
@@ -269,6 +398,24 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // End-call button handler (used by both video and audio UI)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _onEndCallPressed() async {
+    if (_isEndingCall) return;
+    _isEndingCall = true;
+
+    // Signal the other party via Firestore
+    await CallSignalingService.endCall(widget.channelId);
+
+    await _cleanupAndPop();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UI builders
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildLocalPreview() {
     if (_engine == null || !_isInitialized) return Container();
 
@@ -284,10 +431,12 @@ class _CallScreenState extends State<CallScreen> {
     if (_engine == null || !_isInitialized || _remoteUid == null) {
       return Container(
         color: Colors.black,
-        child: const Center(
+        child: Center(
           child: Text(
-            'Waiting for remote user...',
-            style: TextStyle(color: Colors.white, fontSize: 18),
+            _endReasonText.isNotEmpty
+                ? _endReasonText
+                : 'Waiting for remote user...',
+            style: const TextStyle(color: Colors.white, fontSize: 18),
           ),
         ),
       );
@@ -415,12 +564,7 @@ class _CallScreenState extends State<CallScreen> {
             ),
             // End call button
             GestureDetector(
-              onTap: () async {
-                await _createCallLog();
-                Provider.of<CallStateNotifier>(context, listen: false)
-                    .updateState(CallState.Ended);
-                Navigator.pop(context);
-              },
+              onTap: _onEndCallPressed,
               child: Container(
                 width: 70,
                 height: 70,
@@ -443,6 +587,8 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   String _getCallStatusText() {
+    // Show end-reason text (e.g. "Call Declined", "No Answer", "Call Ended")
+    if (_endReasonText.isNotEmpty) return _endReasonText;
     if (_isOnHold) return 'On hold';
     if (_remoteUserJoined && _callDurationSeconds > 0) {
       return _formatDuration(_callDurationSeconds);
@@ -631,13 +777,7 @@ class _CallScreenState extends State<CallScreen> {
                       color: Colors.white,
                       size: 32,
                     ),
-                    onPressed: () async {
-                      await _createCallLog();
-
-                      Provider.of<CallStateNotifier>(context, listen: false)
-                          .updateState(CallState.Ended);
-                      Navigator.pop(context);
-                    },
+                    onPressed: _onEndCallPressed,
                   ),
                 ),
 
@@ -702,7 +842,11 @@ class _CallScreenState extends State<CallScreen> {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  _remoteUid != null ? 'Connected' : 'Waiting...',
+                  _endReasonText.isNotEmpty
+                      ? _endReasonText
+                      : _remoteUid != null
+                          ? 'Connected'
+                          : 'Waiting...',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 16,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 
 /// Full-screen incoming call UI shown when the app is in the foreground.
 ///
@@ -35,6 +36,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   Timer? _autoDeclineTimer;
   StreamSubscription? _callKitSubscription;
 
+  // ── Signaling: listen for caller cancelling the call ────────────────────
+  StreamSubscription<CallSignalStatus?>? _signalingSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +58,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       if (mounted) _dismissScreen();
     });
 
-    // Listen for CallKit events to auto-dismiss when:
+    // Listen for CallKit events:
+    // - User accepts from notification → trigger our own _acceptCall()
     // - Caller hangs up (actionCallEnded)
     // - Call times out (actionCallTimeout)
     // - User declines from notification (actionCallDecline)
@@ -62,9 +67,33 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
       if (event == null || !mounted) return;
 
-      if (event.event == Event.actionCallDecline ||
-          event.event == Event.actionCallTimeout ||
+      if (event.event == Event.actionCallAccept) {
+        // User accepted from the system notification — handle it here so the
+        // global listener in main.dart doesn't create a duplicate CallScreen.
+        _acceptCall();
+      } else if (event.event == Event.actionCallDecline) {
+        // User declined from the system notification — signal Firestore so
+        // the caller sees "Call Declined".
+        _declineCall();
+      } else if (event.event == Event.actionCallTimeout ||
           event.event == Event.actionCallEnded) {
+        _dismissScreen();
+      }
+    });
+
+    // ── Listen to the Firestore call document ──────────────────────────────
+    // If the caller cancels (presses end-call while still ringing), or if
+    // the status changes to 'ended'/'missed', auto-dismiss this screen.
+    _signalingSubscription =
+        CallSignalingService.listenToCallStatus(widget.channelId)
+            .listen((status) {
+      if (status == null || !mounted) return;
+
+      if (status == CallSignalStatus.ended ||
+          status == CallSignalStatus.missed) {
+        // Caller cancelled or call timed out on their side.
+        // Stop CallKit ringtone and dismiss.
+        FlutterCallkitIncoming.endCall(widget.channelId);
         _dismissScreen();
       }
     });
@@ -75,6 +104,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     _pulseController.dispose();
     _autoDeclineTimer?.cancel();
     _callKitSubscription?.cancel();
+    _signalingSubscription?.cancel();
     super.dispose();
   }
 
@@ -85,14 +115,25 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     }
   }
 
+  bool _isAccepting = false;
+
   void _acceptCall() {
+    // Guard against double-invocation (e.g. user taps in-app Accept AND
+    // CallKit fires actionCallAccept almost simultaneously).
+    if (_isAccepting) return;
+    _isAccepting = true;
+
     // Cancel listeners FIRST — endCall fires actionCallEnded which
     // would otherwise trigger _dismissScreen and kill the navigation.
     _callKitSubscription?.cancel();
     _autoDeclineTimer?.cancel();
+    _signalingSubscription?.cancel();
 
     // Stop the CallKit ringtone/notification
     FlutterCallkitIncoming.endCall(widget.channelId);
+
+    // ── Signal "answered" to the caller via Firestore ──────────────────
+    CallSignalingService.answerCall(widget.channelId);
 
     // Navigate to the call screen
     Navigator.of(context).pushReplacement(
@@ -112,9 +153,13 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     // Cancel listeners FIRST
     _callKitSubscription?.cancel();
     _autoDeclineTimer?.cancel();
+    _signalingSubscription?.cancel();
 
     // Stop the CallKit ringtone/notification
     FlutterCallkitIncoming.endCall(widget.channelId);
+
+    // ── Signal "declined" to the caller via Firestore ──────────────────
+    CallSignalingService.declineCall(widget.channelId);
 
     if (mounted) {
       Navigator.of(context).pop();

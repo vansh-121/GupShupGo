@@ -650,6 +650,7 @@ class AuthService {
       String? userId = await _getSavedUserId();
       if (userId != null) {
         await _userService.updateOnlineStatus(userId, false);
+        await _fcmService.unregisterCurrentDevice(userId: userId);
       }
       // Revoke the server-side device session token BEFORE signing out of
       // Firebase Auth — revocation can use the still-valid ID token to prove

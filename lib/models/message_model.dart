@@ -18,6 +18,17 @@ class MessageModel {
   final MessageStatus status;
   final String? mediaUrl;
 
+  /// Metadata for a reply sent from a status update.
+  final String? statusReplyOwnerId;
+  final String? statusReplyItemId;
+  final String? statusReplyOwnerName;
+  final String? statusReplyOwnerPhotoUrl;
+  final String? statusReplyType;
+  final String? statusReplyText;
+  final String? statusReplyMediaUrl;
+  final String? statusReplyCaption;
+  final String? statusReplyBackgroundColor;
+
   /// Local file path for images received/sent via mesh (not yet uploaded).
   final String? localFilePath;
 
@@ -43,6 +54,15 @@ class MessageModel {
     required this.timestamp,
     this.status = MessageStatus.sent,
     this.mediaUrl,
+    this.statusReplyOwnerId,
+    this.statusReplyItemId,
+    this.statusReplyOwnerName,
+    this.statusReplyOwnerPhotoUrl,
+    this.statusReplyType,
+    this.statusReplyText,
+    this.statusReplyMediaUrl,
+    this.statusReplyCaption,
+    this.statusReplyBackgroundColor,
     this.localFilePath,
     this.audioDuration,
     this.isOfflineMesh = false,
@@ -54,6 +74,8 @@ class MessageModel {
   bool get isDelivered =>
       status == MessageStatus.delivered || status == MessageStatus.read;
   bool get isRead => status == MessageStatus.read;
+  bool get hasStatusReply =>
+      statusReplyOwnerId != null && statusReplyItemId != null;
 
   // Convert MessageModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -66,6 +88,15 @@ class MessageModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'status': status.name,
       'mediaUrl': mediaUrl,
+      'statusReplyOwnerId': statusReplyOwnerId,
+      'statusReplyItemId': statusReplyItemId,
+      'statusReplyOwnerName': statusReplyOwnerName,
+      'statusReplyOwnerPhotoUrl': statusReplyOwnerPhotoUrl,
+      'statusReplyType': statusReplyType,
+      'statusReplyText': statusReplyText,
+      'statusReplyMediaUrl': statusReplyMediaUrl,
+      'statusReplyCaption': statusReplyCaption,
+      'statusReplyBackgroundColor': statusReplyBackgroundColor,
       'audioDuration': audioDuration,
       // localFilePath is intentionally excluded from Firestore — it's local only.
       'isOfflineMesh': isOfflineMesh,
@@ -85,6 +116,15 @@ class MessageModel {
       'timestamp': timestamp.millisecondsSinceEpoch,
       'status': status.name,
       'mediaUrl': mediaUrl,
+      'statusReplyOwnerId': statusReplyOwnerId,
+      'statusReplyItemId': statusReplyItemId,
+      'statusReplyOwnerName': statusReplyOwnerName,
+      'statusReplyOwnerPhotoUrl': statusReplyOwnerPhotoUrl,
+      'statusReplyType': statusReplyType,
+      'statusReplyText': statusReplyText,
+      'statusReplyMediaUrl': statusReplyMediaUrl,
+      'statusReplyCaption': statusReplyCaption,
+      'statusReplyBackgroundColor': statusReplyBackgroundColor,
       'localFilePath': localFilePath,
       'audioDuration': audioDuration,
       'isOfflineMesh': isOfflineMesh,
@@ -106,6 +146,15 @@ class MessageModel {
           : DateTime.now(),
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
+      statusReplyOwnerId: map['statusReplyOwnerId'],
+      statusReplyItemId: map['statusReplyItemId'],
+      statusReplyOwnerName: map['statusReplyOwnerName'],
+      statusReplyOwnerPhotoUrl: map['statusReplyOwnerPhotoUrl'],
+      statusReplyType: map['statusReplyType'],
+      statusReplyText: map['statusReplyText'],
+      statusReplyMediaUrl: map['statusReplyMediaUrl'],
+      statusReplyCaption: map['statusReplyCaption'],
+      statusReplyBackgroundColor: map['statusReplyBackgroundColor'],
       localFilePath: map['localFilePath'],
       audioDuration: map['audioDuration'],
       isOfflineMesh: map['isOfflineMesh'] ?? false,
@@ -125,6 +174,15 @@ class MessageModel {
       timestamp: _parseTimestamp(map['timestamp']),
       status: _parseMessageStatus(map['status']),
       mediaUrl: map['mediaUrl'],
+      statusReplyOwnerId: map['statusReplyOwnerId'],
+      statusReplyItemId: map['statusReplyItemId'],
+      statusReplyOwnerName: map['statusReplyOwnerName'],
+      statusReplyOwnerPhotoUrl: map['statusReplyOwnerPhotoUrl'],
+      statusReplyType: map['statusReplyType'],
+      statusReplyText: map['statusReplyText'],
+      statusReplyMediaUrl: map['statusReplyMediaUrl'],
+      statusReplyCaption: map['statusReplyCaption'],
+      statusReplyBackgroundColor: map['statusReplyBackgroundColor'],
       audioDuration: map['audioDuration'],
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
@@ -185,6 +243,15 @@ class MessageModel {
     DateTime? timestamp,
     MessageStatus? status,
     String? mediaUrl,
+    String? statusReplyOwnerId,
+    String? statusReplyItemId,
+    String? statusReplyOwnerName,
+    String? statusReplyOwnerPhotoUrl,
+    String? statusReplyType,
+    String? statusReplyText,
+    String? statusReplyMediaUrl,
+    String? statusReplyCaption,
+    String? statusReplyBackgroundColor,
     String? localFilePath,
     int? audioDuration,
     bool? isOfflineMesh,
@@ -200,6 +267,17 @@ class MessageModel {
       timestamp: timestamp ?? this.timestamp,
       status: status ?? this.status,
       mediaUrl: mediaUrl ?? this.mediaUrl,
+      statusReplyOwnerId: statusReplyOwnerId ?? this.statusReplyOwnerId,
+      statusReplyItemId: statusReplyItemId ?? this.statusReplyItemId,
+      statusReplyOwnerName: statusReplyOwnerName ?? this.statusReplyOwnerName,
+      statusReplyOwnerPhotoUrl:
+          statusReplyOwnerPhotoUrl ?? this.statusReplyOwnerPhotoUrl,
+      statusReplyType: statusReplyType ?? this.statusReplyType,
+      statusReplyText: statusReplyText ?? this.statusReplyText,
+      statusReplyMediaUrl: statusReplyMediaUrl ?? this.statusReplyMediaUrl,
+      statusReplyCaption: statusReplyCaption ?? this.statusReplyCaption,
+      statusReplyBackgroundColor:
+          statusReplyBackgroundColor ?? this.statusReplyBackgroundColor,
       localFilePath: localFilePath ?? this.localFilePath,
       audioDuration: audioDuration ?? this.audioDuration,
       isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,

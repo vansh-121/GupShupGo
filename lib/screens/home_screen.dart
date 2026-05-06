@@ -22,6 +22,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
+import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
@@ -46,6 +47,7 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatService _chatService = ChatService();
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
+  final StatusService _statusService = StatusService();
   final UpdateService _updateService = UpdateService();
 
   // ignore: unused_field
@@ -96,6 +98,9 @@ class _HomeScreenState extends State<HomeScreen>
           _userService.updateOnlineStatus(_currentUserId!, true);
           // Mark all messages as delivered when app comes to foreground
           _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
+          // Keep this device's FCM token fresh after reinstall, data clear,
+          // Play Services recovery, or token rotation.
+          unawaited(_fcmService.setupFCM(userId: _currentUserId!));
           break;
         case AppLifecycleState.paused:
         case AppLifecycleState.inactive:
@@ -493,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen>
               // ── Try cached user first (instant, no Firestore) ──
               final cachedUser = _chatCacheService.getCachedUser(otherUserId);
               if (cachedUser != null) {
-                final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+                final unreadCount = _effectiveUnreadCount(chatRoom);
                 return _buildChatRoomItem(cachedUser, chatRoom, unreadCount);
               }
 
@@ -506,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen>
                   }
 
                   final user = userSnapshot.data!;
-                  final unreadCount = chatRoom.unreadCount[_currentUserId] ?? 0;
+                  final unreadCount = _effectiveUnreadCount(chatRoom);
                   return _buildChatRoomItem(user, chatRoom, unreadCount);
                 },
               );
@@ -620,6 +625,19 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       ),
     );
+  }
+
+  int _effectiveUnreadCount(ChatRoom chatRoom) {
+    final storedUnread = chatRoom.unreadCount[_currentUserId] ?? 0;
+    if (storedUnread > 0) return storedUnread;
+
+    final isIncomingLastMessage = chatRoom.lastMessageSenderId != null &&
+        chatRoom.lastMessageSenderId != _currentUserId;
+    final isUnreadLastMessage =
+        chatRoom.lastMessageStatus == MessageStatus.sent ||
+            chatRoom.lastMessageStatus == MessageStatus.delivered;
+
+    return isIncomingLastMessage && isUnreadLastMessage ? 1 : 0;
   }
 
   Widget _buildChatRoomItem(
@@ -941,6 +959,7 @@ class _HomeScreenState extends State<HomeScreen>
               builder: (_) => StatusViewerScreen(
                 statusModel: myStatus!,
                 currentUserId: _currentUserId!,
+                currentUserName: _currentUser?.name,
                 isMyStatus: true,
               ),
             ),
@@ -957,47 +976,58 @@ class _HomeScreenState extends State<HomeScreen>
     final activeItems = status.activeStatusItems;
     if (activeItems.isEmpty) return const SizedBox.shrink();
 
-    final allViewed =
-        activeItems.every((item) => item.viewedBy.contains(_currentUserId));
-
     final avatarUrl = status.userPhotoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(status.userName)}&background=6C5CE7&color=fff&size=128';
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: allViewed ? c.textLow : c.primary,
-            width: 2.5,
-          ),
-        ),
-        child: CircleAvatar(
-          radius: 26,
-          backgroundImage: NetworkImage(avatarUrl),
-          backgroundColor: c.primaryLt,
-        ),
+    return FutureBuilder<bool>(
+      future: _statusService.hasViewedAllActiveStatusItems(
+        statusModel: status,
+        viewerId: _currentUserId!,
       ),
-      title: Text(
-        status.userName,
-        style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
-      ),
-      subtitle: Text(
-        _formatStatusTime(status.lastUpdated),
-        style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
-      ),
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => StatusViewerScreen(
-              statusModel: status,
-              currentUserId: _currentUserId!,
+      builder: (context, snapshot) {
+        final allViewed = snapshot.data ??
+            activeItems.every((item) => item.viewedBy.contains(_currentUserId));
+
+        return ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          leading: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: allViewed ? c.textLow : c.primary,
+                width: 2.5,
+              ),
+            ),
+            child: CircleAvatar(
+              radius: 26,
+              backgroundImage: NetworkImage(avatarUrl),
+              backgroundColor: c.primaryLt,
             ),
           ),
+          title: Text(
+            status.userName,
+            style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
+          ),
+          subtitle: Text(
+            _formatStatusTime(status.lastUpdated),
+            style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+          ),
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => StatusViewerScreen(
+                  statusModel: status,
+                  currentUserId: _currentUserId!,
+                  currentUserName: _currentUser?.name,
+                ),
+              ),
+            );
+            if (mounted) setState(() {});
+          },
         );
       },
     );
