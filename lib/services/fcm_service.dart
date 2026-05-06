@@ -384,7 +384,10 @@ class FCMService {
           'isAudioOnly': isAudioOnly.toString(),
         },
         android: const AndroidParams(
-          isCustomNotification: true,
+          // MIUI/HyperOS lock screens often clip custom RemoteViews when
+          // notifications are stacked. Let Android render the call layout so
+          // the Accept/Decline row gets the correct height.
+          isCustomNotification: false,
           isShowLogo: false,
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#00A884',
