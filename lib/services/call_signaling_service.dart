@@ -26,6 +26,10 @@ class CallSignalingService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _collection = 'calls';
 
+  static String generateChannelId() {
+    return 'call_${_firestore.collection(_collection).doc().id}';
+  }
+
   // ─── Create ────────────────────────────────────────────────────────────────
 
   /// Creates (or overwrites) the call document. Called by the **caller** right

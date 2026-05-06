@@ -40,6 +40,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
 
+  Stream<int> _watchCurrentViewCount() {
+    return _statusService.watchStatusViewCount(
+      statusOwnerId: widget.statusModel.userId,
+      statusItemId: _activeItems[_currentIndex].id,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -253,7 +260,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       Icon(Icons.visibility, color: cs.onSurfaceVariant),
                       SizedBox(width: 8),
                       Text(
-                        'Viewed by ${currentItem.viewedBy.length}',
+                        'Viewed by ${snapshot.data?.length ?? 0}',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -626,12 +633,19 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                     children: [
                       Icon(Icons.keyboard_arrow_up, color: Colors.white),
                       SizedBox(height: 4),
-                      Text(
-                        '${currentItem.viewedBy.length} views',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
+                      StreamBuilder<int>(
+                        stream: _watchCurrentViewCount(),
+                        initialData: currentItem.viewedBy.length,
+                        builder: (context, snapshot) {
+                          final count = snapshot.data ?? 0;
+                          return Text(
+                            '$count view${count == 1 ? '' : 's'}',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),

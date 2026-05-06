@@ -103,23 +103,32 @@ service cloud.firestore {
     
     // ==================== STATUSES ====================
     match /statuses/{userId} {
-      function isViewerStatusViewUpdate() {
+      function isValidStatusView(viewerId) {
         return request.auth != null
           && request.auth.uid != userId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statusItems']);
+          && request.auth.uid == viewerId
+          && request.resource.data.keys().hasOnly(['viewerId', 'viewedAt'])
+          && request.resource.data.keys().hasAll(['viewerId', 'viewedAt'])
+          && request.resource.data.viewerId == viewerId
+          && request.resource.data.viewedAt is timestamp;
       }
 
       // Anyone authenticated can read statuses
       allow read: if request.auth != null;
       
-      // Users can create/update their own status. Other authenticated users may
-      // update statusItems only so their view can be recorded.
+      // Users can create/update their own status document.
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null
-        && (request.auth.uid == userId || isViewerStatusViewUpdate());
+      allow update: if request.auth != null && request.auth.uid == userId;
       
       // Users can only delete their own status
       allow delete: if request.auth != null && request.auth.uid == userId;
+
+      match /views/{statusItemId}/viewers/{viewerId} {
+        allow read: if request.auth != null
+          && (request.auth.uid == userId || request.auth.uid == viewerId);
+        allow create, update: if isValidStatusView(viewerId);
+        allow delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
     
     // ==================== DEVICE SESSIONS ====================

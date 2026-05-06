@@ -56,8 +56,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _initiateCall(UserModel user) async {
-    String channelId =
-        '${widget.currentUserId}_${user.id}_${DateTime.now().millisecondsSinceEpoch}';
+    final channelId = CallSignalingService.generateChannelId();
 
     // Create the Firestore signaling document BEFORE sending the push.
     await CallSignalingService.createCallDocument(

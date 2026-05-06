@@ -10,6 +10,18 @@ class StatusService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final String _statusCollection = 'statuses';
 
+  CollectionReference<Map<String, dynamic>> _statusViewersRef({
+    required String statusOwnerId,
+    required String statusItemId,
+  }) {
+    return _firestore
+        .collection(_statusCollection)
+        .doc(statusOwnerId)
+        .collection('views')
+        .doc(statusItemId)
+        .collection('viewers');
+  }
+
   /// Upload a text status.
   Future<void> uploadTextStatus({
     required String userId,
@@ -251,37 +263,60 @@ class StatusService {
     required String viewerId,
   }) async {
     try {
-      final docRef =
-          _firestore.collection(_statusCollection).doc(statusOwnerId);
-      final doc = await docRef.get();
+      if (statusOwnerId == viewerId) return;
 
-      if (!doc.exists) return;
-
-      final statusModel = StatusModel.fromFirestore(doc);
-      final updatedItems = statusModel.statusItems.map((item) {
-        if (item.id == statusItemId && !item.viewedBy.contains(viewerId)) {
-          return StatusItem(
-            id: item.id,
-            type: item.type,
-            text: item.text,
-            imageUrl: item.imageUrl,
-            videoUrl: item.videoUrl,
-            thumbnailUrl: item.thumbnailUrl,
-            caption: item.caption,
-            backgroundColor: item.backgroundColor,
-            createdAt: item.createdAt,
-            viewedBy: [...item.viewedBy, viewerId],
-          );
-        }
-        return item;
-      }).toList();
-
-      await docRef.update({
-        'statusItems': updatedItems.map((item) => item.toMap()).toList(),
-      });
+      await _statusViewersRef(
+        statusOwnerId: statusOwnerId,
+        statusItemId: statusItemId,
+      ).doc(viewerId).set({
+        'viewerId': viewerId,
+        'viewedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error marking status as viewed: $e');
     }
+  }
+
+  /// Check whether a viewer has seen a specific status item.
+  Future<bool> hasViewedStatusItem({
+    required String statusOwnerId,
+    required String statusItemId,
+    required String viewerId,
+  }) async {
+    try {
+      if (statusOwnerId == viewerId) return true;
+
+      final doc = await _statusViewersRef(
+        statusOwnerId: statusOwnerId,
+        statusItemId: statusItemId,
+      ).doc(viewerId).get();
+
+      return doc.exists;
+    } catch (e) {
+      print('Error checking status view: $e');
+      return false;
+    }
+  }
+
+  /// Check whether all active items in a status have been viewed.
+  Future<bool> hasViewedAllActiveStatusItems({
+    required StatusModel statusModel,
+    required String viewerId,
+  }) async {
+    final activeItems = statusModel.activeStatusItems;
+    if (activeItems.isEmpty) return false;
+
+    final viewedResults = await Future.wait(
+      activeItems.map((item) {
+        return hasViewedStatusItem(
+          statusOwnerId: statusModel.userId,
+          statusItemId: item.id,
+          viewerId: viewerId,
+        );
+      }),
+    );
+
+    return viewedResults.every((viewed) => viewed);
   }
 
   /// Delete a specific status item.
@@ -344,22 +379,14 @@ class StatusService {
     required String statusItemId,
   }) async {
     try {
-      final doc = await _firestore
-          .collection(_statusCollection)
-          .doc(statusOwnerId)
-          .get();
-
-      if (!doc.exists) return [];
-
-      final statusModel = StatusModel.fromFirestore(doc);
-      final statusItem = statusModel.statusItems
-          .where((item) => item.id == statusItemId)
-          .firstOrNull;
-
-      if (statusItem == null) return [];
+      final viewerDocs = await _statusViewersRef(
+        statusOwnerId: statusOwnerId,
+        statusItemId: statusItemId,
+      ).get();
 
       List<UserModel> viewers = [];
-      for (String viewerId in statusItem.viewedBy) {
+      for (final viewerDoc in viewerDocs.docs) {
+        final viewerId = viewerDoc.id;
         final userDoc =
             await _firestore.collection('users').doc(viewerId).get();
         if (userDoc.exists) {
@@ -371,5 +398,16 @@ class StatusService {
       print('Error getting status viewers: $e');
       return [];
     }
+  }
+
+  /// Watch the viewer count for a specific status item.
+  Stream<int> watchStatusViewCount({
+    required String statusOwnerId,
+    required String statusItemId,
+  }) {
+    return _statusViewersRef(
+      statusOwnerId: statusOwnerId,
+      statusItemId: statusItemId,
+    ).snapshots().map((snapshot) => snapshot.size);
   }
 }
