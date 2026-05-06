@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.0.4';
+const String kCurrentVersion = '1.0.5';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only when the
@@ -165,19 +165,19 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.wifi_tethering_rounded,
-    'Offline Chat Mode',
-    'Chat with nearby friends even without internet using peer-to-peer connections.',
+    Icons.reply_rounded,
+    'Reply to Status Updates',
+    'Reply directly to text, photo, and video statuses from the viewer.',
+  ),
+  _Feature(
+    Icons.visibility_rounded,
+    'Status Views Fixed',
+    'View counts now update correctly when friends watch your statuses.',
   ),
   _Feature(
     Icons.notifications_active_rounded,
-    'Offline Message Alerts',
-    'Get notified when nearby devices send you messages while you\'re offline.',
-  ),
-  _Feature(
-    Icons.mic_rounded,
-    'Voice Messages',
-    'Hold the mic button to record and send quick voice notes.',
+    'Better Alerts and Calls',
+    'Improved message alerts, incoming call notifications, and device handling.',
   ),
   // _Feature(
   //   Icons.palette_rounded,
