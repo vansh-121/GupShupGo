@@ -6,7 +6,6 @@ admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
 const auth = admin.auth();
-const FieldValue = admin.firestore.FieldValue;
 
 const INVALID_FCM_TOKEN_CODES = new Set([
   "messaging/invalid-registration-token",
@@ -38,24 +37,12 @@ async function getNotificationTargets(userId) {
     }
   });
 
-  const legacyToken = userDoc.data().fcmToken;
-  if (typeof legacyToken === "string" && legacyToken && !seenTokens.has(legacyToken)) {
-    targets.push({ token: legacyToken, ref: userRef, source: "legacy" });
-  }
-
   return { exists: true, targets };
 }
 
 async function removeNotificationTarget(target) {
   try {
-    if (target.source === "device") {
-      await target.ref.delete();
-    } else {
-      await target.ref.update({
-        fcmToken: FieldValue.delete(),
-        lastUpdated: FieldValue.serverTimestamp(),
-      });
-    }
+    await target.ref.delete();
   } catch (error) {
     console.error("Error removing invalid FCM token:", error);
   }
@@ -179,6 +166,7 @@ exports.sendCallNotification = onRequest(
       const result = await sendToUserDevices(calleeId, (fcmToken) => ({
         token: fcmToken,
         data: {
+          calleeId: calleeId,
           callerId: callerId,
           callerName: callerName,
           callerPhotoUrl: callerPhotoUrl,
@@ -252,6 +240,7 @@ exports.sendMessageNotification = onRequest(
         token: fcmToken,
         data: {
           type: "chat_message",
+          receiverId: receiverId,
           senderId: senderId,
           senderName: senderName,
           message: message || "",

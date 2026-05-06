@@ -32,6 +32,7 @@ class FCMService {
   static bool _isIncomingCallScreenShowing = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static const _deviceIdKey = 'gsg_fcm_device_id_v1';
+  static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
   static const _secureStorage = FlutterSecureStorage();
 
   /// Public getter so the global CallKit listener in main.dart can check
@@ -68,11 +69,16 @@ class FCMService {
           _firebaseMessagingBackgroundHandler);
 
       // Foreground data-only messages — navigate to full-screen incoming call
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
         print('Foreground message received: ${message.data}');
         final messageType = message.data['type'] ?? '';
 
         if (messageType == 'incoming_call' || messageType == 'call') {
+          if (!await _isMessageForCurrentUser(message.data)) {
+            print('Ignoring call notification for a different signed-in user');
+            return;
+          }
+
           // Show CallKit for ringtone + vibration
           _showCallKitNotification(message.data);
 
@@ -147,7 +153,11 @@ class FCMService {
     // ═══════════════════════════════════════════════════════════════════════
     _tokenRefreshSubscription ??=
         messaging.onTokenRefresh.listen((String newToken) async {
-      final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? userId;
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) {
+        print('Ignoring FCM token refresh while signed out');
+        return;
+      }
       print('FCM token refreshed: $newToken');
       await _storeToken(currentUserId, newToken);
     });
@@ -157,6 +167,7 @@ class FCMService {
   static Future<void> _storeToken(String userId, String token) async {
     try {
       final deviceId = await _getOrCreateDeviceId();
+      await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
       final deviceInfo = await _getDeviceInfo();
       final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
 
@@ -182,9 +193,69 @@ class FCMService {
         SetOptions(merge: true),
       );
 
+      await _secureStorage.write(
+        key: _lastRegisteredUserIdKey,
+        value: userId,
+      );
+
       print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e) {
       print('Error storing FCM token: $e');
+    }
+  }
+
+  Future<void> unregisterCurrentDevice({required String userId}) async {
+    try {
+      final deviceId = await _secureStorage.read(key: _deviceIdKey);
+      if (deviceId != null && deviceId.isNotEmpty) {
+        final userRef =
+            FirebaseFirestore.instance.collection('users').doc(userId);
+        final currentToken = await FirebaseMessaging.instance.getToken();
+
+        await userRef.collection('devices').doc(deviceId).delete();
+
+        if (currentToken != null && currentToken.isNotEmpty) {
+          final userDoc = await userRef.get();
+          if (userDoc.data()?['fcmToken'] == currentToken) {
+            await userRef.set(
+              {
+                'fcmToken': FieldValue.delete(),
+                'lastUpdated': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+          }
+        }
+      }
+
+      await _secureStorage.delete(key: _lastRegisteredUserIdKey);
+      await FirebaseMessaging.instance.deleteToken();
+      print('FCM token unregistered for user: $userId');
+    } catch (e) {
+      print('Error unregistering FCM token for user $userId: $e');
+    }
+  }
+
+  static Future<void> _removePreviousAccountDeviceTokenIfNeeded(
+      String userId, String deviceId) async {
+    final previousUserId =
+        await _secureStorage.read(key: _lastRegisteredUserIdKey);
+    if (previousUserId == null ||
+        previousUserId.isEmpty ||
+        previousUserId == userId) {
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(previousUserId)
+          .collection('devices')
+          .doc(deviceId)
+          .delete();
+      print('Removed this device from previous FCM user: $previousUserId');
+    } catch (e) {
+      print('Could not remove previous FCM user token: $e');
     }
   }
 
@@ -211,6 +282,18 @@ class FCMService {
       }
     } catch (_) {}
     return Platform.operatingSystem;
+  }
+
+  static Future<bool> _isMessageForCurrentUser(
+      Map<String, dynamic> data) async {
+    final expectedUserId = data['calleeId'] ?? data['receiverId'];
+    if (expectedUserId == null || expectedUserId.toString().isEmpty) {
+      return true;
+    }
+
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid ??
+        await _secureStorage.read(key: _lastRegisteredUserIdKey);
+    return currentUserId != null && currentUserId == expectedUserId.toString();
   }
 
   /// Returns the current user's Firebase ID token, or null if not signed in.
@@ -294,6 +377,11 @@ class FCMService {
     final messageType = message.data['type'] ?? '';
 
     if (messageType == 'chat_message') {
+      if (!await _isMessageForCurrentUser(message.data)) {
+        print('Ignoring chat notification for a different signed-in user');
+        return;
+      }
+
       // Handle chat message - mark as delivered
       String chatRoomId = message.data['chatRoomId'] ?? '';
       String senderId = message.data['senderId'] ?? '';
@@ -334,6 +422,11 @@ class FCMService {
         }
       }
     } else if (messageType == 'call' || messageType == 'incoming_call') {
+      if (!await _isMessageForCurrentUser(message.data)) {
+        print('Ignoring call notification for a different signed-in user');
+        return;
+      }
+
       // Show native full-screen call UI via CallKit
       await _showCallKitNotification(message.data);
     }
