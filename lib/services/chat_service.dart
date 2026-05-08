@@ -52,14 +52,23 @@ class ChatService {
     String? senderName,
     MessageType type = MessageType.text,
     String? mediaUrl,
+    String? statusReplyOwnerId,
+    String? statusReplyItemId,
+    String? statusReplyOwnerName,
+    String? statusReplyOwnerPhotoUrl,
+    String? statusReplyType,
+    String? statusReplyText,
+    String? statusReplyMediaUrl,
+    String? statusReplyCaption,
+    String? statusReplyBackgroundColor,
     int? audioDuration,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
+    final chatRoomRef =
+        _firestore.collection(_chatRoomsCollection).doc(chatRoomId);
 
     // Create message document reference
-    DocumentReference messageRef = _firestore
-        .collection(_chatRoomsCollection)
-        .doc(chatRoomId)
+    DocumentReference messageRef = chatRoomRef
         .collection(_messagesCollection)
         .doc();
 
@@ -72,8 +81,20 @@ class ChatService {
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
       mediaUrl: mediaUrl,
+      statusReplyOwnerId: statusReplyOwnerId,
+      statusReplyItemId: statusReplyItemId,
+      statusReplyOwnerName: statusReplyOwnerName,
+      statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+      statusReplyType: statusReplyType,
+      statusReplyText: statusReplyText,
+      statusReplyMediaUrl: statusReplyMediaUrl,
+      statusReplyCaption: statusReplyCaption,
+      statusReplyBackgroundColor: statusReplyBackgroundColor,
       audioDuration: audioDuration,
     );
+    final lastMessagePreview = statusReplyOwnerId != null
+        ? 'Replied to status: $text'
+        : text;
 
     // Use batch write for consistency
     WriteBatch batch = _firestore.batch();
@@ -82,15 +103,19 @@ class ChatService {
     batch.set(messageRef, message.toMap());
 
     // Update chat room with last message info
-    batch.update(
-      _firestore.collection(_chatRoomsCollection).doc(chatRoomId),
+    batch.set(
+      chatRoomRef,
       {
-        'lastMessage': text,
+        'id': chatRoomId,
+        'participants': [senderId, receiverId]..sort(),
+        'lastMessage': lastMessagePreview,
         'lastMessageTime': Timestamp.fromDate(message.timestamp),
         'lastMessageSenderId': senderId,
         'lastMessageStatus': MessageStatus.sent.name,
+        'unreadCount.$senderId': FieldValue.increment(0),
         'unreadCount.$receiverId': FieldValue.increment(1),
       },
+      SetOptions(merge: true),
     );
 
     await batch.commit();

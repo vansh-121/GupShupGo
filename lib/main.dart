@@ -18,7 +18,9 @@ import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -105,7 +107,15 @@ void _setupCallKitListener() {
         break;
       case Event.actionCallDecline:
         print('Call declined by user');
-        // CallKit auto-dismisses; nothing else needed.
+        // If IncomingCallScreen is showing, it handles the decline itself
+        // (including the Firestore update). Otherwise (background / killed),
+        // we must signal Firestore here so the caller sees "Call Declined".
+        if (!FCMService.isIncomingCallScreenShowing) {
+          final channelId = _extractChannelId(event.body);
+          if (channelId.isNotEmpty) {
+            CallSignalingService.declineCall(channelId);
+          }
+        }
         break;
       case Event.actionCallTimeout:
         print('Call timed out (not answered)');
@@ -118,6 +128,18 @@ void _setupCallKitListener() {
         break;
     }
   });
+}
+
+/// Extracts the channelId from a CallKit event body.
+String _extractChannelId(dynamic body) {
+  if (body == null) return '';
+  final Map<String, dynamic> data =
+      body is Map ? Map<String, dynamic>.from(body) : {};
+  final rawExtra = data['extra'];
+  final Map<String, dynamic> extra = rawExtra is Map
+      ? Map<String, dynamic>.from(rawExtra)
+      : <String, dynamic>{};
+  return extra['channelId'] as String? ?? data['id'] as String? ?? '';
 }
 
 /// Navigates to CallScreen when the user taps "Accept" on the CallKit UI.
@@ -147,6 +169,15 @@ void _handleCallAccepted(dynamic body) {
 
   if (channelId.isEmpty) {
     print('Cannot navigate to call: channelId is empty');
+    return;
+  }
+
+  // When the app is in the foreground, IncomingCallScreen is already showing
+  // and will handle the accept itself (pushReplacement → CallScreen).
+  // If we ALSO push CallScreen here, we get a duplicate.  Skip this path
+  // when IncomingCallScreen is active.
+  if (FCMService.isIncomingCallScreenShowing) {
+    print('IncomingCallScreen is handling this accept — skipping global handler');
     return;
   }
 

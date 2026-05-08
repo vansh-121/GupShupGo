@@ -13,6 +13,14 @@ service cloud.firestore {
       
       // Prevent users from deleting profiles
       allow delete: if false;
+
+      // Each signed-in app install stores its own FCM token here. This avoids
+      // one device overwriting another and lets Cloud Functions clean up only
+      // the stale device token that Firebase rejects.
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if request.auth != null
+          && request.auth.uid == userId;
+      }
     }
     
     // ==================== CHAT ROOMS ====================
@@ -95,21 +103,40 @@ service cloud.firestore {
         && (resource.data.callerId == request.auth.uid 
             || resource.data.calleeId == request.auth.uid);
       
-      // Prevent deletion of call records
-      allow delete: if false;
+      // Allow deletion by participants (cleanup after call ends)
+      allow delete: if request.auth != null
+        && (resource.data.callerId == request.auth.uid 
+            || resource.data.calleeId == request.auth.uid);
     }
     
     // ==================== STATUSES ====================
     match /statuses/{userId} {
+      function isValidStatusView(viewerId) {
+        return request.auth != null
+          && request.auth.uid != userId
+          && request.auth.uid == viewerId
+          && request.resource.data.keys().hasOnly(['viewerId', 'viewedAt'])
+          && request.resource.data.keys().hasAll(['viewerId', 'viewedAt'])
+          && request.resource.data.viewerId == viewerId
+          && request.resource.data.viewedAt is timestamp;
+      }
+
       // Anyone authenticated can read statuses
       allow read: if request.auth != null;
       
-      // Users can only create/update their own status
+      // Users can create/update their own status document.
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if request.auth != null && request.auth.uid == userId;
       
       // Users can only delete their own status
       allow delete: if request.auth != null && request.auth.uid == userId;
+
+      match /views/{statusItemId}/viewers/{viewerId} {
+        allow read: if request.auth != null
+          && (request.auth.uid == userId || request.auth.uid == viewerId);
+        allow create, update: if isValidStatusView(viewerId);
+        allow delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
     
     // ==================== DEVICE SESSIONS ====================

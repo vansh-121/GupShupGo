@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -9,6 +12,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
@@ -26,6 +30,14 @@ class FCMService {
 
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
+  static StreamSubscription<String>? _tokenRefreshSubscription;
+  static const _deviceIdKey = 'gsg_fcm_device_id_v1';
+  static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
+  static const _secureStorage = FlutterSecureStorage();
+
+  /// Public getter so the global CallKit listener in main.dart can check
+  /// whether IncomingCallScreen is already handling the accept flow.
+  static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
 
   Future<void> setupFCM({required String userId}) async {
     print('Setting up FCM for user: $userId');
@@ -57,11 +69,16 @@ class FCMService {
           _firebaseMessagingBackgroundHandler);
 
       // Foreground data-only messages — navigate to full-screen incoming call
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
         print('Foreground message received: ${message.data}');
         final messageType = message.data['type'] ?? '';
 
         if (messageType == 'incoming_call' || messageType == 'call') {
+          if (!await _isMessageForCurrentUser(message.data)) {
+            print('Ignoring call notification for a different signed-in user');
+            return;
+          }
+
           // Show CallKit for ringtone + vibration
           _showCallKitNotification(message.data);
 
@@ -134,23 +151,149 @@ class FCMService {
     // Step 5: Listen for token refreshes (handles initial failure + rotations)
     // If Step 4 failed, this will catch the token when Play Services recovers.
     // ═══════════════════════════════════════════════════════════════════════
-    messaging.onTokenRefresh.listen((String newToken) async {
+    _tokenRefreshSubscription ??=
+        messaging.onTokenRefresh.listen((String newToken) async {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) {
+        print('Ignoring FCM token refresh while signed out');
+        return;
+      }
       print('FCM token refreshed: $newToken');
-      await _storeToken(userId, newToken);
+      await _storeToken(currentUserId, newToken);
     });
   }
 
   /// Stores the FCM token in Firestore for the given user.
   static Future<void> _storeToken(String userId, String token) async {
     try {
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(
-        {'fcmToken': token, 'lastUpdated': FieldValue.serverTimestamp()},
+      final deviceId = await _getOrCreateDeviceId();
+      await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
+      final deviceInfo = await _getDeviceInfo();
+      final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+
+      await userRef.collection('devices').doc(deviceId).set(
+        {
+          'deviceId': deviceId,
+          'fcmToken': token,
+          'platform': Platform.operatingSystem,
+          'deviceModel': deviceInfo,
+          'tokenUpdatedAt': FieldValue.serverTimestamp(),
+          'lastSeenAt': FieldValue.serverTimestamp(),
+        },
         SetOptions(merge: true),
       );
-      print('FCM token stored for user: $userId');
+
+      // Kept only as a migration fallback for already deployed functions.
+      // New Cloud Functions read the per-device token registry above.
+      await userRef.set(
+        {
+          'fcmToken': token,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      await _secureStorage.write(
+        key: _lastRegisteredUserIdKey,
+        value: userId,
+      );
+
+      print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e) {
       print('Error storing FCM token: $e');
     }
+  }
+
+  Future<void> unregisterCurrentDevice({required String userId}) async {
+    try {
+      final deviceId = await _secureStorage.read(key: _deviceIdKey);
+      if (deviceId != null && deviceId.isNotEmpty) {
+        final userRef =
+            FirebaseFirestore.instance.collection('users').doc(userId);
+        final currentToken = await FirebaseMessaging.instance.getToken();
+
+        await userRef.collection('devices').doc(deviceId).delete();
+
+        if (currentToken != null && currentToken.isNotEmpty) {
+          final userDoc = await userRef.get();
+          if (userDoc.data()?['fcmToken'] == currentToken) {
+            await userRef.set(
+              {
+                'fcmToken': FieldValue.delete(),
+                'lastUpdated': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+          }
+        }
+      }
+
+      await _secureStorage.delete(key: _lastRegisteredUserIdKey);
+      await FirebaseMessaging.instance.deleteToken();
+      print('FCM token unregistered for user: $userId');
+    } catch (e) {
+      print('Error unregistering FCM token for user $userId: $e');
+    }
+  }
+
+  static Future<void> _removePreviousAccountDeviceTokenIfNeeded(
+      String userId, String deviceId) async {
+    final previousUserId =
+        await _secureStorage.read(key: _lastRegisteredUserIdKey);
+    if (previousUserId == null ||
+        previousUserId.isEmpty ||
+        previousUserId == userId) {
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(previousUserId)
+          .collection('devices')
+          .doc(deviceId)
+          .delete();
+      print('Removed this device from previous FCM user: $previousUserId');
+    } catch (e) {
+      print('Could not remove previous FCM user token: $e');
+    }
+  }
+
+  static Future<String> _getOrCreateDeviceId() async {
+    final existing = await _secureStorage.read(key: _deviceIdKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final deviceId =
+        FirebaseFirestore.instance.collection('_localDeviceIds').doc().id;
+    await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+    return deviceId;
+  }
+
+  static Future<String> _getDeviceInfo() async {
+    try {
+      final plugin = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final info = await plugin.androidInfo;
+        return '${info.manufacturer} ${info.model}'.trim();
+      }
+      if (Platform.isIOS) {
+        final info = await plugin.iosInfo;
+        return info.utsname.machine;
+      }
+    } catch (_) {}
+    return Platform.operatingSystem;
+  }
+
+  static Future<bool> _isMessageForCurrentUser(
+      Map<String, dynamic> data) async {
+    final expectedUserId = data['calleeId'] ?? data['receiverId'];
+    if (expectedUserId == null || expectedUserId.toString().isEmpty) {
+      return true;
+    }
+
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid ??
+        await _secureStorage.read(key: _lastRegisteredUserIdKey);
+    return currentUserId != null && currentUserId == expectedUserId.toString();
   }
 
   /// Returns the current user's Firebase ID token, or null if not signed in.
@@ -234,6 +377,11 @@ class FCMService {
     final messageType = message.data['type'] ?? '';
 
     if (messageType == 'chat_message') {
+      if (!await _isMessageForCurrentUser(message.data)) {
+        print('Ignoring chat notification for a different signed-in user');
+        return;
+      }
+
       // Handle chat message - mark as delivered
       String chatRoomId = message.data['chatRoomId'] ?? '';
       String senderId = message.data['senderId'] ?? '';
@@ -274,6 +422,11 @@ class FCMService {
         }
       }
     } else if (messageType == 'call' || messageType == 'incoming_call') {
+      if (!await _isMessageForCurrentUser(message.data)) {
+        print('Ignoring call notification for a different signed-in user');
+        return;
+      }
+
       // Show native full-screen call UI via CallKit
       await _showCallKitNotification(message.data);
     }
@@ -324,7 +477,10 @@ class FCMService {
           'isAudioOnly': isAudioOnly.toString(),
         },
         android: const AndroidParams(
-          isCustomNotification: true,
+          // MIUI/HyperOS lock screens often clip custom RemoteViews when
+          // notifications are stacked. Let Android render the call layout so
+          // the Accept/Decline row gets the correct height.
+          isCustomNotification: false,
           isShowLogo: false,
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#00A884',

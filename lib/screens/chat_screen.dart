@@ -12,10 +12,13 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
+import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -58,6 +61,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
+  final StatusService _statusService = StatusService();
   final UserService _userService = UserService();
 
   bool _isLoading = true;
@@ -319,12 +323,19 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      final channelId = '${widget.currentUserId}_to_${widget.contact.id}';
+      final channelId = CallSignalingService.generateChannelId();
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       callState.updateState(CallState.Calling);
 
       print(
           'Initiating video call to ${widget.contact.name} on channel $channelId');
+
+      // Create the Firestore signaling document BEFORE sending the push.
+      await CallSignalingService.createCallDocument(
+        channelId: channelId,
+        callerId: widget.currentUserId,
+        calleeId: widget.contact.id,
+      );
 
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId);
@@ -363,12 +374,19 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      final channelId = '${widget.currentUserId}_${widget.contact.id}_a';
+      final channelId = CallSignalingService.generateChannelId();
       final callState = Provider.of<CallStateNotifier>(context, listen: false);
       callState.updateState(CallState.Calling);
 
       print(
           'Initiating audio call to ${widget.contact.name} on channel $channelId');
+
+      // Create the Firestore signaling document BEFORE sending the push.
+      await CallSignalingService.createCallDocument(
+        channelId: channelId,
+        callerId: widget.currentUserId,
+        calleeId: widget.contact.id,
+      );
 
       await FCMService().sendCallNotification(
           widget.contact.id, widget.currentUserId, channelId,
@@ -557,6 +575,8 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (message.hasStatusReply)
+              _buildStatusReplyPreview(message, isMe),
             // ── Audio / voice message ─────────────────────────────
             if (message.type == MessageType.audio) ...[
               ConstrainedBox(
@@ -714,6 +734,210 @@ class _ChatScreenState extends State<ChatScreen> {
               child: imageWidget,
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openStatusReply(MessageModel message) async {
+    if (!message.hasStatusReply) return;
+
+    try {
+      final status =
+          await _statusService.getStatusByUserId(message.statusReplyOwnerId!);
+      final itemExists = status?.activeStatusItems
+              .any((item) => item.id == message.statusReplyItemId) ??
+          false;
+
+      if (!mounted) return;
+
+      if (status == null || !itemExists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This status is no longer available')),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => StatusViewerScreen(
+            statusModel: status,
+            currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            isMyStatus: status.userId == widget.currentUserId,
+            initialStatusItemId: message.statusReplyItemId,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open status')),
+      );
+    }
+  }
+
+  Color _parseStatusColor(String? hex) {
+    try {
+      final value = (hex ?? '#075E54').replaceFirst('#', '');
+      final normalized = value.length == 6 ? 'FF$value' : value;
+      return Color(int.parse(normalized, radix: 16));
+    } catch (_) {
+      return const Color(0xFF075E54);
+    }
+  }
+
+  String _statusReplyTitle(MessageModel message) {
+    final type = message.statusReplyType;
+    if (type == 'image') return 'Photo status';
+    if (type == 'video') return 'Video status';
+    return 'Text status';
+  }
+
+  String _statusReplyPreviewText(MessageModel message) {
+    final text = (message.statusReplyText ?? '').trim();
+    if (text.isNotEmpty) return text;
+    final caption = (message.statusReplyCaption ?? '').trim();
+    if (caption.isNotEmpty) return caption;
+    return _statusReplyTitle(message);
+  }
+
+  Widget _buildStatusReplyPreview(MessageModel message, bool isMe) {
+    final c = AppThemeColors.of(context);
+    final type = message.statusReplyType;
+    final mediaUrl = message.statusReplyMediaUrl;
+    final previewText = _statusReplyPreviewText(message);
+    final previewWidth = (MediaQuery.of(context).size.width - 116)
+        .clamp(188.0, 246.0)
+        .toDouble();
+
+    Widget thumbnail;
+    if ((type == 'image' || type == 'video') && mediaUrl != null) {
+      thumbnail = Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            mediaUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              color: c.surfaceAlt,
+              child: Icon(Icons.broken_image_rounded, color: c.textLow),
+            ),
+          ),
+          if (type == 'video')
+            const Center(
+              child: Icon(
+                Icons.play_circle_fill_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+        ],
+      );
+    } else {
+      thumbnail = Container(
+        color: _parseStatusColor(message.statusReplyBackgroundColor),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(5),
+        child: Text(
+          previewText,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 8,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () => _openStatusReply(message),
+      child: Container(
+        width: previewWidth,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: isMe
+              ? Colors.white.withOpacity(0.16)
+              : c.surfaceAlt.withOpacity(0.92),
+          borderRadius: BorderRadius.circular(10),
+          border: Border(
+            left: BorderSide(
+              color: isMe ? Colors.white.withOpacity(0.75) : c.primary,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: SizedBox(width: 46, height: 58, child: thumbnail),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message.statusReplyOwnerName ?? 'Status',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      color: isMe ? Colors.white : c.textHigh,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(
+                        type == 'video'
+                            ? Icons.videocam_rounded
+                            : type == 'image'
+                                ? Icons.image_rounded
+                                : Icons.format_quote_rounded,
+                        size: 13,
+                        color: isMe
+                            ? Colors.white.withOpacity(0.78)
+                            : c.textMid,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          _statusReplyTitle(message),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            color: isMe
+                                ? Colors.white.withOpacity(0.82)
+                                : c.textMid,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    previewText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      color:
+                          isMe ? Colors.white.withOpacity(0.9) : c.textHigh,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
