@@ -1,7 +1,8 @@
 name: Release APK on PR Merge
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
 
@@ -9,6 +10,7 @@ jobs:
   build-and-release:
     name: Build & Release APK
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
     permissions:
       contents: write
 
