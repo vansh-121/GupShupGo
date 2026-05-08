@@ -1279,10 +1279,513 @@ User Cache:
 
 ---
 
-## 🔄 In-App Update Flow
+## � Device Session Service Architecture
+
+### "Remember This Device" Feature (WhatsApp-Style)
+
+The DeviceSessionService maintains a persistent device token in secure storage that survives:
+- OS-level data wipes
+- Force-stop and app data clearing
+- Battery drains
+- System crashes and reboots
 
 ```
-App starts → HomeScreen.initState
+User Logs In (First Time)
+    │
+    ├─> Firebase Auth succeeds
+    │   └─ Get ID token
+    │
+    ├─> DeviceSessionService.issueToken()
+    │   ├─ Send ID token to Cloud Function
+    │   ├─ Cloud Function validates token
+    │   └─ Returns persistent device token
+    │
+    ├─> Store token in secure storage
+    │   └─ FlutterSecureStorage (Android Keystore)
+    │
+    └─> Login Complete ✅
+        User is now "remembered" on this device
+
+
+Session Resumed (Subsequent Launch)
+    │
+    ├─> Check if Firebase session exists
+    │
+    ├─> If expired/missing:
+    │   │
+    │   ├─> Retrieve device token from secure storage
+    │   │
+    │   ├─> Call DeviceSessionService.exchangeToken()
+    │   │   ├─ Send device token to Cloud Function
+    │   │   ├─ Cloud Function validates token
+    │   │   └─ Returns new Firebase custom token
+    │   │
+    │   ├─> Sign in with custom token
+    │   │   └─ Firebase creates new session
+    │   │
+    │   └─> User automatically logged in ✅
+    │
+    └─> If valid: Use existing session
+```
+
+### Secure Token Storage
+
+```
+Android Implementation:
+
+┌────────────────────────────────────────┐
+│   FlutterSecureStorage (config)        │
+├────────────────────────────────────────┤
+│                                         │
+│  Storage Backend:                       │
+│  └─ EncryptedSharedPreferences         │
+│      └─ Android Keystore (hardware     │
+│         backed when available)         │
+│                                         │
+│  Key: "gsg_device_session_token_v1"    │
+│  Value: JWT-like token (encrypted)     │
+│                                         │
+│  Security:                              │
+│  ✅ Persists across factory reset      │
+│  ✅ Survives app uninstall/reinstall   │
+│  ✅ Cannot be accessed by other apps   │
+│  ✅ Expires after 30 days (server side)│
+│                                         │
+└────────────────────────────────────────┘
+```
+
+### Cloud Function Integration
+
+```
+issueToken() Flow:
+  User signs in → ID token (expires 1 hour)
+      │
+      ├─> POST /issueDeviceSession
+      │   ├─ Headers: Authorization: Bearer {idToken}
+      │   │
+      │   └─> Cloud Function:
+      │       ├─ Verify ID token
+      │       ├─ Extract user UID
+      │       ├─ Generate device session token
+      │       ├─ Store mapping: deviceToken → uid
+      │       └─ Return token to app
+      │
+      └─> Store in secure storage (survives app closes)
+
+exchangeToken() Flow:
+  App launches (no Firebase session)
+      │
+      ├─> Read device token from storage
+      │
+      ├─> POST /exchangeDeviceSession
+      │   ├─ Body: { deviceToken }
+      │   │
+      │   └─> Cloud Function:
+      │       ├─ Verify device token validity
+      │       ├─ Check expiry (30 days)
+      │       ├─ Extract original UID
+      │       ├─ Create Firebase custom token
+      │       └─ Return custom token
+      │
+      ├─> Sign in with custom token
+      │
+      └─> User logged in automatically ✅
+```
+
+---
+
+## 📞 Call Signaling Service Architecture
+
+### Firestore-Based Call State Management
+
+```
+Caller Device                  Firestore                    Callee Device
+     │                          docs                            │
+     │ 1. Generate Channel ID   /calls/{channelId}              │
+     ├─────────────────────────────────────────────────────────┤
+     │                                                            │
+     │ 2. Create document                                        │
+     │    {                                                      │
+     ├──────────────────> {                                      │
+     │ status: "ringing",  callerId,                             │
+     │ callerId,           calleeId,    ──────────────────────>│
+     │ calleeId,           status: "ringing"                    │
+     │ ...                 createdAt                            │
+     │                  }                                        │
+     │                                                            │
+     │ 3. Send FCM Notification                                  │
+     ├─────────────────────────────────────────────────────────>│
+     │                                        Listen to call doc │
+     │                                                 │          │
+     │ 4. Open Call Screen                    ┌──────▼────┐     │
+     ├──────────────────────────┐             │ Incoming  │     │
+     │ Listen to document       │             │ Call UI   │     │
+     │ Real-time updates        │             └──────┬────┘     │
+     │                          │                    │          │
+     │                          │          User taps: Accept    │
+     │                          │                    │          │
+     │                          │ 5. Update status  ▼          │
+     │                          │    answered ──> Update doc   │
+     │ Real-time update:        │                    │          │
+     │ status = "answered"  <───┼────────────────────┤          │
+     │              │           │                    │          │
+     │              ▼           │                    ▼          │
+     │ ┌──────────────────┐    │ ┌──────────────────┐          │
+     │ │ Show video feed  │    │ │ Show video feed  │          │
+     │ │ Both join Agora  │    │ │ Both join Agora  │          │
+     │ └──────────────────┘    │ └──────────────────┘          │
+     │            │             │            │                  │
+     │            │ Talking... (RTC)        │                  │
+     │            │<──────────────────────>│                  │
+     │            │                         │                  │
+     │ 6. End call                          │                  │
+     │ Tap end button                       │                  │
+     │              │                       │                  │
+     │              ├──> Update status: "ended"               │
+     │              │         │                              │
+     │              └─────────┼─────────────────────────────>│
+     │                        │                    Screen ends
+```
+
+### Call Status State Machine
+
+```
+                    ┌──────────────┐
+                    │   ringing    │
+                    └──────┬───────┘
+                           │
+           ┌───────────────┼───────────────┐
+           │               │               │
+           │ Accept        │ Decline       │ Timeout
+           │ (after        │ (user         │ (no answer
+           │  answer)      │  declines)    │  for 60s)
+           │               │               │
+           ▼               ▼               ▼
+      ┌────────┐     ┌─────────┐    ┌────────┐
+      │answered│     │ declined │    │ missed │
+      └───┬────┘     └─────┬────┘    └────┬───┘
+          │                │              │
+          │ End call       │ End call     │
+          │                │              │
+          ▼                ▼              ▼
+      ┌─────────────────────────────────────┐
+      │            ended                     │
+      └─────────────────────────────────────┘
+          (triggers call log creation)
+```
+
+---
+
+## 🌐 Connectivity Provider Architecture
+
+### Real-Time Network Monitoring
+
+```
+┌──────────────────────────────────────────┐
+│      ConnectivityProvider                │
+├──────────────────────────────────────────┤
+│                                           │
+│  Monitors:                                │
+│  ├─ WiFi connectivity                    │
+│  ├─ Mobile data (3G/4G/5G)              │
+│  ├─ Bluetooth connectivity              │
+│  └─ Connection changes (online/offline)  │
+│                                           │
+│  State:                                   │
+│  ├─ isOnline: bool                       │
+│  └─ List<ConnectivityResult>             │
+│                                           │
+│  Callbacks:                               │
+│  ├─ onBackOnlineCallbacks: List          │
+│  └─ notifyListeners() [ChangeNotifier]   │
+│                                           │
+└──────────────────────────────────────────┘
+```
+
+### Network Status Flow
+
+```
+Device Online                  Device Offline                Device Online Again
+     │                              │                               │
+     │ WiFi Connected               │                               │
+     │ ✓ isOnline = true       Lose connection                      │
+     │ ✓ Can send messages     ✗ WiFi disconnected                  │
+     │ ✓ Calls work            ✗ Mobile data off                   │
+     │                              │                               │
+     │                              ▼                               │
+     │                         ✗ isOnline = false              Regain connection
+     │                         ✓ Use mesh network              ✓ WiFi on again
+     │                         ✓ Queue messages locally            │
+     │                         ✓ Show "offline" badge               │
+     │                              │                               │
+     │                              │<──────────────────────────────┤
+     │                                                    Fire onBackOnline callbacks
+     │                                                    │
+     │                                              ┌─────▼──────┐
+     │                                              │ Sync mesh  │
+     │                                              │ messages   │
+     │                                              │ to Firestore
+     │                                              │ + FCM      │
+     │                                              └────────────┘
+     │
+     │ ✓ isOnline = true (restored)
+     │ ✓ Continue normal operation
+```
+
+---
+
+## 📱 FCM Token Management Architecture
+
+### Device-Specific Token Storage
+
+```
+┌──────────────────────────────────────────────┐
+│       FCM Service (per-device)                │
+├──────────────────────────────────────────────┤
+│                                               │
+│  On App Start:                                │
+│  ├─ Get FCM token from FirebaseMessaging    │
+│  └─ Store in Firestore: users/{uid}/fcm     │
+│                                               │
+│  Token Refresh (automatic):                   │
+│  ├─ Device reboots → FCM generates new token│
+│  ├─ onTokenRefresh callback fires           │
+│  └─ Update Firestore immediately            │
+│                                               │
+│  Per-Device Storage:                          │
+│  ├─ Key: "fcm_token_{deviceId}"             │
+│  ├─ Value: Firebase FCM token (encrypted)   │
+│  └─ Storage: SharedPreferences              │
+│                                               │
+│  Firestore Structure:                         │
+│  users/{uid}/                                 │
+│    ├─ fcmToken: "abc123..." (current)       │
+│    ├─ fcmTokens: {                           │
+│    │   "device_id_1": "token_1",             │
+│    │   "device_id_2": "token_2"              │
+│    │ }                                        │
+│    └─ fcmTokenUpdatedAt: Timestamp          │
+│                                               │
+└──────────────────────────────────────────────┘
+```
+
+### Token Refresh Flow
+
+```
+Device Boots/Restarts
+     │
+     ▼
+┌──────────────────┐
+│ FirebaseMessaging│
+│ generates new    │
+│ token            │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│ onTokenRefresh callback  │
+│ (FCMService)             │
+└────────┬─────────────────┘
+         │
+         ├─> Read previous token from SharedPrefs
+         │
+         ├─> If different (first time or changed)
+         │   │
+         │   ├─> Update Firestore users/{uid}
+         │   │   └─ fcmToken: newToken
+         │   │
+         │   ├─ Send to backend
+         │   │  └─ Device can now receive notifications
+         │   │
+         │   └─> Update SharedPrefs cache
+         │
+         └─> Continue normal operation
+```
+
+---
+
+## ⚠️ MIUI/HyperOS Notification Handling
+
+### Device-Specific Notification Optimization
+
+MIUI (Xiaomi) and HyperOS devices require special handling for notification layout and rendering.
+
+```
+Notification Creation (CallKit)
+
+┌──────────────────────────────────────────┐
+│   Detect Device OS/ROM                    │
+├──────────────────────────────────────────┤
+│                                            │
+│  if (MIUI || HyperOS) {                   │
+│    ├─ Use alternative layout resource    │
+│    ├─ Adjust padding/margins             │
+│    ├─ Modify text sizing                 │
+│    └─ Optimize click area detection      │
+│  }                                        │
+│                                            │
+│  if (Standard Android) {                  │
+│    └─ Use default Material Design layout │
+│  }                                        │
+│                                            │
+└──────────────────────────────────────────┘
+```
+
+### Notification Rendering Pipeline
+
+```
+CallKit Notification Triggered
+     │
+     ▼
+┌──────────────────────────┐
+│ Detect Device Manufacturer│
+└────────┬─────────────────┘
+         │
+    ┌────┴────┐
+    │          │
+ Xiaomi    Other OEMs
+    │          │
+    ▼          ▼
+ MIUI/HOS   Standard
+    │          │
+    ├──────────┤
+    │          │
+    ▼          ▼
+┌──────────┐ ┌──────────┐
+│ Custom   │ │ Material │
+│ Layout   │ │ Design 3 │
+│ Resources│ │ Layout   │
+└────┬─────┘ └────┬─────┘
+     │            │
+     └────┬───────┘
+          │
+          ▼
+     Notification Displayed
+     (optimized for device)
+          │
+          ▼
+     User can tap to:
+     ├─ Accept call (green button)
+     ├─ Decline call (red button)
+     └─ Show full-screen UI
+```
+
+### Platform Configuration
+
+```
+Android Configuration:
+
+build.gradle:
+  ├─ minSdk: 21+ required for CallKit
+  ├─ targetSdk: 34 (latest API level)
+  └─ compileSdk: 34
+
+AndroidManifest.xml:
+  ├─ <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  ├─ <meta-data> for MIUI detection
+  └─ Intent filters for CallKit callbacks
+
+Resources (res/):
+  ├─ layout-miui/ (custom layouts for MIUI)
+  ├─ layout-hyp/ (custom layouts for HyperOS)
+  └─ layout/ (default layouts)
+
+Runtime Detection:
+  Build.MANUFACTURER == "Xiaomi"
+  Build.DISPLAY.contains("MIUI")
+  Build.DISPLAY.contains("HyperOS")
+```
+
+---
+
+## 🔔 Status Reply Feature Architecture
+
+### Direct Messaging from Status
+
+```
+User Views Status
+     │
+     ▼
+┌──────────────────┐
+│ Status Viewer    │
+│ (full-screen)    │
+└────────┬─────────┘
+         │
+  User taps "Reply"
+         │
+         ▼
+┌──────────────────────────┐
+│ Opens Chat Screen        │
+│ (auto-populated)         │
+│ - Pre-filled context:    │
+│   - Status owner name    │
+│   - Status link/ref      │
+│   - Timestamp            │
+└────────┬─────────────────┘
+         │
+         │ User types message
+         │
+         ▼
+┌──────────────────────────┐
+│ Send Direct Message      │
+│ With metadata:           │
+│ - replyToStatusId        │
+│ - statusTimestamp        │
+│ - statusOwnerId          │
+└────────┬─────────────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│ Create chat message      │
+│ in Firestore             │
+│ - type: "text"           │
+│ - replyToStatus: true    │
+│ - statusRef: reference   │
+└────────┬─────────────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│ FCM to status owner      │
+│ "User replied to status" │
+└────────────────────────┘
+```
+
+### Data Model
+
+```
+Message Document (with status reply):
+
+{
+  id: "msg_12345",
+  senderId: "user_alice",
+  senderName: "Alice",
+  receiverId: "user_bob",
+  type: "text",
+  text: "Love your status!",
+  timestamp: Timestamp.now(),
+  isRead: false,
+  
+  // Status reply specific fields
+  replyToStatus: true,
+  statusRef: {
+    userId: "user_bob",
+    statusId: "status_67890",
+    statusTimestamp: Timestamp(...),
+    statusType: "image" // text|image|video
+  }
+}
+```
+
+---
+
+**This comprehensive architecture supports:**
+- ✅ Persistent device authentication (WhatsApp-style)
+- ✅ Real-time call state synchronization
+- ✅ Network-aware features with automatic fallback
+- ✅ Device-specific optimization (MIUI/HyperOS)
+- ✅ Reliable FCM token management
+- ✅ Status engagement with direct messaging
+- ✅ Seamless offline → online transitions
     │
     ▼
 ┌──────────────────────────┐

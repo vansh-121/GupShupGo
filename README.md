@@ -11,7 +11,17 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 
 ---
 
-## 📽️ Video Demo
+## � Pre-Register on Google Play
+
+**Get notified when GupShupGo launches!**
+
+[📲 Pre-register now](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+
+Be among the first to get notified when the app launches on Google Play Store.
+
+---
+
+## �📽️ Video Demo
 
 ▶️ [Full Video Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link)
 
@@ -22,6 +32,7 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 ## ✨ Core Features
 
 ### 📞 Video & Voice Calling
+
 - 🎥 **HD video calling** with Agora RTC Engine
 - 🎙️ **Audio-only voice calls** — lightweight, no camera required
 - 🔊 Crystal-clear audio quality
@@ -34,6 +45,7 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - 📋 **Call log history** — records caller, callee, duration, type (audio/video), and status (answered/missed/cancelled)
 
 ### 💬 Real-Time Messaging
+
 - 📨 **Instant messaging** with typing indicators
 - 📷 Send images, videos, and media files
 - 🎙️ **Voice messages** — Record and send audio messages with playback control
@@ -45,8 +57,10 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - ⚡ **Instant chat list** on launch via local chat caching (`ChatCacheService`)
 - 🌐 **Offline messaging with mesh networking** — Send messages to nearby devices via peer-to-peer connection when internet is unavailable
 - 🔗 **Auto-reconnect logic** — Automatic reconnection to mesh network with enhanced error handling
+- 📱 **Device-specific FCM token management** — Proper token storage and refresh handling per device
 
 ### 📸 WhatsApp-Style Status
+
 - 📝 **Text status** with 16 colorful backgrounds
 - 🖼️ **Image status** — Camera capture or gallery upload
 - 🎬 **Video status** — Record or upload (max 30 seconds)
@@ -55,8 +69,10 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - ▶️ Full-screen viewer with progress bars
 - 📊 Tap navigation and swipe gestures
 - 🎨 Add captions to media statuses
+- 💬 **Reply to status** — Send direct messages in response to user statuses
 
 ### 🔐 Authentication & User Management
+
 - 📱 **Phone authentication** with OTP verification
 - 📲 **Carrier-based phone verification** (Phone Number Hint API — no SMS needed)
 - 🔗 **Google Sign-In** — link or sign in with Google
@@ -66,8 +82,10 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - 🟢 **Real-time online/offline status**
 - 🔍 **User search** functionality
 - 👤 User profiles with editable name, about, and photo upload
+- 🛡️ **Device session management** — "Remember this device" feature similar to WhatsApp using secure storage (survives OS-level data wipes and force-stop cleanups)
 
 ### ⚙️ Settings & Privacy
+
 - 🔔 **Notification controls** — toggle messages, groups, and call notifications
 - 🙈 **Privacy settings** — last seen visibility, read receipt toggle
 - 🚫 **Block/unblock users** — manage blocked contacts
@@ -79,19 +97,30 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - 🔌 **Enhanced connectivity checks** — Smart detection of online/offline status with auto-reconnect capabilities
 
 ### 👤 Profile Management
+
 - 📸 **Profile photo** — upload from gallery with compression
 - ✏️ **Edit name & about** — real-time Firestore + Firebase Auth sync
 - 📱 View linked phone number and email
 - 🔗 View linked sign-in providers (Phone, Google, Email)
 
 ### 🔄 In-App Updates
+
 - 📲 **Google Play In-App Updates** — mandatory full-screen update flow
 - ⚡ Automatic update detection via Play Store API
 - 🔒 Users must update before continuing (immediate update type)
 - 🔄 Flexible fallback for non-critical updates
-- ✨ **What's New dialog** — Displays new features and improvements on first launch after update
+- ✨ **What's New dialog** — Displays new features and improvements on first launch after update with detailed feature descriptions
+
+### 📡 Connectivity & Network Management
+
+- 🔌 **Real-time connectivity monitoring** — Watches network status (WiFi, mobile data, offline)
+- 🔄 **Automatic reconnect** — Triggers offline message sync when internet is restored
+- 📱 **Device session persistence** — Maintains login session using secure device tokens (survives OS-level data wipes)
+- 🛡️ **Secure token storage** — Uses Android Keystore-backed storage for device session tokens
+- ⚠️ **MIUI/HyperOS optimization** — Special notification rendering for Xiaomi devices with enhanced layout stability
 
 ### 🎨 Modern UI/UX
+
 - 🎨 **Custom design system** — Poppins typography, purple-indigo brand palette
 - 🌙 **Dark & Light mode** — Full dark mode support with seamless theme switching
 - 📑 Tab navigation (Chats, Status, Calls)
@@ -106,6 +135,7 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 ## 🏗️ Architecture
 
 ### Tech Stack
+
 ```
 Frontend:
   ├── Flutter / Dart (SDK ≥3.2.0)
@@ -139,6 +169,7 @@ Architecture Pattern:
 ```
 
 ### Project Structure
+
 ```plaintext
 lib/
 ├── main.dart                           → App entry point, CallKit listener, cold-start handler
@@ -195,6 +226,7 @@ terms-of-service.txt                    → Terms of service
 ## 🎯 Key Highlights
 
 ### 🔥 WhatsApp Parity
+
 - ✅ Chats with read receipts & delivery status
 - ✅ HD video calling with Agora
 - ✅ Voice/audio-only calling
@@ -212,6 +244,7 @@ terms-of-service.txt                    → Terms of service
 - ✅ Mute chat notifications
 
 ### 🚀 Production Ready
+
 - ✅ Firebase security rules (Firestore + Storage)
 - ✅ Server-side FCM via Cloud Functions (no service account in client)
 - ✅ Firebase App Check for API security
@@ -225,6 +258,7 @@ terms-of-service.txt                    → Terms of service
 - ✅ Privacy policy & terms of service included
 
 ### 📈 Scalable Infrastructure
+
 - ✅ Support for unlimited users
 - ✅ Real-time data synchronization
 - ✅ Automatic expired content cleanup
@@ -238,6 +272,7 @@ terms-of-service.txt                    → Terms of service
 ## 🛠️ Setup Instructions
 
 ### Prerequisites
+
 - Flutter SDK (≥3.2.0)
 - Android Studio / Xcode
 - Firebase account
@@ -245,12 +280,14 @@ terms-of-service.txt                    → Terms of service
 - Node.js (for Cloud Functions deployment)
 
 ### 1. Clone Repository
+
 ```bash
 git clone https://github.com/vansh-121/GupShupGo.git
 cd GupShupGo/gupshupgo
 ```
 
 ### 2. Install Dependencies
+
 ```bash
 flutter pub get
 ```
@@ -258,6 +295,7 @@ flutter pub get
 ### 3. Firebase Setup
 
 #### Create Firebase Project
+
 1. Go to [Firebase Console](https://console.firebase.google.com)
 2. Create a new project
 3. Add Android and iOS apps
@@ -266,6 +304,7 @@ flutter pub get
    - `GoogleService-Info.plist` → `ios/Runner/`
 
 #### Enable Firebase Services
+
 1. **Authentication**
    - Enable Phone authentication
    - Enable Anonymous sign-in (for guest mode)
@@ -275,17 +314,21 @@ flutter pub get
 2. **Firestore Database**
    - Create database in production mode
    - Deploy security rules from `firestore.rules`
+
    ```bash
    firebase deploy --only firestore:rules
    ```
+
    Or manually copy from `firestore.rules` in Console
 
 3. **Firebase Storage**
    - Go to Storage → Get Started
    - Deploy security rules from `storage.rules`
+
    ```bash
    firebase deploy --only storage
    ```
+
    Or manually paste rules in Firebase Console
 
 4. **Cloud Messaging (FCM)**
@@ -298,6 +341,7 @@ flutter pub get
    - Add debug tokens from console logs during development
 
 #### Deploy Cloud Functions
+
 The app uses **Firebase Cloud Functions** for secure server-side FCM delivery (no service account bundled in the client).
 
 ```bash
@@ -308,10 +352,12 @@ firebase deploy --only functions
 ```
 
 This deploys two HTTP endpoints:
+
 - `sendCallNotification` — data-only FCM for native CallKit call UI
 - `sendMessageNotification` — FCM for chat message notifications
 
 ### 4. Agora Setup
+
 1. Sign up at [agora.io](https://www.agora.io/)
 2. Create a new project
 3. Get your **App ID**
@@ -326,18 +372,19 @@ This deploys two HTTP endpoints:
 
 The app requires these permissions (already configured in `AndroidManifest.xml`):
 
-| Permission | Purpose |
-|------------|---------|
-| `INTERNET` | Network access for Firebase & Agora |
-| `CAMERA` | Camera access for video calls & status |
-| `RECORD_AUDIO` | Microphone for voice calls |
-| `READ_EXTERNAL_STORAGE` | Access gallery for images |
-| `WRITE_EXTERNAL_STORAGE` | Save media files |
-| `POST_NOTIFICATIONS` | Show incoming call notifications (Android 13+) |
-| `FOREGROUND_SERVICE` | Background call handling |
-| `WAKE_LOCK` | Keep device awake during calls |
+| Permission               | Purpose                                        |
+| ------------------------ | ---------------------------------------------- |
+| `INTERNET`               | Network access for Firebase & Agora            |
+| `CAMERA`                 | Camera access for video calls & status         |
+| `RECORD_AUDIO`           | Microphone for voice calls                     |
+| `READ_EXTERNAL_STORAGE`  | Access gallery for images                      |
+| `WRITE_EXTERNAL_STORAGE` | Save media files                               |
+| `POST_NOTIFICATIONS`     | Show incoming call notifications (Android 13+) |
+| `FOREGROUND_SERVICE`     | Background call handling                       |
+| `WAKE_LOCK`              | Keep device awake during calls                 |
 
 ### 6. Run the App
+
 ```bash
 # For Android
 flutter run
@@ -353,21 +400,25 @@ flutter run -d ios
 ### Testing with 2 Devices
 
 #### Device 1 (Alice)
+
 1. Open app → Select "Continue as Guest"
 2. Enter name: "Alice"
 3. Main screen shows 3 tabs: Chats, Status, Calls
 
 #### Device 2 (Bob)
+
 1. Open app → Select "Continue as Guest"
 2. Enter name: "Bob"
 3. Both users should now see each other in contacts
 
 ### Test Messaging
+
 1. **Alice:** Tap search icon → Select "Bob" → Start chatting
 2. **Bob:** Receives real-time messages
 3. Test: Send text, images, read receipts
 
 ### Test Video Calling
+
 1. **Alice:** Tap search icon → Tap video icon next to Bob's name
 2. **Bob:** Receives push notification → **Native CallKit call UI appears** → Tap accept
 3. Both devices show live video streams
@@ -375,12 +426,14 @@ flutter run -d ios
 5. Check Calls tab on both devices for the call log entry
 
 ### Test Voice Calling
+
 1. **Alice:** Tap search icon → Tap phone icon next to Bob's name
 2. **Bob:** Receives push notification → **Native CallKit call UI appears** → Tap accept
 3. Audio-only call connects (no video UI)
 4. Test: Mute, speaker toggle, hold, end call
 
 ### Test Status Feature
+
 1. **Alice:** Go to Status tab → Tap camera FAB
 2. Select "Gallery Photo" or "Take Photo"
 3. Add caption → Send
@@ -389,6 +442,7 @@ flutter run -d ios
 6. Test: Text status, video status, navigation, viewer list
 
 ### Test Settings
+
 1. Open **⚙ Settings** from the menu
 2. Test: Profile editing, notification toggles, privacy toggles
 3. Test: Block a user, clear all chats, report a problem
@@ -398,6 +452,7 @@ flutter run -d ios
 ## 🔒 Security & Privacy
 
 ### Firestore Security Rules
+
 - Users can only edit their own profile
 - Read access requires authentication
 - Chat messages protected by participant rules (with legacy chatRoomId fallback)
@@ -407,6 +462,7 @@ flutter run -d ios
 - Chat room deletion is disabled (data preservation)
 
 ### Firebase Storage Rules
+
 - Max file size: 30 MB
 - Only authenticated users can upload
 - Users can only write to their own folders
@@ -414,16 +470,19 @@ flutter run -d ios
 - Everything outside status folders is denied by default
 
 ### Cloud Functions Security
+
 - All Cloud Function endpoints validate Firebase Auth ID tokens
 - FCM tokens are never exposed to client-side code
 - No service account files bundled in the app
 
 ### Firebase App Check
+
 - Play Integrity (production) / Debug provider (development)
 - Prevents unauthorized API access
 - Runs in background — never blocks app startup
 
 ### Best Practices Implemented
+
 - ✅ No sensitive data in client code (service account removed)
 - ✅ Server-side FCM delivery via Cloud Functions
 - ✅ Firebase Auth token validation on all endpoints
@@ -453,13 +512,15 @@ flutter run -d ios
 ### Common Issues
 
 **1. Firebase Connection Error**
+
 ```
 Solution: Verify google-services.json / GoogleService-Info.plist are in correct folders
 ```
 
 **2. Push Notifications Not Working**
+
 ```
-Solution: 
+Solution:
 - Ensure Cloud Functions are deployed: `firebase deploy --only functions`
 - Check FCM is enabled in Firebase Console
 - Verify POST_NOTIFICATIONS permission for Android 13+
@@ -467,6 +528,7 @@ Solution:
 ```
 
 **3. Agora Video Not Showing**
+
 ```
 Solution:
 - Verify App ID is correct
@@ -475,6 +537,7 @@ Solution:
 ```
 
 **4. Status Upload Fails**
+
 ```
 Solution:
 - Deploy Firebase Storage security rules
@@ -483,6 +546,7 @@ Solution:
 ```
 
 **5. In-App Update Not Working**
+
 ```
 Solution:
 - This only works when installed from Google Play
@@ -491,6 +555,7 @@ Solution:
 ```
 
 **6. CallKit Notification Not Showing**
+
 ```
 Solution:
 - Cloud Functions must be deployed
@@ -499,6 +564,7 @@ Solution:
 ```
 
 **7. Build Errors**
+
 ```bash
 flutter clean
 flutter pub get
@@ -510,6 +576,7 @@ flutter run
 ## 🚀 Deployment
 
 ### Android Release
+
 ```bash
 flutter build apk --release
 # Or for app bundle
@@ -517,11 +584,13 @@ flutter build appbundle --release
 ```
 
 ### iOS Release
+
 ```bash
 flutter build ios --release
 ```
 
 ### Pre-Release Checklist
+
 - [ ] Firebase security rules deployed (Firestore + Storage)
 - [ ] Cloud Functions deployed (`firebase deploy --only functions`)
 - [ ] Agora App ID configured
@@ -541,6 +610,7 @@ flutter build ios --release
 ## 💡 Future Enhancements
 
 ### Potential Features
+
 - [ ] Group chats
 - [ ] Group video calls
 - [ ] End-to-end encryption
@@ -583,6 +653,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Repository:** [GupShupGo](https://github.com/vansh-121/GupShupGo)
 
 ### Getting Help
+
 - 📝 Open an [Issue](https://github.com/vansh-121/GupShupGo/issues)
 - 💬 Start a [Discussion](https://github.com/vansh-121/GupShupGo/discussions)
 - ⭐ Star this repo if you find it useful!

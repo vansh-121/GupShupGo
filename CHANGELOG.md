@@ -20,6 +20,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-05-08
+
+### Added
+- 📱 **Device Session Management** — "Remember this device" feature using secure token storage
+  - Survives OS-level data wipes (MIUI, HyperOS)
+  - Survives force-stop and app data clearing
+  - Maintains login even after battery drain or system crashes
+- 📲 **Device-Specific FCM Token Management** — Per-device token storage and automatic refresh
+- 💬 **Status Reply Functionality** — Users can send direct messages in response to status updates
+- 🔌 **Connectivity Provider** — Real-time network connectivity monitoring with callback system
+- ⚠️ **MIUI/HyperOS Notification Optimization** — Special handling for Xiaomi devices with enhanced layout rendering
+- ✨ **Enhanced What's New Dialog** — Detailed feature descriptions with improved user experience
+
+### Changed
+- Updated version to 1.0.5 with improved feature descriptions
+- Refactored FCM token handling for better reliability across device types
+- Optimized notification rendering for all Android versions
+- Improved device session token exchange with Cloud Functions
+
+### Fixed
+- Fixed notification layout rendering on MIUI/HyperOS devices
+- Improved FCM token refresh handling on device reboot
+- Enhanced device session stability across OS versions
+
+### Technical Details
+- **Device Session Service:** Uses FlutterSecureStorage with Android Keystore encryption
+- **FCM Management:** Per-device token storage with automatic expiry handling
+- **Connectivity Service:** Monitors all connection types (WiFi, mobile, Bluetooth)
+- **Status Replies:** Direct messaging from status viewer with automated link creation
+
+---
+
 ## [1.0.4] - 2026-05-03
 
 ### Added
@@ -138,6 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.0.5 | May 2026 | Device Session Mgmt, FCM Token Mgmt, Status Replies, Connectivity Monitoring, MIUI/HyperOS Optimization |
 | 1.0.4 | May 2026 | Voice Messaging, Mesh Networking, Dark Mode, Device Session Mgmt |
 | 1.0.3 | April 2026 | Dark Mode UI, What's New Dialog, Auto-Reconnect |
 | 1.0.2 | March 2026 | Theme Provider, Dark/Light Mode |
