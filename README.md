@@ -36,12 +36,15 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 ### 💬 Real-Time Messaging
 - 📨 **Instant messaging** with typing indicators
 - 📷 Send images, videos, and media files
+- 🎙️ **Voice messages** — Record and send audio messages with playback control
 - ✅ **Read receipts** (seen/delivered status)
 - ⏰ Message timestamps
 - 🗑️ Delete messages
 - 💾 Message persistence with Firestore
 - 🔄 Real-time sync across devices
 - ⚡ **Instant chat list** on launch via local chat caching (`ChatCacheService`)
+- 🌐 **Offline messaging with mesh networking** — Send messages to nearby devices via peer-to-peer connection when internet is unavailable
+- 🔗 **Auto-reconnect logic** — Automatic reconnection to mesh network with enhanced error handling
 
 ### 📸 WhatsApp-Style Status
 - 📝 **Text status** with 16 colorful backgrounds
@@ -72,6 +75,8 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - 🗑️ **Clear all chats** — per-user timestamp-based clearing (non-destructive to other participants)
 - 🐛 **Report a problem** — in-app email to support
 - ❓ **Help Center** — in-app FAQ with expandable answers
+- 📱 **Device session management** — Improved session stability and connectivity handling across all device types
+- 🔌 **Enhanced connectivity checks** — Smart detection of online/offline status with auto-reconnect capabilities
 
 ### 👤 Profile Management
 - 📸 **Profile photo** — upload from gallery with compression
@@ -84,15 +89,17 @@ GupShupGo is a **production-ready Flutter communication app** inspired by WhatsA
 - ⚡ Automatic update detection via Play Store API
 - 🔒 Users must update before continuing (immediate update type)
 - 🔄 Flexible fallback for non-critical updates
+- ✨ **What's New dialog** — Displays new features and improvements on first launch after update
 
 ### 🎨 Modern UI/UX
 - 🎨 **Custom design system** — Poppins typography, purple-indigo brand palette
+- 🌙 **Dark & Light mode** — Full dark mode support with seamless theme switching
 - 📑 Tab navigation (Chats, Status, Calls)
 - ⚡ Smooth animations and transitions
 - 📱 Responsive design for all screen sizes
 - 🎯 Intuitive gesture controls
 - 💫 Loading states and error handling
-- 🌙 Material Design 3 throughout
+- ✨ Material Design 3 throughout
 
 ---
 

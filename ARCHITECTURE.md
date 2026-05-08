@@ -817,7 +817,371 @@ Sender Device                Cloud Function              Receiver Device
 
 ---
 
-## 📲 CallKit Integration
+## 🎙️ Voice Messaging Architecture
+
+### Voice Message Flow
+
+```
+Sender Device                 Firebase                     Receiver Device
+     │                           │                              │
+     │ 1. Start Recording        │                              │
+     ├─> AudioRecorder.start()   │                              │
+     │   (platform specific)     │                              │
+     │                           │                              │
+     │ 2. User stops recording   │                              │
+     ├─> AudioRecorder.stop()    │                              │
+     │   Save to temp file       │                              │
+     │                           │                              │
+     │ 3. Upload audio file      │                              │
+     ├──────────────────────────>│ Firebase Storage             │
+     │   /messages/{uid}/*       │                              │
+     │                           │                              │
+     │ 4. Create message doc     │                              │
+     ├──────────────────────────>│ Firestore                    │
+     │   - type: "voice"         │                              │
+     │   - audioUrl: <URL>       │                              │
+     │   - duration: ms          │                              │
+     │   - timestamp: now        │                              │
+     │   - senderId: uid         │                              │
+     │                           │                              │
+     │                           │ 5. Real-time update          │
+     │                           ├─────────────────────────────>│
+     │                           │                              │
+     │                           │                      6. Download
+     │                           │                         & Play
+     │                           │                              │
+     │                           │<─────────────────────────────┤
+     │                           │    FCM: "New message"        │
+     │                           │                              │
+     │                           │    Display in chat           │
+     │                           │    + Play button             │
+     │                           │                              │
+     │                           │ 7. User plays audio
+     │                           │                              │
+     │                           │<─────────────────────────────┤
+     │                           │    AudioPlayer.play(url)     │
+     │                           │    (platform native)         │
+     │                           │                              │
+```
+
+### Voice Message Data Model
+
+```
+Message Document (Firestore)
+├── id: string
+├── senderId: string
+├── receiverId: string
+├── type: "voice" (enum)
+├── audioUrl: string
+├── duration: int (milliseconds)
+├── fileName: string
+├── timestamp: Timestamp
+├── isRead: boolean
+├── readAt: Timestamp? (optional)
+└── deletedBy: [string] (optional)
+
+Firebase Storage Path:
+/messages/{senderId}/{timestamp}_{randomId}.m4a
+```
+
+### Audio Recording Configuration
+
+```
+Platform Specific Handlers:
+
+Android (android.media.MediaRecorder):
+├── Audio Source: MIC
+├── Output Format: THREE_GPP or MPEG_4
+├── Audio Encoder: AMR_NB or AAC
+├── Sample Rate: 44100 Hz
+├── Bit Rate: 128000 bps
+└── Channels: MONO
+
+iOS (AVAudioRecorder):
+├── Audio Format: m4a
+├── Sample Rate: 44100 Hz
+├── Bit Rate: 128000 bps
+├── Channels: 1 (mono)
+└── Quality: High
+```
+
+---
+
+## 🌐 Mesh Networking Architecture
+
+### Offline P2P Messaging with Nearby Connections
+
+```
+Device A                  Bluetooth/WiFi Direct               Device B
+  │                                                              │
+  │ 1. App goes offline                                          │
+  ├─> MeshService.startAdvertising()                             │
+  │   (Nearby Connections API)                                   │
+  │                                                              │
+  │ 2. Device B detects Device A                                │
+  │<──────────────────────────────────────────────────────────┤
+  │   Nearby Connections: Discovery                            │
+  │                                                              │
+  │ 3. Device B initiates connection                             │
+  ├<─────────────────────────────────────────────────────────┤
+  │   MeshService.connectToPeer()                             │
+  │                                                              │
+  │ 4. Connection established                                    │
+  │<────────────────────────────────────────────────────────>│
+  │   P2P Connection Ready                                      │
+  │                                                              │
+  │ 5. User sends message                                        │
+  ├─> MeshService.sendMessage(payload)                          │
+  │                                                              │
+  │ 6. Message transmitted via BLE/WiFi                         │
+  ├──────────────────────────────────────────────────────────>│
+  │                                              MeshService
+  │                                              receives msg
+  │                                                  │
+  │                                                  ▼
+  │                                         Message stored
+  │                                         locally +
+  │                                         synced to
+  │                                         Firestore
+  │                                         when online
+  │
+```
+
+### Mesh Service Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│        MeshNetworkService (Singleton)        │
+├─────────────────────────────────────────────┤
+│                                              │
+│  State:                                      │
+│  ├── isMeshEnabled: bool                     │
+│  ├── connectedPeers: List<PeerInfo>          │
+│  ├── pendingMessages: Queue<MessageModel>    │
+│  └── isConnected: bool                       │
+│                                              │
+│  Methods:                                    │
+│  ├── startAdvertising()                      │
+│  ├── stopAdvertising()                       │
+│  ├── connectToPeer(peerId)                   │
+│  ├── sendMessage(MessageModel)               │
+│  ├── receiveMessage()                        │
+│  ├── syncToFirestore() [when online]         │
+│  ├── handleConnectionFailure()               │
+│  └── reconnect()                             │
+│                                              │
+│  Event Listeners:                            │
+│  ├── onPeerDiscovered()                      │
+│  ├── onConnectionEstablished()               │
+│  ├── onMessageReceived()                     │
+│  ├── onConnectionLost()                      │
+│  └── onError()                               │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+### Mesh Message Storage & Sync
+
+```
+Offline Scenario:
+
+Device (Offline)
+    │
+    ├─> Send message via Mesh
+    │   ├─ Store in local DB (Hive/SQLite)
+    │   ├─ Add to syncQueue
+    │   └─ Show as "sending via mesh"
+    │
+    └─> Connection restored
+        │
+        ├─> MeshNotificationListener detects
+        │
+        ├─> syncPendingMessages()
+        │   ├─ Fetch from local DB
+        │   ├─ Upload to Firestore
+        │   └─ Mark as synced
+        │
+        └─> Real-time sync complete
+            └─ Receiver sees message
+```
+
+### Nearby Connections Configuration
+
+```
+Android Manifest:
+├── com.google.android.gms.nearby.connection.BLUETOOTH
+├── com.google.android.gms.nearby.connection.BLUETOOTH_ADMIN
+├── android.permission.ACCESS_FINE_LOCATION
+├── android.permission.ACCESS_COARSE_LOCATION
+└── android.permission.CHANGE_NETWORK_STATE
+
+Strategy:
+├── STRATEGY_P2P_POINT_TO_POINT
+├── Payload encoding: JSON over bytes
+├── Max message size: 4KB (typical for chat)
+└── Connection timeout: 30 seconds
+
+Data Format:
+{
+  "type": "message",
+  "senderId": "uid",
+  "senderName": "name",
+  "messageId": "id",
+  "text": "content",
+  "timestamp": 1234567890,
+  "mediaUrls": [] (synced later)
+}
+```
+
+---
+
+## 🌙 Theme & Dark Mode Architecture
+
+### Theme Provider System
+
+```
+┌──────────────────────────────────────────────┐
+│         ThemeProvider (ChangeNotifier)       │
+├──────────────────────────────────────────────┤
+│                                               │
+│  State:                                       │
+│  ├── isDarkMode: bool                         │
+│  ├── currentThemeData: ThemeData              │
+│  └── accentColor: Color                       │
+│                                               │
+│  Methods:                                     │
+│  ├── toggleTheme()                            │
+│  ├── setDarkMode(bool)                        │
+│  ├── getAppColors() -> AppThemeColors         │
+│  ├── loadSavedTheme() (from SharedPrefs)      │
+│  └── saveTheme(bool isDark)                   │
+│                                               │
+│  Persistence:                                 │
+│  └── SharedPreferences: "isDarkMode"          │
+│                                               │
+│  Listeners:                                   │
+│  └── All screens rebuild via Consumer<>      │
+│                                               │
+└──────────────────────────────────────────────┘
+```
+
+### Light & Dark Color Palette
+
+```
+Light Mode:
+├── Primary: #7C3AED (purple)
+├── Secondary: #EC4899 (pink)
+├── Background: #FFFFFF (white)
+├── Surface: #F3F4F6 (light gray)
+├── Text: #1F2937 (dark gray)
+└── Divider: #E5E7EB (light gray)
+
+Dark Mode:
+├── Primary: #A78BFA (light purple)
+├── Secondary: #F472B6 (light pink)
+├── Background: #111827 (very dark gray)
+├── Surface: #1F2937 (dark gray)
+├── Text: #F3F4F6 (light gray)
+└── Divider: #374151 (gray)
+```
+
+### Theme Application Flow
+
+```
+App Launch
+    │
+    ├─> Check SharedPreferences for saved theme
+    │
+    ├─> Load theme preference
+    │
+    ├─> Create ThemeProvider with initial state
+    │
+    ├─> MaterialApp receives:
+    │   ├── theme: ThemeData (light)
+    │   ├── darkTheme: ThemeData (dark)
+    │   └── themeMode: system/light/dark
+    │
+    ├─> MultiProvider wraps app
+    │   └── Consumer<ThemeProvider> in every screen
+    │
+    ├─> Settings Screen → Theme Toggle
+    │   └── onThemeChanged()
+    │       ├─ Update Provider state
+    │       ├─ Rebuild affected screens
+    │       └─ Save preference
+    │
+    └─> Theme applied throughout app
+        ├── Text colors updated
+        ├── Background colors updated
+        ├── Icon colors updated
+        └── Animations smooth
+```
+
+---
+
+## 🔔 Mesh Notification Listener
+
+### Auto-Sync Mechanism
+
+```
+App Running                  Connectivity Service
+
+    │
+    ├─> Monitor connectivity changes
+    │
+    ├─> OFFLINE detected
+    │   └─ Switch to Mesh mode
+    │
+    ├─> ONLINE restored
+    │   │
+    │   ├─> MeshNotificationListener fires
+    │   │
+    │   ├─> Query pending mesh messages
+    │   │   └─ Local database
+    │   │
+    │   ├─> Sync to Firestore
+    │   │   ├─ Add timestamp
+    │   │   ├─ Update message status
+    │   │   └─ Notify sender (FCM)
+    │   │
+    │   ├─> Clear sync queue
+    │   │
+    │   └─> Update UI
+    │       └─ Mark messages as "delivered"
+    │
+    └─> Connection handling
+        ├─ Retry with exponential backoff
+        ├─ Max 5 retries
+        └─ Failure logged
+```
+
+### Error Handling & Recovery
+
+```
+Mesh Connection Error
+    │
+    ├─> Capture exception
+    │
+    ├─> Log to console/analytics
+    │
+    ├─> Exponential backoff:
+    │   ├─ Attempt 1: wait 1s
+    │   ├─ Attempt 2: wait 2s
+    │   ├─ Attempt 3: wait 4s
+    │   ├─ Attempt 4: wait 8s
+    │   └─ Attempt 5: wait 16s
+    │
+    ├─> Success → Continue
+    │
+    ├─> All attempts fail
+    │   └─ Store message locally
+    │       └─ Sync when connection restored
+    │
+    └─> User notified
+        └─ "Syncing messages..." toast
+```
+
+
 
 ### Cold-Start Call Handling
 
