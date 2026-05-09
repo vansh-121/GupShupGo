@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,7 +8,6 @@ import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
-import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -507,10 +505,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
           const SizedBox(height: 8),
 
-          // ── Performance (debug only) ──────────────────────────────────
-          if (kDebugMode) ..._buildPerformanceSection(),
-          if (kDebugMode) const SizedBox(height: 8),
-
           // ── Help ──────────────────────────────────────────────────────
           _buildSectionHeader('HELP'),
           _buildCard(children: [
@@ -906,224 +900,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
-  }
-
-  // ── Performance debug panel ──────────────────────────────────────────────
-  List<Widget> _buildPerformanceSection() {
-    return [
-      _buildSectionHeader('⚡ PERFORMANCE (DEBUG)'),
-      _buildCard(children: [
-        _buildTile(
-          icon: Icons.speed_rounded,
-          iconColor: Colors.deepPurple,
-          title: 'Performance traces',
-          subtitle: 'View registered trace names',
-          onTap: _showPerformancePanel,
-        ),
-        _divider(),
-        _buildTile(
-          icon: Icons.play_arrow_rounded,
-          iconColor: Colors.green,
-          title: 'Run test trace',
-          subtitle: 'Fire a 300 ms synthetic trace',
-          onTap: _runTestTrace,
-        ),
-      ]),
-    ];
-  }
-
-  Future<void> _showPerformancePanel() async {
-    final traces = [
-      PerformanceService.kTraceAgoraInit,
-      PerformanceService.kTraceAgoraRelease,
-      PerformanceService.kTraceCallSetup,
-      PerformanceService.kTraceCallNotification,
-      PerformanceService.kTraceMessageNotification,
-      PerformanceService.kTraceAuthGoogle,
-      PerformanceService.kTraceAuthPhone,
-      PerformanceService.kTraceAuthEmail,
-      PerformanceService.kTraceChatSend,
-      PerformanceService.kTraceStatusUpload,
-    ];
-
-    final c = AppThemeColors.of(context);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.60,
-        maxChildSize: 0.90,
-        minChildSize: 0.40,
-        builder: (context, scrollController) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: ListView(
-              controller: scrollController,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: c.textLow,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    const Icon(Icons.speed_rounded,
-                        color: Colors.deepPurple, size: 22),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Firebase Performance Traces',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: c.textHigh),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'These traces appear in Firebase Console\n'
-                  '→ Performance → Custom traces.',
-                  style: TextStyle(fontSize: 12, color: c.textMid),
-                ),
-                const SizedBox(height: 16),
-                ...traces.map((name) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: Colors.deepPurple.withOpacity(0.2)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.timeline_rounded,
-                              color: Colors.deepPurple, size: 18),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(name,
-                                style: const TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500)),
-                          ),
-                        ],
-                      ),
-                    )),
-                const SizedBox(height: 12),
-                const Divider(),
-                const SizedBox(height: 8),
-                Text(
-                  'HTTP Metrics (auto-instrumented)',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: c.textHigh),
-                ),
-                const SizedBox(height: 8),
-                _buildHttpMetricRow(
-                  label: 'Call notification',
-                  url: 'sendcallnotification…run.app',
-                  method: 'POST',
-                  c: c,
-                ),
-                const SizedBox(height: 6),
-                _buildHttpMetricRow(
-                  label: 'Message notification',
-                  url: 'sendmessagenotification…run.app',
-                  method: 'POST',
-                  c: c,
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildHttpMetricRow({
-    required String label,
-    required String url,
-    required String method,
-    required AppThemeColors c,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.indigo.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.indigo.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.indigo.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(method,
-                style: const TextStyle(
-                    color: Colors.indigo,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: c.textHigh)),
-                Text(url,
-                    style: TextStyle(fontSize: 11, color: c.textMid),
-                    overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _runTestTrace() async {
-    final trace = await PerformanceService.startTrace(
-      'debug_test_trace',
-      attributes: {'source': 'settings_debug_panel'},
-    );
-    await Future.delayed(const Duration(milliseconds: 300));
-    await PerformanceService.stopTrace(trace,
-        attributes: {'completed': 'true'},
-        metrics: {'synthetic_delay_ms': 300});
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-              '⚡ Test trace fired — visible in Firebase Console → Performance'),
-          backgroundColor: Colors.deepPurple,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
-    }
   }
 
   void _showAboutDialog() {
