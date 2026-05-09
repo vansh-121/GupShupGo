@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
@@ -68,6 +69,9 @@ class AuthService {
 
       print('Setting up presence...');
       await _userService.setupPresence(userId);
+
+      // Tag user in Crashlytics so crash reports show who was affected.
+      await CrashlyticsService.setUser(uid: userId, name: user.name);
 
       print('Anonymous sign in complete!');
       return user;
@@ -175,6 +179,13 @@ class AuthService {
       await _fcmService.setupFCM(userId: userId);
       await _userService.setupPresence(userId);
 
+      // Tag user in Crashlytics.
+      await CrashlyticsService.setUser(
+        uid: userId,
+        name: user.name,
+        phone: user.phoneNumber,
+      );
+
       return user;
     } catch (e) {
       print('Error verifying OTP: $e');
@@ -256,6 +267,13 @@ class AuthService {
             await _deviceSession.issueAndPersist();
             await _fcmService.setupFCM(userId: userId);
             await _userService.setupPresence(userId);
+
+            // Tag user in Crashlytics.
+            await CrashlyticsService.setUser(
+              uid: userId,
+              name: user.name,
+              phone: verifiedPhoneNumber,
+            );
 
             onAutoVerified(user);
           } catch (e) {
@@ -354,6 +372,9 @@ class AuthService {
       }
       await _userService.setupPresence(userId);
 
+      // Tag user in Crashlytics.
+      await CrashlyticsService.setUser(uid: userId, name: user.name);
+
       return user;
     } catch (e) {
       print('Error signing in with Google: $e');
@@ -437,6 +458,13 @@ class AuthService {
 
       print('Setting up presence...');
       await _userService.setupPresence(userId);
+
+      // Tag user in Crashlytics.
+      await CrashlyticsService.setUser(
+        uid: userId,
+        name: user.name,
+        phone: user.phoneNumber,
+      );
 
       print('Email sign up complete!');
       return user;
@@ -533,6 +561,9 @@ class AuthService {
 
       print('Setting up presence...');
       await _userService.setupPresence(userId);
+
+      // Tag user in Crashlytics.
+      await CrashlyticsService.setUser(uid: userId, name: user.name);
 
       print('Email sign in complete!');
       return user;
@@ -660,6 +691,8 @@ class AuthService {
       await _googleSignIn.signOut();
       await _auth.signOut();
       await _clearUserIdLocally();
+      // Clear Crashlytics user identity on sign-out.
+      await CrashlyticsService.clearUser();
     } catch (e) {
       print('Error signing out: $e');
     }

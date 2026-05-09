@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -47,6 +48,24 @@ void main() async {
     SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
   ]);
 
+  // ── Firebase Crashlytics — capture all unhandled errors ────────────────
+  // Enable collection on non-debug builds; disable in debug so local errors
+  // are easier to iterate on (they still appear in the Crashlytics console
+  // but are tagged as debug events).
+  await FirebaseCrashlytics.instance
+      .setCrashlyticsCollectionEnabled(!kDebugMode);
+
+  // 1️⃣  Flutter framework errors (widget build errors, layout overflow, etc.)
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+  };
+
+  // 2️⃣  Platform-level uncaught async errors (Zone boundary escapes)
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true; // mark as handled so the app doesn't also crash the isolate
+  };
+
   // ── App Check: fire-and-forget (don't block startup) ──
   _initAppCheck();
 
@@ -63,24 +82,33 @@ void main() async {
   //    the real userId is wired in via updateUserId() on home screen entry.
   final meshIdentity = _ensureMeshGuestIdentity();
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => CallStateNotifier()),
-        ChangeNotifierProvider(create: (_) => StatusProvider()),
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        ChangeNotifierProvider.value(value: connectivityProvider),
-        ChangeNotifierProvider(
-          create: (_) => MeshNetworkService(
-            currentUserId: meshIdentity.guestId,
-            displayName: meshIdentity.displayName,
-            cacheService: ChatCacheService(),
-            connectivityProvider: connectivityProvider,
-          ),
+  // 3️⃣  Wrap runApp in a guarded zone — catches synchronous throws that
+  //     escape both FlutterError.onError and PlatformDispatcher.onError.
+  runZonedGuarded(
+    () {
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) => CallStateNotifier()),
+            ChangeNotifierProvider(create: (_) => StatusProvider()),
+            ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider.value(value: connectivityProvider),
+            ChangeNotifierProvider(
+              create: (_) => MeshNetworkService(
+                currentUserId: meshIdentity.guestId,
+                displayName: meshIdentity.displayName,
+                cacheService: ChatCacheService(),
+                connectivityProvider: connectivityProvider,
+              ),
+            ),
+          ],
+          child: MyApp(),
         ),
-      ],
-      child: MyApp(),
-    ),
+      );
+    },
+    (Object error, StackTrace stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    },
   );
 
   // ── Cold-start: check for calls accepted while the app was dead ────────
