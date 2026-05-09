@@ -6,6 +6,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_performance/firebase_performance.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -17,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class FCMService {
   // ── Cloud Function endpoints (no service account key needed) ────────────
@@ -311,8 +313,13 @@ class FCMService {
   Future<void> sendCallNotification(
       String calleeId, String callerId, String channelId,
       {bool isAudioOnly = false}) async {
+    final metric = PerformanceService.newHttpMetric(
+        _callFunctionUrl, HttpMethod.Post);
     try {
       print('Sending call notification to $calleeId via Cloud Function');
+      await metric.start();
+      metric.putAttribute('call_type', isAudioOnly ? 'audio' : 'video');
+
       final idToken = await _getIdToken();
       final response = await http.post(
         Uri.parse(_callFunctionUrl),
@@ -327,11 +334,18 @@ class FCMService {
           'isAudioOnly': isAudioOnly,
         }),
       );
+
+      metric.httpResponseCode = response.statusCode;
+      metric.responsePayloadSize = response.contentLength;
+      await metric.stop();
+
       print('Call notification response: ${response.statusCode}');
       if (response.statusCode != 200) {
         print('Failed to send call notification: ${response.body}');
       }
     } catch (e, stack) {
+      // Best-effort: stop the metric even on error so it doesn't leak.
+      try { await metric.stop(); } catch (_) {}
       print('Error sending call notification: $e');
       CrashlyticsService.logError(e, stack, reason: 'FCM.sendCallNotification failed for callee $calleeId');
     }
@@ -345,7 +359,11 @@ class FCMService {
     required String message,
     required String chatRoomId,
   }) async {
+    final metric = PerformanceService.newHttpMetric(
+        _messageFunctionUrl, HttpMethod.Post);
     try {
+      await metric.start();
+
       final idToken = await _getIdToken();
       final response = await http.post(
         Uri.parse(_messageFunctionUrl),
@@ -361,8 +379,14 @@ class FCMService {
           'chatRoomId': chatRoomId,
         }),
       );
+
+      metric.httpResponseCode = response.statusCode;
+      metric.responsePayloadSize = response.contentLength;
+      await metric.stop();
+
       print('Message notification sent: ${response.statusCode}');
     } catch (e) {
+      try { await metric.stop(); } catch (_) {}
       print('Error sending message notification: $e');
     }
   }

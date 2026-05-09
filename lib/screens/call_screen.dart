@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_performance/firebase_performance.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -9,6 +10,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -59,10 +61,25 @@ class _CallScreenState extends State<CallScreen> {
   bool _isEndingCall = false; // prevents double-close race conditions
   String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
 
+  // ── Performance: E2E call setup trace ────────────────────────────────────
+  // Started in initState, stopped when the remote peer joins (the moment
+  // the user perceives the call as live). Also stopped early on error.
+  Trace? _callSetupTrace;
+
   @override
   void initState() {
     super.initState();
     _initializeUserInfo();
+
+    // Start E2E call-setup performance trace (stopped when remote joins).
+    PerformanceService.startTrace(
+      PerformanceService.kTraceCallSetup,
+      attributes: {
+        'call_type': widget.isAudioOnly ? 'audio' : 'video',
+        'role': widget.isCaller ? 'caller' : 'callee',
+      },
+    ).then((t) => _callSetupTrace = t);
+
     _initAgora();
     _listenToSignaling();
 
@@ -231,6 +248,15 @@ class _CallScreenState extends State<CallScreen> {
             });
             _noAnswerTimer?.cancel(); // Remote user joined — cancel no-answer timer
             _startCallTimer();
+
+            // Stop the E2E setup trace — remote peer is now in the channel.
+            if (_callSetupTrace != null) {
+              PerformanceService.stopTrace(_callSetupTrace!, attributes: {
+                'result': 'connected',
+                'elapsed_ms': elapsed.toString(),
+              });
+              _callSetupTrace = null;
+            }
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
               UserOfflineReasonType reason) {
@@ -284,6 +310,14 @@ class _CallScreenState extends State<CallScreen> {
       );
     } catch (e) {
       print("Error initializing Agora: $e");
+      // Stop setup trace with failure attributes.
+      if (_callSetupTrace != null) {
+        PerformanceService.stopTrace(_callSetupTrace!, attributes: {
+          'result': 'error',
+          'error_type': e.runtimeType.toString(),
+        });
+        _callSetupTrace = null;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

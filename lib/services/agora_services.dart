@@ -1,6 +1,7 @@
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class AgoraService {
   static bool _isReleasing = false;
@@ -12,34 +13,43 @@ class AgoraService {
       await Future.delayed(Duration(milliseconds: 500));
     }
 
-    RtcEngine engine = createAgoraRtcEngine();
+    return PerformanceService.traceAsync(
+      PerformanceService.kTraceAgoraInit,
+      (trace) async {
+        PerformanceService.setAttribute(
+            trace, 'mode', isAudioOnly ? 'audio' : 'video');
 
-    await engine.initialize(const RtcEngineContext(
-      appId: '49a88df036b446d892ed933756e9fe6f', // Your Agora App ID
-      channelProfile: ChannelProfileType.channelProfileCommunication,
-    ));
+        RtcEngine engine = createAgoraRtcEngine();
 
-    // Enable audio (always needed)
-    await engine.enableAudio();
+        await engine.initialize(const RtcEngineContext(
+          appId: '49a88df036b446d892ed933756e9fe6f',
+          channelProfile: ChannelProfileType.channelProfileCommunication,
+        ));
 
-    if (!isAudioOnly) {
-      // Enable video only if not audio-only mode
-      await engine.enableVideo();
+        // Enable audio (always needed)
+        await engine.enableAudio();
 
-      // Set video configuration
-      await engine.setVideoEncoderConfiguration(
-        const VideoEncoderConfiguration(
-          dimensions: VideoDimensions(width: 640, height: 480),
-          frameRate: 15,
-          bitrate: 400,
-        ),
-      );
+        if (!isAudioOnly) {
+          // Enable video only if not audio-only mode
+          await engine.enableVideo();
 
-      // Start preview
-      await engine.startPreview();
-    }
+          // Set video configuration
+          await engine.setVideoEncoderConfiguration(
+            const VideoEncoderConfiguration(
+              dimensions: VideoDimensions(width: 640, height: 480),
+              frameRate: 15,
+              bitrate: 400,
+            ),
+          );
 
-    return engine;
+          // Start preview
+          await engine.startPreview();
+        }
+
+        return engine;
+      },
+      attributes: {'mode': isAudioOnly ? 'audio' : 'video'},
+    );
   }
 
   static Future<bool> requestPermissions({bool isAudioOnly = false}) async {
@@ -74,10 +84,15 @@ class AgoraService {
 
     _isReleasing = true;
     try {
-      await engine.leaveChannel();
-      await engine.release();
-      // Add a small delay to ensure complete cleanup
-      await Future.delayed(Duration(milliseconds: 300));
+      await PerformanceService.traceAsync(
+        PerformanceService.kTraceAgoraRelease,
+        (_) async {
+          await engine.leaveChannel();
+          await engine.release();
+          // Add a small delay to ensure complete cleanup
+          await Future.delayed(Duration(milliseconds: 300));
+        },
+      );
     } catch (e, stack) {
       print('Error releasing engine: $e');
       CrashlyticsService.logError(

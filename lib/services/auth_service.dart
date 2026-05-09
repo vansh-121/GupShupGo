@@ -10,6 +10,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 
 class AuthService {
@@ -118,79 +119,84 @@ class AuthService {
     required String name,
     String? photoUrl,
   }) async {
-    try {
-      PhoneAuthCredential credential = PhoneAuthProvider.credential(
-        verificationId: verificationId,
-        smsCode: otp,
-      );
-
-      // If user is already signed in (email/Google session), link phone to
-      // that account so both providers share the same UID.
-      final User? currentUser = _auth.currentUser;
-      UserCredential userCredential;
-      if (currentUser != null && currentUser.phoneNumber == null) {
+    return PerformanceService.traceAsync(
+      'auth_sign_in_phone',
+      (_) async {
         try {
-          userCredential = await currentUser.linkWithCredential(credential);
-        } on FirebaseAuthException catch (e) {
-          if (e.code == 'credential-already-in-use' ||
-              e.code == 'account-exists-with-different-credential') {
-            // Phone already tied to its own account – sign into that one.
-            userCredential = await _auth.signInWithCredential(credential);
+          PhoneAuthCredential credential = PhoneAuthProvider.credential(
+            verificationId: verificationId,
+            smsCode: otp,
+          );
+
+          // If user is already signed in (email/Google session), link phone to
+          // that account so both providers share the same UID.
+          final User? currentUser = _auth.currentUser;
+          UserCredential userCredential;
+          if (currentUser != null && currentUser.phoneNumber == null) {
+            try {
+              userCredential = await currentUser.linkWithCredential(credential);
+            } on FirebaseAuthException catch (e) {
+              if (e.code == 'credential-already-in-use' ||
+                  e.code == 'account-exists-with-different-credential') {
+                // Phone already tied to its own account – sign into that one.
+                userCredential = await _auth.signInWithCredential(credential);
+              } else {
+                rethrow;
+              }
+            }
           } else {
-            rethrow;
+            userCredential = await _auth.signInWithCredential(credential);
           }
+          String userId = userCredential.user!.uid;
+          String? phoneNumber = userCredential.user!.phoneNumber;
+
+          // Check if user already exists
+          UserModel? existingUser = await _userService.getUserById(userId);
+
+          UserModel user;
+          if (existingUser != null) {
+            // Update existing user
+            user = existingUser.copyWith(
+              isOnline: true,
+              lastSeen: DateTime.now(),
+            );
+          } else {
+            // Create new user
+            user = UserModel(
+              id: userId,
+              name: name,
+              phoneNumber: phoneNumber,
+              photoUrl: photoUrl,
+              isOnline: true,
+              createdAt: DateTime.now(),
+            );
+          }
+
+          await _userService.createOrUpdateUser(user);
+          await _saveUserIdLocally(userId);
+          await _saveUserLocally(user);
+          // Issue a "remember this device" token now that we hold a fresh
+          // Firebase ID token. On future cold starts where Firebase Auth's
+          // own session has been wiped (Redmi/MIUI force-stop), this token
+          // is exchanged for a Firebase custom token in attemptSilentReauth().
+          await _deviceSession.issueAndPersist();
+          await _fcmService.setupFCM(userId: userId);
+          await _userService.setupPresence(userId);
+
+          // Tag user in Crashlytics.
+          await CrashlyticsService.setUser(
+            uid: userId,
+            name: user.name,
+            phone: user.phoneNumber,
+          );
+
+          return user;
+        } catch (e) {
+          print('Error verifying OTP: $e');
+          return null;
         }
-      } else {
-        userCredential = await _auth.signInWithCredential(credential);
-      }
-      String userId = userCredential.user!.uid;
-      String? phoneNumber = userCredential.user!.phoneNumber;
-
-      // Check if user already exists
-      UserModel? existingUser = await _userService.getUserById(userId);
-
-      UserModel user;
-      if (existingUser != null) {
-        // Update existing user
-        user = existingUser.copyWith(
-          isOnline: true,
-          lastSeen: DateTime.now(),
-        );
-      } else {
-        // Create new user
-        user = UserModel(
-          id: userId,
-          name: name,
-          phoneNumber: phoneNumber,
-          photoUrl: photoUrl,
-          isOnline: true,
-          createdAt: DateTime.now(),
-        );
-      }
-
-      await _userService.createOrUpdateUser(user);
-      await _saveUserIdLocally(userId);
-      await _saveUserLocally(user);
-      // Issue a "remember this device" token now that we hold a fresh
-      // Firebase ID token. On future cold starts where Firebase Auth's
-      // own session has been wiped (Redmi/MIUI force-stop), this token
-      // is exchanged for a Firebase custom token in attemptSilentReauth().
-      await _deviceSession.issueAndPersist();
-      await _fcmService.setupFCM(userId: userId);
-      await _userService.setupPresence(userId);
-
-      // Tag user in Crashlytics.
-      await CrashlyticsService.setUser(
-        uid: userId,
-        name: user.name,
-        phone: user.phoneNumber,
-      );
-
-      return user;
-    } catch (e) {
-      print('Error verifying OTP: $e');
-      return null;
-    }
+      },
+    );
   }
 
   // Sign in with carrier-verified phone number (Firebase Phone Number Verification)
@@ -300,86 +306,91 @@ class AuthService {
 
   // Sign in with Google
   Future<UserModel?> signInWithGoogle() async {
-    try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // user cancelled
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      // If user is already signed in (phone session), link Google to that
-      // account so both providers share the same UID.
-      final User? currentUser = _auth.currentUser;
-      UserCredential userCredential;
-      if (currentUser != null &&
-          !currentUser.providerData
-              .any((p) => p.providerId == GoogleAuthProvider.PROVIDER_ID)) {
+    return PerformanceService.traceAsync(
+      'auth_sign_in_google',
+      (_) async {
         try {
-          userCredential = await currentUser.linkWithCredential(credential);
-        } on FirebaseAuthException catch (e) {
-          if (e.code == 'credential-already-in-use' ||
-              e.code == 'account-exists-with-different-credential') {
-            userCredential = await _auth.signInWithCredential(credential);
+          final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+          if (googleUser == null) return null; // user cancelled
+
+          final GoogleSignInAuthentication googleAuth =
+              await googleUser.authentication;
+
+          final OAuthCredential credential = GoogleAuthProvider.credential(
+            accessToken: googleAuth.accessToken,
+            idToken: googleAuth.idToken,
+          );
+
+          // If user is already signed in (phone session), link Google to that
+          // account so both providers share the same UID.
+          final User? currentUser = _auth.currentUser;
+          UserCredential userCredential;
+          if (currentUser != null &&
+              !currentUser.providerData
+                  .any((p) => p.providerId == GoogleAuthProvider.PROVIDER_ID)) {
+            try {
+              userCredential = await currentUser.linkWithCredential(credential);
+            } on FirebaseAuthException catch (e) {
+              if (e.code == 'credential-already-in-use' ||
+                  e.code == 'account-exists-with-different-credential') {
+                userCredential = await _auth.signInWithCredential(credential);
+              } else {
+                rethrow;
+              }
+            }
           } else {
-            rethrow;
+            userCredential = await _auth.signInWithCredential(credential);
           }
+
+          if (userCredential.user == null) return null;
+
+          final String userId = userCredential.user!.uid;
+          UserModel? existingUser = await _userService.getUserById(userId);
+
+          UserModel user;
+          if (existingUser != null) {
+            user = existingUser.copyWith(
+              isOnline: true,
+              lastSeen: DateTime.now(),
+            );
+          } else {
+            user = UserModel(
+              id: userId,
+              name: userCredential.user!.displayName ??
+                  googleUser.displayName ??
+                  'User',
+              email: userCredential.user!.email ?? googleUser.email,
+              photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
+              isOnline: true,
+              createdAt: DateTime.now(),
+            );
+          }
+
+          await _userService.createOrUpdateUser(user);
+          await _saveUserIdLocally(userId);
+          await _saveUserLocally(user);
+          // Issue a "remember this device" token now that we hold a fresh
+          // Firebase ID token. On future cold starts where Firebase Auth's
+          // own session has been wiped (Redmi/MIUI force-stop), this token
+          // is exchanged for a Firebase custom token in attemptSilentReauth().
+          await _deviceSession.issueAndPersist();
+          try {
+            await _fcmService.setupFCM(userId: userId);
+          } catch (e) {
+            print('FCM setup failed (non-critical): $e');
+          }
+          await _userService.setupPresence(userId);
+
+          // Tag user in Crashlytics.
+          await CrashlyticsService.setUser(uid: userId, name: user.name);
+
+          return user;
+        } catch (e) {
+          print('Error signing in with Google: $e');
+          rethrow;
         }
-      } else {
-        userCredential = await _auth.signInWithCredential(credential);
-      }
-
-      if (userCredential.user == null) return null;
-
-      final String userId = userCredential.user!.uid;
-      UserModel? existingUser = await _userService.getUserById(userId);
-
-      UserModel user;
-      if (existingUser != null) {
-        user = existingUser.copyWith(
-          isOnline: true,
-          lastSeen: DateTime.now(),
-        );
-      } else {
-        user = UserModel(
-          id: userId,
-          name: userCredential.user!.displayName ??
-              googleUser.displayName ??
-              'User',
-          email: userCredential.user!.email ?? googleUser.email,
-          photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
-          isOnline: true,
-          createdAt: DateTime.now(),
-        );
-      }
-
-      await _userService.createOrUpdateUser(user);
-      await _saveUserIdLocally(userId);
-      await _saveUserLocally(user);
-      // Issue a "remember this device" token now that we hold a fresh
-      // Firebase ID token. On future cold starts where Firebase Auth's
-      // own session has been wiped (Redmi/MIUI force-stop), this token
-      // is exchanged for a Firebase custom token in attemptSilentReauth().
-      await _deviceSession.issueAndPersist();
-      try {
-        await _fcmService.setupFCM(userId: userId);
-      } catch (e) {
-        print('FCM setup failed (non-critical): $e');
-      }
-      await _userService.setupPresence(userId);
-
-      // Tag user in Crashlytics.
-      await CrashlyticsService.setUser(uid: userId, name: user.name);
-
-      return user;
-    } catch (e) {
-      print('Error signing in with Google: $e');
-      rethrow;
-    }
+      },
+    );
   }
 
   // Sign up with email and password
@@ -483,98 +494,103 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    try {
-      print('Starting email sign in...');
-
-      // If user is already signed in (phone session), attempt to link this
-      // email credential to that account before falling back to a normal sign-in.
-      final User? currentUser = _auth.currentUser;
-      UserCredential userCredential;
-      if (currentUser != null && currentUser.email == null) {
-        final emailCredential =
-            EmailAuthProvider.credential(email: email, password: password);
+    return PerformanceService.traceAsync(
+      'auth_sign_in_email',
+      (_) async {
         try {
-          userCredential =
-              await currentUser.linkWithCredential(emailCredential);
-        } on FirebaseAuthException catch (e) {
-          if (e.code == 'email-already-in-use' ||
-              e.code == 'credential-already-in-use') {
-            userCredential = await _auth.signInWithEmailAndPassword(
-                email: email, password: password);
+          print('Starting email sign in...');
+
+          // If user is already signed in (phone session), attempt to link this
+          // email credential to that account before falling back to a normal sign-in.
+          final User? currentUser = _auth.currentUser;
+          UserCredential userCredential;
+          if (currentUser != null && currentUser.email == null) {
+            final emailCredential =
+                EmailAuthProvider.credential(email: email, password: password);
+            try {
+              userCredential =
+                  await currentUser.linkWithCredential(emailCredential);
+            } on FirebaseAuthException catch (e) {
+              if (e.code == 'email-already-in-use' ||
+                  e.code == 'credential-already-in-use') {
+                userCredential = await _auth.signInWithEmailAndPassword(
+                    email: email, password: password);
+              } else {
+                rethrow;
+              }
+            }
           } else {
-            rethrow;
+            userCredential = await _auth.signInWithEmailAndPassword(
+              email: email,
+              password: password,
+            );
           }
+
+          if (userCredential.user == null) {
+            print('Error: User credential is null');
+            return null;
+          }
+
+          String userId = userCredential.user!.uid;
+          print('Signed in with user ID: $userId');
+
+          // Check if user exists in Firestore
+          UserModel? existingUser = await _userService.getUserById(userId);
+
+          UserModel user;
+          if (existingUser != null) {
+            // Update existing user status
+            user = existingUser.copyWith(
+              isOnline: true,
+              lastSeen: DateTime.now(),
+            );
+          } else {
+            // Create user profile if it doesn't exist
+            user = UserModel(
+              id: userId,
+              name: userCredential.user!.displayName ?? 'User',
+              email: email,
+              isOnline: true,
+              createdAt: DateTime.now(),
+            );
+          }
+
+          await _userService.createOrUpdateUser(user);
+
+          print('Saving user ID locally...');
+          await _saveUserIdLocally(userId);
+          await _saveUserLocally(user);
+          // Issue a "remember this device" token now that we hold a fresh
+          // Firebase ID token. On future cold starts where Firebase Auth's
+          // own session has been wiped (Redmi/MIUI force-stop), this token
+          // is exchanged for a Firebase custom token in attemptSilentReauth().
+          await _deviceSession.issueAndPersist();
+
+          print('Setting up FCM...');
+          try {
+            await _fcmService.setupFCM(userId: userId);
+          } catch (e) {
+            print('FCM setup failed (non-critical): $e');
+          }
+
+          print('Setting up presence...');
+          await _userService.setupPresence(userId);
+
+          // Tag user in Crashlytics.
+          await CrashlyticsService.setUser(uid: userId, name: user.name);
+
+          print('Email sign in complete!');
+          return user;
+        } on FirebaseAuthException catch (e) {
+          print('Firebase Auth Error: ${e.code} - ${e.message}');
+          rethrow;
+        } catch (e, stackTrace) {
+          print('Error signing in with email: $e');
+          print('Stack trace: $stackTrace');
+          rethrow;
         }
-      } else {
-        userCredential = await _auth.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-      }
-
-      if (userCredential.user == null) {
-        print('Error: User credential is null');
-        return null;
-      }
-
-      String userId = userCredential.user!.uid;
-      print('Signed in with user ID: $userId');
-
-      // Check if user exists in Firestore
-      UserModel? existingUser = await _userService.getUserById(userId);
-
-      UserModel user;
-      if (existingUser != null) {
-        // Update existing user status
-        user = existingUser.copyWith(
-          isOnline: true,
-          lastSeen: DateTime.now(),
-        );
-      } else {
-        // Create user profile if it doesn't exist
-        user = UserModel(
-          id: userId,
-          name: userCredential.user!.displayName ?? 'User',
-          email: email,
-          isOnline: true,
-          createdAt: DateTime.now(),
-        );
-      }
-
-      await _userService.createOrUpdateUser(user);
-
-      print('Saving user ID locally...');
-      await _saveUserIdLocally(userId);
-      await _saveUserLocally(user);
-      // Issue a "remember this device" token now that we hold a fresh
-      // Firebase ID token. On future cold starts where Firebase Auth's
-      // own session has been wiped (Redmi/MIUI force-stop), this token
-      // is exchanged for a Firebase custom token in attemptSilentReauth().
-      await _deviceSession.issueAndPersist();
-
-      print('Setting up FCM...');
-      try {
-        await _fcmService.setupFCM(userId: userId);
-      } catch (e) {
-        print('FCM setup failed (non-critical): $e');
-      }
-
-      print('Setting up presence...');
-      await _userService.setupPresence(userId);
-
-      // Tag user in Crashlytics.
-      await CrashlyticsService.setUser(uid: userId, name: user.name);
-
-      print('Email sign in complete!');
-      return user;
-    } on FirebaseAuthException catch (e) {
-      print('Firebase Auth Error: ${e.code} - ${e.message}');
-      rethrow;
-    } catch (e, stackTrace) {
-      print('Error signing in with email: $e');
-      print('Stack trace: $stackTrace');
-      rethrow;
-    }
+      },
+    );
   }
 
   // ─── Account Linking (called while phone session is already active) ─────────

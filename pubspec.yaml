@@ -37,6 +37,7 @@ dependencies:
   firebase_storage: ^11.6.9
   firebase_app_check: ^0.2.1+8
   firebase_crashlytics: ^3.4.8
+  firebase_performance: ^0.9.4
 
   # Agora RTC Engine
   agora_rtc_engine: ^6.3.1

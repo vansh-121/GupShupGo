@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -118,7 +119,14 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    await batch.commit();
+    await PerformanceService.traceAsync(
+      'chat_send_message',
+      (trace) async {
+        PerformanceService.setAttribute(
+            trace, 'msg_type', type.name);
+        await batch.commit();
+      },
+    );
     print('Message sent: ${message.id}');
 
     // Send push notification for message delivery

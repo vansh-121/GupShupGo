@@ -6,6 +6,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -65,6 +66,9 @@ void main() async {
     FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
     return true; // mark as handled so the app doesn't also crash the isolate
   };
+
+  // ── Firebase Performance Monitoring ────────────────────────────────────
+  await PerformanceService.init();
 
   // ── App Check: fire-and-forget (don't block startup) ──
   _initAppCheck();
