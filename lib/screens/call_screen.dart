@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_performance/firebase_performance.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -9,6 +10,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -59,10 +61,25 @@ class _CallScreenState extends State<CallScreen> {
   bool _isEndingCall = false; // prevents double-close race conditions
   String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
 
+  // ── Performance: E2E call setup trace ────────────────────────────────────
+  // Started in initState, stopped when the remote peer joins (the moment
+  // the user perceives the call as live). Also stopped early on error.
+  Trace? _callSetupTrace;
+
   @override
   void initState() {
     super.initState();
     _initializeUserInfo();
+
+    // Start E2E call-setup performance trace (stopped when remote joins).
+    PerformanceService.startTrace(
+      PerformanceService.kTraceCallSetup,
+      attributes: {
+        'call_type': widget.isAudioOnly ? 'audio' : 'video',
+        'role': widget.isCaller ? 'caller' : 'callee',
+      },
+    ).then((t) => _callSetupTrace = t);
+
     _initAgora();
     _listenToSignaling();
 
@@ -231,6 +248,15 @@ class _CallScreenState extends State<CallScreen> {
             });
             _noAnswerTimer?.cancel(); // Remote user joined — cancel no-answer timer
             _startCallTimer();
+
+            // Stop the E2E setup trace — remote peer is now in the channel.
+            if (_callSetupTrace != null) {
+              PerformanceService.stopTrace(_callSetupTrace!, attributes: {
+                'result': 'connected',
+                'elapsed_ms': elapsed.toString(),
+              });
+              _callSetupTrace = null;
+            }
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
               UserOfflineReasonType reason) {
@@ -284,6 +310,14 @@ class _CallScreenState extends State<CallScreen> {
       );
     } catch (e) {
       print("Error initializing Agora: $e");
+      // Stop setup trace with failure attributes.
+      if (_callSetupTrace != null) {
+        PerformanceService.stopTrace(_callSetupTrace!, attributes: {
+          'result': 'error',
+          'error_type': e.runtimeType.toString(),
+        });
+        _callSetupTrace = null;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -422,7 +456,10 @@ class _CallScreenState extends State<CallScreen> {
     return AgoraVideoView(
       controller: VideoViewController(
         rtcEngine: _engine!,
-        canvas: const VideoCanvas(uid: 0),
+        canvas: const VideoCanvas(
+          uid: 0,
+          renderMode: RenderModeType.renderModeHidden,
+        ),
       ),
     );
   }
@@ -445,7 +482,10 @@ class _CallScreenState extends State<CallScreen> {
     return AgoraVideoView(
       controller: VideoViewController.remote(
         rtcEngine: _engine!,
-        canvas: VideoCanvas(uid: _remoteUid),
+        canvas: VideoCanvas(
+          uid: _remoteUid,
+          renderMode: RenderModeType.renderModeHidden,
+        ),
         connection: RtcConnection(channelId: widget.channelId),
       ),
     );
@@ -529,17 +569,20 @@ class _CallScreenState extends State<CallScreen> {
                       _buildControlButton(
                         icon: _isSpeakerOn
                             ? Icons.volume_up
-                            : Icons.volume_up_outlined,
+                            : Icons.phone_in_talk_outlined,
                         label: 'Speaker',
                         isActive: _isSpeakerOn,
-                        onTap: () {
+                        onTap: () async {
                           setState(() => _isSpeakerOn = !_isSpeakerOn);
-                          _engine?.setEnableSpeakerphone(_isSpeakerOn);
+                          // Correct API: route audio to speaker or earpiece
+                          await _engine?.setRouteInCommunicationMode(
+                            _isSpeakerOn ? 3 : 1, // 3=speaker, 1=earpiece
+                          );
                         },
                       ),
                       _buildControlButton(
                         icon: _isMuted ? Icons.mic_off : Icons.mic_none,
-                        label: 'Mute',
+                        label: _isMuted ? 'Unmute' : 'Mute',
                         isActive: _isMuted,
                         onTap: () {
                           setState(() => _isMuted = !_isMuted);
@@ -552,8 +595,9 @@ class _CallScreenState extends State<CallScreen> {
                         isActive: _isOnHold,
                         onTap: () {
                           setState(() => _isOnHold = !_isOnHold);
+                          // Mute our mic on hold; silence remote via volume (not permanent mute)
                           _engine?.muteLocalAudioStream(_isOnHold || _isMuted);
-                          _engine?.muteAllRemoteAudioStreams(_isOnHold);
+                          _engine?.adjustPlaybackSignalVolume(_isOnHold ? 0 : 100);
                         },
                       ),
                     ],
@@ -658,7 +702,8 @@ class _CallScreenState extends State<CallScreen> {
           _buildRemoteVideo(),
 
           // Local video (small preview in top-right corner)
-          if (_isInitialized)
+          // Hidden when camera is off
+          if (_isInitialized && _localVideoEnabled)
             Positioned(
               top: 40,
               right: 20,
@@ -672,6 +717,24 @@ class _CallScreenState extends State<CallScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: _buildLocalPreview(),
+                ),
+              ),
+            ),
+          // Camera-off placeholder tile
+          if (_isInitialized && !_localVideoEnabled)
+            Positioned(
+              top: 40,
+              right: 20,
+              child: Container(
+                width: 120,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade900,
+                  border: Border.all(color: Colors.white54, width: 2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Icon(Icons.videocam_off, color: Colors.white54, size: 32),
                 ),
               ),
             ),
@@ -692,29 +755,6 @@ class _CallScreenState extends State<CallScreen> {
               ),
             ),
 
-          // Call timer for video calls
-          if (_remoteUserJoined && _callDurationSeconds > 0)
-            Positioned(
-              top: 50,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    _formatDuration(_callDurationSeconds),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
           // Control buttons at bottom
           Positioned(
@@ -734,13 +774,15 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   child: IconButton(
                     icon: Icon(
-                      _isSpeakerOn ? Icons.volume_up : Icons.volume_up_outlined,
+                      _isSpeakerOn ? Icons.volume_up : Icons.phone_in_talk_outlined,
                       color: _isSpeakerOn ? Colors.black : Colors.white,
                       size: 26,
                     ),
-                    onPressed: () {
+                    onPressed: () async {
                       setState(() => _isSpeakerOn = !_isSpeakerOn);
-                      _engine?.setEnableSpeakerphone(_isSpeakerOn);
+                      await _engine?.setRouteInCommunicationMode(
+                        _isSpeakerOn ? 3 : 1, // 3=speaker, 1=earpiece
+                      );
                     },
                   ),
                 ),
@@ -828,6 +870,7 @@ class _CallScreenState extends State<CallScreen> {
           Positioned(
             top: 50,
             left: 20,
+            right: 160, // clear of the 120px preview tile
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -839,18 +882,44 @@ class _CallScreenState extends State<CallScreen> {
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                SizedBox(height: 4),
-                Text(
-                  _endReasonText.isNotEmpty
-                      ? _endReasonText
-                      : _remoteUid != null
-                          ? 'Connected'
-                          : 'Waiting...',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                  ),
+                const SizedBox(height: 4),
+                // "Connected  00:09" — status and timer inline on one line
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _endReasonText.isNotEmpty
+                          ? _endReasonText
+                          : _remoteUid != null
+                              ? 'Connected'
+                              : 'Waiting...',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (_remoteUserJoined && _callDurationSeconds > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _formatDuration(_callDurationSeconds),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),

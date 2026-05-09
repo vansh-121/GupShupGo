@@ -4,6 +4,8 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
     id 'com.google.gms.google-services'
+    // Crashlytics Gradle plugin — enables crash reporting & symbol uploads
+    id 'com.google.firebase.crashlytics'
 }
 
 def keystoreProperties = new Properties()
@@ -39,8 +41,8 @@ android {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 29
-        versionName = "1.0.5"
+        versionCode = 31
+        versionName = "1.0.6"
         minSdkVersion = 24
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
         resConfigs "en"
@@ -105,6 +107,12 @@ android {
             universalApk true
         }
     }
+
+    // Upload full native debug symbols to Crashlytics so Agora/NDK stacks
+    // are fully deobfuscated in the Firebase console.
+    buildTypes.each {
+        it.ndk { debugSymbolLevel = 'FULL' }
+    }
 }
 
 dependencies {
@@ -115,6 +123,11 @@ dependencies {
     implementation 'com.google.firebase:firebase-appcheck-playintegrity'
     // Debug AppCheck provider must NOT ship in the release APK
     debugImplementation 'com.google.firebase:firebase-appcheck-debug'
+
+    // Firebase Crashlytics — crash & non-fatal error reporting
+    implementation 'com.google.firebase:firebase-crashlytics'
+    // Upload native (C/C++) crash symbols; needed for Agora native stacks
+    implementation 'com.google.firebase:firebase-crashlytics-ndk'
 
     // Google Play Services Identity — for Phone Number Hint API (carrier-based verification)
     implementation 'com.google.android.gms:play-services-auth:21.3.0'

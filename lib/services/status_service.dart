@@ -4,6 +4,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/performance_service.dart';
 
 class StatusService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -85,20 +86,30 @@ class StatusService {
     debugPrint('[StatusService] Uploading to Storage path: $storagePath');
     debugPrint('[StatusService] File exists: ${await file.exists()}');
 
-    final ref = _storage.ref().child(storagePath);
-    final uploadTask = ref.putFile(file);
+    return PerformanceService.traceAsync(
+      'status_upload_file',
+      (trace) async {
+        PerformanceService.setAttribute(trace, 'file_type', folder);
+        final fileSizeKb = (await file.length() / 1024).round();
+        PerformanceService.incrementMetric(trace, 'file_size_kb',
+            by: fileSizeKb);
 
-    // Listen for progress
-    uploadTask.snapshotEvents.listen((event) {
-      final progress = event.bytesTransferred / event.totalBytes;
-      debugPrint(
-          '[StatusService] Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
-    });
+        final ref = _storage.ref().child(storagePath);
+        final uploadTask = ref.putFile(file);
 
-    final snapshot = await uploadTask;
-    final downloadUrl = await snapshot.ref.getDownloadURL();
-    debugPrint('[StatusService] Upload complete. URL: $downloadUrl');
-    return downloadUrl;
+        // Listen for progress
+        uploadTask.snapshotEvents.listen((event) {
+          final progress = event.bytesTransferred / event.totalBytes;
+          debugPrint(
+              '[StatusService] Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
+        });
+
+        final snapshot = await uploadTask;
+        final downloadUrl = await snapshot.ref.getDownloadURL();
+        debugPrint('[StatusService] Upload complete. URL: $downloadUrl');
+        return downloadUrl;
+      },
+    );
   }
 
   /// Upload an image status from a file.
