@@ -569,17 +569,20 @@ class _CallScreenState extends State<CallScreen> {
                       _buildControlButton(
                         icon: _isSpeakerOn
                             ? Icons.volume_up
-                            : Icons.volume_up_outlined,
+                            : Icons.phone_in_talk_outlined,
                         label: 'Speaker',
                         isActive: _isSpeakerOn,
-                        onTap: () {
+                        onTap: () async {
                           setState(() => _isSpeakerOn = !_isSpeakerOn);
-                          _engine?.setEnableSpeakerphone(_isSpeakerOn);
+                          // Correct API: route audio to speaker or earpiece
+                          await _engine?.setRouteInCommunicationMode(
+                            _isSpeakerOn ? 3 : 1, // 3=speaker, 1=earpiece
+                          );
                         },
                       ),
                       _buildControlButton(
                         icon: _isMuted ? Icons.mic_off : Icons.mic_none,
-                        label: 'Mute',
+                        label: _isMuted ? 'Unmute' : 'Mute',
                         isActive: _isMuted,
                         onTap: () {
                           setState(() => _isMuted = !_isMuted);
@@ -592,8 +595,9 @@ class _CallScreenState extends State<CallScreen> {
                         isActive: _isOnHold,
                         onTap: () {
                           setState(() => _isOnHold = !_isOnHold);
+                          // Mute our mic on hold; silence remote via volume (not permanent mute)
                           _engine?.muteLocalAudioStream(_isOnHold || _isMuted);
-                          _engine?.muteAllRemoteAudioStreams(_isOnHold);
+                          _engine?.adjustPlaybackSignalVolume(_isOnHold ? 0 : 100);
                         },
                       ),
                     ],
@@ -698,7 +702,8 @@ class _CallScreenState extends State<CallScreen> {
           _buildRemoteVideo(),
 
           // Local video (small preview in top-right corner)
-          if (_isInitialized)
+          // Hidden when camera is off
+          if (_isInitialized && _localVideoEnabled)
             Positioned(
               top: 40,
               right: 20,
@@ -712,6 +717,24 @@ class _CallScreenState extends State<CallScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: _buildLocalPreview(),
+                ),
+              ),
+            ),
+          // Camera-off placeholder tile
+          if (_isInitialized && !_localVideoEnabled)
+            Positioned(
+              top: 40,
+              right: 20,
+              child: Container(
+                width: 120,
+                height: 160,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade900,
+                  border: Border.all(color: Colors.white54, width: 2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Icon(Icons.videocam_off, color: Colors.white54, size: 32),
                 ),
               ),
             ),
@@ -774,13 +797,15 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   child: IconButton(
                     icon: Icon(
-                      _isSpeakerOn ? Icons.volume_up : Icons.volume_up_outlined,
+                      _isSpeakerOn ? Icons.volume_up : Icons.phone_in_talk_outlined,
                       color: _isSpeakerOn ? Colors.black : Colors.white,
                       size: 26,
                     ),
-                    onPressed: () {
+                    onPressed: () async {
                       setState(() => _isSpeakerOn = !_isSpeakerOn);
-                      _engine?.setEnableSpeakerphone(_isSpeakerOn);
+                      await _engine?.setRouteInCommunicationMode(
+                        _isSpeakerOn ? 3 : 1, // 3=speaker, 1=earpiece
+                      );
                     },
                   ),
                 ),
