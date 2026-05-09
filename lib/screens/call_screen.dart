@@ -755,29 +755,6 @@ class _CallScreenState extends State<CallScreen> {
               ),
             ),
 
-          // Call timer for video calls
-          if (_remoteUserJoined && _callDurationSeconds > 0)
-            Positioned(
-              top: 50,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    _formatDuration(_callDurationSeconds),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
           // Control buttons at bottom
           Positioned(
@@ -893,6 +870,7 @@ class _CallScreenState extends State<CallScreen> {
           Positioned(
             top: 50,
             left: 20,
+            right: 160, // clear of the 120px preview tile
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -904,18 +882,44 @@ class _CallScreenState extends State<CallScreen> {
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                SizedBox(height: 4),
-                Text(
-                  _endReasonText.isNotEmpty
-                      ? _endReasonText
-                      : _remoteUid != null
-                          ? 'Connected'
-                          : 'Waiting...',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                  ),
+                const SizedBox(height: 4),
+                // "Connected  00:09" — status and timer inline on one line
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _endReasonText.isNotEmpty
+                          ? _endReasonText
+                          : _remoteUid != null
+                              ? 'Connected'
+                              : 'Waiting...',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (_remoteUserJoined && _callDurationSeconds > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _formatDuration(_callDurationSeconds),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),
