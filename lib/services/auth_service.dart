@@ -72,7 +72,7 @@ class AuthService {
       await _userService.setupPresence(userId);
 
       // Tag user in Crashlytics so crash reports show who was affected.
-      await CrashlyticsService.setUser(uid: userId, name: user.name);
+      await CrashlyticsService.setUser(uid: userId, displayName: user.name);
 
       print('Anonymous sign in complete!');
       return user;
@@ -186,7 +186,7 @@ class AuthService {
           // Tag user in Crashlytics.
           await CrashlyticsService.setUser(
             uid: userId,
-            name: user.name,
+            displayName: user.name,
             phone: user.phoneNumber,
           );
 
@@ -277,7 +277,7 @@ class AuthService {
             // Tag user in Crashlytics.
             await CrashlyticsService.setUser(
               uid: userId,
-              name: user.name,
+              displayName: user.name,
               phone: verifiedPhoneNumber,
             );
 
@@ -382,7 +382,7 @@ class AuthService {
           await _userService.setupPresence(userId);
 
           // Tag user in Crashlytics.
-          await CrashlyticsService.setUser(uid: userId, name: user.name);
+          await CrashlyticsService.setUser(uid: userId, displayName: user.name);
 
           return user;
         } catch (e) {
@@ -471,11 +471,7 @@ class AuthService {
       await _userService.setupPresence(userId);
 
       // Tag user in Crashlytics.
-      await CrashlyticsService.setUser(
-        uid: userId,
-        name: user.name,
-        phone: user.phoneNumber,
-      );
+      await CrashlyticsService.setUser(uid: userId, displayName: user.name);
 
       print('Email sign up complete!');
       return user;
@@ -577,7 +573,7 @@ class AuthService {
           await _userService.setupPresence(userId);
 
           // Tag user in Crashlytics.
-          await CrashlyticsService.setUser(uid: userId, name: user.name);
+          await CrashlyticsService.setUser(uid: userId, displayName: user.name);
 
           print('Email sign in complete!');
           return user;

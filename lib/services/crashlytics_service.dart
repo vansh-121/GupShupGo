@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 /// Usage examples:
 /// ```dart
 /// // After sign-in
-/// CrashlyticsService.setUser(uid: user.uid, name: user.displayName);
+/// CrashlyticsService.setUser(uid: user.uid);
 ///
 /// // Inside a catch block you want to track but not crash on
 /// CrashlyticsService.logError(e, stack, reason: 'Failed to upload avatar');
@@ -23,16 +23,30 @@ class CrashlyticsService {
   // ── User identity ────────────────────────────────────────────────────────
 
   /// Attach the signed-in user's identity to future crash reports.
-  /// Call after login and clear on logout.
+  ///
+  /// Only safe, non-PII data is stored:
+  /// - [uid] via setUserIdentifier (required — links to Firestore/Auth)
+  /// - [firstName] first name only, not PII on its own (optional)
+  /// - [maskedPhone] last 4 digits only, e.g. "XXXX7654" (optional)
+  ///
+  /// Full profile can always be looked up in Firebase Console → Firestore → users/{uid}.
   static Future<void> setUser({
     required String uid,
-    String? name,
-    String? phone,
+    String? displayName, // full name — split to first name below
+    String? phone,       // full phone — masked to last 4 digits below
   }) async {
     if (kDebugMode) return; // don't tag debug runs
     await _c.setUserIdentifier(uid);
-    if (name != null) await _c.setCustomKey('user_name', name);
-    if (phone != null) await _c.setCustomKey('user_phone', phone);
+    // First name only — not PII (can't uniquely identify someone)
+    if (displayName != null && displayName.isNotEmpty) {
+      final firstName = displayName.split(' ').first;
+      await _c.setCustomKey('user_first_name', firstName);
+    }
+    // Last 4 digits of phone only — not PII on its own
+    if (phone != null && phone.length >= 4) {
+      final masked = 'XXXX${phone.substring(phone.length - 4)}';
+      await _c.setCustomKey('user_phone_hint', masked);
+    }
   }
 
   /// Clear user identity on sign-out.
