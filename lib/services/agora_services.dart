@@ -45,16 +45,19 @@ class AgoraService {
           // ── Video configuration ──────────────────────────────────────
           await engine.enableVideo();
 
-          // HD video encoder — 720p @ 30fps (WhatsApp-level quality)
+          // 720p @ 30fps — WhatsApp/FaceTime-level quality.
+          // 1080p causes heavy CPU encoding lag on mobile; 720p @ 2000kbps
+          // is the industry-proven sweet spot for mobile video calls.
           await engine.setVideoEncoderConfiguration(
             const VideoEncoderConfiguration(
               dimensions: VideoDimensions(width: 1280, height: 720),
               frameRate: 30,
-              bitrate: 1800,
-              minBitrate: 400,
+              bitrate: 2000,
+              minBitrate: 600,
               orientationMode: OrientationMode.orientationModeAdaptive,
+              // Smooth motion first: reduce resolution before dropping FPS
               degradationPreference:
-                  DegradationPreference.maintainBalanced,
+                  DegradationPreference.maintainFramerate,
               mirrorMode: VideoMirrorModeType.videoMirrorModeDisabled,
             ),
           );
