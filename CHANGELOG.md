@@ -20,6 +20,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6] - 2026-05-09
+
+### Changed
+- 📹 **Video Quality Upgraded** — Resolution tuned to 720p @ 30fps with 2000 kbps target bitrate (up from 1800 kbps). Uses `maintainFramerate` degradation preference so video stays smooth; previous 1080p setting caused CPU encoding lag on mobile.
+- 🎛️ **Call Controls Fixed** — All buttons on both video and audio call screens now work correctly:
+  - **Speaker**: Replaced deprecated `setEnableSpeakerphone` with the correct `setRouteInCommunicationMode` API
+  - **Mute**: Label dynamically updates to "Unmute" when mic is off
+  - **Hold**: Fixed to use `adjustPlaybackSignalVolume` instead of `muteAllRemoteAudioStreams` (which permanently broke remote audio)
+  - **Camera toggle**: Replaced `muteLocalVideoStream` with `enableLocalVideo` so turning off your camera is properly signalled to the remote user
+  - **Switch camera**: Confirmed working
+- 🖼️ **Camera-Off Placeholder** — When local camera is disabled, the preview tile shows a grey videocam-off icon instead of a frozen frame
+- ⏱️ **Call Timer UI Fixed** — Timer pill now sits inline next to "Connected" on the same line (no more overlap with the username on any device)
+
+### Fixed
+- Fixed camera disable not hiding video feed on the remote user's screen
+- Fixed speaker button having no visual icon change between on/off states
+- Fixed call timer colliding with the username text at the top of the video call screen
+- Fixed Hold button silencing the remote audio permanently across the session
+
+### Technical Details
+- **Video encoder**: `VideoEncoderConfiguration` with `VideoDimensions(1280, 720)`, `frameRate: 30`, `bitrate: 2000`, `minBitrate: 600`, `DegradationPreference.maintainFramerate`
+- **Speaker API**: `setRouteInCommunicationMode(3)` = speaker, `(1)` = earpiece
+- **Camera API**: `enableLocalVideo(bool)` — stops/starts hardware capture and signals remote
+- **Hold audio**: `adjustPlaybackSignalVolume(0/100)` — non-destructive remote silence
+
+---
+
 ## [1.0.5] - 2026-05-08
 
 ### Added
@@ -170,6 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.0.6 | May 2026 | Video quality, call controls fixed, camera-off signalling, timer UI |
 | 1.0.5 | May 2026 | Device Session Mgmt, FCM Token Mgmt, Status Replies, Connectivity Monitoring, MIUI/HyperOS Optimization |
 | 1.0.4 | May 2026 | Voice Messaging, Mesh Networking, Dark Mode, Device Session Mgmt |
 | 1.0.3 | April 2026 | Dark Mode UI, What's New Dialog, Auto-Reconnect |

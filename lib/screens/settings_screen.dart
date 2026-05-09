@@ -528,7 +528,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.5',
+              subtitle: 'Version 1.0.6',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -906,7 +906,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.0.0',
+      applicationVersion: '1.0.6',
       applicationLegalese: '© 2026 GupShupGo',
     );
   }

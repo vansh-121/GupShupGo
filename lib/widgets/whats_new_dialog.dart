@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.0.5';
+const String kCurrentVersion = '1.0.6';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only when the
@@ -165,23 +165,18 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.reply_rounded,
-    'Reply to Status Updates',
-    'Reply directly to text, photo, and video statuses from the viewer.',
+    Icons.bug_report_rounded,
+    'Crash Reporting',
+    'Firebase Crashlytics now automatically captures and reports any app crashes for faster fixes.',
   ),
   _Feature(
-    Icons.visibility_rounded,
-    'Status Views Fixed',
-    'View counts now update correctly when friends watch your statuses.',
+    Icons.speed_rounded,
+    'Performance Monitoring',
+    'Firebase Performance Monitoring tracks call setup time, message speed, and upload performance in real-time.',
   ),
   _Feature(
-    Icons.notifications_active_rounded,
-    'Better Alerts and Calls',
-    'Improved message alerts, incoming call notifications, and device handling.',
+    Icons.videocam_rounded,
+    'Clearer Video Calls',
+    'Video quality upgraded to 720p @ 2000 kbps with smooth 30 fps — sharper, lag-free calls.',
   ),
-  // _Feature(
-  //   Icons.palette_rounded,
-  //   'Polished UI',
-  //   'Consistent theming across all screens for a smoother experience.',
-  // ),
 ];
