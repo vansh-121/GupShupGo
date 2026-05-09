@@ -456,7 +456,10 @@ class _CallScreenState extends State<CallScreen> {
     return AgoraVideoView(
       controller: VideoViewController(
         rtcEngine: _engine!,
-        canvas: const VideoCanvas(uid: 0),
+        canvas: const VideoCanvas(
+          uid: 0,
+          renderMode: RenderModeType.renderModeHidden,
+        ),
       ),
     );
   }
@@ -479,7 +482,10 @@ class _CallScreenState extends State<CallScreen> {
     return AgoraVideoView(
       controller: VideoViewController.remote(
         rtcEngine: _engine!,
-        canvas: VideoCanvas(uid: _remoteUid),
+        canvas: VideoCanvas(
+          uid: _remoteUid,
+          renderMode: RenderModeType.renderModeHidden,
+        ),
         connection: RtcConnection(channelId: widget.channelId),
       ),
     );

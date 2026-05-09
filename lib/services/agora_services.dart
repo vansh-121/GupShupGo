@@ -26,19 +26,36 @@ class AgoraService {
           channelProfile: ChannelProfileType.channelProfileCommunication,
         ));
 
-        // Enable audio (always needed)
+        // ── Audio configuration ──────────────────────────────────────────
         await engine.enableAudio();
 
+        // High-quality audio profile (like WhatsApp voice clarity)
+        await engine.setAudioProfile(
+          profile: AudioProfileType.audioProfileDefault,
+          scenario: AudioScenarioType.audioScenarioChatroom,
+        );
+
+        // Enhanced noise suppression for clearer voice
+        await engine.setAINSMode(
+          enabled: true,
+          mode: AudioAinsMode.ainsModeAggressive,
+        );
+
         if (!isAudioOnly) {
-          // Enable video only if not audio-only mode
+          // ── Video configuration ──────────────────────────────────────
           await engine.enableVideo();
 
-          // Set video configuration
+          // HD video encoder — 720p @ 30fps (WhatsApp-level quality)
           await engine.setVideoEncoderConfiguration(
             const VideoEncoderConfiguration(
-              dimensions: VideoDimensions(width: 640, height: 480),
-              frameRate: 15,
-              bitrate: 400,
+              dimensions: VideoDimensions(width: 1280, height: 720),
+              frameRate: 30,
+              bitrate: 1800,
+              minBitrate: 400,
+              orientationMode: OrientationMode.orientationModeAdaptive,
+              degradationPreference:
+                  DegradationPreference.maintainBalanced,
+              mirrorMode: VideoMirrorModeType.videoMirrorModeDisabled,
             ),
           );
 
