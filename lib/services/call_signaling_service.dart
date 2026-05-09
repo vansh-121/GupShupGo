@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:video_chat_app/services/crashlytics_service.dart';
 
 /// Possible statuses for a call signaling document.
 ///
@@ -58,8 +59,9 @@ class CallSignalingService {
         'status': CallSignalStatus.answered.name,
         'answeredAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
+    } catch (e, stack) {
       print('CallSignaling: error answering call: $e');
+      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.answerCall failed');
     }
   }
 
@@ -70,8 +72,9 @@ class CallSignalingService {
         'status': CallSignalStatus.declined.name,
         'endedAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
+    } catch (e, stack) {
       print('CallSignaling: error declining call: $e');
+      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.declineCall failed');
     }
   }
 
@@ -83,8 +86,9 @@ class CallSignalingService {
         'status': CallSignalStatus.ended.name,
         'endedAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
+    } catch (e, stack) {
       print('CallSignaling: error ending call: $e');
+      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.endCall failed');
     }
   }
 
@@ -95,8 +99,9 @@ class CallSignalingService {
         'status': CallSignalStatus.missed.name,
         'endedAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
+    } catch (e, stack) {
       print('CallSignaling: error marking call as missed: $e');
+      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.missCall failed');
     }
   }
 

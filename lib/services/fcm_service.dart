@@ -16,6 +16,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
+import 'package:video_chat_app/services/crashlytics_service.dart';
 
 class FCMService {
   // ── Cloud Function endpoints (no service account key needed) ────────────
@@ -199,8 +200,9 @@ class FCMService {
       );
 
       print('FCM token stored for user: $userId on device: $deviceId');
-    } catch (e) {
+    } catch (e, stack) {
       print('Error storing FCM token: $e');
+      CrashlyticsService.logError(e, stack, reason: 'FCM._storeToken failed for user $userId');
     }
   }
 
@@ -329,8 +331,9 @@ class FCMService {
       if (response.statusCode != 200) {
         print('Failed to send call notification: ${response.body}');
       }
-    } catch (e) {
+    } catch (e, stack) {
       print('Error sending call notification: $e');
+      CrashlyticsService.logError(e, stack, reason: 'FCM.sendCallNotification failed for callee $calleeId');
     }
   }
 

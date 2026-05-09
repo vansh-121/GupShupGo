@@ -1,5 +1,6 @@
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:video_chat_app/services/crashlytics_service.dart';
 
 class AgoraService {
   static bool _isReleasing = false;
@@ -77,8 +78,12 @@ class AgoraService {
       await engine.release();
       // Add a small delay to ensure complete cleanup
       await Future.delayed(Duration(milliseconds: 300));
-    } catch (e) {
+    } catch (e, stack) {
       print('Error releasing engine: $e');
+      CrashlyticsService.logError(
+        e, stack,
+        reason: 'Agora engine release failed',
+      );
     } finally {
       _isReleasing = false;
     }
