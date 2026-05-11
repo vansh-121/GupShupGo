@@ -964,10 +964,10 @@ class ChatService {
         .snapshots()
         .asyncMap((snapshot) async {
       final ps = await PlaintextStore.instance();
-      final previews = await ps.getAllRoomPreviews();
+      final previews = await ps.getAllRoomPreviewsWithMeta();
 
       // First pass: build the room list with cached previews applied, and
-      // collect any rooms that show the encrypted placeholder so we can
+      // collect any rooms whose cached preview is missing or stale so we can
       // decrypt their last message in parallel below.
       final chatRooms = <ChatRoom>[];
       final needsPreview = <int>[]; // indexes into chatRooms
@@ -986,19 +986,27 @@ class ChatService {
         }
 
         final localPreview = previews[chatRoom.id];
-        if (localPreview != null) {
+        // The cached preview is fresh only when it's at least as new as the
+        // room's lastMessageTime. Otherwise a new message landed (typically
+        // an incoming reply after we sent something) and the cache still
+        // points at our own outgoing text — drop it and eager-decrypt.
+        final roomMs = chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
+        final isFresh = localPreview != null &&
+            localPreview.updatedAt + 1000 >= roomMs;
+        if (isFresh) {
           chatRoom = ChatRoom(
             id: chatRoom.id,
             participants: chatRoom.participants,
-            lastMessage: localPreview,
+            lastMessage: localPreview.text,
             lastMessageTime: chatRoom.lastMessageTime,
             lastMessageSenderId: chatRoom.lastMessageSenderId,
             lastMessageStatus: chatRoom.lastMessageStatus,
             unreadCount: chatRoom.unreadCount,
           );
-        } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder) {
-          // No local preview and the server-side text is the encrypted
-          // placeholder — schedule an eager decrypt below.
+        } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
+            localPreview != null) {
+          // Either the server text is the encrypted placeholder, or we have
+          // a stale local preview — eager-decrypt the latest message.
           needsPreview.add(chatRooms.length);
         }
 

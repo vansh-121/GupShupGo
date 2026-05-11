@@ -154,13 +154,27 @@ class PlaintextStore {
     return rows.first['last_message_text'] as String?;
   }
 
-  /// Bulk preview lookup for the chat list — one query covers every room.
-  Future<Map<String, String>> getAllRoomPreviews() async {
-    final rows = await _db.query(_roomTable,
-        columns: const ['chat_room_id', 'last_message_text']);
+  /// Bulk preview lookup that also returns each preview's `updated_at`
+  /// (milliseconds since epoch) and the message id it was generated from.
+  /// Callers use the timestamp to decide whether the cached preview is still
+  /// fresh enough — if the chat room's lastMessageTime is newer, the cached
+  /// preview is stale (e.g. we sent the last message earlier, then the peer
+  /// replied) and must be re-derived.
+  Future<Map<String, ({String text, String messageId, int updatedAt})>>
+      getAllRoomPreviewsWithMeta() async {
+    final rows = await _db.query(_roomTable, columns: const [
+      'chat_room_id',
+      'last_message_text',
+      'last_message_id',
+      'updated_at',
+    ]);
     return {
       for (final r in rows)
-        r['chat_room_id'] as String: r['last_message_text'] as String,
+        r['chat_room_id'] as String: (
+          text: r['last_message_text'] as String,
+          messageId: (r['last_message_id'] as String?) ?? '',
+          updatedAt: (r['updated_at'] as int?) ?? 0,
+        ),
     };
   }
 
