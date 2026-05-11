@@ -22,6 +22,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
@@ -69,6 +70,18 @@ void main() async {
 
   // ── Firebase Performance Monitoring ────────────────────────────────────
   await PerformanceService.init();
+
+  // ── E2EE: hydrate Signal stores BEFORE any screen tries to encrypt or
+  //         decrypt a message. Without this, the first SignalService.instance
+  //         access after a cold start with a cached session would throw
+  //         StateError("init() must be called…") and the catch-block in
+  //         ChatService.decryptForRendering would surface as
+  //         "⚠ Decryption failed" on every incoming message.
+  try {
+    await SignalService.init();
+  } catch (e) {
+    debugPrint('SignalService.init failed at startup (non-fatal): $e');
+  }
 
   // ── App Check: fire-and-forget (don't block startup) ──
   _initAppCheck();

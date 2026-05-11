@@ -9,6 +9,7 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -34,6 +35,13 @@ class AuthService {
       print('E2EE registration failed (non-blocking): $e');
     }
   }
+
+  /// Public entry point so screens (HomeScreen on cold start, etc.) can
+  /// trigger E2EE registration without going through a sign-in path.
+  /// Needed for the upgrade case where the user was already signed in
+  /// when E2EE first shipped — no sign-in helper would have fired.
+  Future<void> ensureE2EERegisteredForCurrentSession(String userId) =>
+      _ensureE2EERegistered(userId);
 
   // Get current user
   User? getCurrentUser() {
@@ -728,6 +736,12 @@ class AuthService {
       // different account.
       await SignalService.wipe();
       await _deviceIdentity.wipeLocal();
+      // Also wipe the local decrypted-message cache so the next user signed
+      // in on this device doesn't see the previous user's chat history.
+      try {
+        final ps = await PlaintextStore.instance();
+        await ps.wipe();
+      } catch (_) {}
       await _googleSignIn.signOut();
       await _auth.signOut();
       await _clearUserIdLocally();

@@ -95,7 +95,19 @@ class PersistentSignalStores {
     if (!generated) {
       final snapshot = await _ss.read(key: _storesKey);
       if (snapshot != null) {
-        await stores._persistor.hydrate(snapshot, stores);
+        try {
+          await stores._persistor.hydrate(snapshot, stores);
+        } catch (e) {
+          // A corrupted snapshot would otherwise brick E2EE forever. The
+          // identity keypair is preserved (different storage key), so peers
+          // who've already trusted this device's identity stay trusted; only
+          // the per-peer ratchet sessions are lost and will be re-established
+          // on the next message. We delete the snapshot so the next flush()
+          // writes a clean one.
+          // ignore: avoid_print
+          print('PersistentSignalStores hydrate failed — wiping snapshot: $e');
+          await _ss.delete(key: _storesKey);
+        }
       }
     }
     return stores;

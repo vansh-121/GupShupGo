@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -19,6 +21,11 @@ class ChatService {
   // visible to the server, so we never put plaintext there.
   static const String _encryptedPreviewPlaceholder = '🔒 Encrypted message';
 
+  // All decrypted message bodies (both incoming and outgoing) live in a
+  // local sqflite DB via PlaintextStore. The Firestore stream is the
+  // transport, the local DB is the source of truth for rendering — the
+  // same architecture WhatsApp uses.
+
   /// Returns true iff the peer has at least one device with a published
   /// key bundle (i.e. they've upgraded to an E2EE-capable build).
   Future<bool> _peerHasKeyBundle(String peerUid) async {
@@ -32,30 +39,35 @@ class ChatService {
     return snap.docs.isNotEmpty;
   }
 
-  /// Decrypts a v2 (E2EE) message in-memory for rendering. Returns the
-  /// same model with `text` (and reply/media fields) populated from the
-  /// envelope addressed to (selfUid, selfDeviceId). If no envelope is
-  /// addressed to us, returns the message with `text = '⚠ This message
-  /// can't be decrypted on this device.'`
+  /// Resolves a Firestore MessageModel into its rendered form.
   ///
-  /// v1 messages are passed through unchanged.
-  Future<MessageModel> decryptForRendering(
+  /// • v1 (legacy plaintext) messages pass through unchanged.
+  /// • v2 (E2EE) messages are answered from the local PlaintextStore. We
+  ///   only call into libsignal on a cache miss, then persist the result
+  ///   so the next render is a pure SQLite hit.
+  /// • If we can't produce plaintext (the envelope isn't addressed to this
+  ///   device, the ratchet has moved past this message, the session is
+  ///   missing, etc.) we return null and the stream filters the message
+  ///   out — WhatsApp's behaviour for unrecoverable history.
+  Future<MessageModel?> decryptForRendering(
       MessageModel msg, String selfUid) async {
     if (msg.schemaVersion < 2) return msg;
+
+    final store = await PlaintextStore.instance();
+
+    // Cache hit — fast path used on every Firestore snapshot replay
+    // (read receipts, typing indicators, delivery status changes).
+    final cachedPayload = await store.get(msg.id);
+    if (cachedPayload != null) return _applyPayload(msg, cachedPayload);
+
+    // Need to actually decrypt. Find an envelope addressed to this device.
     final envelopes = msg.envelopes;
-    if (envelopes == null || envelopes.isEmpty) {
-      return msg.copyWith(text: '⚠ Encrypted message (no envelope)');
-    }
+    if (envelopes == null || envelopes.isEmpty) return null;
     final deviceId = await _deviceIdentity.getDeviceId();
-    if (deviceId == null) {
-      return msg.copyWith(text: '⚠ Encryption keys missing on this device');
-    }
-    final addr = '$selfUid:$deviceId';
-    final env = envelopes[addr];
-    if (env == null) {
-      return msg.copyWith(
-          text: '⚠ Message was sent from another device of yours');
-    }
+    if (deviceId == null) return null;
+    final env = envelopes['$selfUid:$deviceId'];
+    if (env == null) return null;
+
     try {
       final pt = await SignalService.instance.decrypt(
         msg.senderId,
@@ -63,27 +75,46 @@ class ChatService {
         EncryptedEnvelope.fromMap(env),
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
-      return msg.copyWith(
-        text: (payload['text'] as String?) ?? '',
-        mediaUrl: payload['mediaUrl'] as String?,
-        audioDuration: payload['audioDuration'] as int?,
-        statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
-        statusReplyItemId: payload['statusReplyItemId'] as String?,
-        statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
-        statusReplyOwnerPhotoUrl:
-            payload['statusReplyOwnerPhotoUrl'] as String?,
-        statusReplyType: payload['statusReplyType'] as String?,
-        statusReplyText: payload['statusReplyText'] as String?,
-        statusReplyMediaUrl: payload['statusReplyMediaUrl'] as String?,
-        statusReplyCaption: payload['statusReplyCaption'] as String?,
-        statusReplyBackgroundColor:
-            payload['statusReplyBackgroundColor'] as String?,
-      );
+      await store.save(msg.id, payload);
+      return _applyPayload(msg, payload);
     } catch (e) {
+      final errStr = e.toString();
+      // If the session is missing, drop it so the next PreKey message from
+      // this peer can rebuild from scratch. This is invisible to the user.
+      if (errStr.contains('NoSession') ||
+          errStr.contains('No session') ||
+          errStr.contains('InvalidMessage')) {
+        try {
+          await SignalService.instance.stores.sessionStore.deleteSession(
+            SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1),
+          );
+          SignalService.instance.stores.markDirty();
+        } catch (_) {}
+      }
       // ignore: avoid_print
-      print('decrypt failed for ${msg.id}: $e');
-      return msg.copyWith(text: '⚠ Decryption failed');
+      print('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
+      return null;
     }
+  }
+
+  MessageModel _applyPayload(
+      MessageModel msg, Map<String, dynamic> payload) {
+    return msg.copyWith(
+      text: (payload['text'] as String?) ?? '',
+      mediaUrl: payload['mediaUrl'] as String?,
+      audioDuration: payload['audioDuration'] as int?,
+      statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
+      statusReplyItemId: payload['statusReplyItemId'] as String?,
+      statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
+      statusReplyOwnerPhotoUrl:
+          payload['statusReplyOwnerPhotoUrl'] as String?,
+      statusReplyType: payload['statusReplyType'] as String?,
+      statusReplyText: payload['statusReplyText'] as String?,
+      statusReplyMediaUrl: payload['statusReplyMediaUrl'] as String?,
+      statusReplyCaption: payload['statusReplyCaption'] as String?,
+      statusReplyBackgroundColor:
+          payload['statusReplyBackgroundColor'] as String?,
+    );
   }
 
   // Generate a unique chat room ID from two user IDs
@@ -192,6 +223,26 @@ class ChatService {
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
+        // Persist our own outgoing plaintext to the local sqflite store so
+        // this device can render the message when the Firestore write loops
+        // back through the chat stream. No envelope is produced for the
+        // sending device in the fan-out, so this is the only way to recover
+        // the body. Survives app restart, unlike a process-local cache.
+        final ps = await PlaintextStore.instance();
+        await ps.save(messageRef.id, {
+          'text': text,
+          'mediaUrl': mediaUrl,
+          'audioDuration': audioDuration,
+          'statusReplyOwnerId': statusReplyOwnerId,
+          'statusReplyItemId': statusReplyItemId,
+          'statusReplyOwnerName': statusReplyOwnerName,
+          'statusReplyOwnerPhotoUrl': statusReplyOwnerPhotoUrl,
+          'statusReplyType': statusReplyType,
+          'statusReplyText': statusReplyText,
+          'statusReplyMediaUrl': statusReplyMediaUrl,
+          'statusReplyCaption': statusReplyCaption,
+          'statusReplyBackgroundColor': statusReplyBackgroundColor,
+        });
       } catch (e) {
         // ignore: avoid_print
         print('E2EE encrypt failed, falling back to plaintext: $e');
@@ -320,9 +371,13 @@ class ChatService {
                 clearedAt == null || msg.timestamp.isAfter(clearedAt))
             .toList();
         // Decrypt E2EE messages in parallel. v1 messages pass through.
-        return Future.wait(
+        // Null returns (messages we can't render) are filtered out — the
+        // chat list silently omits them, like WhatsApp omits messages it
+        // couldn't restore from backup.
+        final resolved = await Future.wait(
           raw.map((m) => decryptForRendering(m, currentUserId)),
         );
+        return resolved.whereType<MessageModel>().toList();
       });
     });
   }
@@ -354,9 +409,10 @@ class ChatService {
         .toList()
         .reversed
         .toList();
-    return Future.wait(
+    final resolved = await Future.wait(
       raw.map((m) => decryptForRendering(m, currentUserId)),
     );
+    return resolved.whereType<MessageModel>().toList();
   }
 
   // Mark messages as read
@@ -622,3 +678,4 @@ class ChatService {
     });
   }
 }
+

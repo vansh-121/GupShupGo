@@ -145,6 +145,14 @@ class _HomeScreenState extends State<HomeScreen>
         displayName: name.isEmpty ? mesh.displayName : name,
       );
 
+      // ── E2EE: make sure this device has published a key bundle.
+      // _ensureE2EERegistered is a cheap no-op once the local "registered"
+      // flag is set — but covers the case where a user upgraded to the
+      // E2EE build while already signed in (sign-in helpers wouldn't have
+      // fired in that scenario, so registration would otherwise never run).
+      unawaited(_authService.ensureE2EERegisteredForCurrentSession(
+          _currentUserId!));
+
       // ── Show UI immediately ──
       setState(() {
         _isInitialized = true;
