@@ -117,16 +117,55 @@ class ChatService {
     }).catchError((_) => false);
   }
 
+  // ─── Firestore message vault (cross-install backup) ─────────────────────
+  // Decrypted plaintext payloads are mirrored to
+  //   users/{uid}/msgVault/{messageId}
+  // so that a fresh install can recover message history even after the local
+  // PlaintextStore (SQLite) and Signal session state are both wiped. Vault
+  // writes are fire-and-forget: the local SQLite store is the primary cache
+  // and vault failures are non-fatal.
+  static const _vaultCollection = 'msgVault';
+
+  Future<void> _saveToVault(
+      String uid, String messageId, Map<String, dynamic> payload) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection(_vaultCollection)
+          .doc(messageId)
+          .set({'p': jsonEncode(payload)});
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>?> _loadFromVault(
+      String uid, String messageId) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection(_vaultCollection)
+          .doc(messageId)
+          .get();
+      if (!doc.exists) return null;
+      final raw = doc.data()?['p'] as String?;
+      if (raw == null) return null;
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Resolves a Firestore MessageModel into its rendered form.
   ///
   /// • v1 (legacy plaintext) messages pass through unchanged.
   /// • v2 (E2EE) messages are answered from the local PlaintextStore. We
   ///   only call into libsignal on a cache miss, then persist the result
   ///   so the next render is a pure SQLite hit.
-  /// • If we can't produce plaintext (the envelope isn't addressed to this
-  ///   device, the ratchet has moved past this message, the session is
-  ///   missing, etc.) we return null and the stream filters the message
-  ///   out — WhatsApp's behaviour for unrecoverable history.
+  /// • If the envelope isn't addressed to this device (e.g. after reinstall
+  ///   with a new device ID) or the ratchet can't decrypt, we check the
+  ///   Firestore message vault — a per-user cross-install plaintext backup —
+  ///   before returning null.
   // In-memory cache of decrypted payloads keyed by message id. Firestore
   // re-emits the entire message list on every read receipt / typing change,
   // so without this we'd hit SQLite N times per snapshot. Memory cost is
@@ -152,11 +191,24 @@ class ChatService {
 
     // Need to actually decrypt. Find an envelope addressed to this device.
     final envelopes = msg.envelopes;
-    if (envelopes == null || envelopes.isEmpty) return null;
     final deviceId = await _deviceIdentity.getDeviceId();
-    if (deviceId == null) return null;
-    final env = envelopes['$selfUid:$deviceId'];
-    if (env == null) return null;
+
+    // No envelope for this device — happens after reinstall (new device ID)
+    // or if the sender's fan-out didn't include us. Fall back to the
+    // Firestore message vault which was populated when we first decrypted
+    // this message on a previous install.
+    final env = (envelopes == null || envelopes.isEmpty || deviceId == null)
+        ? null
+        : envelopes['$selfUid:$deviceId'];
+
+    if (env == null) {
+      final vaultPayload = await _loadFromVault(selfUid, msg.id);
+      if (vaultPayload != null) {
+        _payloadMemo[msg.id] = vaultPayload;
+        await store.save(msg.id, vaultPayload);
+      }
+      return vaultPayload != null ? _applyPayload(msg, vaultPayload) : null;
+    }
 
     try {
       final pt = await SignalService.instance.decrypt(
@@ -167,6 +219,8 @@ class ChatService {
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       _payloadMemo[msg.id] = payload;
       await store.save(msg.id, payload);
+      // Mirror to the cross-install vault so future reinstalls can recover.
+      unawaited(_saveToVault(selfUid, msg.id, payload));
       // Update the chat-list preview from the receiver's side so the most
       // recent decrypted message shows up immediately on the home screen.
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
@@ -189,6 +243,13 @@ class ChatService {
           );
           SignalService.instance.stores.markDirty();
         } catch (_) {}
+      }
+      // Libsignal couldn't decrypt — try the vault before giving up.
+      final vaultPayload = await _loadFromVault(selfUid, msg.id);
+      if (vaultPayload != null) {
+        _payloadMemo[msg.id] = vaultPayload;
+        await store.save(msg.id, vaultPayload);
+        return _applyPayload(msg, vaultPayload);
       }
       // ignore: avoid_print
       print('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
@@ -438,6 +499,10 @@ class ChatService {
         // and renders without a SQLite round-trip.
         _payloadMemo[messageRef.id] = outgoingPayload;
         await ps.save(messageRef.id, outgoingPayload);
+        // Mirror to the cross-install vault so the sender's history
+        // survives a reinstall (new device ID loses the Firestore envelope
+        // but can recover from the vault).
+        unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
         // ignore: avoid_print
         print('E2EE encrypt failed, falling back to plaintext: $e');

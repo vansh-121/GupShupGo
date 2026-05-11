@@ -870,19 +870,19 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   Widget _buildEncryptedStatus(StatusItem item) {
     final dec = _decrypted[item.id];
     if (dec == null) {
-      return Container(
+      // Subtle spinner on a dark background — no "Decrypting…" text.
+      // The status progress bar at the top already indicates activity;
+      // a second text label just looks broken.
+      return const ColoredBox(
         color: Colors.black,
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_outline, color: Colors.white70, size: 48),
-              SizedBox(height: 12),
-              Text(
-                'Decrypting…',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ],
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white30,
+            ),
           ),
         ),
       );

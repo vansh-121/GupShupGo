@@ -43,6 +43,12 @@ service cloud.firestore {
       match /backups/{backupId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Cross-install message vault: decrypted plaintext mirrored here so
+      // message history survives a reinstall. Only the owner can read or write.
+      match /msgVault/{messageId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
     
     // ==================== CHAT ROOMS ====================
