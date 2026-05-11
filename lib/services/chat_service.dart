@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -61,16 +62,28 @@ class ChatService {
   ///   device, the ratchet has moved past this message, the session is
   ///   missing, etc.) we return null and the stream filters the message
   ///   out — WhatsApp's behaviour for unrecoverable history.
+  // In-memory cache of decrypted payloads keyed by message id. Firestore
+  // re-emits the entire message list on every read receipt / typing change,
+  // so without this we'd hit SQLite N times per snapshot. Memory cost is
+  // small — a Map<String, dynamic> per message — and it's wiped on signOut
+  // along with the rest of the crypto state.
+  static final Map<String, Map<String, dynamic>> _payloadMemo = {};
+
   Future<MessageModel?> decryptForRendering(
       MessageModel msg, String selfUid) async {
     if (msg.schemaVersion < 2) return msg;
 
+    // In-memory hot path — no awaits, synchronous return.
+    final memo = _payloadMemo[msg.id];
+    if (memo != null) return _applyPayload(msg, memo);
+
     final store = await PlaintextStore.instance();
 
-    // Cache hit — fast path used on every Firestore snapshot replay
-    // (read receipts, typing indicators, delivery status changes).
     final cachedPayload = await store.get(msg.id);
-    if (cachedPayload != null) return _applyPayload(msg, cachedPayload);
+    if (cachedPayload != null) {
+      _payloadMemo[msg.id] = cachedPayload;
+      return _applyPayload(msg, cachedPayload);
+    }
 
     // Need to actually decrypt. Find an envelope addressed to this device.
     final envelopes = msg.envelopes;
@@ -87,6 +100,7 @@ class ChatService {
         EncryptedEnvelope.fromMap(env),
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
+      _payloadMemo[msg.id] = payload;
       await store.save(msg.id, payload);
       // Update the chat-list preview from the receiver's side so the most
       // recent decrypted message shows up immediately on the home screen.
@@ -256,7 +270,7 @@ class ChatService {
               ? 'Replied to status: $text'
               : text,
         );
-        await ps.save(messageRef.id, {
+        final outgoingPayload = <String, dynamic>{
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
@@ -269,7 +283,12 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
-        });
+        };
+        // Populate the in-memory memo BEFORE the Firestore write so the
+        // stream's snapshot for our own message hits the synchronous path
+        // and renders without a SQLite round-trip.
+        _payloadMemo[messageRef.id] = outgoingPayload;
+        await ps.save(messageRef.id, outgoingPayload);
       } catch (e) {
         // ignore: avoid_print
         print('E2EE encrypt failed, falling back to plaintext: $e');
@@ -337,27 +356,30 @@ class ChatService {
     );
     print('Message sent: ${message.id}');
 
-    // Send push notification for message delivery.
-    // This helps mark message as delivered even if receiver app is in background.
+    // Fire-and-forget the FCM push. Awaiting it added 200ms–1s to every
+    // send while the HTTP call to the notifications endpoint ran. The
+    // message is already committed to Firestore by this point, so the
+    // receiver will get it via the chat stream regardless — the FCM ping
+    // is only there to wake a backgrounded app.
     //
-    // E2EE: NEVER include the plaintext in the FCM payload. The FCM service
-    // is operated by the cloud provider and any preview text is visible to
-    // them. We pass a generic preview when E2EE is active; the receiver's
-    // device renders the real text after decryption.
-    try {
-      String displayName = senderName ?? 'Someone';
-      final previewText = schemaVersion == 2 ? 'New message' : text;
-      await _fcmService.sendMessageNotification(
-        receiverId: receiverId,
-        senderId: senderId,
-        senderName: displayName,
-        message: previewText,
-        chatRoomId: chatRoomId,
-      );
-    } catch (e) {
-      print('Error sending message notification: $e');
-      // Don't fail the message send if notification fails
-    }
+    // E2EE: NEVER include the plaintext in the FCM payload. The FCM
+    // backend can read whatever we put in here; the receiver's device
+    // renders the real text after decryption.
+    unawaited(() async {
+      try {
+        final displayName = senderName ?? 'Someone';
+        final previewText = schemaVersion == 2 ? 'New message' : text;
+        await _fcmService.sendMessageNotification(
+          receiverId: receiverId,
+          senderId: senderId,
+          senderName: displayName,
+          message: previewText,
+          chatRoomId: chatRoomId,
+        );
+      } catch (e) {
+        print('Error sending message notification: $e');
+      }
+    }());
 
     return message;
   }
@@ -573,32 +595,28 @@ class ChatService {
         .where('participants', arrayContains: userId)
         .snapshots()
         .asyncMap((snapshot) async {
-      // Pull all local previews in one query — the Firestore-side
-      // `lastMessage` is the encrypted placeholder for v2 rooms, so we
-      // override it with the locally-decrypted text whenever we have one.
-      final previews =
-          await (await PlaintextStore.instance()).getAllRoomPreviews();
+      final ps = await PlaintextStore.instance();
+      final previews = await ps.getAllRoomPreviews();
 
-      List<ChatRoom> chatRooms = [];
+      // First pass: build the room list with cached previews applied, and
+      // collect any rooms that show the encrypted placeholder so we can
+      // decrypt their last message in parallel below.
+      final chatRooms = <ChatRoom>[];
+      final needsPreview = <int>[]; // indexes into chatRooms
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
         var chatRoom = ChatRoom.fromMap(data, doc.id);
 
-        // Check per-user clearedAt timestamp
         final clearedAtMap = data['clearedAt'] as Map<String, dynamic>?;
         if (clearedAtMap != null && clearedAtMap[userId] != null) {
           final clearedAt = (clearedAtMap[userId] as Timestamp).toDate();
-          // Hide if no messages exist after clear time
           if (chatRoom.lastMessageTime == null ||
               !chatRoom.lastMessageTime!.isAfter(clearedAt)) {
-            continue; // skip this chat room
+            continue;
           }
         }
 
-        // Override the server-side placeholder with our locally decrypted
-        // preview, if we have one. Rooms still on v1 (or where we don't
-        // yet have a preview cached) fall back to whatever Firestore has.
         final localPreview = previews[chatRoom.id];
         if (localPreview != null) {
           chatRoom = ChatRoom(
@@ -610,9 +628,58 @@ class ChatService {
             lastMessageStatus: chatRoom.lastMessageStatus,
             unreadCount: chatRoom.unreadCount,
           );
+        } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder) {
+          // No local preview and the server-side text is the encrypted
+          // placeholder — schedule an eager decrypt below.
+          needsPreview.add(chatRooms.length);
         }
 
         chatRooms.add(chatRoom);
+      }
+
+      // Eager preview decrypt: fetch the latest message of each room that
+      // still shows the placeholder and decrypt it locally. This is how
+      // WhatsApp's chat list shows the real text without ever opening the
+      // chat. Runs in parallel; per-room cost is one Firestore read + one
+      // libsignal decrypt, and the result is persisted so subsequent
+      // snapshots short-circuit to the SQLite cache.
+      if (needsPreview.isNotEmpty) {
+        await Future.wait(needsPreview.map((i) async {
+          final room = chatRooms[i];
+          try {
+            final latest = await _firestore
+                .collection(_chatRoomsCollection)
+                .doc(room.id)
+                .collection(_messagesCollection)
+                .orderBy('timestamp', descending: true)
+                .limit(1)
+                .get();
+            if (latest.docs.isEmpty) return;
+            final msg = MessageModel.fromFirestore(latest.docs.first);
+            final decrypted = await decryptForRendering(msg, userId);
+            if (decrypted == null) return;
+            final text = decrypted.text.isNotEmpty
+                ? decrypted.text
+                : (decrypted.mediaUrl != null ? 'Media' : '');
+            if (text.isEmpty) return;
+            await ps.saveRoomPreview(
+              chatRoomId: room.id,
+              messageId: msg.id,
+              text: text,
+            );
+            chatRooms[i] = ChatRoom(
+              id: room.id,
+              participants: room.participants,
+              lastMessage: text,
+              lastMessageTime: room.lastMessageTime,
+              lastMessageSenderId: room.lastMessageSenderId,
+              lastMessageStatus: room.lastMessageStatus,
+              unreadCount: room.unreadCount,
+            );
+          } catch (_) {
+            // Leave the placeholder in place; next snapshot will retry.
+          }
+        }));
       }
 
       // Sort locally to handle null lastMessageTime

@@ -220,8 +220,14 @@ class SignalService {
     required Uint8List plaintext,
   }) async {
     final out = <String, EncryptedEnvelope>{};
-    final recipientDevices =
-        await _listDeviceIds(recipientUid);
+    final recipientDevices = (await _listDeviceIds(recipientUid)).toList();
+    // Never Signal-encrypt to our own posting device: it advances the session
+    // ratchet at encrypt time and we'd be unable to decrypt the resulting
+    // ciphertext on the same device. Callers that need the posting device
+    // to access the plaintext later must cache it locally.
+    if (recipientUid == senderUid) {
+      recipientDevices.removeWhere((d) => d == senderDeviceId);
+    }
     final senderOtherDevices = (await _listDeviceIds(senderUid))
       ..removeWhere((d) => d == senderDeviceId);
 

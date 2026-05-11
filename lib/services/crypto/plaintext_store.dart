@@ -23,6 +23,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -160,6 +161,38 @@ class PlaintextStore {
       for (final r in rows)
         r['chat_room_id'] as String: r['last_message_text'] as String,
     };
+  }
+
+  /// Save the AES content key for a status item this device posted, so the
+  /// owner can decrypt their own status without a Signal-to-self envelope
+  /// (which would advance the ratchet and break local decrypt). Stored in
+  /// the same table with a `status_key:` id prefix to avoid a schema bump.
+  Future<void> saveStatusKey(String statusItemId, Uint8List key) async {
+    await _db.insert(
+      _table,
+      {
+        'id': 'status_key:$statusItemId',
+        'payload': jsonEncode({'k': base64Encode(key)}),
+        'saved_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Fetches the locally-cached content key for an owner's own status item,
+  /// or null if this device didn't post it.
+  Future<Uint8List?> getStatusKey(String statusItemId) async {
+    final rows = await _db.query(
+      _table,
+      columns: const ['payload'],
+      where: 'id = ?',
+      whereArgs: ['status_key:$statusItemId'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final payload =
+        jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+    return base64Decode(payload['k'] as String);
   }
 
   /// Drops all rows. Called from AuthService.signOut.

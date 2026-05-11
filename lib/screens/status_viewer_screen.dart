@@ -73,52 +73,110 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       duration: Duration(seconds: 5),
     )..addStatusListener(_onProgressStatus);
 
-    _decryptAllEncrypted().then((_) {
-      if (mounted) setState(() {});
-    });
+    // Hydrate from the process-wide cache synchronously so the first
+    // frame already renders the plaintext when the provider pre-decrypted
+    // ahead of us. This is the "no spinner" path.
+    for (final item in _activeItems) {
+      if (!item.type.startsWith('encrypted')) continue;
+      final cached = StatusService.cachedPlaintext(item.id);
+      if (cached == null) continue;
+      _decrypted[item.id] = cached.text != null
+          ? _DecryptedStatus.text(
+              text: cached.text ?? '',
+              backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+            )
+          : _DecryptedStatus.media(
+              localFile: cached.localFile!,
+              bytes: cached.bytes!,
+              isVideo: cached.isVideo,
+            );
+    }
+
+    _decryptAllEncrypted();
     _loadCurrentStatus();
     _markCurrentAsViewed();
   }
 
-  /// Eagerly decrypt every encrypted item so swipes are instant. Each item
-  /// goes from {url, iv, hash} on Firestore → AES-GCM ciphertext from Storage
-  /// → plaintext bytes here. Failures (no key envelope, integrity mismatch)
-  /// leave the slot empty; the builder shows a "⚠ couldn't decrypt" panel.
+  /// Decrypt the currently-visible item first so the user stops staring at
+  /// "Decrypting…" while later items round-trip. The remaining items run in
+  /// parallel and each one rebuilds the UI as soon as it lands.
   Future<void> _decryptAllEncrypted() async {
-    for (final item in _activeItems) {
-      if (!item.type.startsWith('encrypted')) continue;
-      try {
-        final result = await _statusService.decryptStatusItem(
+    final encrypted = _activeItems
+        .where((i) => i.type.startsWith('encrypted'))
+        .toList();
+    if (encrypted.isEmpty) return;
+
+    final current = _activeItems[_currentIndex];
+    if (current.type.startsWith('encrypted')) {
+      await _decryptOne(current);
+      if (mounted) setState(() {});
+    }
+
+    await Future.wait(encrypted
+        .where((i) => i.id != current.id)
+        .map((item) async {
+      await _decryptOne(item);
+      if (mounted) setState(() {});
+    }));
+  }
+
+  Future<void> _decryptOne(StatusItem item) async {
+    if (_decrypted.containsKey(item.id)) return;
+    // Process-wide cache hit: the provider has already decrypted this item
+    // while the user was browsing the status list. Render synchronously,
+    // no network round-trip.
+    final cached = StatusService.cachedPlaintext(item.id);
+    if (cached != null) {
+      _decrypted[item.id] = cached.text != null
+          ? _DecryptedStatus.text(
+              text: cached.text ?? '',
+              backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+            )
+          : _DecryptedStatus.media(
+              localFile: cached.localFile!,
+              bytes: cached.bytes!,
+              isVideo: cached.isVideo,
+            );
+      return;
+    }
+    try {
+      // Try up to 3 times with a small backoff. Covers the brief window
+      // where a viewer opens a fresh status before the wrappedKey envelope
+      // has propagated through Firestore (or arrived via the listener).
+      Map<String, dynamic>? result;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        result = await _statusService.decryptStatusItem(
           ownerUid: widget.statusModel.userId,
           item: item,
           selfUid: widget.currentUserId,
         );
-        if (result == null) continue;
-        if (item.type == 'encrypted') {
-          final j = result['json'] as Map<String, dynamic>;
-          _decrypted[item.id] = _DecryptedStatus.text(
-            text: (j['text'] as String?) ?? '',
-            backgroundColor:
-                (j['backgroundColor'] as String?) ?? '#6C5CE7',
-          );
-        } else {
-          // Write decrypted bytes to a temp file so VideoPlayer / Image.file
-          // can consume them. systemTemp is wiped by the OS.
-          final bytes = result['bytes'] as Uint8List;
-          final isVideo = item.type == 'encrypted_video';
-          final ext = isVideo ? 'mp4' : 'jpg';
-          final file = await File(
-                  '${Directory.systemTemp.path}/dec_${item.id}.$ext')
-              .writeAsBytes(bytes, flush: true);
-          _decrypted[item.id] = _DecryptedStatus.media(
-            localFile: file,
-            bytes: bytes,
-            isVideo: isVideo,
-          );
-        }
-      } catch (_) {
-        // skip — UI will show the "couldn't decrypt" placeholder.
+        if (result != null) break;
+        if (!mounted) return;
+        await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
       }
+      if (result == null) return;
+      if (item.type == 'encrypted') {
+        final j = result['json'] as Map<String, dynamic>;
+        _decrypted[item.id] = _DecryptedStatus.text(
+          text: (j['text'] as String?) ?? '',
+          backgroundColor:
+              (j['backgroundColor'] as String?) ?? '#6C5CE7',
+        );
+      } else {
+        final bytes = result['bytes'] as Uint8List;
+        final isVideo = item.type == 'encrypted_video';
+        final ext = isVideo ? 'mp4' : 'jpg';
+        final file = await File(
+                '${Directory.systemTemp.path}/dec_${item.id}.$ext')
+            .writeAsBytes(bytes, flush: true);
+        _decrypted[item.id] = _DecryptedStatus.media(
+          localFile: file,
+          bytes: bytes,
+          isVideo: isVideo,
+        );
+      }
+    } catch (_) {
+      // skip — UI will show the "couldn't decrypt" placeholder.
     }
   }
 

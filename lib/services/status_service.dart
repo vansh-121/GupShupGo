@@ -8,9 +8,32 @@ import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
-import 'package:video_chat_app/services/crypto/persistent_signal_stores.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
+
+/// Decrypted form of an encrypted status item, kept in the process-wide
+/// cache below so the viewer can render instantly when the user taps a
+/// status. WhatsApp's UX guarantee is "no spinners on status open" — that
+/// only works if the work happens *before* the user taps.
+class StatusPlaintext {
+  StatusPlaintext.text({required this.text, required this.backgroundColor})
+      : localFile = null,
+        bytes = null,
+        isVideo = false;
+  StatusPlaintext.media({
+    required File this.localFile,
+    required Uint8List this.bytes,
+    required this.isVideo,
+  })  : text = null,
+        backgroundColor = null;
+
+  final String? text;
+  final String? backgroundColor;
+  final File? localFile;
+  final Uint8List? bytes;
+  final bool isVideo;
+}
 
 class StatusService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -18,6 +41,76 @@ class StatusService {
   final EncryptedMediaService _media = EncryptedMediaService();
   final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
   final String _statusCollection = 'statuses';
+
+  // Process-wide cache of decrypted status items, populated as soon as
+  // the status list streams emit. The viewer reads from here on open —
+  // there is no on-demand decryption while a UI screen is visible.
+  static final Map<String, StatusPlaintext> _plaintextCache = {};
+  // Dedupe in-flight pre-decrypts so multiple stream emissions don't fire
+  // overlapping decrypt jobs for the same status item.
+  static final Map<String, Future<void>> _inFlight = {};
+
+  static StatusPlaintext? cachedPlaintext(String statusItemId) =>
+      _plaintextCache[statusItemId];
+
+  /// Background pre-decrypt for every encrypted item in [models]. Safe to
+  /// call repeatedly from a stream listener — already-decrypted items and
+  /// already-in-flight items are skipped. Fire-and-forget from the caller's
+  /// perspective; never throws.
+  Future<void> preDecryptStatuses(
+      List<StatusModel> models, String selfUid) async {
+    final tasks = <Future<void>>[];
+    for (final m in models) {
+      for (final item in m.activeStatusItems) {
+        if (!item.type.startsWith('encrypted')) continue;
+        if (_plaintextCache.containsKey(item.id)) continue;
+        final existing = _inFlight[item.id];
+        if (existing != null) {
+          tasks.add(existing);
+          continue;
+        }
+        final future = _preDecryptOne(m.userId, item, selfUid)
+            .whenComplete(() => _inFlight.remove(item.id));
+        _inFlight[item.id] = future;
+        tasks.add(future);
+      }
+    }
+    if (tasks.isNotEmpty) await Future.wait(tasks);
+  }
+
+  Future<void> _preDecryptOne(
+      String ownerUid, StatusItem item, String selfUid) async {
+    try {
+      final result = await decryptStatusItem(
+        ownerUid: ownerUid,
+        item: item,
+        selfUid: selfUid,
+      );
+      if (result == null) return;
+      if (item.type == 'encrypted') {
+        final j = result['json'] as Map<String, dynamic>;
+        _plaintextCache[item.id] = StatusPlaintext.text(
+          text: (j['text'] as String?) ?? '',
+          backgroundColor:
+              (j['backgroundColor'] as String?) ?? '#6C5CE7',
+        );
+      } else {
+        final bytes = result['bytes'] as Uint8List;
+        final isVideo = item.type == 'encrypted_video';
+        final ext = isVideo ? 'mp4' : 'jpg';
+        final file = await File(
+                '${Directory.systemTemp.path}/dec_${item.id}.$ext')
+            .writeAsBytes(bytes, flush: true);
+        _plaintextCache[item.id] = StatusPlaintext.media(
+          localFile: file,
+          bytes: bytes,
+          isVideo: isVideo,
+        );
+      }
+    } catch (_) {
+      // Leave uncached; viewer will retry on open as a fallback.
+    }
+  }
 
   // ── E2EE status: wrap a per-status content key for each authorised viewer.
   //
@@ -32,7 +125,9 @@ class StatusService {
   // To rotate the viewer set (someone added/removed from contacts), we add
   // or remove the wrappedKey doc — the blob never changes.
 
-  /// Wraps the content key for every viewer's every device.
+  /// Wraps the content key for every viewer's every device. The owner is
+  /// always included in the fan-out so they can decrypt their own status
+  /// (otherwise "My Status" stays on the "Decrypting…" placeholder forever).
   Future<void> _publishWrappedKeys({
     required String ownerUid,
     required int ownerDeviceId,
@@ -40,7 +135,8 @@ class StatusService {
     required Uint8List contentKey,
     required List<String> viewerUids,
   }) async {
-    for (final viewerUid in viewerUids) {
+    final fanout = <String>{...viewerUids, ownerUid}.toList();
+    for (final viewerUid in fanout) {
       final encs = await SignalService.instance.encryptForUser(
         senderUid: ownerUid,
         senderDeviceId: ownerDeviceId,
@@ -98,9 +194,6 @@ class StatusService {
     }
   }
 
-  /// Random 256-bit content key for a status item.
-  Uint8List _newContentKey() => signalRandomBytes(32);
-
   /// Compute the default viewer set: every other user with whom this user has
   /// an active chat room. The pragmatic "who can see my status" cohort —
   /// matches how most people actually share status updates without exposing
@@ -138,11 +231,9 @@ class StatusService {
     if (ownerDeviceId == null) {
       throw StateError('E2EE not registered — cannot post encrypted status');
     }
-    final contentKey = _newContentKey();
     final statusItemId = _firestore.collection(_statusCollection).doc().id;
 
-    // Encrypt the text using the same AES-GCM helper as media.
-    final encBundle = await _media.encryptAndUploadBytes(
+    final bundle = await _media.encryptAndUploadBytes(
       bytes: Uint8List.fromList(utf8.encode(jsonEncode({
         'type': 'text',
         'text': text,
@@ -152,26 +243,6 @@ class StatusService {
           'statuses/$userId/encrypted_text/${DateTime.now().millisecondsSinceEpoch}',
       contentType: 'application/json',
     );
-    // Override the random per-blob key with the per-status content key so
-    // _all_ status blobs of this item share the same key (text + any future
-    // media in the same story). For text-only this is functionally equivalent
-    // to encBundle.key, but unified design.
-    final unifiedKey = contentKey;
-    // Re-encrypt with the unified key to keep one wrapping per status item.
-    final reEncrypted = await _media.encryptAndUploadBytes(
-      bytes: Uint8List.fromList(utf8.encode(jsonEncode({
-        'type': 'text',
-        'text': text,
-        'backgroundColor': backgroundColor,
-      }))),
-      storagePath:
-          'statuses/$userId/encrypted_text/${DateTime.now().millisecondsSinceEpoch}_v2',
-      contentType: 'application/json',
-    );
-    // Delete the throwaway first upload.
-    try {
-      await FirebaseStorage.instance.refFromURL(encBundle.url).delete();
-    } catch (_) {}
 
     final statusItem = StatusItem(
       id: statusItemId,
@@ -179,31 +250,37 @@ class StatusService {
       text: null,
       createdAt: DateTime.now(),
       viewedBy: [],
-      // We stash the bundle without the key — viewers fetch the wrapped key
-      // separately and decrypt locally.
-      imageUrl: reEncrypted.url,
+      imageUrl: bundle.url,
       caption: jsonEncode({
         'enc': true,
-        'iv': base64Encode(reEncrypted.iv),
-        'hash': base64Encode(reEncrypted.hash),
+        'iv': base64Encode(bundle.iv),
+        'hash': base64Encode(bundle.hash),
         'ownerDeviceId': ownerDeviceId,
       }),
     );
 
+    // Cache the content key locally so this (posting) device can decrypt
+    // its own status without a Signal-to-self envelope.
+    final ps = await PlaintextStore.instance();
+    await ps.saveStatusKey(statusItemId, Uint8List.fromList(bundle.key));
+
+    // Order matters: publish wrapped keys BEFORE the status item doc.
+    // The status list stream fires as soon as the item doc lands; if the
+    // viewer opens it before their envelope exists, `_fetchWrappedKey`
+    // returns null and the viewer is stuck on "Decrypting…" with no retry.
+    await _publishWrappedKeys(
+      ownerUid: userId,
+      ownerDeviceId: ownerDeviceId,
+      statusItemId: statusItemId,
+      contentKey: Uint8List.fromList(bundle.key),
+      viewerUids: viewerUids,
+    );
     await _addStatusItem(
       userId: userId,
       userName: userName,
       userPhotoUrl: userPhotoUrl,
       userPhoneNumber: userPhoneNumber,
       statusItem: statusItem,
-    );
-
-    await _publishWrappedKeys(
-      ownerUid: userId,
-      ownerDeviceId: ownerDeviceId,
-      statusItemId: statusItemId,
-      contentKey: unifiedKey,
-      viewerUids: viewerUids,
     );
   }
 
@@ -293,20 +370,25 @@ class StatusService {
       viewedBy: [],
     );
 
-    await _addStatusItem(
-      userId: userId,
-      userName: userName,
-      userPhotoUrl: userPhotoUrl,
-      userPhoneNumber: userPhoneNumber,
-      statusItem: statusItem,
-    );
+    final ps = await PlaintextStore.instance();
+    await ps.saveStatusKey(statusItemId, Uint8List.fromList(bundle.key));
 
+    // Wrapped keys must land before the status item is visible to the
+    // status list stream — otherwise the viewer opens it, finds no
+    // envelope addressed to them, and stays on "Decrypting…" with no retry.
     await _publishWrappedKeys(
       ownerUid: userId,
       ownerDeviceId: ownerDeviceId,
       statusItemId: statusItemId,
       contentKey: Uint8List.fromList(bundle.key),
       viewerUids: viewerUids,
+    );
+    await _addStatusItem(
+      userId: userId,
+      userName: userName,
+      userPhotoUrl: userPhotoUrl,
+      userPhoneNumber: userPhoneNumber,
+      statusItem: statusItem,
     );
   }
 
@@ -328,7 +410,13 @@ class StatusService {
     final meta = jsonDecode(item.caption ?? '{}') as Map<String, dynamic>;
     final ownerDeviceId = (meta['ownerDeviceId'] as int?) ?? 1;
 
-    final key = await _fetchWrappedKey(
+    // Owner viewing their own status: read the locally-cached content key
+    // first. No Firestore round-trip, no Signal-to-self.
+    Uint8List? key;
+    if (selfUid == ownerUid) {
+      key = await (await PlaintextStore.instance()).getStatusKey(item.id);
+    }
+    key ??= await _fetchWrappedKey(
       ownerUid: ownerUid,
       ownerDeviceId: ownerDeviceId,
       statusItemId: item.id,

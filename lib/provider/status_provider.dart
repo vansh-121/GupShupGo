@@ -39,6 +39,12 @@ class StatusProvider extends ChangeNotifier {
       (status) {
         _myStatus = status;
         notifyListeners();
+        // Pre-decrypt our own encrypted statuses too — keeps the "My
+        // Status" tap-through instant on multi-device installs where the
+        // owner is just another viewer.
+        if (status != null) {
+          _statusService.preDecryptStatuses([status], userId);
+        }
       },
       onError: (e) {
         _error = e.toString();
@@ -53,6 +59,11 @@ class StatusProvider extends ChangeNotifier {
       (statuses) {
         _otherStatuses = statuses;
         notifyListeners();
+        // Kick off pre-decrypt in the background. The viewer reads from
+        // the resulting in-memory cache on tap, so opening a status feels
+        // instant instead of waiting on a Firestore read + Storage GET +
+        // libsignal + AES-GCM round-trip.
+        _statusService.preDecryptStatuses(statuses, userId);
       },
       onError: (e) {
         _error = e.toString();
