@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -46,6 +47,11 @@ class StatusService {
   // the status list streams emit. The viewer reads from here on open —
   // there is no on-demand decryption while a UI screen is visible.
   static final Map<String, StatusPlaintext> _plaintextCache = {};
+  // AES content keys for media statuses, keyed by statusItemId.
+  // Populated by _preWarmStatusCache from statusVault and by _fetchWrappedKey
+  // on first successful decrypt. Allows media to re-download from Storage on
+  // reinstall without needing the Signal session to unwrap the key again.
+  static final Map<String, Uint8List> _mediaKeyCache = {};
   // Dedupe in-flight pre-decrypts so multiple stream emissions don't fire
   // overlapping decrypt jobs for the same status item.
   static final Map<String, Future<void>> _inFlight = {};
@@ -53,12 +59,81 @@ class StatusService {
   static StatusPlaintext? cachedPlaintext(String statusItemId) =>
       _plaintextCache[statusItemId];
 
+  // ─── Status vault (cross-install backup for text statuses) ───────────────
+  // Text status plaintext is mirrored to users/{selfUid}/statusVault/{itemId}
+  // so it survives reinstall (Signal session wiped → _fetchWrappedKey fails,
+  // but vault still has the plaintext). Media statuses are not vaulted —
+  // the blobs are too large for Firestore; disk cache covers restarts.
+  static const _statusVaultCollection = 'statusVault';
+
+  // Memoised per-uid vault pre-warm — one Firestore collection read at startup
+  // instead of per-item misses during decryption.
+  static final Map<String, Future<void>> _statusPreWarmCache = {};
+
+  Future<void> _preWarmStatusCache(String selfUid) {
+    return _statusPreWarmCache.putIfAbsent(
+        selfUid, () => _doPreWarmStatus(selfUid));
+  }
+
+  Future<void> _doPreWarmStatus(String selfUid) async {
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(selfUid)
+          .collection(_statusVaultCollection)
+          .get();
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        if (data['t'] == 'text' && !_plaintextCache.containsKey(doc.id)) {
+          _plaintextCache[doc.id] = StatusPlaintext.text(
+            text: (data['tx'] as String?) ?? '',
+            backgroundColor: (data['bg'] as String?) ?? '#6C5CE7',
+          );
+        } else if (data['t'] == 'media_key' &&
+            !_mediaKeyCache.containsKey(doc.id)) {
+          // Restore the AES content key — the encrypted blob is still in
+          // Storage, so we can re-download and decrypt without Signal.
+          final k = data['k'] as String?;
+          if (k != null) _mediaKeyCache[doc.id] = base64Decode(k);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveTextStatusToVault(
+      String selfUid, String itemId, String text, String bg) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(selfUid)
+          .collection(_statusVaultCollection)
+          .doc(itemId)
+          .set({'t': 'text', 'tx': text, 'bg': bg});
+    } catch (_) {}
+  }
+
+  Future<void> _saveMediaKeyToVault(
+      String selfUid, String itemId, Uint8List key) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(selfUid)
+          .collection(_statusVaultCollection)
+          .doc(itemId)
+          .set({'t': 'media_key', 'k': base64Encode(key)});
+    } catch (_) {}
+  }
+
   /// Background pre-decrypt for every encrypted item in [models]. Safe to
   /// call repeatedly from a stream listener — already-decrypted items and
   /// already-in-flight items are skipped. Fire-and-forget from the caller's
   /// perspective; never throws.
   Future<void> preDecryptStatuses(
       List<StatusModel> models, String selfUid) async {
+    // Bulk-load the text status vault into _plaintextCache so items that
+    // were seen on a previous install (Signal session lost) still render.
+    await _preWarmStatusCache(selfUid);
+
     final tasks = <Future<void>>[];
     for (final m in models) {
       for (final item in m.activeStatusItems) {
@@ -144,6 +219,9 @@ class StatusService {
         ownerUid: ownerUid,
         item: item,
         selfUid: selfUid,
+        // Pass the vault-restored AES key so media statuses can re-download
+        // from Storage on reinstall without needing the Signal session.
+        preloadedKey: _mediaKeyCache[item.id],
       );
       if (result == null) return;
       if (item.type == 'encrypted') {
@@ -158,6 +236,8 @@ class StatusService {
           text: text,
           backgroundColor: bg,
         );
+        // Mirror to Firestore vault so text statuses survive reinstall.
+        unawaited(_saveTextStatusToVault(selfUid, item.id, text, bg));
       } else {
         final bytes = result['bytes'] as Uint8List;
         final isVideo = item.type == 'encrypted_video';
@@ -265,8 +345,13 @@ class StatusService {
     if (!doc.exists) return null;
     final env = EncryptedEnvelope.fromMap(doc.data()!);
     try {
-      return await SignalService.instance
+      final key = await SignalService.instance
           .decrypt(ownerUid, ownerDeviceId, env);
+      // Mirror AES key to vault so future reinstalls can re-download the
+      // blob from Storage without needing the Signal session.
+      _mediaKeyCache[statusItemId] = key;
+      unawaited(_saveMediaKeyToVault(selfUid, statusItemId, key));
+      return key;
     } catch (_) {
       return null;
     }
@@ -340,7 +425,10 @@ class StatusService {
     // Cache the content key locally so this (posting) device can decrypt
     // its own status without a Signal-to-self envelope.
     final ps = await PlaintextStore.instance();
-    await ps.saveStatusKey(statusItemId, Uint8List.fromList(bundle.key));
+    final ownerKey = Uint8List.fromList(bundle.key);
+    await ps.saveStatusKey(statusItemId, ownerKey);
+    _mediaKeyCache[statusItemId] = ownerKey;
+    unawaited(_saveMediaKeyToVault(userId, statusItemId, ownerKey));
 
     // Order matters: publish wrapped keys BEFORE the status item doc.
     // The status list stream fires as soon as the item doc lands; if the
@@ -449,7 +537,10 @@ class StatusService {
     );
 
     final ps = await PlaintextStore.instance();
-    await ps.saveStatusKey(statusItemId, Uint8List.fromList(bundle.key));
+    final ownerMediaKey = Uint8List.fromList(bundle.key);
+    await ps.saveStatusKey(statusItemId, ownerMediaKey);
+    _mediaKeyCache[statusItemId] = ownerMediaKey;
+    unawaited(_saveMediaKeyToVault(userId, statusItemId, ownerMediaKey));
 
     // Wrapped keys must land before the status item is visible to the
     // status list stream — otherwise the viewer opens it, finds no
@@ -472,10 +563,14 @@ class StatusService {
 
   /// Viewer side: decrypts an encrypted status item and returns the
   /// plaintext bytes + iv. Returns null if not authorised.
+  ///
+  /// [preloadedKey] skips Signal-decrypt entirely — used on reinstall when
+  /// _mediaKeyCache already has the AES key from the Firestore status vault.
   Future<Map<String, dynamic>?> decryptStatusItem({
     required String ownerUid,
     required StatusItem item,
     required String selfUid,
+    Uint8List? preloadedKey,
   }) async {
     if (item.type != 'encrypted' &&
         item.type != 'encrypted_image' &&
@@ -488,10 +583,12 @@ class StatusService {
     final meta = jsonDecode(item.caption ?? '{}') as Map<String, dynamic>;
     final ownerDeviceId = (meta['ownerDeviceId'] as int?) ?? 1;
 
-    // Owner viewing their own status: read the locally-cached content key
-    // first. No Firestore round-trip, no Signal-to-self.
-    Uint8List? key;
-    if (selfUid == ownerUid) {
+    // Priority order for the AES content key:
+    //   1. preloadedKey (from _mediaKeyCache, pre-warmed from vault)
+    //   2. Owner's local SQLite store (no Signal round-trip)
+    //   3. Signal-decrypt via _fetchWrappedKey (needs live session)
+    Uint8List? key = preloadedKey;
+    if (key == null && selfUid == ownerUid) {
       key = await (await PlaintextStore.instance()).getStatusKey(item.id);
     }
     key ??= await _fetchWrappedKey(

@@ -117,6 +117,52 @@ class ChatService {
     }).catchError((_) => false);
   }
 
+  // ─── Payload cache pre-warm ──────────────────────────────────────────────
+  // On every chat open we bulk-load both the local SQLite store AND the
+  // Firestore message vault into _payloadMemo in ONE pass before the message
+  // subscription starts. This means the first Firestore snapshot resolves
+  // synchronously via memo (no awaits per-message), which is how WhatsApp
+  // renders instantly even on a reinstall.
+  //
+  // The Future is memoised per uid so concurrent opens or rapid navigation
+  // between chats never trigger duplicate network reads.
+  static final Map<String, Future<void>> _preWarmCache = {};
+
+  Future<void> _preWarmPayloadCache(String uid) {
+    return _preWarmCache.putIfAbsent(uid, () => _doPreWarm(uid));
+  }
+
+  Future<void> _doPreWarm(String uid) async {
+    // 1. SQLite bulk-load (local IO, ~10-50ms) — populates memo from prior
+    //    decryption sessions on the same install.
+    try {
+      final store = await PlaintextStore.instance();
+      final all = await store.getAllMessagePayloads();
+      for (final e in all.entries) {
+        _payloadMemo.putIfAbsent(e.key, () => e.value);
+      }
+    } catch (_) {}
+
+    // 2. Firestore vault bulk-read (one network query, not N) — restores
+    //    history on reinstall where SQLite was wiped but vault survived.
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection(_vaultCollection)
+          .get();
+      for (final doc in snap.docs) {
+        if (_payloadMemo.containsKey(doc.id)) continue;
+        final raw = doc.data()['p'] as String?;
+        if (raw == null) continue;
+        try {
+          _payloadMemo[doc.id] =
+              jsonDecode(raw) as Map<String, dynamic>;
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
   // ─── Firestore message vault (cross-install backup) ─────────────────────
   // Decrypted plaintext payloads are mirrored to
   //   users/{uid}/msgVault/{messageId}
@@ -659,7 +705,13 @@ class ChatService {
     StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? messagesSub;
     StreamSubscription<void>? outboxSub;
 
-    void start() {
+    // ignore: discarded_futures
+    Future<void> start() async {
+      // Bulk-populate _payloadMemo from SQLite + Firestore vault before the
+      // message subscription fires. Once the memo is warm, every subsequent
+      // Firestore snapshot resolves synchronously — no per-message awaits.
+      await _preWarmPayloadCache(currentUserId);
+
       // (1) Track clearedAt independently of the messages subscription.
       chatRoomSub = _firestore
           .collection(_chatRoomsCollection)

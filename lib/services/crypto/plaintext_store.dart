@@ -249,6 +249,25 @@ class PlaintextStore {
     return base64Decode(payload['k'] as String);
   }
 
+  /// Bulk-reads all regular message payloads (excludes status_* rows) into a
+  /// single map. Used by ChatService._preWarmPayloadCache to populate
+  /// _payloadMemo in one SQLite query instead of N per-message queries.
+  Future<Map<String, Map<String, dynamic>>> getAllMessagePayloads() async {
+    final rows = await _db.query(
+      _table,
+      columns: const ['id', 'payload'],
+      where: "id NOT LIKE 'status_%'",
+    );
+    final result = <String, Map<String, dynamic>>{};
+    for (final row in rows) {
+      try {
+        result[row['id'] as String] =
+            jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+      } catch (_) {}
+    }
+    return result;
+  }
+
   /// Drops all rows. Called from AuthService.signOut.
   Future<void> wipe() async {
     await _db.delete(_table);

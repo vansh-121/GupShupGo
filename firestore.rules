@@ -49,6 +49,14 @@ service cloud.firestore {
       match /msgVault/{messageId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Cross-install status vault: decrypted text status content mirrored
+      // here so statuses survive reinstall (Signal session lost → can't
+      // re-derive AES key, but vault has the plaintext). Text only — media
+      // blobs are too large for Firestore.
+      match /statusVault/{statusItemId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
     
     // ==================== CHAT ROOMS ====================
