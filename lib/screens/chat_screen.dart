@@ -100,10 +100,23 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isOtherUserTyping = false;
   StreamSubscription<bool>? _typingSubscription;
 
+  // Tracks which message ids have already been rendered at least once so we
+  // only run the slide-in animation on newly-inserted bubbles. Without this,
+  // every message would animate on the first build of the chat screen.
+  final Set<String> _seenMessageIds = <String>{};
+  bool _didInitialMessageBuild = false;
+
   // ─── Mesh messaging state ─────────────────────────────────────────
   StreamSubscription<MessageModel>? _meshMessageSubscription;
   final List<MessageModel> _meshMessages = [];
   late MeshNetworkService _meshService;
+
+  // Cached messages stream. MUST NOT be re-created on every build — every
+  // setState() (typing toggle, mic/send swap, optimistic outbox tick) would
+  // otherwise spin up a fresh subscription whose initial frame is just the
+  // outbox, causing the prior history to vanish for 2–3s until Firestore
+  // re-emits and decryption completes. Initialized once in initState.
+  late final Stream<List<MessageModel>> _messagesStream;
 
   @override
   void initState() {
@@ -112,6 +125,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final chatRoomId = _chatService.getChatRoomId(
         widget.currentUserId, widget.contact.id);
     _isMuted = _settingsService.isChatMuted(chatRoomId);
+    _messagesStream = _chatService
+        .getMessages(widget.currentUserId, widget.contact.id)
+        .asBroadcastStream();
     // Suppress global mesh banners for this conversation while it's open.
     _meshService = Provider.of<MeshNetworkService>(context, listen: false);
     _meshService.setActiveConversation(widget.contact.id);
@@ -515,15 +531,40 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToBottom() {
-    Future.delayed(Duration(milliseconds: 100), () {
+    // The list is built with `reverse: true` (WhatsApp-style, anchored to
+    // the input). In a reversed list the visual bottom corresponds to
+    // offset 0.0, so "scroll to bottom" = "scroll to start of the scroll
+    // axis". A small delay lets the new bubble lay out first.
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
+          0.0,
+          duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
       }
     });
+  }
+
+  // Wraps a freshly-inserted message bubble in a one-shot fade+rise
+  // animation. Existing bubbles (already in `_seenMessageIds`) are returned
+  // unchanged so scrolling through history doesn't re-animate every item.
+  Widget _animatedBubble(Widget child) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, c) {
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, (1 - t) * 14),
+            child: c,
+          ),
+        );
+      },
+      child: child,
+    );
   }
 
   Widget _buildDateDivider(String date) {
@@ -554,6 +595,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final isMe = message.senderId == widget.currentUserId;
 
     return Align(
+      // Stable key tied to the message id. Without this, when the outbox
+      // bubble (status=sending) is swapped for the Firestore-backed copy
+      // (status=sent) — which has the exact same id and timestamp now —
+      // Flutter would still rebuild the bubble's Element from scratch via
+      // positional reconciliation. With the key, the Element is reused
+      // in place: only the status icon transitions, no layout reflow.
+      key: ValueKey('msg-${message.id}'),
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: EdgeInsets.only(
@@ -1041,7 +1089,14 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
-    // Group messages by date
+    // Group messages by date. On the very first build we treat every
+    // message as "already seen" so we don't replay the entry animation for
+    // history when the screen opens. Subsequent builds animate only ids we
+    // haven't rendered before — i.e. new optimistic bubbles and freshly
+    // arrived peer messages.
+    final isInitial = !_didInitialMessageBuild;
+    _didInitialMessageBuild = true;
+
     List<Widget> messageWidgets = [];
     String? lastDate;
 
@@ -1054,18 +1109,29 @@ class _ChatScreenState extends State<ChatScreen> {
         lastDate = messageDate;
       }
 
-      messageWidgets.add(_buildMessage(message));
+      final bubble = _buildMessage(message);
+      final isNew = _seenMessageIds.add(message.id);
+      messageWidgets.add(
+        isNew && !isInitial ? _animatedBubble(bubble) : bubble,
+      );
     }
 
-    // Append typing bubble as the last item in the conversation
+    // Append typing bubble as the last item — with reverse:true below this
+    // ends up at the visual bottom, just above the input bar.
     if (_isOtherUserTyping) {
       messageWidgets.add(_buildTypingBubble());
     }
 
+    // reverse:true anchors content to the bottom of the viewport (WhatsApp
+    // behaviour). We feed widgets in normal top→bottom order then reverse
+    // the list so index 0 is the bottom-most item; this keeps the date
+    // divider visually above its day's first message and lets new bubbles
+    // appear right next to the input rather than at the top of empty space.
     return ListView(
       controller: _scrollController,
+      reverse: true,
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 0),
-      children: messageWidgets,
+      children: messageWidgets.reversed.toList(),
     );
   }
 
@@ -1300,10 +1366,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 Expanded(
                   child: StreamBuilder<List<MessageModel>>(
-                    stream: _chatService.getMessages(
-                      widget.currentUserId,
-                      widget.contact.id,
-                    ),
+                    stream: _messagesStream,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {

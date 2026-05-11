@@ -540,76 +540,46 @@ class ChatService {
   // Get messages stream for a chat room.
   // Respects the per-user `clearedAt` timestamp written by "Clear all chats"
   // so only messages AFTER the clear time are shown to this user.
+  //
+  // Implementation note: the messages-subcollection subscription is started
+  // ONCE and kept alive for the lifetime of the returned stream. The
+  // chatRoom doc subscription (only used to track `clearedAt`) runs in
+  // parallel — it can fire dozens of times per minute (typing indicators,
+  // lastMessage updates, read-receipt status writes, etc.), but we keep
+  // the messages stream untouched across those changes. Previously this
+  // used `asyncExpand`, which tore down and rebuilt the entire messages
+  // subscription on every chatRoom doc tick — that re-decryption pass was
+  // the source of the visible "Today combines with previous list" reflow
+  // the user reported after the outbox was introduced (sending a message
+  // updates chatRoom.lastMessage as part of the same batch, which fired
+  // the asyncExpand teardown right after the optimistic bubble appeared).
   Stream<List<MessageModel>> getMessages(
       String currentUserId, String otherUserId) {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
-    // Combine the chatRoom doc stream (for clearedAt) with the messages stream
-    return _firestore
-        .collection(_chatRoomsCollection)
-        .doc(chatRoomId)
-        .snapshots()
-        .asyncExpand((chatRoomSnap) {
-      DateTime? clearedAt;
-      if (chatRoomSnap.exists) {
-        final data = chatRoomSnap.data();
-        final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
-        final ts = clearedAtMap?[currentUserId];
-        if (ts is Timestamp) {
-          clearedAt = ts.toDate();
-        }
-      }
-
-      // The base Firestore stream of committed messages.
-      final firestoreStream = _firestore
-          .collection(_chatRoomsCollection)
-          .doc(chatRoomId)
-          .collection(_messagesCollection)
-          .orderBy('timestamp', descending: false)
-          .snapshots()
-          .asyncMap((snapshot) async {
-        final raw = snapshot.docs
-            .map((doc) => MessageModel.fromFirestore(doc))
-            .where((msg) =>
-                clearedAt == null || msg.timestamp.isAfter(clearedAt))
-            .toList();
-        // Decrypt E2EE messages in parallel. v1 messages pass through.
-        // Null returns (messages we can't render) are filtered out — the
-        // chat list silently omits them, like WhatsApp omits messages it
-        // couldn't restore from backup.
-        final resolved = await Future.wait(
-          raw.map((m) => decryptForRendering(m, currentUserId)),
-        );
-        return resolved.whereType<MessageModel>().toList();
-      });
-
-      // Merge the Firestore stream with outbox change notifications. Every
-      // time either source ticks we re-emit the union of (latest Firestore
-      // list) ∪ (current outbox), with outbox entries filtered out if the
-      // canonical Firestore message with the same id has already landed.
-      // This is what makes the bubble appear instantly on tap and then
-      // seamlessly hand off to the Firestore-backed render once the commit
-      // completes — without ever showing the same bubble twice.
-      return _mergeWithOutbox(chatRoomId, firestoreStream);
-    });
-  }
-
-  /// Combines the committed-message stream with the local outbox so a
-  /// freshly-tapped send shows up as a bubble in the same frame.
-  Stream<List<MessageModel>> _mergeWithOutbox(
-    String chatRoomId,
-    Stream<List<MessageModel>> firestoreStream,
-  ) {
+    DateTime? clearedAt;
+    List<MessageModel> latestDecrypted = const [];
     List<MessageModel> latestCommitted = const [];
     bool gotFirstFirestoreEmission = false;
     final controller = StreamController<List<MessageModel>>();
 
+    void recomputeCommittedFromLatest() {
+      // Re-apply the clearedAt filter against the latest decrypted list
+      // without re-decrypting anything. clearedAt changes are rare (only
+      // when the user taps "Clear all chats"), but we still want a fresh
+      // filter pass to be cheap when it does happen.
+      if (clearedAt == null) {
+        latestCommitted = latestDecrypted;
+      } else {
+        latestCommitted = latestDecrypted
+            .where((m) => m.timestamp.isAfter(clearedAt!))
+            .toList();
+      }
+    }
+
     List<MessageModel> combine() {
       final outboxList = _outbox[chatRoomId] ?? const <MessageModel>[];
       if (outboxList.isEmpty) return latestCommitted;
-      // Dedup: once Firestore has delivered a message, the outbox copy
-      // (which may still be in the middle of being removed by the post-
-      // commit cleanup) must not appear alongside the canonical version.
       final committedIds = {for (final m in latestCommitted) m.id};
       final merged = <MessageModel>[
         ...latestCommitted,
@@ -619,71 +589,98 @@ class ChatService {
       return merged;
     }
 
-    StreamSubscription<List<MessageModel>>? firestoreSub;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+        chatRoomSub;
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? messagesSub;
     StreamSubscription<void>? outboxSub;
 
     void start() {
-      firestoreSub = firestoreStream.listen(
-        (msgs) {
-          latestCommitted = msgs;
-          gotFirstFirestoreEmission = true;
-          // The moment Firestore confirms a previously-pending message has
-          // arrived, drop its optimistic twin from the outbox. We defer
-          // this until the canonical version is actually in the snapshot
-          // list — clearing on commit-ack alone would leave a 1-frame gap
-          // where the bubble vanishes and re-appears.
-          final outboxList = _outbox[chatRoomId];
-          if (outboxList != null && outboxList.isNotEmpty) {
-            final committedIds = {for (final m in msgs) m.id};
-            final stillPending = outboxList
-                .where((m) => !committedIds.contains(m.id))
-                .toList();
-            if (stillPending.length != outboxList.length) {
-              if (stillPending.isEmpty) {
-                _outbox.remove(chatRoomId);
-              } else {
-                _outbox[chatRoomId] = stillPending;
-              }
-              // Don't emit on _outboxNotifier here — we're about to emit
-              // a combined frame ourselves and a duplicate tick would
-              // just trigger an identical rebuild.
-            }
-          }
-          if (!controller.isClosed) controller.add(combine());
-        },
-        onError: (e, st) {
-          if (!controller.isClosed) controller.addError(e, st);
-        },
-        onDone: () {
-          if (!controller.isClosed) controller.close();
-        },
-      );
-      // Outbox ticks emit on top of whatever the last Firestore snapshot
-      // was. If Firestore hasn't emitted yet we still emit so the bubble
-      // appears immediately on a cold open.
-      outboxSub = _outboxNotifier.stream.listen((_) {
-        if (controller.isClosed) return;
-        if (gotFirstFirestoreEmission) {
+      // (1) Track clearedAt independently of the messages subscription.
+      chatRoomSub = _firestore
+          .collection(_chatRoomsCollection)
+          .doc(chatRoomId)
+          .snapshots()
+          .listen((snap) {
+        DateTime? newClearedAt;
+        if (snap.exists) {
+          final data = snap.data();
+          final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
+          final ts = clearedAtMap?[currentUserId];
+          if (ts is Timestamp) newClearedAt = ts.toDate();
+        }
+        if (newClearedAt == clearedAt) return; // no-op for unrelated changes
+        clearedAt = newClearedAt;
+        recomputeCommittedFromLatest();
+        if (!controller.isClosed && gotFirstFirestoreEmission) {
           controller.add(combine());
-        } else {
-          controller.add(_outbox[chatRoomId] ?? const <MessageModel>[]);
         }
       });
-      // Emit an initial frame if the outbox already has entries for this
-      // room (e.g. user opens the chat right after firing a send).
-      final initialOutbox = _outbox[chatRoomId];
-      if (initialOutbox != null && initialOutbox.isNotEmpty) {
-        controller.add(List<MessageModel>.from(initialOutbox));
-      }
+
+      // (2) Messages subscription — started once, never torn down.
+      messagesSub = _firestore
+          .collection(_chatRoomsCollection)
+          .doc(chatRoomId)
+          .collection(_messagesCollection)
+          .orderBy('timestamp', descending: false)
+          .snapshots()
+          .listen((snapshot) async {
+        final raw = snapshot.docs
+            .map((doc) => MessageModel.fromFirestore(doc))
+            .toList();
+        // Decrypt E2EE messages in parallel. v1 messages pass through.
+        // Null returns (messages we can't render) are filtered out — the
+        // chat list silently omits them, like WhatsApp omits messages it
+        // couldn't restore from backup. The in-memory _payloadMemo means
+        // already-decrypted messages return synchronously in practice.
+        final resolved = await Future.wait(
+          raw.map((m) => decryptForRendering(m, currentUserId)),
+        );
+        latestDecrypted = resolved.whereType<MessageModel>().toList();
+        recomputeCommittedFromLatest();
+        gotFirstFirestoreEmission = true;
+
+        // Cleanup outbox entries whose canonical Firestore copy has now
+        // landed. Done here (not in sendMessage's commit-ack) so there's
+        // no frame where the bubble disappears before the canonical
+        // version is in the list.
+        final outboxList = _outbox[chatRoomId];
+        if (outboxList != null && outboxList.isNotEmpty) {
+          final committedIds = {for (final m in latestCommitted) m.id};
+          final stillPending = outboxList
+              .where((m) => !committedIds.contains(m.id))
+              .toList();
+          if (stillPending.length != outboxList.length) {
+            if (stillPending.isEmpty) {
+              _outbox.remove(chatRoomId);
+            } else {
+              _outbox[chatRoomId] = stillPending;
+            }
+          }
+        }
+
+        if (!controller.isClosed) controller.add(combine());
+      }, onError: (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      });
+
+      // (3) Outbox ticks: emit the combined view on every change. Until
+      // Firestore has emitted at least once, latestCommitted is empty
+      // and combine() falls back to outbox-only — which is the right
+      // behaviour on cold open with a pending send.
+      outboxSub = _outboxNotifier.stream.listen((_) {
+        if (!controller.isClosed) controller.add(combine());
+      });
     }
 
     controller.onListen = start;
     controller.onCancel = () async {
-      await firestoreSub?.cancel();
+      await chatRoomSub?.cancel();
+      await messagesSub?.cancel();
       await outboxSub?.cancel();
     };
     return controller.stream;
   }
+
 
   // Get paginated messages (for loading older messages)
   Future<List<MessageModel>> getMessagesPaginated({
