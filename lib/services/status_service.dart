@@ -66,8 +66,14 @@ class StatusService {
 
   /// Fetches and decrypts the content key for a status item this device is
   /// authorised to view. Returns null if no envelope is addressed to us.
+  ///
+  /// [ownerDeviceId] is required: the status owner's deviceId stored in the
+  /// status item's metadata. Different devices of the same owner have
+  /// separate Signal sessions, so we must use the right one or decryption
+  /// silently fails.
   Future<Uint8List?> _fetchWrappedKey({
     required String ownerUid,
+    required int ownerDeviceId,
     required String statusItemId,
     required String selfUid,
   }) async {
@@ -85,10 +91,8 @@ class StatusService {
     if (!doc.exists) return null;
     final env = EncryptedEnvelope.fromMap(doc.data()!);
     try {
-      // Owner is always deviceId=1 for status (the originating device).
-      // For multi-device owners, callers should pass the owner's deviceId
-      // from the status item metadata.
-      return await SignalService.instance.decrypt(ownerUid, 1, env);
+      return await SignalService.instance
+          .decrypt(ownerUid, ownerDeviceId, env);
     } catch (_) {
       return null;
     }
@@ -318,14 +322,19 @@ class StatusService {
         item.type != 'encrypted_video') {
       return null; // not an encrypted item
     }
+    // Parse the metadata up-front so we know which of the owner's devices
+    // posted this status. Without the right deviceId we'd address the wrong
+    // Signal session and decryption would silently fail.
+    final meta = jsonDecode(item.caption ?? '{}') as Map<String, dynamic>;
+    final ownerDeviceId = (meta['ownerDeviceId'] as int?) ?? 1;
+
     final key = await _fetchWrappedKey(
       ownerUid: ownerUid,
+      ownerDeviceId: ownerDeviceId,
       statusItemId: item.id,
       selfUid: selfUid,
     );
     if (key == null) return null;
-
-    final meta = jsonDecode(item.caption ?? '{}') as Map<String, dynamic>;
     final bundle = MediaKeyBundle(
       key: key,
       iv: base64Decode(meta['iv'] as String),

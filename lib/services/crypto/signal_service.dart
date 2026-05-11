@@ -234,18 +234,39 @@ class SignalService {
     return out;
   }
 
+  // 60-second cache for device-id lookups. The expensive Firestore query
+  // was firing twice per message (once for sender, once for recipient),
+  // which dominated end-to-end send latency. Device lists rarely change —
+  // new devices register at sign-in time, weeks apart — so this cache is
+  // safe and the TTL prevents stale state from lingering more than a
+  // minute after a new device joins.
+  static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
+
   Future<List<int>> _listDeviceIds(String uid) async {
+    final hit = _deviceIdCache[uid];
+    if (hit != null &&
+        DateTime.now().difference(hit.at).inSeconds < 60) {
+      return hit.ids;
+    }
     final snap = await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('devices')
         .where('keyBundle', isNull: false)
         .get();
-    return snap.docs
+    final ids = snap.docs
         .map((d) => int.tryParse(d.id))
         .whereType<int>()
         .toList();
+    _deviceIdCache[uid] = (at: DateTime.now(), ids: ids);
+    return ids;
   }
+
+  /// Invalidate the device-id cache for a user. Call from
+  /// DeviceIdentityService after a fresh registration so subsequent sends
+  /// see the new device immediately.
+  static void invalidateDeviceCache(String uid) =>
+      _deviceIdCache.remove(uid);
 
   // ── Wipe (used by signOut and "Reset encryption") ───────────────────────
   static Future<void> wipe() async {

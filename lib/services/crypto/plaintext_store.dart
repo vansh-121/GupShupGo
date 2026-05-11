@@ -33,6 +33,7 @@ class PlaintextStore {
 
   static const _dbName = 'gsg_plaintext.db';
   static const _table = 'message_plaintext';
+  static const _roomTable = 'chat_room_preview';
 
   static PlaintextStore? _instance;
   static Completer<PlaintextStore>? _opening;
@@ -47,7 +48,7 @@ class PlaintextStore {
       final dbDir = await getDatabasesPath();
       final db = await openDatabase(
         p.join(dbDir, _dbName),
-        version: 1,
+        version: 2,
         onCreate: (db, _) async {
           await db.execute('''
             CREATE TABLE $_table (
@@ -56,6 +57,26 @@ class PlaintextStore {
               saved_at INTEGER NOT NULL
             )
           ''');
+          await db.execute('''
+            CREATE TABLE $_roomTable (
+              chat_room_id TEXT PRIMARY KEY,
+              last_message_text TEXT NOT NULL,
+              last_message_id TEXT NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+          ''');
+        },
+        onUpgrade: (db, oldV, newV) async {
+          if (oldV < 2) {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS $_roomTable (
+                chat_room_id TEXT PRIMARY KEY,
+                last_message_text TEXT NOT NULL,
+                last_message_id TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+              )
+            ''');
+          }
         },
       );
       _instance = PlaintextStore._(db);
@@ -97,8 +118,53 @@ class PlaintextStore {
         as Map<String, dynamic>;
   }
 
+  /// Persists the last decrypted text for a chat room. Called on both
+  /// sides — sender at sendMessage time, receiver at decrypt time — so the
+  /// chat list can render a real preview instead of "🔒 Encrypted message".
+  Future<void> saveRoomPreview({
+    required String chatRoomId,
+    required String messageId,
+    required String text,
+  }) async {
+    await _db.insert(
+      _roomTable,
+      {
+        'chat_room_id': chatRoomId,
+        'last_message_text': text,
+        'last_message_id': messageId,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Fetches the local preview text for one chat room, or null if we don't
+  /// have one yet.
+  Future<String?> getRoomPreview(String chatRoomId) async {
+    final rows = await _db.query(
+      _roomTable,
+      columns: const ['last_message_text'],
+      where: 'chat_room_id = ?',
+      whereArgs: [chatRoomId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['last_message_text'] as String?;
+  }
+
+  /// Bulk preview lookup for the chat list — one query covers every room.
+  Future<Map<String, String>> getAllRoomPreviews() async {
+    final rows = await _db.query(_roomTable,
+        columns: const ['chat_room_id', 'last_message_text']);
+    return {
+      for (final r in rows)
+        r['chat_room_id'] as String: r['last_message_text'] as String,
+    };
+  }
+
   /// Drops all rows. Called from AuthService.signOut.
   Future<void> wipe() async {
     await _db.delete(_table);
+    await _db.delete(_roomTable);
   }
 }

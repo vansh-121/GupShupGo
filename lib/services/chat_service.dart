@@ -28,7 +28,17 @@ class ChatService {
 
   /// Returns true iff the peer has at least one device with a published
   /// key bundle (i.e. they've upgraded to an E2EE-capable build).
+  ///
+  /// Cached per peer with a 60-second TTL. A peer transitioning from
+  /// pre-E2EE to E2EE-capable will pick up the new bundle within a minute
+  /// — fine for a one-time event that only happens on app upgrade.
+  static final Map<String, ({DateTime at, bool has})> _peerBundleCache = {};
   Future<bool> _peerHasKeyBundle(String peerUid) async {
+    final hit = _peerBundleCache[peerUid];
+    if (hit != null &&
+        DateTime.now().difference(hit.at).inSeconds < 60) {
+      return hit.has;
+    }
     final snap = await _firestore
         .collection('users')
         .doc(peerUid)
@@ -36,7 +46,9 @@ class ChatService {
         .where('keyBundle', isNull: false)
         .limit(1)
         .get();
-    return snap.docs.isNotEmpty;
+    final has = snap.docs.isNotEmpty;
+    _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
+    return has;
   }
 
   /// Resolves a Firestore MessageModel into its rendered form.
@@ -76,6 +88,14 @@ class ChatService {
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       await store.save(msg.id, payload);
+      // Update the chat-list preview from the receiver's side so the most
+      // recent decrypted message shows up immediately on the home screen.
+      final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
+      await store.saveRoomPreview(
+        chatRoomId: chatRoomId,
+        messageId: msg.id,
+        text: (payload['text'] as String?) ?? '',
+      );
       return _applyPayload(msg, payload);
     } catch (e) {
       final errStr = e.toString();
@@ -229,6 +249,13 @@ class ChatService {
         // sending device in the fan-out, so this is the only way to recover
         // the body. Survives app restart, unlike a process-local cache.
         final ps = await PlaintextStore.instance();
+        await ps.saveRoomPreview(
+          chatRoomId: chatRoomId,
+          messageId: messageRef.id,
+          text: statusReplyOwnerId != null
+              ? 'Replied to status: $text'
+              : text,
+        );
         await ps.save(messageRef.id, {
           'text': text,
           'mediaUrl': mediaUrl,
@@ -545,12 +572,18 @@ class ChatService {
         .collection(_chatRoomsCollection)
         .where('participants', arrayContains: userId)
         .snapshots()
-        .map((snapshot) {
+        .asyncMap((snapshot) async {
+      // Pull all local previews in one query — the Firestore-side
+      // `lastMessage` is the encrypted placeholder for v2 rooms, so we
+      // override it with the locally-decrypted text whenever we have one.
+      final previews =
+          await (await PlaintextStore.instance()).getAllRoomPreviews();
+
       List<ChatRoom> chatRooms = [];
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        final chatRoom = ChatRoom.fromMap(data, doc.id);
+        var chatRoom = ChatRoom.fromMap(data, doc.id);
 
         // Check per-user clearedAt timestamp
         final clearedAtMap = data['clearedAt'] as Map<String, dynamic>?;
@@ -561,6 +594,22 @@ class ChatService {
               !chatRoom.lastMessageTime!.isAfter(clearedAt)) {
             continue; // skip this chat room
           }
+        }
+
+        // Override the server-side placeholder with our locally decrypted
+        // preview, if we have one. Rooms still on v1 (or where we don't
+        // yet have a preview cached) fall back to whatever Firestore has.
+        final localPreview = previews[chatRoom.id];
+        if (localPreview != null) {
+          chatRoom = ChatRoom(
+            id: chatRoom.id,
+            participants: chatRoom.participants,
+            lastMessage: localPreview,
+            lastMessageTime: chatRoom.lastMessageTime,
+            lastMessageSenderId: chatRoom.lastMessageSenderId,
+            lastMessageStatus: chatRoom.lastMessageStatus,
+            unreadCount: chatRoom.unreadCount,
+          );
         }
 
         chatRooms.add(chatRoom);

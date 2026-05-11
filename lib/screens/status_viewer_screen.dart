@@ -641,8 +641,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               ),
             ),
 
-            // Bottom: caption for image/video statuses
+            // Bottom: caption for image/video statuses. Encrypted statuses
+            // store metadata JSON in the `caption` field — never render
+            // that as user-visible text. (The plaintext caption from inside
+            // the encrypted payload is extracted on decrypt and would need
+            // a separate render path; out of scope here.)
             if (currentItem.type != 'text' &&
+                !currentItem.type.startsWith('encrypted') &&
                 currentItem.caption != null &&
                 currentItem.caption!.isNotEmpty)
               Positioned(

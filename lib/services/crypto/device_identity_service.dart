@@ -33,9 +33,18 @@ class DeviceIdentityService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// The local deviceId, or null if this install has never registered.
+  ///
+  /// Memoised once read — the deviceId is immutable for the lifetime of
+  /// an install (we never re-allocate). Without this memo, every
+  /// `sendMessage` was paying a secure-storage round-trip just to look up
+  /// a constant.
+  static int? _cachedDeviceId;
   Future<int?> getDeviceId() async {
+    if (_cachedDeviceId != null) return _cachedDeviceId;
     final s = await _ss.read(key: _deviceIdKey);
-    return s == null ? null : int.parse(s);
+    if (s == null) return null;
+    _cachedDeviceId = int.parse(s);
+    return _cachedDeviceId;
   }
 
   Future<int> _allocateDeviceId(String uid) async {
@@ -113,6 +122,10 @@ class DeviceIdentityService {
     await svc.stores.flush();
     await _ss.write(key: _deviceIdKey, value: '$deviceId');
     await _ss.write(key: _registeredFlagKey, value: userId);
+    _cachedDeviceId = deviceId;
+    // Drop the cached device list so peers see this device on their next
+    // send instead of waiting up to 60s for the TTL to expire.
+    SignalService.invalidateDeviceCache(userId);
     return deviceId;
   }
 
@@ -200,5 +213,6 @@ class DeviceIdentityService {
   Future<void> wipeLocal() async {
     await _ss.delete(key: _deviceIdKey);
     await _ss.delete(key: _registeredFlagKey);
+    _cachedDeviceId = null;
   }
 }
