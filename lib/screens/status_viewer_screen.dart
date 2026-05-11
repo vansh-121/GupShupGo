@@ -59,7 +59,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   void initState() {
     super.initState();
-    _activeItems = widget.statusModel.activeStatusItems;
+    // Filter out items that can't be decrypted on this install — AES key
+    // was never vaulted (status never opened before reinstall). Showing a
+    // spinner for them forever is worse than silently omitting, which is
+    // exactly what WhatsApp does.
+    _activeItems = widget.statusModel.activeStatusItems
+        .where((item) => !StatusService.isUnrecoverable(item.id))
+        .toList();
     if (widget.initialStatusItemId != null) {
       final initialIndex = _activeItems.indexWhere(
         (item) => item.id == widget.initialStatusItemId,

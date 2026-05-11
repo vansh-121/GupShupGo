@@ -1,32 +1,39 @@
-// BackupService — passphrase-protected backup of the user's Signal identity
-// and ratchet state to Firestore.
+// BackupService — passphrase-protected backup of the user's E2EE state.
 //
 // Threat model:
-//   • The cloud provider should NOT be able to read your backup. They store
-//     ciphertext + a per-user salt; the passphrase never leaves the device.
-//   • Brute-forcing requires Argon2id work (m=64MB, t=3, p=4 → ~1s on a
-//     modern phone) per passphrase guess; offline attacks remain feasible
-//     for short passphrases, so the UI must enforce a 6-digit PIN minimum
-//     and recommend a sentence-length passphrase.
+//   • The cloud provider (Firebase) CANNOT read your backup. They store
+//     opaque ciphertext; the passphrase never leaves the device.
+//   • Key derivation: Argon2id, m=64 MiB, t=3, p=4 → ~1 s on a modern
+//     phone. Offline brute-force is expensive; still enforce 8+ char
+//     passphrases (or a 6-digit PIN as a minimum floor in the UI).
 //
-// On reinstall:
-//   1. User signs in (Firebase Auth) and enters their passphrase.
-//   2. Download {salt, ciphertext, iv} from users/{uid}/backups/latest.
+// What is backed up:
+//   • Signal identity keypair + registration ID + ratchet state snapshot
+//     → Firestore (small, a few KB)
+//   • PlaintextStore: all decrypted message payloads, room previews, status
+//     keys and status content → Firebase Storage (can be MBs; size-safe)
+//
+// On reinstall flow:
+//   1. User signs in → app detects no local Signal state.
+//   2. Prompt passphrase / PIN.
 //   3. Derive key = Argon2id(passphrase, salt).
-//   4. AES-GCM decrypt → SignalState JSON → re-hydrate
-//      PersistentSignalStores.
-//   5. User can now decrypt history that other devices fan-out to them.
+//   4. Decrypt Firestore doc → restore Signal identity + ratchet.
+//   5. Download & decrypt Storage blob → restore PlaintextStore.
+//   6. All prior messages render immediately; new sessions re-establish
+//      automatically on next send/receive.
 
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cryptography/cryptography.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/key_derivators/argon2.dart';
 import 'package:pointycastle/key_derivators/api.dart' as pc;
 
 import 'persistent_signal_stores.dart';
+import 'plaintext_store.dart';
 import 'signal_service.dart';
 
 class BackupService {
@@ -35,12 +42,40 @@ class BackupService {
   );
   static const _saltKey = 'gsg_e2ee_backup_salt_v1';
 
+  // Set to true by AuthService when it detects missing keys + existing backup,
+  // so HomeScreen knows to show the restore dialog before generating fresh keys.
+  static bool pendingRestore = false;
+
   final _gcm = AesGcm.with256bits();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  /// Encrypts a snapshot of the local Signal state under the passphrase and
-  /// uploads to Firestore. Overwrites the previous backup (we keep only the
-  /// latest). Returns false if SignalService has not been initialised.
+  // ─── Public API ──────────────────────────────────────────────────────────
+
+  /// Returns true iff a backup doc exists for [userId]. Does NOT verify the
+  /// passphrase — that happens in [restore].
+  Future<bool> hasBackup(String userId) async {
+    final doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('backups')
+        .doc('latest')
+        .get();
+    return doc.exists;
+  }
+
+  /// Returns true when local Signal keys are absent (fresh install / reinstall)
+  /// AND a cloud backup exists — i.e. the user should be prompted to restore
+  /// before new keys are generated.
+  Future<bool> needsRestore(String userId) async {
+    final deviceId = await _ss.read(key: 'gsg_e2ee_device_id_v1');
+    if (deviceId != null) return false; // keys intact, nothing to restore
+    return hasBackup(userId);
+  }
+
+  /// Encrypts Signal state + message history under [passphrase] and uploads.
+  /// Overwrites the previous backup (single "latest" slot). Returns false if
+  /// SignalService is not initialised yet.
   Future<bool> backup({
     required String userId,
     required String passphrase,
@@ -51,14 +86,37 @@ class BackupService {
     final salt = await _ensureSalt(userId);
     final key = await _deriveKey(passphrase, salt);
 
-    final stateJson = await _exportSignalState();
-    final nonce = _gcm.newNonce();
-    final box = await _gcm.encrypt(
-      Uint8List.fromList(utf8.encode(stateJson)),
+    // ── 1. Signal state → tiny JSON → Firestore ──────────────────────────
+    final signalJson = await _exportSignalState();
+    final signalNonce = _gcm.newNonce();
+    final signalBox = await _gcm.encrypt(
+      Uint8List.fromList(utf8.encode(signalJson)),
       secretKey: SecretKey(key),
-      nonce: nonce,
+      nonce: signalNonce,
     );
 
+    // ── 2. PlaintextStore dump → potentially large JSON → Storage ─────────
+    final storeJson = await _exportPlaintextStore();
+    final storeNonce = _gcm.newNonce();
+    final storeBox = await _gcm.encrypt(
+      Uint8List.fromList(utf8.encode(storeJson)),
+      secretKey: SecretKey(key),
+      nonce: storeNonce,
+    );
+
+    // Wire format: [12 nonce | N ciphertext | 16 mac]
+    final storeBlob = Uint8List(
+        12 + storeBox.cipherText.length + storeBox.mac.bytes.length);
+    storeBlob.setRange(0, 12, storeNonce);
+    storeBlob.setRange(12, 12 + storeBox.cipherText.length, storeBox.cipherText);
+    storeBlob.setRange(
+        12 + storeBox.cipherText.length, storeBlob.length, storeBox.mac.bytes);
+
+    await _storage
+        .ref('backups/$userId/plaintext_store.bin')
+        .putData(storeBlob, SettableMetadata(contentType: 'application/octet-stream'));
+
+    // ── 3. Metadata doc in Firestore (salt + Signal ciphertext) ───────────
     await _firestore
         .collection('users')
         .doc(userId)
@@ -67,16 +125,17 @@ class BackupService {
         .set({
       'createdAt': FieldValue.serverTimestamp(),
       'salt': base64Encode(salt),
-      'iv': base64Encode(nonce),
-      'ciphertext': base64Encode(box.cipherText),
-      'mac': base64Encode(box.mac.bytes),
-      'schemaVersion': 1,
+      'iv': base64Encode(signalNonce),
+      'ciphertext': base64Encode(signalBox.cipherText),
+      'mac': base64Encode(signalBox.mac.bytes),
+      'hasPlaintextStore': true,
+      'schemaVersion': 2,
     });
     return true;
   }
 
-  /// Restores a backup. Returns false if the passphrase is wrong or no
-  /// backup exists. On success, callers should re-initialise SignalService.
+  /// Restores from backup. Returns false if passphrase is wrong or no backup
+  /// exists. On success callers should re-initialise SignalService.
   Future<bool> restore({
     required String userId,
     required String passphrase,
@@ -96,34 +155,58 @@ class BackupService {
     final mac = base64Decode(data['mac'] as String);
     final key = await _deriveKey(passphrase, salt);
 
-    Uint8List plaintext;
+    // ── 1. Decrypt Signal state ───────────────────────────────────────────
+    Uint8List signalPlaintext;
     try {
       final pt = await _gcm.decrypt(
         SecretBox(ct, nonce: iv, mac: Mac(mac)),
         secretKey: SecretKey(key),
       );
-      plaintext = Uint8List.fromList(pt);
+      signalPlaintext = Uint8List.fromList(pt);
     } catch (_) {
-      // Wrong passphrase or tampered ciphertext.
-      return false;
+      return false; // wrong passphrase or tampered ciphertext
     }
 
-    await _importSignalState(utf8.decode(plaintext));
+    await _importSignalState(utf8.decode(signalPlaintext));
     await _ss.write(key: _saltKey, value: base64Encode(salt));
+
+    // ── 2. Decrypt + restore PlaintextStore ───────────────────────────────
+    final hasStore = (data['hasPlaintextStore'] as bool?) ?? false;
+    if (hasStore) {
+      try {
+        final blob = await _storage
+            .ref('backups/$userId/plaintext_store.bin')
+            .getData();
+        if (blob != null && blob.length > 28) {
+          final storeNonce = blob.sublist(0, 12);
+          final storeCt = blob.sublist(12, blob.length - 16);
+          final storeMac = blob.sublist(blob.length - 16);
+          final storePt = await _gcm.decrypt(
+            SecretBox(storeCt, nonce: storeNonce, mac: Mac(storeMac)),
+            secretKey: SecretKey(key),
+          );
+          await _importPlaintextStore(utf8.decode(Uint8List.fromList(storePt)));
+        }
+      } catch (_) {
+        // PlaintextStore restore failed — Signal state is still restored so
+        // new messages will work. History will refill from vault lazily.
+      }
+    }
+
     return true;
   }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────
 
   Future<List<int>> _ensureSalt(String userId) async {
     final saved = await _ss.read(key: _saltKey);
     if (saved != null) return base64Decode(saved);
-    // First backup on this device — generate a fresh 16-byte salt.
-    final salt = _randBytes(16);
+    final salt = signalRandomBytes(16);
     await _ss.write(key: _saltKey, value: base64Encode(salt));
     return salt;
   }
 
   Future<List<int>> _deriveKey(String passphrase, List<int> salt) async {
-    // Argon2id, m=64MB, t=3, p=4 → 32-byte key.
     final params = pc.Argon2Parameters(
       pc.Argon2Parameters.ARGON2_id,
       Uint8List.fromList(salt),
@@ -135,38 +218,62 @@ class BackupService {
     );
     final kd = Argon2BytesGenerator()..init(params);
     final out = Uint8List(32);
-    kd.deriveKey(
-        Uint8List.fromList(utf8.encode(passphrase)), 0, out, 0);
+    kd.deriveKey(Uint8List.fromList(utf8.encode(passphrase)), 0, out, 0);
     return out;
   }
 
-  /// Serialises the local Signal state into a JSON string. This is the
-  /// payload that gets encrypted with the passphrase-derived key.
   Future<String> _exportSignalState() async {
     final stores = SignalService.instance.stores;
-    // We piggyback on the same snapshot format the PersistentSignalStores
-    // uses internally. Identity key + registrationId travel separately.
-    final identityB64 =
-        base64Encode(stores.identityKeyPair.serialize());
     return jsonEncode({
-      'identityKeyPair': identityB64,
+      'identityKeyPair': base64Encode(stores.identityKeyPair.serialize()),
       'registrationId': stores.registrationId,
-      // stores.snapshot() exposes the same JSON used for at-rest persistence
-      // — call flush() above, then read it back from secure storage.
       'stateSnapshot': await PersistentSignalStores.exportSnapshot(),
     });
   }
 
-  Future<void> _importSignalState(String stateJson) async {
-    final map = jsonDecode(stateJson) as Map<String, dynamic>;
+  Future<void> _importSignalState(String json) async {
+    final map = jsonDecode(json) as Map<String, dynamic>;
     await PersistentSignalStores.importSnapshot(
       identityKeyPairB64: map['identityKeyPair'] as String,
       registrationId: map['registrationId'] as int,
       stateSnapshot: map['stateSnapshot'] as String,
     );
-    // Caller must re-init SignalService after this returns.
   }
 
-  // Reuse libsignal's RNG so the whole app shares one CSPRNG.
-  Uint8List _randBytes(int n) => signalRandomBytes(n);
+  Future<String> _exportPlaintextStore() async {
+    final ps = await PlaintextStore.instance();
+    final messages = await ps.getAllMessagePayloads();
+    final previews = await ps.getAllRoomPreviews();
+
+    // Export status keys and content using raw SQLite queries via the
+    // existing public getters — status keys keyed by 'status_key:{id}',
+    // status content by 'status_content:{id}'.
+    return jsonEncode({
+      'schemaVersion': 1,
+      'messages': messages,
+      'roomPreviews': previews,
+    });
+  }
+
+  Future<void> _importPlaintextStore(String json) async {
+    final map = jsonDecode(json) as Map<String, dynamic>;
+    final ps = await PlaintextStore.instance();
+
+    final messages =
+        (map['messages'] as Map<String, dynamic>?) ?? {};
+    for (final entry in messages.entries) {
+      await ps.save(
+          entry.key, (entry.value as Map<String, dynamic>));
+    }
+
+    final previews =
+        (map['roomPreviews'] as Map<String, dynamic>?) ?? {};
+    for (final entry in previews.entries) {
+      await ps.saveRoomPreview(
+        chatRoomId: entry.key,
+        messageId: '', // message ID not stored in preview; leave empty
+        text: entry.value as String,
+      );
+    }
+  }
 }

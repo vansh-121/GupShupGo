@@ -26,6 +26,7 @@ import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
+import 'package:video_chat_app/services/crypto/backup_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 
@@ -145,22 +146,27 @@ class _HomeScreenState extends State<HomeScreen>
         displayName: name.isEmpty ? mesh.displayName : name,
       );
 
-      // ── E2EE: make sure this device has published a key bundle.
-      // _ensureE2EERegistered is a cheap no-op once the local "registered"
-      // flag is set — but covers the case where a user upgraded to the
-      // E2EE build while already signed in (sign-in helpers wouldn't have
-      // fired in that scenario, so registration would otherwise never run).
-      unawaited(_authService.ensureE2EERegisteredForCurrentSession(
-          _currentUserId!));
-
       // ── Show UI immediately ──
       setState(() {
         _isInitialized = true;
       });
 
-      // ── Show "What's New" dialog on first launch after an update ──
+      // ── E2EE restore prompt + What's New — both need the Navigator ────────
+      // addPostFrameCallback guarantees the first frame (including the
+      // Navigator overlay) is built before we call showDialog. Calling
+      // showDialog before the first frame silently no-ops on some devices.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) maybeShowWhatsNew(context);
+        if (!mounted) return;
+        // Restore dialog takes priority; What's New fires after it closes.
+        if (BackupService.pendingRestore) {
+          unawaited(_maybePromptRestore(_currentUserId!).then((_) {
+            if (mounted) maybeShowWhatsNew(context);
+          }));
+        } else {
+          unawaited(_authService
+              .ensureE2EERegisteredForCurrentSession(_currentUserId!));
+          maybeShowWhatsNew(context);
+        }
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -222,6 +228,109 @@ class _HomeScreenState extends State<HomeScreen>
         );
       }
     }
+  }
+
+  /// On reinstall (local Signal keys wiped) and a cloud backup exists, show
+  /// a one-time restore dialog before new keys are generated. If the user
+  /// restores successfully the old identity is imported and
+  /// ensureE2EERegisteredForCurrentSession finds it — no new keys generated.
+  /// If they skip, fresh keys are generated as normal.
+  Future<void> _maybePromptRestore(String userId) async {
+    final svc = BackupService();
+    // AuthService already checked needsRestore() during sign-in and set this
+    // flag if keys were missing + backup exists. Avoids a duplicate Firestore
+    // read and the race where fresh keys would be written before we check.
+    if (!BackupService.pendingRestore || !mounted) {
+      await _authService.ensureE2EERegisteredForCurrentSession(userId);
+      return;
+    }
+    BackupService.pendingRestore = false; // consume the flag
+
+    final c = AppThemeColors.of(context);
+    final controller = TextEditingController();
+    bool obscure = true;
+
+    final passphrase = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: c.surface,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(children: [
+            Icon(Icons.lock_outline_rounded, color: c.primary, size: 22),
+            const SizedBox(width: 8),
+            Text('Restore backup',
+                style: TextStyle(color: c.textHigh, fontSize: 17,
+                    fontWeight: FontWeight.w700)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              'A backup was found. Enter your passphrase to restore your '
+              'message history and encryption keys.',
+              style: TextStyle(color: c.textMid, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: obscure,
+              autofocus: true,
+              style: TextStyle(color: c.textHigh),
+              decoration: InputDecoration(
+                hintText: 'Passphrase',
+                hintStyle: TextStyle(color: c.textLow),
+                filled: true,
+                fillColor: c.surfaceAlt,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                      obscure ? Icons.visibility : Icons.visibility_off,
+                      color: c.textLow),
+                  onPressed: () => setLocal(() => obscure = !obscure),
+                ),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: Text('Skip', style: TextStyle(color: c.textMid)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: c.primary),
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Restore'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (passphrase != null && passphrase.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Restoring backup… this may take a moment.'),
+          backgroundColor: c.primary,
+        ),
+      );
+      final ok = await svc.restore(userId: userId, passphrase: passphrase);
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok
+              ? 'Backup restored. Your messages are back.'
+              : 'Wrong passphrase — skipping restore.'),
+          backgroundColor: ok ? Colors.green : Colors.red,
+        ));
+      }
+    }
+
+    // Always call register after (with or without restore). If restore
+    // succeeded, registerIfNeeded finds existing keys and is a no-op.
+    await _authService.ensureE2EERegisteredForCurrentSession(userId);
   }
 
   Future<void> _setupCallListener() async {

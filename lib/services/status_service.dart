@@ -55,9 +55,16 @@ class StatusService {
   // Dedupe in-flight pre-decrypts so multiple stream emissions don't fire
   // overlapping decrypt jobs for the same status item.
   static final Map<String, Future<void>> _inFlight = {};
+  // Items that can never be decrypted on this install (no AES key in vault,
+  // Signal session gone). Hidden from the viewer — same as WhatsApp, which
+  // silently drops statuses it can't recover after reinstall.
+  static final Set<String> _unrecoverable = {};
 
   static StatusPlaintext? cachedPlaintext(String statusItemId) =>
       _plaintextCache[statusItemId];
+
+  static bool isUnrecoverable(String statusItemId) =>
+      _unrecoverable.contains(statusItemId);
 
   // ─── Status vault (cross-install backup for text statuses) ───────────────
   // Text status plaintext is mirrored to users/{selfUid}/statusVault/{itemId}
@@ -223,7 +230,13 @@ class StatusService {
         // from Storage on reinstall without needing the Signal session.
         preloadedKey: _mediaKeyCache[item.id],
       );
-      if (result == null) return;
+      if (result == null) {
+        // No AES key available (vault empty, Signal session gone) — this
+        // item cannot be decrypted on this install. Mark it so the viewer
+        // can filter it out instead of showing a spinner forever.
+        _unrecoverable.add(item.id);
+        return;
+      }
       if (item.type == 'encrypted') {
         final j = result['json'] as Map<String, dynamic>;
         final text = (j['text'] as String?) ?? '';
@@ -259,7 +272,7 @@ class StatusService {
         );
       }
     } catch (_) {
-      // Leave uncached; viewer will retry on open as a fallback.
+      _unrecoverable.add(item.id);
     }
   }
 

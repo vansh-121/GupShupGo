@@ -460,7 +460,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.cloud_upload,
               iconColor: AppColors.primary,
               title: 'Encrypted backup',
-              subtitle: 'Set a passphrase to back up your encryption keys',
+              subtitle: 'Backs up keys + message history. '
+                  'Firebase never sees your passphrase.',
               onTap: _setupEncryptedBackup,
             ),
             _divider(),
@@ -468,7 +469,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.cloud_download,
               iconColor: Colors.orange,
               title: 'Restore from backup',
-              subtitle: 'Recover keys after reinstalling the app',
+              subtitle: 'Recover keys and messages after reinstalling',
               onTap: _restoreEncryptedBackup,
             ),
             _divider(),

@@ -40,6 +40,18 @@ service firebase.storage {
             || request.resource.contentType == 'application/octet-stream');
     }
 
+    // Encrypted E2EE backup blobs. Only the owner can read or write.
+    // Max 20 MB — covers very active users with thousands of messages.
+    // Firebase sees opaque AES-GCM ciphertext; the passphrase never leaves
+    // the device.
+    match /backups/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Deny everything else
     match /{allPaths=**} {
       allow read, write: if false;
