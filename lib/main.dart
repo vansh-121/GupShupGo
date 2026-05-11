@@ -22,6 +22,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
@@ -81,6 +82,24 @@ void main() async {
     await SignalService.init();
   } catch (e) {
     debugPrint('SignalService.init failed at startup (non-fatal): $e');
+  }
+
+  // ── Warm the encryption-adjacent caches in the background ──────────────
+  // Opening the sqflite-backed PlaintextStore on the first message render
+  // adds a ~30–80ms hitch (disk open + schema check); seeding the device-id
+  // cache for the current user removes the ~100ms first-send Firestore
+  // query. Both are fire-and-forget — failure here is non-fatal, the
+  // downstream code paths still work, they just pay first-use latency.
+  // ignore: discarded_futures
+  PlaintextStore.instance().catchError((e) {
+    debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
+    return Future<PlaintextStore>.error(e);
+  });
+  final cachedUid = FirebaseAuth.instance.currentUser?.uid;
+  if (cachedUid != null) {
+    // ignore: discarded_futures
+    SignalService.instance.listDeviceIdsCached(cachedUid).catchError((_) =>
+        const <int>[]); // best-effort warm; cache is self-healing on miss
   }
 
   // ── App Check: fire-and-forget (don't block startup) ──

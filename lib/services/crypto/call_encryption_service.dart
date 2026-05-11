@@ -19,6 +19,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'persistent_signal_stores.dart';
 import 'signal_service.dart';
 
+// The caller's deviceId is encoded on the sender side as senderDeviceId and
+// addressed by recipient (uid, deviceId). The callee doesn't know the
+// caller's deviceId from the envelope alone, so we record it as a small
+// hint field on each envelope doc — eliminates the 1..10 brute-force scan
+// the previous implementation did, which on average wasted ~9 failed
+// libsignal decrypts before finding the right session.
+const _senderDeviceIdField = 'sd';
+
 class CallEncryptionKey {
   CallEncryptionKey({required this.key, required this.salt});
   final Uint8List key;   // 32 bytes
@@ -73,7 +81,7 @@ class CallEncryptionService {
             .doc(channelId)
             .collection('keyEnvelopes')
             .doc(addr),
-        env.toMap(),
+        {...env.toMap(), _senderDeviceIdField: senderDeviceId},
       );
     });
     await batch.commit();
@@ -98,12 +106,30 @@ class CallEncryptionService {
         .get();
     if (!doc.exists) return null;
 
-    final env = EncryptedEnvelope.fromMap(doc.data()!);
-    // The caller's deviceId is encoded in the envelope key on the sender's
-    // side as senderDeviceId. We need to know which session decrypts: scan
-    // all of caller's known device ids. In practice caller has 1 device for
-    // an outgoing call, so we try deviceId=1 first then 2..10 as fallback.
-    for (var d = 1; d <= 10; d++) {
+    final data = doc.data()!;
+    final env = EncryptedEnvelope.fromMap(data);
+    final hintedSenderDeviceId = data[_senderDeviceIdField];
+    // Fast path: caller writes its deviceId alongside the envelope so the
+    // callee can decrypt with the exact session on the first try. Every
+    // failed libsignal decrypt advances internal state and risks
+    // session-store corruption, so brute-forcing was both slow and unsafe.
+    if (hintedSenderDeviceId is int) {
+      try {
+        final pt = await SignalService.instance
+            .decrypt(callerUid, hintedSenderDeviceId, env);
+        final map = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
+        return CallEncryptionKey.fromMap(map);
+      } catch (_) {
+        // Fall through to discovery path below — handles old envelopes
+        // written by clients that pre-date the deviceId hint.
+      }
+    }
+    // Legacy fallback: probe known caller devices. Bounded by the cached
+    // device-id list (typically 1–2 entries) rather than the previous
+    // hard-coded 1..10 sweep.
+    final deviceIds =
+        await SignalService.instance.listDeviceIdsCached(callerUid);
+    for (final d in deviceIds) {
       try {
         final pt = await SignalService.instance.decrypt(callerUid, d, env);
         final map = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;

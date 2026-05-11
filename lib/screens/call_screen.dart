@@ -68,6 +68,17 @@ class _CallScreenState extends State<CallScreen> {
   // the user perceives the call as live). Also stopped early on error.
   Trace? _callSetupTrace;
 
+  // ── E2EE key exchange runs in parallel with Agora engine init ─────────
+  // The Signal-encrypted key publish (caller) or Firestore poll (callee)
+  // has no dependency on the RtcEngine — only the final
+  // enableMediaEncryption() call does. By kicking the exchange off the
+  // moment the screen mounts, we overlap a Firestore round-trip (caller:
+  // ~150ms, callee: 0–3000ms while waiting for the caller to publish) with
+  // engine init + permission prompts. Previously these ran serially after
+  // engine init, adding their full latency to user-perceived "connecting"
+  // time.
+  Future<CallEncryptionKey?>? _callKeyFuture;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +93,10 @@ class _CallScreenState extends State<CallScreen> {
       },
     ).then((t) => _callSetupTrace = t);
 
+    // Kick off the Signal key exchange immediately, in parallel with the
+    // Agora engine init below. _initAgora awaits this future just before
+    // joinChannel — the only step that needs the key.
+    _callKeyFuture = _exchangeCallKey();
     _initAgora();
     _listenToSignaling();
 
@@ -219,46 +234,48 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
-  /// Establishes a per-call shared secret with the other party (via a
-  /// Signal-encrypted envelope written under calls/{channelId}/keyEnvelopes)
-  /// and enables Agora's AES-256-GCM media-stream encryption on this engine.
-  /// MUST be called before `joinChannel` — Agora silently drops frames if the
-  /// encryption config is set after the channel join.
-  Future<void> _setupCallEncryption() async {
-    if (_engine == null) return;
+  /// Runs the Signal key exchange independently of the Agora engine. Started
+  /// from initState so its Firestore round-trip overlaps engine init.
+  Future<CallEncryptionKey?> _exchangeCallKey() async {
     final selfUid = FirebaseAuth.instance.currentUser?.uid;
     final peerUid = widget.calleeId;
-    if (selfUid == null || peerUid == null) return;
+    if (selfUid == null || peerUid == null) return null;
 
-    final deviceIdSvc = DeviceIdentityService();
-    final selfDeviceId = await deviceIdSvc.getDeviceId();
-    if (selfDeviceId == null) return; // E2EE not registered on this device
+    final selfDeviceId = await DeviceIdentityService().getDeviceId();
+    if (selfDeviceId == null) return null; // E2EE not registered on this device
 
     final svc = CallEncryptionService();
-    CallEncryptionKey? key;
-
     if (widget.isCaller) {
-      // Caller generates and publishes for the callee.
-      key = await svc.publishKeyForCallees(
+      return svc.publishKeyForCallees(
         channelId: widget.channelId,
         senderUid: selfUid,
         senderDeviceId: selfDeviceId,
         calleeUid: peerUid,
       );
-    } else {
-      // Callee polls for the envelope. The caller might write a fraction of
-      // a second after the call-screen mounts, so retry briefly.
-      for (var i = 0; i < 10 && key == null; i++) {
-        key = await svc.fetchKey(
-          channelId: widget.channelId,
-          selfUid: selfUid,
-          selfDeviceId: selfDeviceId,
-          callerUid: peerUid,
-        );
-        if (key == null) await Future.delayed(const Duration(milliseconds: 300));
-      }
     }
+    // Callee: poll for the caller's envelope. The 150ms cadence + 20 tries
+    // (~3s budget) matches the previous behaviour but the poll now happens
+    // concurrently with engine init, so its latency is hidden under Agora's
+    // init cost in the common case.
+    for (var i = 0; i < 20; i++) {
+      final key = await svc.fetchKey(
+        channelId: widget.channelId,
+        selfUid: selfUid,
+        selfDeviceId: selfDeviceId,
+        callerUid: peerUid,
+      );
+      if (key != null) return key;
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+    return null;
+  }
 
+  /// Applies the prefetched call key to the Agora engine. Must run before
+  /// joinChannel — Agora silently drops frames if encryption is configured
+  /// after the channel join.
+  Future<void> _applyCallEncryption() async {
+    if (_engine == null) return;
+    final key = await _callKeyFuture;
     if (key == null) {
       print('No call encryption key available — call will be unencrypted');
       return;
@@ -350,7 +367,7 @@ class _CallScreenState extends State<CallScreen> {
       // matches WhatsApp's "best effort" call encryption behaviour for
       // cross-version compatibility.
       try {
-        await _setupCallEncryption();
+        await _applyCallEncryption();
       } catch (e) {
         print('Call encryption setup failed (continuing unencrypted): $e');
       }

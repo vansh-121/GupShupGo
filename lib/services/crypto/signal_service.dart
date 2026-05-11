@@ -258,6 +258,11 @@ class SignalService {
   // minute after a new device joins.
   static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
 
+  /// Public wrapper around the cached device-id lookup so other services
+  /// (e.g. CallEncryptionService when discovering the caller's deviceId)
+  /// can reuse the same 60-second cache instead of re-querying Firestore.
+  Future<List<int>> listDeviceIdsCached(String uid) => _listDeviceIds(uid);
+
   Future<List<int>> _listDeviceIds(String uid) async {
     final hit = _deviceIdCache[uid];
     if (hit != null &&

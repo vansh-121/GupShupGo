@@ -11,7 +11,9 @@
       "Bash(find ~/AppData/Local/Pub/Cache/hosted -maxdepth 3 -name \"libsignal*\" -type d 2>&1 | head -5)",
       "Read(//c/Users/VANSH/AppData/Local/Pub/Cache/hosted/**)",
       "Bash(flutter test *)",
-      "Bash(flutter build *)"
+      "Bash(flutter build *)",
+      "Bash(Get-ChildItem -Path \"E:\\\\GupShupGo\\\\gupshupgo\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

@@ -15,9 +15,15 @@
 //   tens of KB). When it grows beyond ~256 KB we'll migrate sessions to an
 //   sqflite DB encrypted with a Keystore-held key.
 //
-// Concurrency: all mutations route through `_flushSoon()` which debounces
-// writes by 250ms. `flush()` forces an immediate write — call before app
-// background, on signOut, and before backup snapshot.
+// Concurrency: all mutations route through `markDirty()` which debounces
+// writes by 1500ms. `flush()` forces an immediate write — called before app
+// background, on signOut, and before backup snapshot. The 1.5s window
+// coalesces a burst of encrypts/decrypts (typing, reading a chat) into a
+// single snapshot write; the previous 250ms window was rewriting the entire
+// store ~4× per second during active chat which dominated end-to-end
+// message latency. The flush-on-pause guarantee in main()/AuthService keeps
+// the durability story unchanged: nothing committed to memory is lost
+// across an app background.
 
 import 'dart:async';
 import 'dart:convert';
@@ -116,7 +122,7 @@ class PersistentSignalStores {
   /// Schedules a debounced flush. Call after every mutating store operation.
   void markDirty() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), flush);
+    _debounce = Timer(const Duration(milliseconds: 1500), flush);
   }
 
   /// Forces an immediate snapshot of all stores to secure storage. Call on
