@@ -8,6 +8,8 @@ import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/crypto/backup_service.dart';
+import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -451,6 +453,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
           const SizedBox(height: 8),
 
+          // ── Encryption ───────────────────────────────────────────────
+          _buildSectionHeader('END-TO-END ENCRYPTION'),
+          _buildCard(children: [
+            _buildTile(
+              icon: Icons.cloud_upload,
+              iconColor: AppColors.primary,
+              title: 'Encrypted backup',
+              subtitle: 'Set a passphrase to back up your encryption keys',
+              onTap: _setupEncryptedBackup,
+            ),
+            _divider(),
+            _buildTile(
+              icon: Icons.cloud_download,
+              iconColor: Colors.orange,
+              title: 'Restore from backup',
+              subtitle: 'Recover keys after reinstalling the app',
+              onTap: _restoreEncryptedBackup,
+            ),
+            _divider(),
+            _buildTile(
+              icon: Icons.verified_user,
+              iconColor: Colors.green,
+              title: 'Verify safety number',
+              subtitle: 'Confirm a contact\'s identity out-of-band',
+              onTap: _verifySafetyNumber,
+            ),
+          ]),
+          const SizedBox(height: 8),
+
           // ── Notifications ─────────────────────────────────────────────
           _buildSectionHeader('NOTIFICATIONS'),
           _buildCard(children: [
@@ -551,6 +582,127 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  // ── E2EE: encrypted backup ─────────────────────────────────────────────
+  Future<String?> _promptPassphrase(String title, String hint) async {
+    final controller = TextEditingController();
+    bool obscure = true;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            obscureText: obscure,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: hint,
+              suffixIcon: IconButton(
+                icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setLocal(() => obscure = !obscure),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, controller.text),
+                child: const Text('OK')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setupEncryptedBackup() async {
+    final pass = await _promptPassphrase(
+      'Backup passphrase',
+      'At least 8 characters',
+    );
+    if (pass == null || pass.length < 8) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Passphrase too short (need 8+).')),
+        );
+      }
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Encrypting backup… this can take ~1s.')),
+    );
+    final ok = await BackupService()
+        .backup(userId: widget.currentUser.id, passphrase: pass);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? 'Backup uploaded.' : 'Backup failed.')),
+    );
+  }
+
+  Future<void> _restoreEncryptedBackup() async {
+    final pass = await _promptPassphrase(
+      'Restore passphrase',
+      'Same one you set on the other device',
+    );
+    if (pass == null || pass.isEmpty) return;
+    final ok = await BackupService()
+        .restore(userId: widget.currentUser.id, passphrase: pass);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Restored. Restart the app to load keys.'
+            : 'Wrong passphrase or no backup found.'),
+      ),
+    );
+  }
+
+  Future<void> _verifySafetyNumber() async {
+    final controller = TextEditingController();
+    final peerUid = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Contact user ID'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Firebase UID'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Show number')),
+        ],
+      ),
+    );
+    if (peerUid == null || peerUid.isEmpty) return;
+    final n = await SafetyNumberService().safetyNumberFor(
+      selfUserId: widget.currentUser.id,
+      peerUserId: peerUid,
+    );
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Safety number'),
+        content: n == null
+            ? const Text('Peer has no published key bundle yet.')
+            : SelectableText(n,
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 16, height: 1.6)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close')),
         ],
       ),
     );

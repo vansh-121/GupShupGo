@@ -269,23 +269,38 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       debugPrint('[Status] File path: ${_selectedFile!.path}');
       debugPrint('[Status] File size: ${await _selectedFile!.length()} bytes');
 
+      // E2EE: encrypt the file and wrap the content key for every viewer.
+      final viewers =
+          await _statusService.defaultViewerUids(widget.userId);
+      if (viewers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No contacts yet — start a chat before posting a status.')),
+          );
+        }
+        return;
+      }
       if (_isVideo) {
-        await _statusService.uploadVideoStatus(
+        await _statusService.uploadEncryptedVideoStatus(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
           userPhoneNumber: widget.userPhoneNumber,
           videoFile: _selectedFile!,
           caption: caption.isNotEmpty ? caption : null,
+          viewerUids: viewers,
         );
       } else {
-        await _statusService.uploadImageStatus(
+        await _statusService.uploadEncryptedImageStatus(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
           userPhoneNumber: widget.userPhoneNumber,
           imageFile: _selectedFile!,
           caption: caption.isNotEmpty ? caption : null,
+          viewerUids: viewers,
         );
       }
 

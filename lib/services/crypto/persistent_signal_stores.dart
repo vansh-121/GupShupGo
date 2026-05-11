@@ -212,14 +212,18 @@ class _Persistor {
   }
 
   // ── Sessions ───────────────────────────────────────────────────────────
-  // Key format: "<uid>|<deviceId>" → base64(SessionRecord).
+  // Key format: "<uid>|<deviceId>" → base64(SessionRecord serialized bytes).
+  // libsignal_protocol_dart's InMemorySessionStore stores already-serialized
+  // bytes in a public `sessions` HashMap<SignalProtocolAddress, Uint8List>,
+  // so we can dump them directly without round-tripping through
+  // SessionRecord.serialize().
   Future<Map<String, String>> _dumpSessions(
       InMemorySessionStore store) async {
-    // InMemorySessionStore doesn't expose a public iterator either. We
-    // rely on SignalService to re-trigger session writes when used; on a
-    // fresh launch with no snapshot, peers will re-establish via PreKeyBundle.
-    // TODO: open a PR upstream to expose snapshot() on the in-memory stores.
-    return const {};
+    final out = <String, String>{};
+    store.sessions.forEach((addr, bytes) {
+      out['${addr.getName()}|${addr.getDeviceId()}'] = base64Encode(bytes);
+    });
+    return out;
   }
 
   Future<void> _restoreSessions(
@@ -234,9 +238,15 @@ class _Persistor {
   }
 
   // ── Trusted identities ─────────────────────────────────────────────────
+  // store.trustedKeys is the public HashMap<SignalProtocolAddress, IdentityKey>.
   Future<Map<String, String>> _dumpTrustedIdentities(
       InMemoryIdentityKeyStore store) async {
-    return const {};
+    final out = <String, String>{};
+    store.trustedKeys.forEach((addr, key) {
+      out['${addr.getName()}|${addr.getDeviceId()}'] =
+          base64Encode(key.serialize());
+    });
+    return out;
   }
 
   Future<void> _restoreTrustedIdentities(

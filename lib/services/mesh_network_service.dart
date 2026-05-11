@@ -12,6 +12,8 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 
 /// Mesh message wrapper for relay / dedup across peers.
 class _MeshPayload {
@@ -470,21 +472,31 @@ class MeshNetworkService extends ChangeNotifier {
 
   /// Send a text message via the mesh network.
   /// The message is also stored locally as pending for Firestore sync.
+  ///
+  /// E2EE: if the receiver has a published key bundle (i.e. they've been
+  /// online recently to register) we encrypt the text into a v2 envelope
+  /// before broadcasting. If not, we fall back to plaintext mesh —
+  /// mesh-only deployments where peers have never had internet would
+  /// otherwise be unreachable.
   Future<MessageModel> sendViaMesh({
     required String receiverId,
     required String text,
     String? senderName,
   }) async {
+    final encrypted = await _maybeEncryptForMesh(receiverId, text);
     final message = MessageModel(
       id: _generateId(),
       senderId: _currentUserId,
       receiverId: receiverId,
-      text: text,
+      text: encrypted == null ? text : '',
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
       isOfflineMesh: true,
       meshHops: 0,
       syncPending: true,
+      schemaVersion: encrypted == null ? 1 : 2,
+      senderDeviceId: encrypted?.senderDeviceId,
+      envelopes: encrypted?.envelopes,
     );
 
     // Store locally
@@ -642,6 +654,33 @@ class MeshNetworkService extends ChangeNotifier {
     return message;
   }
 
+
+  /// Try to encrypt `text` for `receiverId` using the same multi-device
+  /// fan-out the regular ChatService uses. Returns null if anything is
+  /// missing (no local identity, peer has no published bundle reachable
+  /// from this device, encrypt threw) — caller falls back to plaintext
+  /// mesh.
+  Future<({int? senderDeviceId, Map<String, Map<String, dynamic>>? envelopes})?>
+      _maybeEncryptForMesh(String receiverId, String text) async {
+    try {
+      final senderDeviceId = await DeviceIdentityService().getDeviceId();
+      if (senderDeviceId == null) return null;
+      final encs = await SignalService.instance.encryptForUser(
+        senderUid: _currentUserId,
+        senderDeviceId: senderDeviceId,
+        recipientUid: receiverId,
+        plaintext: Uint8List.fromList(utf8.encode(text)),
+      );
+      if (encs.isEmpty) return null;
+      return (
+        senderDeviceId: senderDeviceId,
+        envelopes: encs.map((k, v) => MapEntry(k, v.toMap())),
+      );
+    } catch (e) {
+      debugPrint('[Mesh] E2EE encrypt failed, sending plaintext: $e');
+      return null;
+    }
+  }
 
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {

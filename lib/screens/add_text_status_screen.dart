@@ -70,13 +70,29 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
     setState(() => _isUploading = true);
 
     try {
-      await _statusService.uploadTextStatus(
+      // E2EE: encrypt the status under a per-item key and wrap the key for
+      // every viewer's device. If the user has zero contacts, we have no one
+      // to share it with — surface that explicitly rather than silently
+      // dropping the post.
+      final viewers = await _statusService.defaultViewerUids(widget.userId);
+      if (viewers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No contacts yet — start a chat before posting a status.')),
+          );
+        }
+        return;
+      }
+      await _statusService.uploadEncryptedTextStatus(
         userId: widget.userId,
         userName: widget.userName,
         userPhotoUrl: widget.userPhotoUrl,
         userPhoneNumber: widget.userPhoneNumber,
         text: text,
         backgroundColor: _backgroundColors[_currentColorIndex],
+        viewerUids: viewers,
       );
 
       if (mounted) {

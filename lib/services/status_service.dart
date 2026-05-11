@@ -97,6 +97,25 @@ class StatusService {
   /// Random 256-bit content key for a status item.
   Uint8List _newContentKey() => signalRandomBytes(32);
 
+  /// Compute the default viewer set: every other user with whom this user has
+  /// an active chat room. The pragmatic "who can see my status" cohort —
+  /// matches how most people actually share status updates without exposing
+  /// every signed-in user on the platform.
+  Future<List<String>> defaultViewerUids(String selfUid) async {
+    final snap = await _firestore
+        .collection('chatRooms')
+        .where('participants', arrayContains: selfUid)
+        .get();
+    final peers = <String>{};
+    for (final d in snap.docs) {
+      final parts = List<String>.from(d.data()['participants'] ?? const []);
+      for (final p in parts) {
+        if (p != selfUid) peers.add(p);
+      }
+    }
+    return peers.toList();
+  }
+
   /// Encrypted text status. The text body is encrypted under a per-item
   /// content key; the content key is wrapped per viewer device.
   ///
@@ -194,6 +213,54 @@ class StatusService {
     required File imageFile,
     String? caption,
     required List<String> viewerUids,
+  }) =>
+      _uploadEncryptedMedia(
+        userId: userId,
+        userName: userName,
+        userPhotoUrl: userPhotoUrl,
+        userPhoneNumber: userPhoneNumber,
+        file: imageFile,
+        statusType: 'encrypted_image',
+        folder: 'encrypted_images',
+        contentType: 'image/jpeg',
+        caption: caption,
+        viewerUids: viewerUids,
+      );
+
+  /// Encrypted video status — same flow as image, different content type.
+  Future<void> uploadEncryptedVideoStatus({
+    required String userId,
+    required String userName,
+    String? userPhotoUrl,
+    String? userPhoneNumber,
+    required File videoFile,
+    String? caption,
+    required List<String> viewerUids,
+  }) =>
+      _uploadEncryptedMedia(
+        userId: userId,
+        userName: userName,
+        userPhotoUrl: userPhotoUrl,
+        userPhoneNumber: userPhoneNumber,
+        file: videoFile,
+        statusType: 'encrypted_video',
+        folder: 'encrypted_videos',
+        contentType: 'video/mp4',
+        caption: caption,
+        viewerUids: viewerUids,
+      );
+
+  Future<void> _uploadEncryptedMedia({
+    required String userId,
+    required String userName,
+    String? userPhotoUrl,
+    String? userPhoneNumber,
+    required File file,
+    required String statusType,
+    required String folder,
+    required String contentType,
+    String? caption,
+    required List<String> viewerUids,
   }) async {
     final ownerDeviceId = await _deviceIdentity.getDeviceId();
     if (ownerDeviceId == null) {
@@ -201,15 +268,15 @@ class StatusService {
     }
     final statusItemId = _firestore.collection(_statusCollection).doc().id;
     final bundle = await _media.encryptAndUpload(
-      file: imageFile,
+      file: file,
       storagePath:
-          'statuses/$userId/encrypted_images/${DateTime.now().millisecondsSinceEpoch}.bin',
-      contentType: 'image/jpeg',
+          'statuses/$userId/$folder/${DateTime.now().millisecondsSinceEpoch}.bin',
+      contentType: contentType,
     );
 
     final statusItem = StatusItem(
       id: statusItemId,
-      type: 'encrypted_image',
+      type: statusType,
       imageUrl: bundle.url,
       caption: jsonEncode({
         'enc': true,
@@ -246,7 +313,9 @@ class StatusService {
     required StatusItem item,
     required String selfUid,
   }) async {
-    if (item.type != 'encrypted' && item.type != 'encrypted_image') {
+    if (item.type != 'encrypted' &&
+        item.type != 'encrypted_image' &&
+        item.type != 'encrypted_video') {
       return null; // not an encrypted item
     }
     final key = await _fetchWrappedKey(
@@ -265,7 +334,9 @@ class StatusService {
       sizeBytes: 0, // unknown; not used by download path
       contentType: item.type == 'encrypted_image'
           ? 'image/jpeg'
-          : 'application/json',
+          : item.type == 'encrypted_video'
+              ? 'video/mp4'
+              : 'application/json',
     );
     final pt = await _media.downloadAndDecrypt(bundle);
     return {

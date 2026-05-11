@@ -10,6 +10,8 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class CallScreen extends StatefulWidget {
@@ -217,6 +219,53 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  /// Establishes a per-call shared secret with the other party (via a
+  /// Signal-encrypted envelope written under calls/{channelId}/keyEnvelopes)
+  /// and enables Agora's AES-256-GCM media-stream encryption on this engine.
+  /// MUST be called before `joinChannel` — Agora silently drops frames if the
+  /// encryption config is set after the channel join.
+  Future<void> _setupCallEncryption() async {
+    if (_engine == null) return;
+    final selfUid = FirebaseAuth.instance.currentUser?.uid;
+    final peerUid = widget.calleeId;
+    if (selfUid == null || peerUid == null) return;
+
+    final deviceIdSvc = DeviceIdentityService();
+    final selfDeviceId = await deviceIdSvc.getDeviceId();
+    if (selfDeviceId == null) return; // E2EE not registered on this device
+
+    final svc = CallEncryptionService();
+    CallEncryptionKey? key;
+
+    if (widget.isCaller) {
+      // Caller generates and publishes for the callee.
+      key = await svc.publishKeyForCallees(
+        channelId: widget.channelId,
+        senderUid: selfUid,
+        senderDeviceId: selfDeviceId,
+        calleeUid: peerUid,
+      );
+    } else {
+      // Callee polls for the envelope. The caller might write a fraction of
+      // a second after the call-screen mounts, so retry briefly.
+      for (var i = 0; i < 10 && key == null; i++) {
+        key = await svc.fetchKey(
+          channelId: widget.channelId,
+          selfUid: selfUid,
+          selfDeviceId: selfDeviceId,
+          callerUid: peerUid,
+        );
+        if (key == null) await Future.delayed(const Duration(milliseconds: 300));
+      }
+    }
+
+    if (key == null) {
+      print('No call encryption key available — call will be unencrypted');
+      return;
+    }
+    await AgoraService.enableMediaEncryption(_engine!, key);
+  }
+
   Future<void> _initAgora() async {
     try {
       // Set initial call start time to avoid null errors
@@ -293,6 +342,18 @@ class _CallScreenState extends State<CallScreen> {
 
       // Small delay to ensure engine is fully initialized
       await Future.delayed(Duration(milliseconds: 200));
+
+      // ── E2EE: enable Agora media encryption with a per-call key ──────
+      // The key is exchanged out-of-band via a Signal-encrypted envelope.
+      // If anything fails (peer not E2EE-ready, no devices, etc.) we fall
+      // back to an unencrypted call rather than blocking the user — this
+      // matches WhatsApp's "best effort" call encryption behaviour for
+      // cross-version compatibility.
+      try {
+        await _setupCallEncryption();
+      } catch (e) {
+        print('Call encryption setup failed (continuing unencrypted): $e');
+      }
 
       // Join channel with null token for testing
       await _engine!.joinChannel(
