@@ -17,7 +17,7 @@
 //
 // Concurrency: all mutations route through `markDirty()` which debounces
 // writes by 1500ms. `flush()` forces an immediate write — called before app
-// background, on signOut, and before backup snapshot. The 1.5s window
+// background and on signOut. The 1.5s window
 // coalesces a burst of encrypts/decrypts (typing, reading a chat) into a
 // single snapshot write; the previous 250ms window was rewriting the entire
 // store ~4× per second during active chat which dominated end-to-end
@@ -126,7 +126,7 @@ class PersistentSignalStores {
   }
 
   /// Forces an immediate snapshot of all stores to secure storage. Call on
-  /// app pause/detach and before any backup.
+  /// app pause/detach.
   Future<void> flush() async {
     _debounce?.cancel();
     final snapshot = await _persistor.snapshot(this);
@@ -140,26 +140,6 @@ class PersistentSignalStores {
     await _ss.delete(key: _storesKey);
   }
 
-  /// Used by BackupService — returns the latest stores snapshot JSON.
-  static Future<String?> exportSnapshot() async {
-    return _ss.read(key: _storesKey);
-  }
-
-  /// Used by BackupService restore — rewrites identity + snapshot from the
-  /// decrypted backup. Caller must call SignalService.init() again after.
-  static Future<void> importSnapshot({
-    required String identityKeyPairB64,
-    required int registrationId,
-    required String? stateSnapshot,
-  }) async {
-    await _ss.write(key: _identityKey, value: identityKeyPairB64);
-    await _ss.write(key: _registrationIdKey, value: '$registrationId');
-    if (stateSnapshot != null) {
-      await _ss.write(key: _storesKey, value: stateSnapshot);
-    } else {
-      await _ss.delete(key: _storesKey);
-    }
-  }
 }
 
 /// Serializes the four stores to / from a single JSON blob. Each entry uses

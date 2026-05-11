@@ -90,10 +90,9 @@ dependencies:
   # to be distributed under GPL-3.0 too. See LICENSE.
   libsignal_protocol_dart: ^0.7.1
 
-  # Crypto primitives used by media encryption, backup KDF, and Agora
+  # Crypto primitives used by media encryption and Agora
   # call-key derivation. Apache-2.0 / MIT.
   cryptography: ^2.7.0
-  pointycastle: ^3.9.1
   crypto: ^3.0.3
 
   # Local persistent store for ratchet sessions, prekeys, and decrypted

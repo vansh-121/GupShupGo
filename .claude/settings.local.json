@@ -15,7 +15,8 @@
       "Bash(Get-ChildItem -Path \"E:\\\\GupShupGo\\\\gupshupgo\" -Directory)",
       "Bash(Select-Object Name)",
       "Bash(firebase target:list)",
-      "Bash(firebase apps:list)"
+      "Bash(firebase apps:list)",
+      "Bash(xargs grep -l \"vault\\\\|Vault\")"
     ]
   }
 }

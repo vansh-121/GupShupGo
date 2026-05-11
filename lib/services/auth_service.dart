@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show VoidCallback, debugPrint;
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
-import 'package:video_chat_app/services/crypto/backup_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
@@ -29,19 +28,14 @@ class AuthService {
   /// is published to Firestore for this user/device. Safe to call repeatedly
   /// — cheap no-op once registered.
   ///
-  /// On reinstall (local keys wiped) + cloud backup exists: skips
-  /// registerIfNeeded so fresh keys aren't generated before the user can
-  /// enter their passphrase. BackupService.pendingRestore is set to true so
-  /// HomeScreen knows to show the restore dialog, after which it calls
-  /// ensureE2EERegisteredForCurrentSession again to finish registration.
+  /// On reinstall (local keys wiped) we generate fresh keys and allocate a
+  /// new deviceId. Decrypted message history is recovered lazily from the
+  /// per-user msgVault/statusVault in Firestore (see ChatService /
+  /// StatusService). New sessions with peers re-establish on next
+  /// send/receive via their published key bundles.
   Future<void> _ensureE2EERegistered(String userId) async {
     try {
       await SignalService.init();
-      if (await BackupService().needsRestore(userId)) {
-        BackupService.pendingRestore = true;
-        debugPrint('[E2EE] Backup detected — skipping key generation, HomeScreen will prompt restore');
-        return; // HomeScreen will restore then call us again
-      }
       await _deviceIdentity.registerIfNeeded(userId);
     } catch (e) {
       print('E2EE registration failed (non-blocking): $e');
