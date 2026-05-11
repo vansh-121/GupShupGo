@@ -22,6 +22,49 @@ class ChatService {
   // visible to the server, so we never put plaintext there.
   static const String _encryptedPreviewPlaceholder = '🔒 Encrypted message';
 
+  // ─── Local send outbox (WhatsApp-style optimistic UI) ───────────────────
+  //
+  // The Firestore stream is the source of truth for delivered messages, but
+  // it can't render a bubble until the commit lands — that's 100–800ms on a
+  // good network, longer on a flaky one. The outbox plugs that gap: the
+  // moment sendMessage() is called we build a MessageModel with
+  // status=sending, drop it into _outbox, and emit it through every active
+  // getMessages() stream so the bubble appears in the same frame as the
+  // tap. The actual encrypt + Firestore commit runs in the background; on
+  // success the entry is removed (Firestore re-delivers the canonical
+  // message with status=sent), on failure the entry is updated to
+  // status=failed so the user sees an error indicator and can retry.
+  //
+  // Static because ChatService is constructed per-screen but the outbox
+  // must outlive any single screen — a send from the chat list preview
+  // bar (hypothetical) should appear instantly when the user opens the
+  // chat screen a moment later. Keyed by chatRoomId.
+  static final Map<String, List<MessageModel>> _outbox = {};
+
+  // Broadcasts whenever _outbox changes so the merged stream in
+  // getMessages can re-emit. We use a void signal rather than passing the
+  // full outbox map to avoid forcing a copy on every notification — every
+  // listener reads _outbox directly during the merge step.
+  static final StreamController<void> _outboxNotifier =
+      StreamController<void>.broadcast();
+
+  static void _addToOutbox(String chatRoomId, MessageModel message) {
+    final list = _outbox.putIfAbsent(chatRoomId, () => <MessageModel>[]);
+    list.add(message);
+    _outboxNotifier.add(null);
+  }
+
+  static void _updateOutbox(
+      String chatRoomId, String messageId, MessageModel Function(MessageModel) update) {
+    final list = _outbox[chatRoomId];
+    if (list == null) return;
+    final idx = list.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    list[idx] = update(list[idx]);
+    _outboxNotifier.add(null);
+  }
+
+
   // All decrypted message bodies (both incoming and outgoing) live in a
   // local sqflite DB via PlaintextStore. The Firestore stream is the
   // transport, the local DB is the source of truth for rendering — the
@@ -30,16 +73,29 @@ class ChatService {
   /// Returns true iff the peer has at least one device with a published
   /// key bundle (i.e. they've upgraded to an E2EE-capable build).
   ///
-  /// Cached per peer with a 60-second TTL. A peer transitioning from
-  /// pre-E2EE to E2EE-capable will pick up the new bundle within a minute
-  /// — fine for a one-time event that only happens on app upgrade.
+  /// Stale-while-revalidate. Cached entries are returned instantly; if the
+  /// cached value is older than 5 minutes we kick off a background refresh
+  /// but DO NOT block the send. The previous 60-second hard TTL caused a
+  /// periodic latency spike — once a minute the first send to a peer
+  /// synchronously queried Firestore before encryption could begin, which
+  /// is exactly the "sometimes the send is slow, sometimes it's instant"
+  /// symptom users perceive.
   static final Map<String, ({DateTime at, bool has})> _peerBundleCache = {};
+  static const _peerBundleFreshWindow = Duration(minutes: 5);
+  static final Set<String> _peerBundleRefreshInFlight = <String>{};
+
   Future<bool> _peerHasKeyBundle(String peerUid) async {
     final hit = _peerBundleCache[peerUid];
-    if (hit != null &&
-        DateTime.now().difference(hit.at).inSeconds < 60) {
+    if (hit != null) {
+      if (DateTime.now().difference(hit.at) > _peerBundleFreshWindow) {
+        _refreshPeerBundle(peerUid);
+      }
       return hit.has;
     }
+    return _fetchPeerBundle(peerUid);
+  }
+
+  Future<bool> _fetchPeerBundle(String peerUid) async {
     final snap = await _firestore
         .collection('users')
         .doc(peerUid)
@@ -50,6 +106,15 @@ class ChatService {
     final has = snap.docs.isNotEmpty;
     _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
     return has;
+  }
+
+  void _refreshPeerBundle(String peerUid) {
+    if (_peerBundleRefreshInFlight.contains(peerUid)) return;
+    _peerBundleRefreshInFlight.add(peerUid);
+    // ignore: discarded_futures
+    _fetchPeerBundle(peerUid).whenComplete(() {
+      _peerBundleRefreshInFlight.remove(peerUid);
+    }).catchError((_) => false);
   }
 
   /// Resolves a Firestore MessageModel into its rendered form.
@@ -210,11 +275,95 @@ class ChatService {
     final chatRoomRef =
         _firestore.collection(_chatRoomsCollection).doc(chatRoomId);
 
-    // Create message document reference
+    // Firestore generates the doc id synchronously client-side, so we have a
+    // stable id to publish into the outbox before any async work begins.
     DocumentReference messageRef = chatRoomRef
         .collection(_messagesCollection)
         .doc();
 
+    // ── Optimistic bubble: WhatsApp behaviour ───────────────────────────
+    // Drop a `status: sending` MessageModel into the outbox immediately so
+    // the chat stream emits it in the same frame as the tap. Once the
+    // Firestore commit lands, the canonical message arrives via the
+    // snapshot stream and we remove the outbox entry. On failure we flip
+    // it to status=failed so the bubble stays on screen with an error
+    // indicator the user can retry from.
+    final optimistic = MessageModel(
+      id: messageRef.id,
+      senderId: senderId,
+      receiverId: receiverId,
+      text: text,
+      type: type,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      mediaUrl: mediaUrl,
+      audioDuration: audioDuration,
+      statusReplyOwnerId: statusReplyOwnerId,
+      statusReplyItemId: statusReplyItemId,
+      statusReplyOwnerName: statusReplyOwnerName,
+      statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+      statusReplyType: statusReplyType,
+      statusReplyText: statusReplyText,
+      statusReplyMediaUrl: statusReplyMediaUrl,
+      statusReplyCaption: statusReplyCaption,
+      statusReplyBackgroundColor: statusReplyBackgroundColor,
+    );
+    _addToOutbox(chatRoomId, optimistic);
+
+    try {
+      return await _commitMessage(
+        chatRoomId: chatRoomId,
+        chatRoomRef: chatRoomRef,
+        messageRef: messageRef,
+        senderId: senderId,
+        receiverId: receiverId,
+        text: text,
+        senderName: senderName,
+        type: type,
+        mediaUrl: mediaUrl,
+        audioDuration: audioDuration,
+        statusReplyOwnerId: statusReplyOwnerId,
+        statusReplyItemId: statusReplyItemId,
+        statusReplyOwnerName: statusReplyOwnerName,
+        statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+        statusReplyType: statusReplyType,
+        statusReplyText: statusReplyText,
+        statusReplyMediaUrl: statusReplyMediaUrl,
+        statusReplyCaption: statusReplyCaption,
+        statusReplyBackgroundColor: statusReplyBackgroundColor,
+      );
+    } catch (e) {
+      // Keep the bubble visible with a failed indicator so the user can
+      // see what didn't go through and (in a future revision) tap to
+      // retry. The bubble is removed only on a successful commit, when
+      // Firestore re-delivers the canonical message.
+      _updateOutbox(chatRoomId, messageRef.id,
+          (m) => m.copyWith(status: MessageStatus.failed));
+      rethrow;
+    }
+  }
+
+  Future<MessageModel> _commitMessage({
+    required String chatRoomId,
+    required DocumentReference chatRoomRef,
+    required DocumentReference messageRef,
+    required String senderId,
+    required String receiverId,
+    required String text,
+    String? senderName,
+    required MessageType type,
+    String? mediaUrl,
+    int? audioDuration,
+    String? statusReplyOwnerId,
+    String? statusReplyItemId,
+    String? statusReplyOwnerName,
+    String? statusReplyOwnerPhotoUrl,
+    String? statusReplyType,
+    String? statusReplyText,
+    String? statusReplyMediaUrl,
+    String? statusReplyCaption,
+    String? statusReplyBackgroundColor,
+  }) async {
     // ── E2EE: build the inner plaintext payload, encrypt for every device
     //         of receiver + sender's other devices (multi-device fan-out).
     final senderDeviceId = await _deviceIdentity.getDeviceId();
@@ -355,6 +504,10 @@ class ChatService {
       },
     );
     print('Message sent: ${message.id}');
+    // Outbox cleanup happens in the merge layer the moment the Firestore
+    // snapshot stream actually delivers the canonical message. Removing
+    // here, between commit-ack and Firestore-observe, would cause a brief
+    // 1-frame flicker where the bubble disappears and then reappears.
 
     // Fire-and-forget the FCM push. Awaiting it added 200ms–1s to every
     // send while the HTTP call to the notifications endpoint ran. The
@@ -407,7 +560,8 @@ class ChatService {
         }
       }
 
-      return _firestore
+      // The base Firestore stream of committed messages.
+      final firestoreStream = _firestore
           .collection(_chatRoomsCollection)
           .doc(chatRoomId)
           .collection(_messagesCollection)
@@ -428,7 +582,107 @@ class ChatService {
         );
         return resolved.whereType<MessageModel>().toList();
       });
+
+      // Merge the Firestore stream with outbox change notifications. Every
+      // time either source ticks we re-emit the union of (latest Firestore
+      // list) ∪ (current outbox), with outbox entries filtered out if the
+      // canonical Firestore message with the same id has already landed.
+      // This is what makes the bubble appear instantly on tap and then
+      // seamlessly hand off to the Firestore-backed render once the commit
+      // completes — without ever showing the same bubble twice.
+      return _mergeWithOutbox(chatRoomId, firestoreStream);
     });
+  }
+
+  /// Combines the committed-message stream with the local outbox so a
+  /// freshly-tapped send shows up as a bubble in the same frame.
+  Stream<List<MessageModel>> _mergeWithOutbox(
+    String chatRoomId,
+    Stream<List<MessageModel>> firestoreStream,
+  ) {
+    List<MessageModel> latestCommitted = const [];
+    bool gotFirstFirestoreEmission = false;
+    final controller = StreamController<List<MessageModel>>();
+
+    List<MessageModel> combine() {
+      final outboxList = _outbox[chatRoomId] ?? const <MessageModel>[];
+      if (outboxList.isEmpty) return latestCommitted;
+      // Dedup: once Firestore has delivered a message, the outbox copy
+      // (which may still be in the middle of being removed by the post-
+      // commit cleanup) must not appear alongside the canonical version.
+      final committedIds = {for (final m in latestCommitted) m.id};
+      final merged = <MessageModel>[
+        ...latestCommitted,
+        ...outboxList.where((m) => !committedIds.contains(m.id)),
+      ];
+      merged.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return merged;
+    }
+
+    StreamSubscription<List<MessageModel>>? firestoreSub;
+    StreamSubscription<void>? outboxSub;
+
+    void start() {
+      firestoreSub = firestoreStream.listen(
+        (msgs) {
+          latestCommitted = msgs;
+          gotFirstFirestoreEmission = true;
+          // The moment Firestore confirms a previously-pending message has
+          // arrived, drop its optimistic twin from the outbox. We defer
+          // this until the canonical version is actually in the snapshot
+          // list — clearing on commit-ack alone would leave a 1-frame gap
+          // where the bubble vanishes and re-appears.
+          final outboxList = _outbox[chatRoomId];
+          if (outboxList != null && outboxList.isNotEmpty) {
+            final committedIds = {for (final m in msgs) m.id};
+            final stillPending = outboxList
+                .where((m) => !committedIds.contains(m.id))
+                .toList();
+            if (stillPending.length != outboxList.length) {
+              if (stillPending.isEmpty) {
+                _outbox.remove(chatRoomId);
+              } else {
+                _outbox[chatRoomId] = stillPending;
+              }
+              // Don't emit on _outboxNotifier here — we're about to emit
+              // a combined frame ourselves and a duplicate tick would
+              // just trigger an identical rebuild.
+            }
+          }
+          if (!controller.isClosed) controller.add(combine());
+        },
+        onError: (e, st) {
+          if (!controller.isClosed) controller.addError(e, st);
+        },
+        onDone: () {
+          if (!controller.isClosed) controller.close();
+        },
+      );
+      // Outbox ticks emit on top of whatever the last Firestore snapshot
+      // was. If Firestore hasn't emitted yet we still emit so the bubble
+      // appears immediately on a cold open.
+      outboxSub = _outboxNotifier.stream.listen((_) {
+        if (controller.isClosed) return;
+        if (gotFirstFirestoreEmission) {
+          controller.add(combine());
+        } else {
+          controller.add(_outbox[chatRoomId] ?? const <MessageModel>[]);
+        }
+      });
+      // Emit an initial frame if the outbox already has entries for this
+      // room (e.g. user opens the chat right after firing a send).
+      final initialOutbox = _outbox[chatRoomId];
+      if (initialOutbox != null && initialOutbox.isNotEmpty) {
+        controller.add(List<MessageModel>.from(initialOutbox));
+      }
+    }
+
+    controller.onListen = start;
+    controller.onCancel = () async {
+      await firestoreSub?.cancel();
+      await outboxSub?.cancel();
+    };
+    return controller.stream;
   }
 
   // Get paginated messages (for loading older messages)

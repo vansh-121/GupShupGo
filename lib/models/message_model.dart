@@ -3,6 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum MessageType { text, image, audio, video }
 
 enum MessageStatus {
+  // Local-only state. The message is in the outbox: the bubble is on
+  // screen but the encrypt + Firestore commit hasn't completed yet.
+  // Never persisted to Firestore — it only exists for the brief window
+  // between user tap and commit, and is replaced by `sent` the moment
+  // the Firestore stream re-delivers the message.
+  sending,
+  // Local-only state. Encrypt or Firestore commit failed; the bubble
+  // stays in the outbox with this status so the user can retry.
+  failed,
   sent, // Message sent but not delivered
   delivered, // Message delivered to device but not read
   read // Message read by receiver
@@ -253,6 +262,10 @@ class MessageModel {
         return MessageStatus.delivered;
       case 'read':
         return MessageStatus.read;
+      // `sending` and `failed` are local-only states that should never
+      // appear in a Firestore payload, but a stale write from a buggy
+      // client would otherwise stick a permanent "sending" bubble on the
+      // receiver. Map them back to the safe `sent` baseline.
       default:
         return MessageStatus.sent;
     }

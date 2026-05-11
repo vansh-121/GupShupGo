@@ -414,7 +414,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty || _isSending) return;
+    if (text.isEmpty) return;
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send messages to this contact')),
@@ -422,62 +422,71 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    setState(() {
-      _isSending = true;
-    });
+    // ── Optimistic UI: WhatsApp-style ────────────────────────────────────
+    // Clear the input field, stop the typing indicator, and scroll to the
+    // bottom IMMEDIATELY — before encryption or any Firestore work runs.
+    // Previously the send button was disabled (`_isSending = true`) for the
+    // entire encrypt + Firestore commit (~150–800ms depending on cache
+    // state and network), which is what made sends feel "sometimes slow".
+    // The user can now type and queue the next message while this one is
+    // still going through; the Firestore stream resolves the message into
+    // the chat list whenever the commit lands.
+    _messageController.clear();
+    _stopTyping();
+    _scrollToBottom();
 
-    try {
-      _messageController.clear();
-      // User sent the message — stop typing indicator immediately
-      _stopTyping();
+    final connectivity =
+        Provider.of<ConnectivityProvider>(context, listen: false);
 
-      // Check connectivity — send via mesh if offline
-      final connectivity =
-          Provider.of<ConnectivityProvider>(context, listen: false);
+    if (!connectivity.isOnline) {
+      // ── Offline path stays awaited so we can fall back to mesh and
+      //    restore the text if mesh is also unavailable. Offline send is a
+      //    user-noticeable error case — surfacing it sync is the right call.
+      try {
+        final meshService =
+            Provider.of<MeshNetworkService>(context, listen: false);
+        final meshMsg = await meshService.sendViaMesh(
+          receiverId: widget.contact.id,
+          text: text,
+          senderName: widget.currentUserName,
+        );
+        if (mounted) setState(() => _meshMessages.add(meshMsg));
+        _scrollToBottom();
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'No internet & mesh unavailable. Message not sent.')),
+        );
+        _messageController.text = text;
+      }
+      return;
+    }
 
-      if (!connectivity.isOnline) {
-        // ── Offline: send via mesh network ──────────────────────────
-        try {
-          final meshService =
-              Provider.of<MeshNetworkService>(context, listen: false);
-          final meshMsg = await meshService.sendViaMesh(
-            receiverId: widget.contact.id,
-            text: text,
-            senderName: widget.currentUserName,
-          );
-          setState(() => _meshMessages.add(meshMsg));
-          _scrollToBottom();
-        } catch (_) {
-          // Mesh not available — show error
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text(
-                    'No internet & mesh unavailable. Message not sent.')),
-          );
-          _messageController.text = text;
-        }
-      } else {
-        // ── Online: send via Firestore as usual ─────────────────────
+    // ── Online: fire-and-forget. The encrypt + Firestore batch happens
+    //    in the background; the chat stream brings the message into view
+    //    the moment the commit lands. On failure we restore the text only
+    //    if the user hasn't started typing something new.
+    unawaited(() async {
+      try {
         await _chatService.sendMessage(
           senderId: widget.currentUserId,
           receiverId: widget.contact.id,
           text: text,
           senderName: widget.currentUserName,
         );
-        _scrollToBottom();
+      } catch (e) {
+        print('Error sending message: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to send message')),
+        );
+        if (_messageController.text.isEmpty) {
+          _messageController.text = text;
+        }
       }
-    } catch (e) {
-      print('Error sending message: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send message')),
-      );
-      // Restore the text if sending failed
-      _messageController.text = text;
-    } finally {
-      setState(() {
-        _isSending = false;
-      });
-    }
+    }());
   }
 
   String _formatTime(DateTime dateTime) {
@@ -945,6 +954,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageStatusIcon(MessageModel message) {
     switch (message.status) {
+      case MessageStatus.sending:
+        // Clock icon while the Firestore commit is still in flight. The
+        // outbox layer holds the bubble on screen during this window so
+        // the user never waits for the send to "feel" complete.
+        return const Icon(Icons.access_time_rounded,
+            size: 14, color: Colors.white70);
+      case MessageStatus.failed:
+        return const Icon(Icons.error_outline_rounded,
+            size: 14, color: Color(0xFFFFB4A9));
       case MessageStatus.sent:
         return const Icon(Icons.done_rounded, size: 14, color: Colors.white70);
       case MessageStatus.delivered:

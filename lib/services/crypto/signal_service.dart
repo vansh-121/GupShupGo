@@ -250,25 +250,41 @@ class SignalService {
     return out;
   }
 
-  // 60-second cache for device-id lookups. The expensive Firestore query
-  // was firing twice per message (once for sender, once for recipient),
-  // which dominated end-to-end send latency. Device lists rarely change —
-  // new devices register at sign-in time, weeks apart — so this cache is
-  // safe and the TTL prevents stale state from lingering more than a
-  // minute after a new device joins.
+  // Stale-while-revalidate cache for device-id lookups. Device lists rarely
+  // change (new device only on sign-in) so we keep entries effectively
+  // forever and refresh them out-of-band when they age past 5 minutes.
+  //
+  // The original 60-second hard TTL caused a periodic ~150ms latency spike
+  // on the send path: every minute the first send would synchronously
+  // re-query Firestore — exactly the "sometimes the send is slow, sometimes
+  // it's instant" pattern users see. With this pattern the hot path is
+  // always an in-memory map hit; new devices propagate within ~5 min of the
+  // next message activity. invalidateDeviceCache() forces an immediate
+  // re-fetch when DeviceIdentityService registers a new device locally.
   static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
+  static const _deviceIdFreshWindow = Duration(minutes: 5);
+  static final Set<String> _deviceIdRefreshInFlight = <String>{};
 
   /// Public wrapper around the cached device-id lookup so other services
   /// (e.g. CallEncryptionService when discovering the caller's deviceId)
-  /// can reuse the same 60-second cache instead of re-querying Firestore.
+  /// can reuse the same cache instead of re-querying Firestore.
   Future<List<int>> listDeviceIdsCached(String uid) => _listDeviceIds(uid);
 
   Future<List<int>> _listDeviceIds(String uid) async {
     final hit = _deviceIdCache[uid];
-    if (hit != null &&
-        DateTime.now().difference(hit.at).inSeconds < 60) {
+    if (hit != null) {
+      // Stale-but-usable: return cached IDs immediately, refresh in the
+      // background. The send path NEVER blocks on this query after the
+      // first lookup for a peer.
+      if (DateTime.now().difference(hit.at) > _deviceIdFreshWindow) {
+        _refreshDeviceIds(uid);
+      }
       return hit.ids;
     }
+    return _fetchAndCacheDeviceIds(uid);
+  }
+
+  Future<List<int>> _fetchAndCacheDeviceIds(String uid) async {
     final snap = await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
@@ -281,6 +297,15 @@ class SignalService {
         .toList();
     _deviceIdCache[uid] = (at: DateTime.now(), ids: ids);
     return ids;
+  }
+
+  void _refreshDeviceIds(String uid) {
+    if (_deviceIdRefreshInFlight.contains(uid)) return;
+    _deviceIdRefreshInFlight.add(uid);
+    // ignore: discarded_futures
+    _fetchAndCacheDeviceIds(uid).whenComplete(() {
+      _deviceIdRefreshInFlight.remove(uid);
+    }).catchError((_) => const <int>[]);
   }
 
   /// Invalidate the device-id cache for a user. Call from
