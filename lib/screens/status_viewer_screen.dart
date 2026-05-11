@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -122,61 +123,34 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
   Future<void> _decryptOne(StatusItem item) async {
     if (_decrypted.containsKey(item.id)) return;
-    // Process-wide cache hit: the provider has already decrypted this item
-    // while the user was browsing the status list. Render synchronously,
-    // no network round-trip.
-    final cached = StatusService.cachedPlaintext(item.id);
-    if (cached != null) {
-      _decrypted[item.id] = cached.text != null
-          ? _DecryptedStatus.text(
-              text: cached.text ?? '',
-              backgroundColor: cached.backgroundColor ?? '#6C5CE7',
-            )
-          : _DecryptedStatus.media(
-              localFile: cached.localFile!,
-              bytes: cached.bytes!,
-              isVideo: cached.isVideo,
-            );
-      return;
-    }
-    try {
-      // Try up to 3 times with a small backoff. Covers the brief window
-      // where a viewer opens a fresh status before the wrappedKey envelope
-      // has propagated through Firestore (or arrived via the listener).
-      Map<String, dynamic>? result;
-      for (var attempt = 0; attempt < 3; attempt++) {
-        result = await _statusService.decryptStatusItem(
-          ownerUid: widget.statusModel.userId,
-          item: item,
-          selfUid: widget.currentUserId,
-        );
-        if (result != null) break;
-        if (!mounted) return;
-        await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+
+    // Up to 3 attempts to cover the brief propagation window for a freshly
+    // posted status whose wrappedKey envelope hasn't arrived yet. Each
+    // attempt goes through ensureDecrypted which prefers the persistent
+    // disk cache — so a status the user has already seen renders
+    // instantly even after an app restart (and without network).
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await _statusService.ensureDecrypted(
+        ownerUid: widget.statusModel.userId,
+        item: item,
+        selfUid: widget.currentUserId,
+      );
+      final cached = StatusService.cachedPlaintext(item.id);
+      if (cached != null) {
+        _decrypted[item.id] = cached.text != null
+            ? _DecryptedStatus.text(
+                text: cached.text ?? '',
+                backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+              )
+            : _DecryptedStatus.media(
+                localFile: cached.localFile!,
+                bytes: cached.bytes!,
+                isVideo: cached.isVideo,
+              );
+        return;
       }
-      if (result == null) return;
-      if (item.type == 'encrypted') {
-        final j = result['json'] as Map<String, dynamic>;
-        _decrypted[item.id] = _DecryptedStatus.text(
-          text: (j['text'] as String?) ?? '',
-          backgroundColor:
-              (j['backgroundColor'] as String?) ?? '#6C5CE7',
-        );
-      } else {
-        final bytes = result['bytes'] as Uint8List;
-        final isVideo = item.type == 'encrypted_video';
-        final ext = isVideo ? 'mp4' : 'jpg';
-        final file = await File(
-                '${Directory.systemTemp.path}/dec_${item.id}.$ext')
-            .writeAsBytes(bytes, flush: true);
-        _decrypted[item.id] = _DecryptedStatus.media(
-          localFile: file,
-          bytes: bytes,
-          isVideo: isVideo,
-        );
-      }
-    } catch (_) {
-      // skip — UI will show the "couldn't decrypt" placeholder.
+      if (!mounted) return;
+      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
     }
   }
 
@@ -480,9 +454,48 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _videoController?.pause();
 
     final currentItem = _activeItems[_currentIndex];
-    final mediaUrl = currentItem.type == 'image'
-        ? currentItem.imageUrl
-        : currentItem.thumbnailUrl ?? currentItem.videoUrl;
+
+    // For encrypted statuses the on-Firestore fields are opaque metadata
+    // (caption holds a JSON blob with iv/hash, type is "encrypted*", text is
+    // null). Sending those verbatim is what produced the "{enc:true,iv:…}"
+    // reply preview. Project the *decrypted* fields into the reply
+    // payload so the chat preview matches what the user actually saw.
+    String replyType = currentItem.type;
+    String? replyText = currentItem.text;
+    String? replyCaption = currentItem.caption;
+    String? replyBg = currentItem.backgroundColor;
+    String? mediaUrl;
+
+    if (currentItem.type.startsWith('encrypted')) {
+      final cached = StatusService.cachedPlaintext(currentItem.id);
+      String? embeddedCaption;
+      try {
+        final meta = jsonDecode(currentItem.caption ?? '{}')
+            as Map<String, dynamic>;
+        embeddedCaption = meta['caption'] as String?;
+      } catch (_) {}
+
+      if (currentItem.type == 'encrypted') {
+        replyType = 'text';
+        replyText = cached?.text ?? '';
+        replyBg = cached?.backgroundColor ?? '#6C5CE7';
+        replyCaption = null;
+      } else {
+        replyType =
+            currentItem.type == 'encrypted_video' ? 'video' : 'image';
+        replyText = null;
+        replyBg = null;
+        replyCaption = embeddedCaption;
+      }
+      // Never expose the ciphertext blob URL — the receiver couldn't
+      // decrypt it anyway (no wrapped key addressed to them for the
+      // reply context) and the placeholder thumbnail handles this case.
+      mediaUrl = null;
+    } else {
+      mediaUrl = currentItem.type == 'image'
+          ? currentItem.imageUrl
+          : currentItem.thumbnailUrl ?? currentItem.videoUrl;
+    }
 
     try {
       await _chatService.sendMessage(
@@ -494,11 +507,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
         statusReplyItemId: currentItem.id,
         statusReplyOwnerName: widget.statusModel.userName,
         statusReplyOwnerPhotoUrl: widget.statusModel.userPhotoUrl,
-        statusReplyType: currentItem.type,
-        statusReplyText: currentItem.text,
+        statusReplyType: replyType,
+        statusReplyText: replyText,
         statusReplyMediaUrl: mediaUrl,
-        statusReplyCaption: currentItem.caption,
-        statusReplyBackgroundColor: currentItem.backgroundColor,
+        statusReplyCaption: replyCaption,
+        statusReplyBackgroundColor: replyBg,
       );
       _replyController.clear();
       FocusScope.of(context).unfocus();
@@ -1020,7 +1033,8 @@ class StatusAnimatedBuilder extends AnimatedWidget {
 }
 
 /// Minimal video player for an encrypted status item. Takes a local file
-/// (the decrypted plaintext written to systemTemp) and plays it once.
+/// (decrypted plaintext written to the persistent media cache dir) and
+/// plays it once.
 class _EncryptedVideoView extends StatefulWidget {
   const _EncryptedVideoView({required this.file});
   final File file;

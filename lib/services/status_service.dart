@@ -78,8 +78,67 @@ class StatusService {
     if (tasks.isNotEmpty) await Future.wait(tasks);
   }
 
+  /// Public entry point for one-off decryption (from the viewer screen).
+  /// Goes through the same disk-cache → network → persist pipeline as the
+  /// background pre-decrypt, with the same in-flight deduping so two
+  /// callers don't kick off overlapping work for the same item.
+  Future<void> ensureDecrypted({
+    required String ownerUid,
+    required StatusItem item,
+    required String selfUid,
+  }) async {
+    if (!item.type.startsWith('encrypted')) return;
+    if (_plaintextCache.containsKey(item.id)) return;
+    final existing = _inFlight[item.id];
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    final fut = _preDecryptOne(ownerUid, item, selfUid)
+        .whenComplete(() => _inFlight.remove(item.id));
+    _inFlight[item.id] = fut;
+    await fut;
+  }
+
   Future<void> _preDecryptOne(
       String ownerUid, StatusItem item, String selfUid) async {
+    final ps = await PlaintextStore.instance();
+
+    // Disk cache hit: hydrate the in-memory cache from previously-decrypted
+    // content and skip the network round-trip entirely. This is the path
+    // that powers "status playable after app restart / offline" — the
+    // same guarantee WhatsApp gives.
+    try {
+      final disk = await ps.getStatusContent(item.id);
+      if (disk != null) {
+        if (disk['t'] == 'text') {
+          _plaintextCache[item.id] = StatusPlaintext.text(
+            text: (disk['tx'] as String?) ?? '',
+            backgroundColor: (disk['bg'] as String?) ?? '#6C5CE7',
+          );
+          return;
+        }
+        final path = disk['mp'] as String?;
+        if (path != null) {
+          final file = File(path);
+          if (await file.exists()) {
+            // For video we only need the path (the player opens the file
+            // directly). For images we keep bytes in memory for Image.memory.
+            final isVideo = (disk['v'] as bool?) ?? false;
+            final bytes = isVideo ? Uint8List(0) : await file.readAsBytes();
+            _plaintextCache[item.id] = StatusPlaintext.media(
+              localFile: file,
+              bytes: bytes,
+              isVideo: isVideo,
+            );
+            return;
+          }
+        }
+      }
+    } catch (_) {
+      // Fall through to network decrypt.
+    }
+
     try {
       final result = await decryptStatusItem(
         ownerUid: ownerUid,
@@ -89,21 +148,33 @@ class StatusService {
       if (result == null) return;
       if (item.type == 'encrypted') {
         final j = result['json'] as Map<String, dynamic>;
-        _plaintextCache[item.id] = StatusPlaintext.text(
-          text: (j['text'] as String?) ?? '',
-          backgroundColor:
-              (j['backgroundColor'] as String?) ?? '#6C5CE7',
+        final text = (j['text'] as String?) ?? '';
+        final bg = (j['backgroundColor'] as String?) ?? '#6C5CE7';
+        _plaintextCache[item.id] =
+            StatusPlaintext.text(text: text, backgroundColor: bg);
+        await ps.saveStatusContent(
+          itemId: item.id,
+          type: 'text',
+          text: text,
+          backgroundColor: bg,
         );
       } else {
         final bytes = result['bytes'] as Uint8List;
         final isVideo = item.type == 'encrypted_video';
         final ext = isVideo ? 'mp4' : 'jpg';
-        final file = await File(
-                '${Directory.systemTemp.path}/dec_${item.id}.$ext')
-            .writeAsBytes(bytes, flush: true);
+        // Persistent dir, not systemTemp — the OS wipes the latter at will.
+        final mediaDir = await ps.mediaCacheDir();
+        final filePath = '$mediaDir/dec_${item.id}.$ext';
+        final file = await File(filePath).writeAsBytes(bytes, flush: true);
         _plaintextCache[item.id] = StatusPlaintext.media(
           localFile: file,
           bytes: bytes,
+          isVideo: isVideo,
+        );
+        await ps.saveStatusContent(
+          itemId: item.id,
+          type: 'media',
+          mediaPath: filePath,
           isVideo: isVideo,
         );
       }
@@ -128,6 +199,12 @@ class StatusService {
   /// Wraps the content key for every viewer's every device. The owner is
   /// always included in the fan-out so they can decrypt their own status
   /// (otherwise "My Status" stays on the "Decrypting…" placeholder forever).
+  ///
+  /// All viewers run in parallel. Sequential fan-out was the dominant cost
+  /// of an upload — each viewer pays one consumeOneTimePreKey HTTP round-trip
+  /// per device, and 10 viewers × ~2s adds up to the 40-50s upload the user
+  /// was seeing. Different viewers' sessions don't touch the same session
+  /// store entry, so concurrent encrypts are safe.
   Future<void> _publishWrappedKeys({
     required String ownerUid,
     required int ownerDeviceId,
@@ -136,13 +213,14 @@ class StatusService {
     required List<String> viewerUids,
   }) async {
     final fanout = <String>{...viewerUids, ownerUid}.toList();
-    for (final viewerUid in fanout) {
+    await Future.wait(fanout.map((viewerUid) async {
       final encs = await SignalService.instance.encryptForUser(
         senderUid: ownerUid,
         senderDeviceId: ownerDeviceId,
         recipientUid: viewerUid,
         plaintext: contentKey,
       );
+      if (encs.isEmpty) return;
       final batch = _firestore.batch();
       encs.forEach((addr, env) {
         batch.set(
@@ -157,7 +235,7 @@ class StatusService {
         );
       });
       await batch.commit();
-    }
+    }));
   }
 
   /// Fetches and decrypts the content key for a status item this device is

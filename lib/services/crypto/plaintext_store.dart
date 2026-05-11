@@ -23,6 +23,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
@@ -161,6 +162,59 @@ class PlaintextStore {
       for (final r in rows)
         r['chat_room_id'] as String: r['last_message_text'] as String,
     };
+  }
+
+  /// Persists the decrypted form of a status item so the next app launch
+  /// can render it instantly — WhatsApp's "I've already seen this status,
+  /// show it offline" guarantee. For text items we save the plaintext JSON
+  /// fields directly; for media we point to a file on disk (written
+  /// separately by the caller into [mediaCacheDir]).
+  Future<void> saveStatusContent({
+    required String itemId,
+    required String type, // 'text' | 'media'
+    String? text,
+    String? backgroundColor,
+    String? mediaPath,
+    bool isVideo = false,
+  }) async {
+    await _db.insert(
+      _table,
+      {
+        'id': 'status_content:$itemId',
+        'payload': jsonEncode({
+          't': type,
+          if (text != null) 'tx': text,
+          if (backgroundColor != null) 'bg': backgroundColor,
+          if (mediaPath != null) 'mp': mediaPath,
+          'v': isVideo,
+        }),
+        'saved_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getStatusContent(String itemId) async {
+    final rows = await _db.query(
+      _table,
+      columns: const ['payload'],
+      where: 'id = ?',
+      whereArgs: ['status_content:$itemId'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return jsonDecode(rows.first['payload'] as String)
+        as Map<String, dynamic>;
+  }
+
+  /// Persistent directory for decrypted status media. Lives next to the
+  /// SQLite DB so it survives process restarts (unlike systemTemp, which
+  /// the OS wipes whenever it feels like it).
+  Future<String> mediaCacheDir() async {
+    final dbDir = await getDatabasesPath();
+    final mediaDir = p.join(dbDir, 'gsg_status_media');
+    await Directory(mediaDir).create(recursive: true);
+    return mediaDir;
   }
 
   /// Save the AES content key for a status item this device posted, so the

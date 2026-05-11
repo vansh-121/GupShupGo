@@ -231,11 +231,21 @@ class SignalService {
     final senderOtherDevices = (await _listDeviceIds(senderUid))
       ..removeWhere((d) => d == senderDeviceId);
 
-    for (final d in recipientDevices) {
-      out['$recipientUid:$d'] = await encrypt(recipientUid, d, plaintext);
-    }
-    for (final d in senderOtherDevices) {
-      out['$senderUid:$d'] = await encrypt(senderUid, d, plaintext);
+    // Parallel fan-out across devices. Each (peerUid, deviceId) is a
+    // separate session, so concurrent encrypts don't race. The dominant
+    // cost of each iteration is the consumeOneTimePreKey HTTP call inside
+    // ensureSession — running them concurrently turns N round-trips into
+    // one round-trip's worth of wall time.
+    final tasks = <Future<MapEntry<String, EncryptedEnvelope>>>[
+      for (final d in recipientDevices)
+        encrypt(recipientUid, d, plaintext)
+            .then((env) => MapEntry('$recipientUid:$d', env)),
+      for (final d in senderOtherDevices)
+        encrypt(senderUid, d, plaintext)
+            .then((env) => MapEntry('$senderUid:$d', env)),
+    ];
+    for (final entry in await Future.wait(tasks)) {
+      out[entry.key] = entry.value;
     }
     return out;
   }
