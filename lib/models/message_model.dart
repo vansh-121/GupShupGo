@@ -160,6 +160,9 @@ class MessageModel {
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
+      'schemaVersion': schemaVersion,
+      if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
+      if (envelopes != null) 'envelopes': envelopes,
     };
   }
 

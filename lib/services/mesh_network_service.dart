@@ -12,8 +12,6 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
-import 'package:video_chat_app/services/crypto/device_identity_service.dart';
-import 'package:video_chat_app/services/crypto/signal_service.dart';
 
 /// Mesh message wrapper for relay / dedup across peers.
 class _MeshPayload {
@@ -483,29 +481,21 @@ class MeshNetworkService extends ChangeNotifier {
     required String text,
     String? senderName,
   }) async {
-    final encrypted = await _maybeEncryptForMesh(receiverId, text);
     final message = MessageModel(
       id: _generateId(),
       senderId: _currentUserId,
       receiverId: receiverId,
-      text: encrypted == null ? text : '',
+      text: text,
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
       isOfflineMesh: true,
       meshHops: 0,
       syncPending: true,
-      schemaVersion: encrypted == null ? 1 : 2,
-      senderDeviceId: encrypted?.senderDeviceId,
-      envelopes: encrypted?.envelopes,
     );
 
-    // Store locally
     _cacheService.storePendingMeshMessage(message);
-
-    // Mark as seen to prevent relay loops
     _seenMessageIds.add(message.id);
 
-    // Broadcast to all connected peers
     final payload = _MeshPayload(
       messageId: message.id,
       messageJson: message.toJson(),
@@ -655,33 +645,6 @@ class MeshNetworkService extends ChangeNotifier {
   }
 
 
-  /// Try to encrypt `text` for `receiverId` using the same multi-device
-  /// fan-out the regular ChatService uses. Returns null if anything is
-  /// missing (no local identity, peer has no published bundle reachable
-  /// from this device, encrypt threw) — caller falls back to plaintext
-  /// mesh.
-  Future<({int? senderDeviceId, Map<String, Map<String, dynamic>>? envelopes})?>
-      _maybeEncryptForMesh(String receiverId, String text) async {
-    try {
-      final senderDeviceId = await DeviceIdentityService().getDeviceId();
-      if (senderDeviceId == null) return null;
-      final encs = await SignalService.instance.encryptForUser(
-        senderUid: _currentUserId,
-        senderDeviceId: senderDeviceId,
-        recipientUid: receiverId,
-        plaintext: Uint8List.fromList(utf8.encode(text)),
-      );
-      if (encs.isEmpty) return null;
-      return (
-        senderDeviceId: senderDeviceId,
-        envelopes: encs.map((k, v) => MapEntry(k, v.toMap())),
-      );
-    } catch (e) {
-      debugPrint('[Mesh] E2EE encrypt failed, sending plaintext: $e');
-      return null;
-    }
-  }
-
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {
     final bytes = utf8.encode(jsonEncode(payload.toJson()));
@@ -699,6 +662,12 @@ class MeshNetworkService extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════
 
   void _handlePayload(String endpointId, Payload payload) {
+    _handlePayloadAsync(endpointId, payload).catchError((Object e) {
+      debugPrint('[Mesh] Error handling payload: $e');
+    });
+  }
+
+  Future<void> _handlePayloadAsync(String endpointId, Payload payload) async {
     // ── Handle incoming FILE payloads (image data) ────────────────────
     if (payload.type == PayloadType.FILE) {
       final uri = payload.uri;
@@ -712,52 +681,48 @@ class MeshNetworkService extends ChangeNotifier {
 
     if (payload.type != PayloadType.BYTES || payload.bytes == null) return;
 
-    try {
-      final jsonStr = utf8.decode(payload.bytes!);
-      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final jsonStr = utf8.decode(payload.bytes!);
+    final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-      // ── File metadata bytes ─────────────────────────────────────────
-      if (data['payloadType'] == 'file_metadata') {
-        _handleFileMetadata(data);
-        return;
-      }
-
-      final meshPayload = _MeshPayload.fromJson(data);
-
-      // Dedup: skip if we've already seen this message
-      if (_seenMessageIds.contains(meshPayload.messageId)) return;
-      _seenMessageIds.add(meshPayload.messageId);
-
-      final message = MessageModel.fromJson(meshPayload.messageJson).copyWith(
-        meshHops: meshPayload.hops + 1,
-        isOfflineMesh: true,
-      );
-
-      // Is this message for us?
-      if (message.receiverId == _currentUserId) {
-        _incomingMeshMessages.add(message);
-        _meshMessageController.add(message);
-        // Also store locally so it persists across app restarts
-        _cacheService.storePendingMeshMessage(message);
-        debugPrint('[Mesh] Received message for me: ${message.text}');
-      }
-
-      // Relay forward if TTL allows (store-and-forward)
-      if (meshPayload.canRelay) {
-        final relayPayload = _MeshPayload(
-          messageId: meshPayload.messageId,
-          messageJson: meshPayload.messageJson,
-          hops: meshPayload.hops + 1,
-          ttl: meshPayload.ttl,
-        );
-        _broadcastToAllPeers(relayPayload);
-        debugPrint('[Mesh] Relaying message ${message.id} (hop ${relayPayload.hops})');
-      }
-
-      notifyListeners();
-    } catch (e) {
-      debugPrint('[Mesh] Error handling payload: $e');
+    // ── File metadata bytes ─────────────────────────────────────────
+    if (data['payloadType'] == 'file_metadata') {
+      _handleFileMetadata(data);
+      return;
     }
+
+    final meshPayload = _MeshPayload.fromJson(data);
+
+    // Dedup: skip if we've already seen this message
+    if (_seenMessageIds.contains(meshPayload.messageId)) return;
+    _seenMessageIds.add(meshPayload.messageId);
+
+    final MessageModel message = MessageModel.fromJson(meshPayload.messageJson).copyWith(
+      meshHops: meshPayload.hops + 1,
+      isOfflineMesh: true,
+    );
+
+    // Is this message for us?
+    if (message.receiverId == _currentUserId) {
+      _incomingMeshMessages.add(message);
+      _meshMessageController.add(message);
+      // Also store locally so it persists across app restarts
+      _cacheService.storePendingMeshMessage(message);
+      debugPrint('[Mesh] Received message for me: ${message.text}');
+    }
+
+    // Relay forward if TTL allows (store-and-forward)
+    if (meshPayload.canRelay) {
+      final relayPayload = _MeshPayload(
+        messageId: meshPayload.messageId,
+        messageJson: meshPayload.messageJson,
+        hops: meshPayload.hops + 1,
+        ttl: meshPayload.ttl,
+      );
+      _broadcastToAllPeers(relayPayload);
+      debugPrint('[Mesh] Relaying message ${message.id} (hop ${relayPayload.hops})');
+    }
+
+    notifyListeners();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
