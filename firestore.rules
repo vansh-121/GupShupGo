@@ -17,9 +17,31 @@ service cloud.firestore {
       // Each signed-in app install stores its own FCM token here. This avoids
       // one device overwriting another and lets Cloud Functions clean up only
       // the stale device token that Firebase rejects.
+      //
+      // E2EE: this same path also stores the Signal PreKeyBundle (public).
+      //   - keyBundle must be readable by ANY authenticated user (otherwise
+      //     peers can't initiate a session).
+      //   - Only the owner can write/update their own bundle.
       match /devices/{deviceId} {
-        allow read, create, update, delete: if request.auth != null
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null
           && request.auth.uid == userId;
+        allow delete: if request.auth != null && request.auth.uid == userId;
+
+        // One-time prekeys: readable by anyone (so we can build a bundle),
+        // writable only by the owner. Atomic consume-on-read happens via
+        // the consumeOneTimePreKey Cloud Function which uses the Admin SDK.
+        match /oneTimePreKeys/{preKeyId} {
+          allow read: if request.auth != null;
+          allow create, update, delete: if request.auth != null
+            && request.auth.uid == userId;
+        }
+      }
+
+      // E2EE: passphrase-encrypted device-state backup. Only the owner can
+      // read or write. Cloud admins see opaque ciphertext.
+      match /backups/{backupId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
     
@@ -105,8 +127,18 @@ service cloud.firestore {
       
       // Allow deletion by participants (cleanup after call ends)
       allow delete: if request.auth != null
-        && (resource.data.callerId == request.auth.uid 
+        && (resource.data.callerId == request.auth.uid
             || resource.data.calleeId == request.auth.uid);
+
+      // E2EE: per-device wrapped Agora encryption keys.
+      // Sender writes; recipient reads. Doc id is "<recipientUid>:<deviceId>".
+      match /keyEnvelopes/{addr} {
+        allow read: if request.auth != null
+          && addr.matches(request.auth.uid + ':.*');
+        allow create: if request.auth != null
+          && (get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid
+              || get(/databases/$(database)/documents/calls/$(callId)).data.calleeId == request.auth.uid);
+      }
     }
     
     // ==================== STATUSES ====================
@@ -136,6 +168,17 @@ service cloud.firestore {
           && (request.auth.uid == userId || request.auth.uid == viewerId);
         allow create, update: if isValidStatusView(viewerId);
         allow delete: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // E2EE: wrappedKeys/{statusItemId}/envelopes/{viewerUid:deviceId}
+      // Owner writes one envelope per viewer device. Viewer reads only
+      // their own. Owner can delete to revoke access.
+      match /wrappedKeys/{statusItemId}/envelopes/{addr} {
+        allow read: if request.auth != null
+          && (addr.matches(request.auth.uid + ':.*')
+              || request.auth.uid == userId);
+        allow create, update, delete: if request.auth != null
+          && request.auth.uid == userId;
       }
     }
     

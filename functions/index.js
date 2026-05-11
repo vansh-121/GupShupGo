@@ -461,3 +461,58 @@ exports.revokeDeviceSession = onRequest(
     }
   }
 );
+
+// ─── E2EE: consume one-time prekey ───────────────────────────────────────────
+//
+// Returns one of the target user's published one-time prekeys AND deletes it
+// from Firestore atomically, so the same prekey is never handed out twice.
+// (Atomic consume-on-read is the property that gives X3DH forward secrecy at
+// session setup; without it, a passive logger of Firestore could replay the
+// prekey to re-derive past session keys.)
+//
+// Request:  { targetUid: string, deviceId: number }
+// Response: { preKey: { id: number, pub: string } | null }
+// 200 + null preKey when the pool is empty — caller proceeds without OTPK.
+exports.consumeOneTimePreKey = onRequest(
+  { cors: true, invoker: "public" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      const { targetUid, deviceId } = req.body || {};
+      if (!targetUid || typeof deviceId !== "number") {
+        res.status(400).json({ error: "Missing targetUid or deviceId" });
+        return;
+      }
+
+      const otpkCol = db
+        .collection("users")
+        .doc(targetUid)
+        .collection("devices")
+        .doc(String(deviceId))
+        .collection("oneTimePreKeys");
+
+      // Transactional consume: pick the first prekey, delete it, return it.
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(otpkCol.limit(1));
+        if (snap.empty) return null;
+        const doc = snap.docs[0];
+        tx.delete(doc.ref);
+        return doc.data();
+      });
+
+      res.status(200).json({ preKey: result || null });
+    } catch (error) {
+      console.error("consumeOneTimePreKey error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);

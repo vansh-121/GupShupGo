@@ -18,6 +18,21 @@ class MessageModel {
   final MessageStatus status;
   final String? mediaUrl;
 
+  // ─── End-to-end encryption (v2) ─────────────────────────────────────
+  /// 1 = legacy plaintext, 2 = E2EE. Persisted to Firestore. Old clients
+  /// see only schemaVersion=1 messages; new clients can render both.
+  final int schemaVersion;
+
+  /// Sender's deviceId. Needed by the recipient to pick the right Signal
+  /// session for decryption.
+  final int? senderDeviceId;
+
+  /// Map "<recipientUid>:<deviceId>" → { ct: base64, pk: bool }.
+  /// One entry per recipient device + one per sender's other devices
+  /// (self-sync). Only the device that owns the matching session can
+  /// decrypt its own entry.
+  final Map<String, Map<String, dynamic>>? envelopes;
+
   /// Metadata for a reply sent from a status update.
   final String? statusReplyOwnerId;
   final String? statusReplyItemId;
@@ -68,6 +83,9 @@ class MessageModel {
     this.isOfflineMesh = false,
     this.meshHops = 0,
     this.syncPending = false,
+    this.schemaVersion = 1,
+    this.senderDeviceId,
+    this.envelopes,
   });
 
   // Convenience getters for status
@@ -102,6 +120,9 @@ class MessageModel {
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
+      'schemaVersion': schemaVersion,
+      if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
+      if (envelopes != null) 'envelopes': envelopes,
     };
   }
 
@@ -160,7 +181,17 @@ class MessageModel {
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
+      schemaVersion: (map['schemaVersion'] as int?) ?? 1,
+      senderDeviceId: map['senderDeviceId'] as int?,
+      envelopes: _parseEnvelopes(map['envelopes']),
     );
+  }
+
+  static Map<String, Map<String, dynamic>>? _parseEnvelopes(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is! Map) return null;
+    return raw.map((k, v) =>
+        MapEntry(k as String, Map<String, dynamic>.from(v as Map)));
   }
 
   // Create MessageModel from Firestore document
@@ -187,6 +218,9 @@ class MessageModel {
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
+      schemaVersion: (map['schemaVersion'] as int?) ?? 1,
+      senderDeviceId: map['senderDeviceId'] as int?,
+      envelopes: _parseEnvelopes(map['envelopes']),
     );
   }
 
@@ -257,6 +291,9 @@ class MessageModel {
     bool? isOfflineMesh,
     int? meshHops,
     bool? syncPending,
+    int? schemaVersion,
+    int? senderDeviceId,
+    Map<String, Map<String, dynamic>>? envelopes,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -283,6 +320,9 @@ class MessageModel {
       isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,
       meshHops: meshHops ?? this.meshHops,
       syncPending: syncPending ?? this.syncPending,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+      senderDeviceId: senderDeviceId ?? this.senderDeviceId,
+      envelopes: envelopes ?? this.envelopes,
     );
   }
 }

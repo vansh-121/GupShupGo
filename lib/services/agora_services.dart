@@ -1,6 +1,7 @@
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class AgoraService {
@@ -90,6 +91,25 @@ class AgoraService {
     }
 
     return allGranted;
+  }
+
+  /// E2EE for the media stream. Call BEFORE joinChannel.
+  ///
+  /// `key` is the shared 32-byte secret derived per-call and exchanged via
+  /// the Signal-encrypted CallEncryptionService envelope. `salt` is the
+  /// matching 16-byte KDF salt. Both sides must pass the exact same bytes
+  /// or the stream will be unintelligible (Agora drops un-decryptable frames
+  /// silently — there is no failure callback).
+  static Future<void> enableMediaEncryption(
+      RtcEngine engine, CallEncryptionKey k) async {
+    await engine.enableEncryption(
+      enabled: true,
+      config: EncryptionConfig(
+        encryptionMode: EncryptionMode.aes256Gcm2,
+        encryptionKey: String.fromCharCodes(k.key),
+        encryptionKdfSalt: k.salt,
+      ),
+    );
   }
 
   // For production use: implement token generation

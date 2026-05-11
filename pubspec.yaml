@@ -85,6 +85,22 @@ dependencies:
   cupertino_icons: ^1.0.2
   device_info_plus: ^10.1.2
 
+  # End-to-end encryption (Signal Protocol).
+  # NOTE: libsignal_protocol_dart is GPL-3.0. Linking it requires this app
+  # to be distributed under GPL-3.0 too. See LICENSE.
+  libsignal_protocol_dart: ^0.7.1
+
+  # Crypto primitives used by media encryption, backup KDF, and Agora
+  # call-key derivation. Apache-2.0 / MIT.
+  cryptography: ^2.7.0
+  pointycastle: ^3.9.1
+  crypto: ^3.0.3
+
+  # Local persistent store for ratchet sessions, prekeys, and decrypted
+  # message cache (so we don't re-decrypt on every render).
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

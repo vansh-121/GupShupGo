@@ -1,13 +1,90 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FCMService _fcmService = FCMService();
+  final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
   final String _chatRoomsCollection = 'chatRooms';
   final String _messagesCollection = 'messages';
+
+  // The placeholder we write to chatRoom.lastMessage — the room doc is
+  // visible to the server, so we never put plaintext there.
+  static const String _encryptedPreviewPlaceholder = '🔒 Encrypted message';
+
+  /// Returns true iff the peer has at least one device with a published
+  /// key bundle (i.e. they've upgraded to an E2EE-capable build).
+  Future<bool> _peerHasKeyBundle(String peerUid) async {
+    final snap = await _firestore
+        .collection('users')
+        .doc(peerUid)
+        .collection('devices')
+        .where('keyBundle', isNull: false)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
+  /// Decrypts a v2 (E2EE) message in-memory for rendering. Returns the
+  /// same model with `text` (and reply/media fields) populated from the
+  /// envelope addressed to (selfUid, selfDeviceId). If no envelope is
+  /// addressed to us, returns the message with `text = '⚠ This message
+  /// can't be decrypted on this device.'`
+  ///
+  /// v1 messages are passed through unchanged.
+  Future<MessageModel> decryptForRendering(
+      MessageModel msg, String selfUid) async {
+    if (msg.schemaVersion < 2) return msg;
+    final envelopes = msg.envelopes;
+    if (envelopes == null || envelopes.isEmpty) {
+      return msg.copyWith(text: '⚠ Encrypted message (no envelope)');
+    }
+    final deviceId = await _deviceIdentity.getDeviceId();
+    if (deviceId == null) {
+      return msg.copyWith(text: '⚠ Encryption keys missing on this device');
+    }
+    final addr = '$selfUid:$deviceId';
+    final env = envelopes[addr];
+    if (env == null) {
+      return msg.copyWith(
+          text: '⚠ Message was sent from another device of yours');
+    }
+    try {
+      final pt = await SignalService.instance.decrypt(
+        msg.senderId,
+        msg.senderDeviceId ?? 1,
+        EncryptedEnvelope.fromMap(env),
+      );
+      final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
+      return msg.copyWith(
+        text: (payload['text'] as String?) ?? '',
+        mediaUrl: payload['mediaUrl'] as String?,
+        audioDuration: payload['audioDuration'] as int?,
+        statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
+        statusReplyItemId: payload['statusReplyItemId'] as String?,
+        statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
+        statusReplyOwnerPhotoUrl:
+            payload['statusReplyOwnerPhotoUrl'] as String?,
+        statusReplyType: payload['statusReplyType'] as String?,
+        statusReplyText: payload['statusReplyText'] as String?,
+        statusReplyMediaUrl: payload['statusReplyMediaUrl'] as String?,
+        statusReplyCaption: payload['statusReplyCaption'] as String?,
+        statusReplyBackgroundColor:
+            payload['statusReplyBackgroundColor'] as String?,
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('decrypt failed for ${msg.id}: $e');
+      return msg.copyWith(text: '⚠ Decryption failed');
+    }
+  }
 
   // Generate a unique chat room ID from two user IDs
   String getChatRoomId(String userId1, String userId2) {
@@ -73,29 +150,82 @@ class ChatService {
         .collection(_messagesCollection)
         .doc();
 
+    // ── E2EE: build the inner plaintext payload, encrypt for every device
+    //         of receiver + sender's other devices (multi-device fan-out).
+    final senderDeviceId = await _deviceIdentity.getDeviceId();
+    final canEncrypt =
+        senderDeviceId != null && await _peerHasKeyBundle(receiverId);
+
+    Map<String, Map<String, dynamic>>? envelopes;
+    String storedText = text;
+    int schemaVersion = 1;
+
+    if (canEncrypt) {
+      // The payload that flows inside the Signal envelope. We can extend this
+      // with media metadata, status reply blocks, etc. — nothing inside is
+      // visible to the server.
+      final payload = jsonEncode({
+        'type': type.name,
+        'text': text,
+        if (mediaUrl != null) 'mediaUrl': mediaUrl,
+        if (audioDuration != null) 'audioDuration': audioDuration,
+        if (statusReplyOwnerId != null) ...{
+          'statusReplyOwnerId': statusReplyOwnerId,
+          'statusReplyItemId': statusReplyItemId,
+          'statusReplyOwnerName': statusReplyOwnerName,
+          'statusReplyOwnerPhotoUrl': statusReplyOwnerPhotoUrl,
+          'statusReplyType': statusReplyType,
+          'statusReplyText': statusReplyText,
+          'statusReplyMediaUrl': statusReplyMediaUrl,
+          'statusReplyCaption': statusReplyCaption,
+          'statusReplyBackgroundColor': statusReplyBackgroundColor,
+        },
+      });
+
+      try {
+        final encs = await SignalService.instance.encryptForUser(
+          senderUid: senderId,
+          senderDeviceId: senderDeviceId,
+          recipientUid: receiverId,
+          plaintext: Uint8List.fromList(utf8.encode(payload)),
+        );
+        envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
+        storedText = '';
+        schemaVersion = 2;
+      } catch (e) {
+        // ignore: avoid_print
+        print('E2EE encrypt failed, falling back to plaintext: $e');
+      }
+    }
+
     MessageModel message = MessageModel(
       id: messageRef.id,
       senderId: senderId,
       receiverId: receiverId,
-      text: text,
+      text: storedText,
       type: type,
       timestamp: DateTime.now(),
       status: MessageStatus.sent,
-      mediaUrl: mediaUrl,
-      statusReplyOwnerId: statusReplyOwnerId,
-      statusReplyItemId: statusReplyItemId,
-      statusReplyOwnerName: statusReplyOwnerName,
-      statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
-      statusReplyType: statusReplyType,
-      statusReplyText: statusReplyText,
-      statusReplyMediaUrl: statusReplyMediaUrl,
-      statusReplyCaption: statusReplyCaption,
-      statusReplyBackgroundColor: statusReplyBackgroundColor,
-      audioDuration: audioDuration,
+      mediaUrl: schemaVersion == 2 ? null : mediaUrl,
+      statusReplyOwnerId: schemaVersion == 2 ? null : statusReplyOwnerId,
+      statusReplyItemId: schemaVersion == 2 ? null : statusReplyItemId,
+      statusReplyOwnerName: schemaVersion == 2 ? null : statusReplyOwnerName,
+      statusReplyOwnerPhotoUrl:
+          schemaVersion == 2 ? null : statusReplyOwnerPhotoUrl,
+      statusReplyType: schemaVersion == 2 ? null : statusReplyType,
+      statusReplyText: schemaVersion == 2 ? null : statusReplyText,
+      statusReplyMediaUrl: schemaVersion == 2 ? null : statusReplyMediaUrl,
+      statusReplyCaption: schemaVersion == 2 ? null : statusReplyCaption,
+      statusReplyBackgroundColor:
+          schemaVersion == 2 ? null : statusReplyBackgroundColor,
+      audioDuration: schemaVersion == 2 ? null : audioDuration,
+      schemaVersion: schemaVersion,
+      senderDeviceId: senderDeviceId,
+      envelopes: envelopes,
     );
-    final lastMessagePreview = statusReplyOwnerId != null
-        ? 'Replied to status: $text'
-        : text;
+    final lastMessagePreview = schemaVersion == 2
+        ? _encryptedPreviewPlaceholder
+        : (statusReplyOwnerId != null ? 'Replied to status: $text' : text);
 
     // Use batch write for consistency
     WriteBatch batch = _firestore.batch();
@@ -129,15 +259,21 @@ class ChatService {
     );
     print('Message sent: ${message.id}');
 
-    // Send push notification for message delivery
-    // This helps mark message as delivered even if receiver app is in background
+    // Send push notification for message delivery.
+    // This helps mark message as delivered even if receiver app is in background.
+    //
+    // E2EE: NEVER include the plaintext in the FCM payload. The FCM service
+    // is operated by the cloud provider and any preview text is visible to
+    // them. We pass a generic preview when E2EE is active; the receiver's
+    // device renders the real text after decryption.
     try {
       String displayName = senderName ?? 'Someone';
+      final previewText = schemaVersion == 2 ? 'New message' : text;
       await _fcmService.sendMessageNotification(
         receiverId: receiverId,
         senderId: senderId,
         senderName: displayName,
-        message: text,
+        message: previewText,
         chatRoomId: chatRoomId,
       );
     } catch (e) {
@@ -177,12 +313,16 @@ class ChatService {
           .collection(_messagesCollection)
           .orderBy('timestamp', descending: false)
           .snapshots()
-          .map((snapshot) {
-        return snapshot.docs
+          .asyncMap((snapshot) async {
+        final raw = snapshot.docs
             .map((doc) => MessageModel.fromFirestore(doc))
             .where((msg) =>
                 clearedAt == null || msg.timestamp.isAfter(clearedAt))
             .toList();
+        // Decrypt E2EE messages in parallel. v1 messages pass through.
+        return Future.wait(
+          raw.map((m) => decryptForRendering(m, currentUserId)),
+        );
       });
     });
   }
@@ -209,11 +349,14 @@ class ChatService {
 
     QuerySnapshot snapshot = await query.get();
 
-    return snapshot.docs
+    final raw = snapshot.docs
         .map((doc) => MessageModel.fromFirestore(doc))
         .toList()
         .reversed
         .toList();
+    return Future.wait(
+      raw.map((m) => decryptForRendering(m, currentUserId)),
+    );
   }
 
   // Mark messages as read
