@@ -38,22 +38,22 @@ service cloud.firestore {
         }
       }
 
-      // E2EE: passphrase-encrypted device-state backup. Only the owner can
-      // read or write. Cloud admins see opaque ciphertext.
-      match /backups/{backupId} {
+      // E2EE: vault key derivation metadata (Argon2id salt + verifier).
+      // Required by VaultCipher.bootstrap on every cold start to decide
+      // setup-vs-unlock. Document is owner-only — without it the PIN
+      // prompt never appears and the rest of the vault is unreadable.
+      match /vaultMeta/{docId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
-      // Cross-install message vault: decrypted plaintext mirrored here so
-      // message history survives a reinstall. Only the owner can read or write.
+      // Cross-install message vault: AES-256-GCM ciphertext of decrypted
+      // payloads, keyed off the user's vault PIN. Owner-only.
       match /msgVault/{messageId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
-      // Cross-install status vault: decrypted text status content mirrored
-      // here so statuses survive reinstall (Signal session lost → can't
-      // re-derive AES key, but vault has the plaintext). Text only — media
-      // blobs are too large for Firestore.
+      // Cross-install status vault: AES-256-GCM ciphertext of decrypted
+      // text statuses and AES content keys for media statuses. Owner-only.
       match /statusVault/{statusItemId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }

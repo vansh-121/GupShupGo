@@ -11,6 +11,7 @@ import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 /// Decrypted form of an encrypted status item, kept in the process-wide
@@ -82,7 +83,18 @@ class StatusService {
         selfUid, () => _doPreWarmStatus(selfUid));
   }
 
+  /// Drop the per-uid pre-warm AND the process-wide plaintext / media-key
+  /// caches so the next status open re-decrypts from the vault. Called
+  /// after VaultCipher unlocks and after VaultCipher.reset.
+  static void invalidatePreWarm(String uid) {
+    _statusPreWarmCache.remove(uid);
+    _plaintextCache.clear();
+    _mediaKeyCache.clear();
+  }
+
   Future<void> _doPreWarmStatus(String selfUid) async {
+    // Vault payloads are E2EE — without the unlocked key we can't read them.
+    if (!VaultCipher.instance.isReady) return;
     try {
       final snap = await _firestore
           .collection('users')
@@ -91,17 +103,20 @@ class StatusService {
           .get();
       for (final doc in snap.docs) {
         final data = doc.data();
-        if (data['t'] == 'text' && !_plaintextCache.containsKey(doc.id)) {
+        final type = data['t'] as String?;
+        if (type == 'text' && !_plaintextCache.containsKey(doc.id)) {
+          final payload = await VaultCipher.instance.decryptDoc(data);
+          if (payload == null) continue;
           _plaintextCache[doc.id] = StatusPlaintext.text(
-            text: (data['tx'] as String?) ?? '',
-            backgroundColor: (data['bg'] as String?) ?? '#6C5CE7',
+            text: (payload['tx'] as String?) ?? '',
+            backgroundColor: (payload['bg'] as String?) ?? '#6C5CE7',
           );
-        } else if (data['t'] == 'media_key' &&
+        } else if (type == 'media_key' &&
             !_mediaKeyCache.containsKey(doc.id)) {
           // Restore the AES content key — the encrypted blob is still in
           // Storage, so we can re-download and decrypt without Signal.
-          final k = data['k'] as String?;
-          if (k != null) _mediaKeyCache[doc.id] = base64Decode(k);
+          final k = await VaultCipher.instance.decryptBytes(data);
+          if (k != null) _mediaKeyCache[doc.id] = k;
         }
       }
     } catch (_) {}
@@ -109,25 +124,30 @@ class StatusService {
 
   Future<void> _saveTextStatusToVault(
       String selfUid, String itemId, String text, String bg) async {
+    final enc =
+        await VaultCipher.instance.encryptPayload({'tx': text, 'bg': bg});
+    if (enc == null) return; // vault locked — skip rather than leak plaintext
     try {
       await _firestore
           .collection('users')
           .doc(selfUid)
           .collection(_statusVaultCollection)
           .doc(itemId)
-          .set({'t': 'text', 'tx': text, 'bg': bg});
+          .set({'t': 'text', ...enc});
     } catch (_) {}
   }
 
   Future<void> _saveMediaKeyToVault(
       String selfUid, String itemId, Uint8List key) async {
+    final enc = await VaultCipher.instance.encryptBytes(key);
+    if (enc == null) return;
     try {
       await _firestore
           .collection('users')
           .doc(selfUid)
           .collection(_statusVaultCollection)
           .doc(itemId)
-          .set({'t': 'media_key', 'k': base64Encode(key)});
+          .set({'t': 'media_key', ...enc});
     } catch (_) {}
   }
 

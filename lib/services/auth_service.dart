@@ -11,6 +11,7 @@ import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -742,6 +743,12 @@ class AuthService {
       // different account.
       await SignalService.wipe();
       await _deviceIdentity.wipeLocal();
+      // Lock the vault in-memory only. The cached key in secure storage
+      // is keyed by uid — if the same user signs back in we auto-unlock
+      // silently, if a different user signs in _tryAutoUnlock notices
+      // the uid mismatch and prompts. This is what makes the PIN dialog
+      // fire on reinstall but NOT on every signout/signin cycle.
+      VaultCipher.instance.lock();
       // Also wipe the local decrypted-message cache so the next user signed
       // in on this device doesn't see the previous user's chat history.
       try {

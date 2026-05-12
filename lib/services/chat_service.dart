@@ -8,6 +8,7 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
@@ -132,6 +133,16 @@ class ChatService {
     return _preWarmCache.putIfAbsent(uid, () => _doPreWarm(uid));
   }
 
+  /// Drop the per-uid pre-warm cache AND the process-wide decrypted-
+  /// payload memo so the next chat open re-derives every preview from
+  /// disk/vault. Called after VaultCipher unlocks (so previously-skipped
+  /// vault reads can complete) and after VaultCipher.reset (so wiped
+  /// history doesn't keep rendering from RAM).
+  static void invalidatePreWarm(String uid) {
+    _preWarmCache.remove(uid);
+    _payloadMemo.clear();
+  }
+
   Future<void> _doPreWarm(String uid) async {
     // 1. SQLite bulk-load (local IO, ~10-50ms) — populates memo from prior
     //    decryption sessions on the same install.
@@ -145,6 +156,10 @@ class ChatService {
 
     // 2. Firestore vault bulk-read (one network query, not N) — restores
     //    history on reinstall where SQLite was wiped but vault survived.
+    //    Each doc is decrypted in-memory with the vault key. If the vault
+    //    isn't unlocked yet we just skip — the chat will refill once the
+    //    user unlocks.
+    if (!VaultCipher.instance.isReady) return;
     try {
       final snap = await _firestore
           .collection('users')
@@ -153,12 +168,8 @@ class ChatService {
           .get();
       for (final doc in snap.docs) {
         if (_payloadMemo.containsKey(doc.id)) continue;
-        final raw = doc.data()['p'] as String?;
-        if (raw == null) continue;
-        try {
-          _payloadMemo[doc.id] =
-              jsonDecode(raw) as Map<String, dynamic>;
-        } catch (_) {}
+        final payload = await VaultCipher.instance.decryptDoc(doc.data());
+        if (payload != null) _payloadMemo[doc.id] = payload;
       }
     } catch (_) {}
   }
@@ -174,13 +185,18 @@ class ChatService {
 
   Future<void> _saveToVault(
       String uid, String messageId, Map<String, dynamic> payload) async {
+    // Drop the write rather than leak plaintext if the vault key isn't
+    // available yet. PlaintextStore still has the message locally; the
+    // post-unlock migration in HomeScreen flushes anything missing.
+    final enc = await VaultCipher.instance.encryptPayload(payload);
+    if (enc == null) return;
     try {
       await _firestore
           .collection('users')
           .doc(uid)
           .collection(_vaultCollection)
           .doc(messageId)
-          .set({'p': jsonEncode(payload)});
+          .set(enc);
     } catch (_) {}
   }
 
@@ -194,9 +210,7 @@ class ChatService {
           .doc(messageId)
           .get();
       if (!doc.exists) return null;
-      final raw = doc.data()?['p'] as String?;
-      if (raw == null) return null;
-      return jsonDecode(raw) as Map<String, dynamic>;
+      return VaultCipher.instance.decryptDoc(doc.data()!);
     } catch (_) {
       return null;
     }

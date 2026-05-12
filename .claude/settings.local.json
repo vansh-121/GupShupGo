@@ -16,7 +16,10 @@
       "Bash(Select-Object Name)",
       "Bash(firebase target:list)",
       "Bash(firebase apps:list)",
-      "Bash(xargs grep -l \"vault\\\\|Vault\")"
+      "Bash(xargs grep -l \"vault\\\\|Vault\")",
+      "PowerShell(flutter pub get)",
+      "PowerShell(flutter analyze lib/services/crypto/vault_cipher.dart lib/widgets/vault_pin_dialog.dart lib/services/chat_service.dart lib/services/status_service.dart lib/services/auth_service.dart lib/screens/home_screen.dart 2>&1)",
+      "PowerShell(flutter analyze lib/services/crypto/vault_cipher.dart lib/widgets/vault_pin_dialog.dart lib/services/chat_service.dart lib/services/status_service.dart lib/services/auth_service.dart 2>&1 | Where-Object { $_ -match '\\\\s+\\(error|warning\\)\\\\s+-' })"
     ]
   }
 }

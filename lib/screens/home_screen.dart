@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -26,7 +27,10 @@ import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -154,10 +158,25 @@ class _HomeScreenState extends State<HomeScreen>
       // addPostFrameCallback guarantees the first frame (including the
       // Navigator overlay) is built before we call showDialog. Calling
       // showDialog before the first frame silently no-ops on some devices.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
-        unawaited(_authService
-            .ensureE2EERegisteredForCurrentSession(_currentUserId!));
+        // Vault prompt must fire even if Signal registration is offline /
+        // transiently failing — otherwise the user would silently see no
+        // chats with no explanation. Each step is isolated in its own
+        // try/catch so a failure in one never blocks the next.
+        try {
+          await _authService
+              .ensureE2EERegisteredForCurrentSession(_currentUserId!);
+        } catch (e) {
+          debugPrint('[E2EE] registration failed in post-frame: $e');
+        }
+        if (!mounted) return;
+        try {
+          await _ensureVaultReady(_currentUserId!);
+        } catch (e) {
+          debugPrint('[Vault] readiness failed: $e');
+        }
+        if (!mounted) return;
         maybeShowWhatsNew(context);
       });
 
@@ -220,6 +239,87 @@ class _HomeScreenState extends State<HomeScreen>
         );
       }
     }
+  }
+
+  /// Bootstraps the E2EE vault key.
+  ///
+  /// • Auto-unlocks from the cached key in secure storage when possible
+  ///   (warm path on every cold start after the first).
+  /// • If the user has a vault config in Firestore but no local key
+  ///   (reinstall, or first run after this feature shipped on an
+  ///   already-onboarded account) → show the unlock dialog. The dialog
+  ///   blocks until they enter the right PIN or reset.
+  /// • If no vault config exists yet → show setup dialog so the user picks
+  ///   a PIN before any vault writes happen. Until they finish, vault
+  ///   writes silently skip — we never leak plaintext to Firestore.
+  /// • After the vault is ready, drop in-memory pre-warm caches so the
+  ///   next chat / status open re-reads the vault, and kick off a
+  ///   background backfill of any local messages that aren't in the
+  ///   vault yet (e.g. messages sent while the vault was still locked).
+  Future<void> _ensureVaultReady(String uid) async {
+    final state = await VaultCipher.instance.bootstrap(uid);
+    if (state == VaultState.ready) {
+      _migrateAndBackfillInBackground(uid);
+      return;
+    }
+    if (!mounted) return;
+    final ok = await VaultPinDialog.show(
+      context: context,
+      uid: uid,
+      mode: state == VaultState.needsSetup
+          ? VaultPinMode.setup
+          : VaultPinMode.unlock,
+    );
+    if (!ok) return;
+    ChatService.invalidatePreWarm(uid);
+    StatusService.invalidatePreWarm(uid);
+    _migrateAndBackfillInBackground(uid);
+  }
+
+  /// Background sweep that (a) re-encrypts any legacy plaintext vault docs
+  /// produced by older app versions and (b) pushes anything in the local
+  /// PlaintextStore that hasn't made it to the vault yet. Both passes are
+  /// idempotent so a partial run on a previous launch heals on the next.
+  void _migrateAndBackfillInBackground(String uid) {
+    unawaited(() async {
+      try {
+        await VaultCipher.instance.migrateLegacyEntries(uid);
+      } catch (_) {}
+      _backfillVaultInBackground(uid);
+    }());
+  }
+
+  /// Walks the local PlaintextStore and pushes any message not yet in
+  /// the encrypted msgVault. Fire-and-forget — failures are non-fatal
+  /// and retried opportunistically by future sends/receives.
+  void _backfillVaultInBackground(String uid) {
+    unawaited(() async {
+      try {
+        if (!VaultCipher.instance.isReady) return;
+        final store = await PlaintextStore.instance();
+        final local = await store.getAllMessagePayloads();
+        if (local.isEmpty) return;
+        final col = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('msgVault');
+        // Probe what already lives in the vault — one read up front avoids
+        // a per-message round trip on cold start.
+        final existing = await col.get();
+        final present = existing.docs.map((d) => d.id).toSet();
+        final missing = local.entries
+            .where((e) => !present.contains(e.key))
+            .toList();
+        for (final entry in missing) {
+          final enc =
+              await VaultCipher.instance.encryptPayload(entry.value);
+          if (enc == null) return;
+          try {
+            await col.doc(entry.key).set(enc);
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }());
   }
 
   Future<void> _setupCallListener() async {
