@@ -23,6 +23,24 @@ class ChatService {
   // visible to the server, so we never put plaintext there.
   static const String _encryptedPreviewPlaceholder = '🔒 Encrypted message';
 
+  // What we render in place of an E2EE message that this install can't
+  // decrypt. Happens after reinstall: messages encrypted to the old
+  // deviceId can't be decrypted with the new device's Signal keys, and if
+  // we hadn't decrypted them before reinstall they aren't in the vault
+  // either. Showing a placeholder bubble (rather than silently dropping
+  // them) tells the user "something arrived here" — so they can ask the
+  // sender to resend rather than wondering why blue ticks went up without
+  // them seeing anything.
+  static const String _undecryptablePlaceholderText =
+      '🔒 This message can\'t be decrypted on this device. Ask sender to resend.';
+
+  /// Build a placeholder MessageModel for E2EE messages we can't decrypt.
+  /// Marks schemaVersion=1 so downstream code skips re-decrypt attempts.
+  MessageModel _lockedPlaceholder(MessageModel raw) => raw.copyWith(
+        text: _undecryptablePlaceholderText,
+        schemaVersion: 1,
+      );
+
   // ─── Local send outbox (WhatsApp-style optimistic UI) ───────────────────
   //
   // The Firestore stream is the source of truth for delivered messages, but
@@ -141,7 +159,20 @@ class ChatService {
   static void invalidatePreWarm(String uid) {
     _preWarmCache.remove(uid);
     _payloadMemo.clear();
+    // Notify any active chat / chat-list stream subscribers so they can
+    // re-decrypt their currently-displayed snapshot without waiting for
+    // the next Firestore change. Without this, the home screen card and
+    // open chat would stay on the "🔒 can't decrypt" placeholder until
+    // some unrelated Firestore event (a typing indicator, a new message)
+    // happened to fire.
+    _vaultReadyNotifier.add(null);
   }
+
+  // Broadcast tick the moment the vault becomes usable (post-unlock,
+  // post-reinstall). Subscribers re-run their decrypt pass against the
+  // most recent raw Firestore snapshot they've cached.
+  static final StreamController<void> _vaultReadyNotifier =
+      StreamController<void>.broadcast();
 
   Future<void> _doPreWarm(String uid) async {
     // 1. SQLite bulk-load (local IO, ~10-50ms) — populates memo from prior
@@ -688,6 +719,7 @@ class ChatService {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
     DateTime? clearedAt;
+    List<MessageModel> latestRaw = const [];
     List<MessageModel> latestDecrypted = const [];
     List<MessageModel> latestCommitted = const [];
     bool gotFirstFirestoreEmission = false;
@@ -719,10 +751,30 @@ class ChatService {
       return merged;
     }
 
+    // Re-runs the decrypt pass over the last raw Firestore snapshot.
+    // Called on vault-ready ticks so the moment the user unlocks
+    // (typically right after reinstall) every currently-displayed
+    // "🔒 can't decrypt" bubble retries against the now-readable vault
+    // and recovers its plaintext — without waiting for an unrelated
+    // Firestore change to force a fresh snapshot.
+    Future<void> redecryptLatest() async {
+      if (latestRaw.isEmpty) return;
+      final resolved = await Future.wait(
+        latestRaw.map((m) async {
+          final r = await decryptForRendering(m, currentUserId);
+          return r ?? _lockedPlaceholder(m);
+        }),
+      );
+      latestDecrypted = resolved;
+      recomputeCommittedFromLatest();
+      if (!controller.isClosed) controller.add(combine());
+    }
+
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
         chatRoomSub;
     StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? messagesSub;
     StreamSubscription<void>? outboxSub;
+    StreamSubscription<void>? vaultReadySub;
 
     // ignore: discarded_futures
     Future<void> start() async {
@@ -763,15 +815,20 @@ class ChatService {
         final raw = snapshot.docs
             .map((doc) => MessageModel.fromFirestore(doc))
             .toList();
+        latestRaw = raw;
         // Decrypt E2EE messages in parallel. v1 messages pass through.
-        // Null returns (messages we can't render) are filtered out — the
-        // chat list silently omits them, like WhatsApp omits messages it
-        // couldn't restore from backup. The in-memory _payloadMemo means
-        // already-decrypted messages return synchronously in practice.
+        // Messages we can't decrypt (post-reinstall, lost session, etc.)
+        // are surfaced as a "locked" placeholder bubble instead of being
+        // dropped — so the user sees that something arrived and can ask
+        // the sender to resend, rather than wondering why the sender's
+        // blue ticks went up with no visible message.
         final resolved = await Future.wait(
-          raw.map((m) => decryptForRendering(m, currentUserId)),
+          raw.map((m) async {
+            final r = await decryptForRendering(m, currentUserId);
+            return r ?? _lockedPlaceholder(m);
+          }),
         );
-        latestDecrypted = resolved.whereType<MessageModel>().toList();
+        latestDecrypted = resolved;
         recomputeCommittedFromLatest();
         gotFirstFirestoreEmission = true;
 
@@ -806,6 +863,20 @@ class ChatService {
       outboxSub = _outboxNotifier.stream.listen((_) {
         if (!controller.isClosed) controller.add(combine());
       });
+
+      // (4) Vault-ready ticks: re-decrypt the cached raw snapshot the
+      // moment the vault becomes usable. Fixes the post-reinstall case
+      // where the home screen and chat both rendered with the "🔒 can't
+      // decrypt" placeholder because the vault was still locked when the
+      // first message snapshot arrived — once the user enters their PIN,
+      // the bubbles auto-recover their plaintext from the vault.
+      // ignore: discarded_futures
+      vaultReadySub = _vaultReadyNotifier.stream.listen((_) async {
+        try {
+          await _preWarmPayloadCache(currentUserId);
+          await redecryptLatest();
+        } catch (_) {}
+      });
     }
 
     controller.onListen = start;
@@ -813,6 +884,7 @@ class ChatService {
       await chatRoomSub?.cancel();
       await messagesSub?.cancel();
       await outboxSub?.cancel();
+      await vaultReadySub?.cancel();
     };
     return controller.stream;
   }
@@ -846,9 +918,12 @@ class ChatService {
         .reversed
         .toList();
     final resolved = await Future.wait(
-      raw.map((m) => decryptForRendering(m, currentUserId)),
+      raw.map((m) async {
+        final r = await decryptForRendering(m, currentUserId);
+        return r ?? _lockedPlaceholder(m);
+      }),
     );
-    return resolved.whereType<MessageModel>().toList();
+    return resolved;
   }
 
   // Mark messages as read
@@ -977,11 +1052,18 @@ class ChatService {
   // message arrived after the clear timestamp — in that case the chat
   // reappears automatically (WhatsApp behaviour).
   Stream<List<ChatRoom>> getChatRooms(String userId) {
-    return _firestore
-        .collection(_chatRoomsCollection)
-        .where('participants', arrayContains: userId)
-        .snapshots()
-        .asyncMap((snapshot) async {
+    // Manual controller so the chat list can be re-emitted on
+    // vault-ready ticks as well as on every Firestore snapshot. Without
+    // this, post-reinstall the home screen would stay on "🔒 Encrypted
+    // message" / "🔒 can't decrypt" placeholders until some unrelated
+    // chatRoom change happened to retrigger the asyncMap.
+    final controller = StreamController<List<ChatRoom>>();
+    QuerySnapshot<Map<String, dynamic>>? latestSnap;
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? roomsSub;
+    StreamSubscription<void>? vaultReadySub;
+
+    Future<List<ChatRoom>> process(
+        QuerySnapshot<Map<String, dynamic>> snapshot) async {
       final ps = await PlaintextStore.instance();
       final previews = await ps.getAllRoomPreviewsWithMeta();
 
@@ -1052,10 +1134,16 @@ class ChatService {
             if (latest.docs.isEmpty) return;
             final msg = MessageModel.fromFirestore(latest.docs.first);
             final decrypted = await decryptForRendering(msg, userId);
-            if (decrypted == null) return;
-            final text = decrypted.text.isNotEmpty
-                ? decrypted.text
-                : (decrypted.mediaUrl != null ? 'Media' : '');
+            // Post-reinstall recovery: when the latest message can't be
+            // decrypted, replace the generic "🔒 Encrypted message"
+            // placeholder with the explicit "can't decrypt — ask sender
+            // to resend" indicator so the user understands why their
+            // chat looks empty inside.
+            final text = decrypted == null
+                ? _undecryptablePlaceholderText
+                : (decrypted.text.isNotEmpty
+                    ? decrypted.text
+                    : (decrypted.mediaUrl != null ? 'Media' : ''));
             if (text.isEmpty) return;
             await ps.saveRoomPreview(
               chatRoomId: room.id,
@@ -1086,7 +1174,45 @@ class ChatService {
       });
 
       return chatRooms;
-    });
+    }
+
+    Future<void> emitFromCachedSnap() async {
+      final snap = latestSnap;
+      if (snap == null) return;
+      try {
+        final rooms = await process(snap);
+        if (!controller.isClosed) controller.add(rooms);
+      } catch (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      }
+    }
+
+    controller.onListen = () {
+      roomsSub = _firestore
+          .collection(_chatRoomsCollection)
+          .where('participants', arrayContains: userId)
+          .snapshots()
+          .listen((snap) {
+        latestSnap = snap;
+        // ignore: discarded_futures
+        emitFromCachedSnap();
+      }, onError: (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      });
+
+      // Re-emit on vault-ready ticks so post-reinstall placeholders get
+      // replaced with real previews the moment the user enters their PIN
+      // — no need to wait for an unrelated chatRoom mutation.
+      vaultReadySub = _vaultReadyNotifier.stream.listen((_) {
+        // ignore: discarded_futures
+        emitFromCachedSnap();
+      });
+    };
+    controller.onCancel = () async {
+      await roomsSub?.cancel();
+      await vaultReadySub?.cancel();
+    };
+    return controller.stream;
   }
 
   // Delete a message
