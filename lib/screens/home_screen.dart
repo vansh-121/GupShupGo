@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -200,6 +201,15 @@ class _HomeScreenState extends State<HomeScreen>
             .catchError((e) => print('Background delivery sync error: $e')),
       ]);
 
+      // ── Pre-warm Signal sessions + Cloud Function cold start ──
+      // The first send to a peer historically paid for: (a) a Firebase
+      // Functions cold-start to consume a one-time prekey (~3-8s), and
+      // (b) building a Signal session from the prekey bundle. Doing both
+      // here at app open makes the first send feel as instant as the
+      // tenth. Fire-and-forget; never blocks the UI.
+      // ignore: discarded_futures
+      _prewarmEncryption(_currentUserId!);
+
       // ── Check for app updates via Google Play native API ──
       _updateService.checkAndPromptUpdate();
 
@@ -221,6 +231,38 @@ class _HomeScreenState extends State<HomeScreen>
         _isInitialized = true;
       });
     }
+  }
+
+  /// Pre-warms the Cloud Function and pre-establishes Signal sessions for
+  /// every contact this user has a chat with, so the first message of the
+  /// session is a pure local encrypt with no network round-trips.
+  Future<void> _prewarmEncryption(String userId) async {
+    // Warm the Functions cold-start in parallel with the peer query.
+    final warmFn = SignalService.warmConsumeOneTimePreKey();
+    List<String> peerUids = const [];
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('chatRooms')
+          .where('participants', arrayContains: userId)
+          .get();
+      final peers = <String>{};
+      for (final d in snap.docs) {
+        final parts =
+            List<String>.from(d.data()['participants'] ?? const []);
+        for (final p in parts) {
+          if (p != userId) peers.add(p);
+        }
+      }
+      peerUids = peers.toList();
+    } catch (e) {
+      debugPrint('[Prewarm] peer fetch failed: $e');
+    }
+    try {
+      await SignalService.instance.prewarmSessions(peerUids);
+    } catch (e) {
+      debugPrint('[Prewarm] session prewarm failed: $e');
+    }
+    await warmFn;
   }
 
   /// Loads user from local cache (synchronous — no Firestore read).

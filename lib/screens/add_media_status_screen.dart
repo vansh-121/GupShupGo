@@ -2,7 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -282,8 +284,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
         }
         return;
       }
+      // Fire-and-forget: provider inserts an optimistic StatusItem
+      // immediately, then runs compression + AES-GCM encrypt + Storage
+      // upload + Signal key fan-out + Firestore writes in the background.
+      // The screen closes in the same frame as the tap.
+      if (!mounted) return;
+      final provider = context.read<StatusProvider>();
       if (_isVideo) {
-        await _statusService.uploadEncryptedVideoStatus(
+        provider.postEncryptedVideoStatusInBackground(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
@@ -293,7 +301,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
           viewerUids: viewers,
         );
       } else {
-        await _statusService.uploadEncryptedImageStatus(
+        provider.postEncryptedImageStatusInBackground(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
@@ -304,7 +312,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
         );
       }
 
-      debugPrint('[Status] Upload successful!');
+      debugPrint('[Status] Upload kicked off in background');
       if (mounted) {
         Navigator.pop(context, true);
       }

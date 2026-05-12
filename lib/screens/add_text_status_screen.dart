@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
@@ -85,7 +87,14 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
         }
         return;
       }
-      await _statusService.uploadEncryptedTextStatus(
+
+      // Fire-and-forget: provider inserts an optimistic StatusItem
+      // immediately and runs the upload + key fan-out + Firestore writes
+      // in the background. The screen pops in the same frame as the tap,
+      // matching WhatsApp's "post feels instant" UX.
+      if (!mounted) return;
+      final provider = context.read<StatusProvider>();
+      provider.postEncryptedTextStatusInBackground(
         userId: widget.userId,
         userName: widget.userName,
         userPhotoUrl: widget.userPhotoUrl,

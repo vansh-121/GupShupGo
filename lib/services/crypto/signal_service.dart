@@ -314,6 +314,50 @@ class SignalService {
   static void invalidateDeviceCache(String uid) =>
       _deviceIdCache.remove(uid);
 
+  /// Pre-establish Signal sessions with every device of every peer in
+  /// [peerUids], in the background. After this runs the first encrypt for
+  /// each peer becomes a pure local CPU operation — no Firestore read, no
+  /// `consumeOneTimePreKey` HTTP round-trip — so the first message of the
+  /// session feels as instant as the second.
+  ///
+  /// Idempotent and safe to call repeatedly. Best-effort: errors per peer
+  /// are swallowed so one unreachable peer doesn't stall the rest.
+  Future<void> prewarmSessions(List<String> peerUids) async {
+    if (peerUids.isEmpty) return;
+    await Future.wait(peerUids.map((uid) async {
+      try {
+        final devices = await _listDeviceIds(uid);
+        await Future.wait(devices.map((d) async {
+          try {
+            await ensureSession(uid, d);
+          } catch (_) {}
+        }));
+      } catch (_) {}
+    }));
+  }
+
+  /// Send a no-op POST to consumeOneTimePreKey to defeat the Firebase
+  /// Functions cold start before the user's first real send. The endpoint
+  /// rejects missing fields with a fast 400; we don't care about the body.
+  /// Best-effort and silent on failure.
+  static Future<void> warmConsumeOneTimePreKey() async {
+    try {
+      final idToken =
+          await FirebaseAuth.instance.currentUser?.getIdToken();
+      if (idToken == null) return;
+      // OPTIONS request triggers function startup without consuming a
+      // prekey. (Cloud Functions still pay the cold-start, exactly what we
+      // want to absorb up-front.)
+      await http
+          .head(
+            Uri.parse(
+                'https://us-central1-videocallapp-81166.cloudfunctions.net/consumeOneTimePreKey'),
+            headers: {'Authorization': 'Bearer $idToken'},
+          )
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {}
+  }
+
   // ── Wipe (used by signOut and "Reset encryption") ───────────────────────
   static Future<void> wipe() async {
     await PersistentSignalStores.wipe();

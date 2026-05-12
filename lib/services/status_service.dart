@@ -12,6 +12,7 @@ import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
+import 'package:video_chat_app/services/image_compressor.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 /// Decrypted form of an encrypted status item, kept in the process-wide
@@ -501,19 +502,23 @@ class StatusService {
     required File imageFile,
     String? caption,
     required List<String> viewerUids,
-  }) =>
-      _uploadEncryptedMedia(
-        userId: userId,
-        userName: userName,
-        userPhotoUrl: userPhotoUrl,
-        userPhoneNumber: userPhoneNumber,
-        file: imageFile,
-        statusType: 'encrypted_image',
-        folder: 'encrypted_images',
-        contentType: 'image/jpeg',
-        caption: caption,
-        viewerUids: viewerUids,
-      );
+  }) async {
+    // Shrink before encrypt+upload — a 5 MB gallery photo turns into a
+    // ~250 KB JPEG that uploads in a second over 4G instead of 15-30s.
+    final compressed = await ImageCompressor.compressForStatus(imageFile);
+    return _uploadEncryptedMedia(
+      userId: userId,
+      userName: userName,
+      userPhotoUrl: userPhotoUrl,
+      userPhoneNumber: userPhoneNumber,
+      file: compressed,
+      statusType: 'encrypted_image',
+      folder: 'encrypted_images',
+      contentType: 'image/jpeg',
+      caption: caption,
+      viewerUids: viewerUids,
+    );
+  }
 
   /// Encrypted video status — same flow as image, different content type.
   Future<void> uploadEncryptedVideoStatus({
@@ -771,10 +776,10 @@ class StatusService {
     String? caption,
   }) async {
     try {
-      // Upload image to Firebase Storage
+      final compressed = await ImageCompressor.compressForStatus(imageFile);
       final imageUrl = await _uploadFileToStorage(
         userId: userId,
-        file: imageFile,
+        file: compressed,
         folder: 'images',
       );
 
