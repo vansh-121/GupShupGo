@@ -7,6 +7,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
+import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
@@ -456,6 +457,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader('END-TO-END ENCRYPTION'),
           _buildCard(children: [
             _buildTile(
+              icon: Icons.shield_outlined,
+              iconColor: AppColors.primary,
+              title: 'Vault',
+              subtitle: 'PIN, auto-delete window, what\'s stored',
+              onTap: _openVaultSettings,
+            ),
+            _divider(),
+            _buildTile(
               icon: Icons.verified_user,
               iconColor: Colors.green,
               title: 'Verify safety number',
@@ -570,6 +579,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+
+  void _openVaultSettings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VaultSettingsScreen(uid: widget.currentUser.id),
+      ),
+    );
+  }
 
   Future<void> _verifySafetyNumber() async {
     final controller = TextEditingController();

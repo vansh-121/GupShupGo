@@ -133,7 +133,11 @@ class StatusService {
           .doc(selfUid)
           .collection(_statusVaultCollection)
           .doc(itemId)
-          .set({'t': 'text', ...enc});
+          .set({
+        't': 'text',
+        ...enc,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     } catch (_) {}
   }
 
@@ -147,7 +151,11 @@ class StatusService {
           .doc(selfUid)
           .collection(_statusVaultCollection)
           .doc(itemId)
-          .set({'t': 'media_key', ...enc});
+          .set({
+        't': 'media_key',
+        ...enc,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     } catch (_) {}
   }
 

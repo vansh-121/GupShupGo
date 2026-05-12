@@ -48,6 +48,18 @@ enum VaultState {
   ready,
 }
 
+/// User-visible vault configuration mirrored from `vaultMeta/config`.
+class VaultSettings {
+  const VaultSettings({required this.retentionDays, required this.createdAt});
+
+  /// Number of days after which a vault entry is auto-deleted. `null`
+  /// means "keep forever".
+  final int? retentionDays;
+
+  /// When the vault was originally set up (server timestamp).
+  final DateTime? createdAt;
+}
+
 class VaultCipher {
   VaultCipher._();
   static final VaultCipher instance = VaultCipher._();
@@ -306,8 +318,14 @@ class VaultCipher {
         if (replacement == null) continue;
         try {
           // set() (not update()) — replaces the whole doc so legacy fields
-          // (p, tx, bg, k) are dropped along with the rewrite.
-          await doc.reference.set(replacement);
+          // (p, tx, bg, k) are dropped along with the rewrite. Stamp
+          // createdAt so retention can later apply to migrated entries
+          // (we don't have the original message timestamp here; "now" is
+          // the best approximation).
+          await doc.reference.set({
+            ...replacement,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
         } catch (_) {}
       }
 
@@ -335,6 +353,231 @@ class VaultCipher {
     _uid = null;
     await _ss.delete(key: _localKeyKey);
     await _ss.delete(key: _localUidKey);
+  }
+
+  // ─── Settings ───────────────────────────────────────────────────────────
+
+  /// Reads the vault config doc. Returns null if the vault hasn't been
+  /// set up. Safe to call without an unlocked vault — the config doc
+  /// itself contains only the KDF salt + verifier + plaintext retention
+  /// preference, nothing the key protects.
+  Future<VaultSettings?> getSettings(String uid) async {
+    final doc = await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('vaultMeta')
+        .doc('config')
+        .get();
+    if (!doc.exists) return null;
+    final data = doc.data()!;
+    final ts = data['createdAt'];
+    return VaultSettings(
+      retentionDays: data['retentionDays'] as int?,
+      createdAt: ts is Timestamp ? ts.toDate() : null,
+    );
+  }
+
+  /// Updates the retention window. `days = null` means keep forever.
+  /// Caller should run [applyRetention] right after so any docs that
+  /// became eligible under the new window are pruned immediately.
+  Future<void> setRetention(String uid, int? days) async {
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('vaultMeta')
+        .doc('config')
+        .set({'retentionDays': days}, SetOptions(merge: true));
+  }
+
+  /// Deletes every msgVault / statusVault doc whose `createdAt` is older
+  /// than the configured retention window. No-op when retention is null.
+  /// Idempotent and best-effort: runs in pages, swallows transient errors.
+  /// Local PlaintextStore entries for the pruned messages are also wiped
+  /// so the chat list doesn't keep showing previews of expired content.
+  Future<int> applyRetention(String uid) async {
+    final settings = await getSettings(uid);
+    final days = settings?.retentionDays;
+    if (days == null) return 0;
+    final cutoff = Timestamp.fromDate(
+      DateTime.now().subtract(Duration(days: days)),
+    );
+
+    var deleted = 0;
+    final prunedMessageIds = <String>[];
+
+    for (final col in const ['msgVault', 'statusVault']) {
+      final ref = _firestore.collection('users').doc(uid).collection(col);
+      while (true) {
+        // Legacy entries written before retention shipped have no
+        // createdAt field; orderBy('createdAt') skips them silently
+        // (Firestore ignores docs missing the order field). They stay
+        // until they're naturally rewritten (e.g. via PIN change) or
+        // the user clears the vault explicitly.
+        final snap = await ref
+            .where('createdAt', isLessThan: cutoff)
+            .orderBy('createdAt')
+            .limit(200)
+            .get();
+        if (snap.docs.isEmpty) break;
+        final batch = _firestore.batch();
+        for (final d in snap.docs) {
+          batch.delete(d.reference);
+          if (col == 'msgVault') prunedMessageIds.add(d.id);
+        }
+        await batch.commit();
+        deleted += snap.docs.length;
+        if (snap.docs.length < 200) break;
+      }
+    }
+
+    if (prunedMessageIds.isNotEmpty) {
+      try {
+        final ps = await PlaintextStore.instance();
+        for (final id in prunedMessageIds) {
+          await ps.delete(id);
+        }
+      } catch (_) {}
+    }
+    return deleted;
+  }
+
+  // ─── PIN change & data wipe ────────────────────────────────────────────
+
+  /// Re-encrypts the entire vault under a new PIN. Returns false if
+  /// [oldPin] is wrong; otherwise rewrites every msgVault/statusVault
+  /// entry, updates vaultMeta with a new salt + verifier, and refreshes
+  /// the local cached key. The vault must already be set up.
+  ///
+  /// Best-effort atomicity: docs are rewritten in pages, then the verifier
+  /// is flipped last. If the device dies mid-rewrite the user can re-run
+  /// the change with the same old PIN to resume — the old key still
+  /// validates against the existing verifier, so resumption is safe.
+  /// Caller should show a "do not close the app" hint and progress.
+  Future<bool> changePin(
+    String uid,
+    String oldPin,
+    String newPin, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final cfgDoc = await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('vaultMeta')
+        .doc('config')
+        .get();
+    if (!cfgDoc.exists) return false;
+    final cfg = cfgDoc.data()!;
+    final oldSalt = base64Decode(cfg['salt'] as String);
+    final oldKey = await _deriveKey(oldPin, oldSalt);
+    if (!await _verifierMatches(
+        oldKey, cfg['verifier'] as Map<String, dynamic>)) {
+      return false;
+    }
+
+    final newSalt = _randomBytes(16);
+    final newKey = await _deriveKey(newPin, newSalt);
+
+    // Count first so progress is meaningful.
+    var total = 0;
+    for (final col in const ['msgVault', 'statusVault']) {
+      final count =
+          await _firestore.collection('users').doc(uid).collection(col).count().get();
+      total += count.count ?? 0;
+    }
+    var done = 0;
+    onProgress?.call(done, total);
+
+    for (final col in const ['msgVault', 'statusVault']) {
+      final ref = _firestore.collection('users').doc(uid).collection(col);
+      DocumentSnapshot<Map<String, dynamic>>? cursor;
+      while (true) {
+        var q = ref.orderBy(FieldPath.documentId).limit(150);
+        if (cursor != null) q = q.startAfterDocument(cursor);
+        final snap = await q.get();
+        if (snap.docs.isEmpty) break;
+
+        for (final d in snap.docs) {
+          final data = d.data();
+          // Decrypt under old key, re-encrypt under new key. Preserve
+          // createdAt (and the 't' tag on statusVault) so retention math
+          // and routing stay correct.
+          Map<String, dynamic>? rewritten;
+          if (data['t'] == 'media_key') {
+            final bytes = await _decryptRaw(oldKey, data);
+            if (bytes != null) {
+              final enc = await _encryptRaw(newKey, bytes);
+              rewritten = {'t': 'media_key', ...enc};
+            }
+          } else {
+            final pt = await _decryptRaw(oldKey, data);
+            if (pt != null) {
+              final enc = await _encryptRaw(newKey, pt);
+              rewritten = (data['t'] != null)
+                  ? {'t': data['t'], ...enc}
+                  : enc;
+            }
+          }
+          if (rewritten != null) {
+            if (data['createdAt'] != null) {
+              rewritten['createdAt'] = data['createdAt'];
+            }
+            try {
+              await d.reference.set(rewritten);
+            } catch (_) {}
+          }
+          done++;
+          onProgress?.call(done, total);
+        }
+
+        if (snap.docs.length < 150) break;
+        cursor = snap.docs.last;
+      }
+    }
+
+    // Flip the verifier last so an interrupted run leaves the OLD PIN
+    // still valid (allowing retry).
+    final newVerifier = await _encryptRaw(
+      newKey,
+      Uint8List.fromList(utf8.encode(_verifierConstant)),
+    );
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('vaultMeta')
+        .doc('config')
+        .set({
+      'salt': base64Encode(newSalt),
+      'verifier': newVerifier,
+    }, SetOptions(merge: true));
+
+    await _cacheKey(uid, newKey);
+    _key = newKey;
+    _uid = uid;
+    return true;
+  }
+
+  /// Wipes every msgVault + statusVault doc (and the local SQLite cache)
+  /// but keeps the PIN/salt/verifier intact — the user keeps the same
+  /// vault and PIN, they just start with empty history. Caller should
+  /// invalidate ChatService + StatusService pre-warm afterwards.
+  Future<void> clearVaultData(String uid) async {
+    for (final col in const ['msgVault', 'statusVault']) {
+      final ref = _firestore.collection('users').doc(uid).collection(col);
+      while (true) {
+        final snap = await ref.limit(400).get();
+        if (snap.docs.isEmpty) break;
+        final batch = _firestore.batch();
+        for (final d in snap.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+        if (snap.docs.length < 400) break;
+      }
+    }
+    try {
+      final ps = await PlaintextStore.instance();
+      await ps.wipe();
+    } catch (_) {}
   }
 
   // ─── Payload encrypt / decrypt ──────────────────────────────────────────

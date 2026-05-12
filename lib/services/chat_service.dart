@@ -196,7 +196,7 @@ class ChatService {
           .doc(uid)
           .collection(_vaultCollection)
           .doc(messageId)
-          .set(enc);
+          .set({...enc, 'createdAt': FieldValue.serverTimestamp()});
     } catch (_) {}
   }
 

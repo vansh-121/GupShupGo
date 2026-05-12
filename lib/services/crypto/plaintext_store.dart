@@ -287,4 +287,11 @@ class PlaintextStore {
     await _db.delete(_table);
     await _db.delete(_roomTable);
   }
+
+  /// Removes the cached plaintext for a single message id. Used by the
+  /// retention sweep so previews of pruned messages don't linger in the
+  /// chat list. Best-effort: missing rows are a no-op.
+  Future<void> delete(String messageId) async {
+    await _db.delete(_table, where: 'id = ?', whereArgs: [messageId]);
+  }
 }

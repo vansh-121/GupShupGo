@@ -285,6 +285,15 @@ class _HomeScreenState extends State<HomeScreen>
       try {
         await VaultCipher.instance.migrateLegacyEntries(uid);
       } catch (_) {}
+      try {
+        final pruned = await VaultCipher.instance.applyRetention(uid);
+        if (pruned > 0) {
+          // Pruned entries leave stale previews in the in-memory caches;
+          // drop them so the chat list refreshes.
+          ChatService.invalidatePreWarm(uid);
+          StatusService.invalidatePreWarm(uid);
+        }
+      } catch (_) {}
       _backfillVaultInBackground(uid);
     }());
   }
