@@ -778,10 +778,20 @@ class ChatService {
 
     // ignore: discarded_futures
     Future<void> start() async {
-      // Bulk-populate _payloadMemo from SQLite + Firestore vault before the
-      // message subscription fires. Once the memo is warm, every subsequent
-      // Firestore snapshot resolves synchronously — no per-message awaits.
-      await _preWarmPayloadCache(currentUserId);
+      // Kick off the SQLite + Firestore-vault bulk prewarm in the
+      // BACKGROUND. Awaiting it here used to add 3-10s to every cold
+      // chat-open (the vault read scales with the user's total message
+      // count, not just this chat's). decryptForRendering already has
+      // its own per-message SQLite + vault fallbacks, so the first emit
+      // can render from cold paths and the bulk prewarm just turns
+      // subsequent emits into pure synchronous memo hits. When the
+      // prewarm completes, we re-decrypt the latest snapshot so any
+      // bubbles that fell back to "locked" auto-recover.
+      // ignore: discarded_futures
+      _preWarmPayloadCache(currentUserId).then((_) {
+        // ignore: discarded_futures
+        redecryptLatest();
+      });
 
       // (1) Track clearedAt independently of the messages subscription.
       chatRoomSub = _firestore

@@ -148,55 +148,47 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initializeChat() async {
+    // The chat screen now renders IMMEDIATELY — the StreamBuilder on
+    // _messagesStream surfaces cached/decrypted messages as soon as the
+    // local Firestore snapshot lands (sub-second). Block-status checks,
+    // markDelivered / markRead, and listener setup all run in the
+    // background. Previously these were four sequential Firestore
+    // round-trips (~600ms-2s) that the spinner blocked on for no UX
+    // reason — the user just wants to see their messages.
+    if (mounted) setState(() => _isLoading = false);
+
     try {
-      // ── Check block status first ───────────────────────────────────
       await _checkBlockStatus();
-
-      // Ensure chat room exists
-      await _chatService.getOrCreateChatRoom(
-        widget.currentUserId,
-        widget.contact.id,
-      );
-
-      // Mark messages as delivered first (in case they were sent)
-      if (!_isBlockedByContact) {
-        await _chatService.markMessagesAsDelivered(
-          widget.currentUserId,
-          widget.contact.id,
-        );
-      }
-
-      // Mark messages as read when opening chat (user is viewing them)
-      if (_settingsService.showReadReceipts && !_isBlocked) {
-        await _chatService.markMessagesAsRead(
-          widget.currentUserId,
-          widget.contact.id,
-        );
-      }
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      // Start listening for new messages and mark them as read immediately
-      _startReadReceiptListener();
-
-      // Start listening for the other user's typing status (skip if blocked)
-      if (!_isBlocked && !_isBlockedByContact) {
-        _listenToTypingStatus();
-      }
-
-      // Start listening for real-time online/offline status changes
-      _listenToOnlineStatus();
-
-      // Start listening for mesh messages (offline messaging)
-      _listenToMeshMessages();
     } catch (e) {
-      print('Error initializing chat: $e');
-      setState(() {
-        _isLoading = false;
-      });
+      debugPrint('block check failed (non-fatal): $e');
     }
+
+    // Fire the rest in parallel; none of them affect the visible message
+    // list (they only update status indicators on previous messages).
+    unawaited(_chatService
+        .getOrCreateChatRoom(widget.currentUserId, widget.contact.id)
+        .catchError((e) {
+      debugPrint('getOrCreateChatRoom failed: $e');
+      return null as dynamic;
+    }));
+    if (!_isBlockedByContact) {
+      unawaited(_chatService
+          .markMessagesAsDelivered(widget.currentUserId, widget.contact.id)
+          .catchError((e) => debugPrint('markDelivered failed: $e')));
+    }
+    if (_settingsService.showReadReceipts && !_isBlocked) {
+      unawaited(_chatService
+          .markMessagesAsRead(widget.currentUserId, widget.contact.id)
+          .catchError((e) => debugPrint('markRead failed: $e')));
+    }
+
+    if (!mounted) return;
+    _startReadReceiptListener();
+    if (!_isBlocked && !_isBlockedByContact) {
+      _listenToTypingStatus();
+    }
+    _listenToOnlineStatus();
+    _listenToMeshMessages();
   }
 
   void _listenToMeshMessages() {
