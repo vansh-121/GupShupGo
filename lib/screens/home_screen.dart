@@ -61,6 +61,16 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isRefreshingUsers = false; // debounce for background user refresh
   List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
 
+  // Cached chat-list stream. Created lazily on the first build of the
+  // Chats tab and reused for the rest of the screen's lifetime. Without
+  // this, getChatRooms() was being re-invoked on every rebuild (e.g.
+  // when the user switched to Status/Calls and back), producing a fresh
+  // single-subscription StreamController each time — and the
+  // StreamBuilder occasionally tried to re-listen on the same instance
+  // during the rebuild handoff, throwing "Stream has already been
+  // listened to".
+  Stream<List<ChatRoom>>? _chatRoomsStream;
+
   // Tracks Firebase Auth presence so we can show a non-blocking re-verify
   // banner when the local session exists but Firebase has no user (typical
   // for phone-auth users on MIUI/HyperOS Redmi devices that wiped Firebase's
@@ -535,8 +545,10 @@ class _HomeScreenState extends State<HomeScreen>
       return Center(child: CircularProgressIndicator());
     }
 
+    _chatRoomsStream ??=
+        _chatService.getChatRooms(_currentUserId!).asBroadcastStream();
     return StreamBuilder<List<ChatRoom>>(
-      stream: _chatService.getChatRooms(_currentUserId!),
+      stream: _chatRoomsStream,
       builder: (context, chatSnapshot) {
         final c = AppThemeColors.of(context);
         // ── Use cached data while Firestore stream is still connecting ──
