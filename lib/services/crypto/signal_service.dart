@@ -121,7 +121,16 @@ class SignalService {
     int? oneTimePreKeyId;
     Uint8List? oneTimePreKeyPub;
     try {
-      final otpk = await _consumeOneTimePreKey(peerUid, deviceId);
+      // Hard 2s budget. The Cloud Function cold-start can run 3-10s on a
+      // first call after idle; that was the dominant cost of the first
+      // message to a new peer (15-20s total). Without OTPK the session
+      // still establishes via signed prekey + X3DH — the only loss is
+      // initial-message forward secrecy if the signed prekey is later
+      // compromised, which is an acceptable trade for the UX win. The
+      // Cloud Function still runs to consume an OTPK on warmer calls; the
+      // pool is replenished by the periodic refill path.
+      final otpk = await _consumeOneTimePreKey(peerUid, deviceId)
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
       if (otpk != null) {
         oneTimePreKeyId = otpk['id'] as int;
         oneTimePreKeyPub = base64Decode(otpk['pub'] as String);
