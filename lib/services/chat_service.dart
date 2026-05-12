@@ -409,6 +409,11 @@ class ChatService {
     // snapshot stream and we remove the outbox entry. On failure we flip
     // it to status=failed so the bubble stays on screen with an error
     // indicator the user can retry from.
+    // WhatsApp-parity perceived speed: show the single tick (sent) in the
+    // same frame as the tap. Firestore's offline persistence queues the
+    // batch commit locally and rarely fails when online, so the lie is
+    // tiny and self-correcting — on failure we flip to `failed` in the
+    // catch below, same as before.
     final optimistic = MessageModel(
       id: messageRef.id,
       senderId: senderId,
@@ -416,7 +421,7 @@ class ChatService {
       text: text,
       type: type,
       timestamp: DateTime.now(),
-      status: MessageStatus.sending,
+      status: MessageStatus.sent,
       mediaUrl: mediaUrl,
       audioDuration: audioDuration,
       statusReplyOwnerId: statusReplyOwnerId,
