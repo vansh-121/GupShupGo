@@ -24,6 +24,7 @@ import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 class Contact {
@@ -1029,42 +1030,47 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessagesList(List<MessageModel> messages) {
     final c = AppThemeColors.of(context);
     if (messages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: c.primaryLt,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.waving_hand_rounded,
-                size: 40,
-                color: c.primary,
-              ),
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // E2EE notice is always visible — even on empty chats — so the
+          // user sees the encryption guarantee before they send their
+          // first message, matching WhatsApp's "🔒 Messages are end-to-
+          // end encrypted" pill above the greeting.
+          E2EEBanner.chat(context),
+          const Spacer(),
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: c.primaryLt,
+              shape: BoxShape.circle,
             ),
-            const SizedBox(height: 20),
-            Text(
-              'Say hello!',
-              style: GoogleFonts.poppins(
-                color: c.textHigh,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
+            child: Icon(
+              Icons.waving_hand_rounded,
+              size: 40,
+              color: c.primary,
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Start the conversation',
-              style: GoogleFonts.poppins(
-                color: c.textMid,
-                fontSize: 14,
-              ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Say hello!',
+            style: GoogleFonts.poppins(
+              color: c.textHigh,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Start the conversation',
+            style: GoogleFonts.poppins(
+              color: c.textMid,
+              fontSize: 14,
+            ),
+          ),
+          const Spacer(flex: 2),
+        ],
       );
     }
 
@@ -1102,6 +1108,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _didInitialMessageBuild = true;
 
     List<Widget> messageWidgets = [];
+    // E2EE pill at the very top of the conversation — same placement as
+    // WhatsApp, always visible above the oldest message so users see the
+    // encryption guarantee whenever they scroll back to the start of
+    // the chat.
+    messageWidgets.add(E2EEBanner.chat(context));
     String? lastDate;
 
     for (int i = 0; i < displayMessages.length; i++) {

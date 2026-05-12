@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -373,6 +374,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── Profile card ──────────────────────────────────────────────
           _buildProfileCard(avatarUrl),
           const SizedBox(height: 8),
+
+          // ── End-to-end encryption info card ───────────────────────────
+          // High-visibility placement so users see the encryption
+          // guarantee right after their profile, before scrolling into
+          // any other setting — same place WhatsApp puts theirs.
+          E2EEBanner.card(
+            context,
+            body:
+                'Messages, status updates, and calls are secured with the '
+                'Signal Protocol. Only you and the people you chat with can '
+                'read what is sent, listen to what is said, or see your '
+                'status. Not even GupShupGo.',
+          ),
 
           // ── Account ───────────────────────────────────────────────────
           _buildSectionHeader('ACCOUNT'),

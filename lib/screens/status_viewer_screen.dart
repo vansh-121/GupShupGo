@@ -684,12 +684,34 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                   fontSize: 15,
                                 ),
                               ),
-                              Text(
-                                _formatTimeAgo(currentItem.createdAt),
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    _formatTimeAgo(currentItem.createdAt),
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  // E2EE indicator inline next to the
+                                  // timestamp, so viewers see at a glance
+                                  // that the status is encrypted end-to-end.
+                                  if (currentItem.type
+                                      .startsWith('encrypted')) ...[
+                                    SizedBox(width: 8),
+                                    Icon(Icons.lock_outline_rounded,
+                                        color: Colors.white70, size: 11),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      'End-to-end encrypted',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),

@@ -457,13 +457,36 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ],
                 ),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Re-pick media button
-                  IconButton(
-                    icon: Icon(Icons.add_photo_alternate, color: Colors.white),
-                    onPressed: _isUploading ? null : _showMediaSourcePicker,
+                  // E2EE assurance line above the caption row.
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.lock_outline_rounded,
+                            size: 12, color: Colors.white70),
+                        const SizedBox(width: 6),
+                        Text(
+                          'End-to-end encrypted',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  Row(
+                    children: [
+                      // Re-pick media button
+                      IconButton(
+                        icon: Icon(Icons.add_photo_alternate, color: Colors.white),
+                        onPressed: _isUploading ? null : _showMediaSourcePicker,
+                      ),
                   // Caption input — no box, just plain text on gradient
                   Expanded(
                     child: TextField(
@@ -506,6 +529,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                               color: Colors.white, size: 22),
                     ),
                   ),
+                ],
+              ),
                 ],
               ),
             ),
