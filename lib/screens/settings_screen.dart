@@ -604,45 +604,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _verifySafetyNumber() async {
-    final controller = TextEditingController();
-    final peerUid = await showDialog<String>(
+    final c = AppThemeColors.of(context);
+    final selfUid = widget.currentUser.id;
+
+    // Show a bottom-sheet contact picker populated from existing chats.
+    final peerUser = await showModalBottomSheet<UserModel>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Contact user ID'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Firebase UID'),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Show number')),
-        ],
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (_) => _SafetyNumberContactPicker(selfUid: selfUid),
     );
-    if (peerUid == null || peerUid.isEmpty) return;
+
+    if (peerUser == null || !mounted) return;
+
+    // Show a loading indicator while computing.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
     final n = await SafetyNumberService().safetyNumberFor(
-      selfUserId: widget.currentUser.id,
-      peerUserId: peerUid,
+      selfUserId: selfUid,
+      peerUserId: peerUser.id,
     );
+
     if (!mounted) return;
+    Navigator.pop(context); // dismiss loading
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Safety number'),
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundImage: NetworkImage(
+                peerUser.photoUrl ??
+                    'https://ui-avatars.com/api/?name=${Uri.encodeComponent(peerUser.name)}&background=4CAF50&color=fff&size=128',
+              ),
+              backgroundColor: c.surfaceAlt,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                peerUser.name,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
         content: n == null
-            ? const Text('Peer has no published key bundle yet.')
-            : SelectableText(n,
-                style: const TextStyle(
-                    fontFamily: 'monospace', fontSize: 16, height: 1.6)),
+            ? const Text(
+                'This contact hasn\'t published an encryption key bundle yet. '
+                'They may be using an older version of GupShupGo.')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'If the number below matches on ${peerUser.name}\'s device, '
+                    'your end-to-end encryption is verified.',
+                    style: TextStyle(fontSize: 13, color: c.textMid),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: c.surfaceAlt,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: SelectableText(
+                      n,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 16,
+                        height: 1.8,
+                        letterSpacing: 1.2,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 14, color: c.textLow),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Compare this number in person or over a trusted call.',
+                          style: TextStyle(fontSize: 11, color: c.textLow),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -1000,6 +1065,222 @@ class _SettingsScreenState extends State<SettingsScreen> {
       applicationName: 'GupShupGo',
       applicationVersion: '1.0.6',
       applicationLegalese: '© 2026 GupShupGo',
+    );
+  }
+}
+
+// ── Contact picker for safety number verification ─────────────────────────
+/// A bottom-sheet widget that lists the user's recent chat contacts so they
+/// can tap one to verify their safety number — no Firebase UID needed.
+class _SafetyNumberContactPicker extends StatefulWidget {
+  final String selfUid;
+  const _SafetyNumberContactPicker({required this.selfUid});
+
+  @override
+  State<_SafetyNumberContactPicker> createState() =>
+      _SafetyNumberContactPickerState();
+}
+
+class _SafetyNumberContactPickerState
+    extends State<_SafetyNumberContactPicker> {
+  List<UserModel> _contacts = [];
+  List<UserModel> _filtered = [];
+  bool _loading = true;
+  final _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadContacts() async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+
+      // Fetch all chatRooms the current user participates in.
+      final snap = await firestore
+          .collection('chatRooms')
+          .where('participants', arrayContains: widget.selfUid)
+          .get();
+
+      // Collect unique peer UIDs.
+      final peerUids = <String>{};
+      for (final doc in snap.docs) {
+        final parts = List<String>.from(doc.data()['participants'] ?? []);
+        for (final uid in parts) {
+          if (uid != widget.selfUid) peerUids.add(uid);
+        }
+      }
+
+      // Resolve each peer UID into a UserModel.
+      final users = <UserModel>[];
+      for (final uid in peerUids) {
+        final userDoc = await firestore.collection('users').doc(uid).get();
+        if (userDoc.exists) {
+          users.add(UserModel.fromFirestore(userDoc));
+        }
+      }
+
+      // Sort alphabetically.
+      users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+      if (mounted) {
+        setState(() {
+          _contacts = users;
+          _filtered = users;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _onSearch(String query) {
+    final q = query.toLowerCase();
+    setState(() {
+      _filtered = q.isEmpty
+          ? _contacts
+          : _contacts
+              .where((u) => u.name.toLowerCase().contains(q))
+              .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      maxChildSize: 0.85,
+      minChildSize: 0.4,
+      builder: (context, scrollController) {
+        return Column(
+          children: [
+            // ── Handle + title ────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: Column(
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: c.textLow,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Icon(Icons.verified_user, color: c.primary, size: 22),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Verify a contact',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: c.textHigh,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Select a contact to view your shared safety number.',
+                    style: TextStyle(fontSize: 13, color: c.textMid),
+                  ),
+                  const SizedBox(height: 14),
+                  // ── Search bar ────────────────────────────────────────
+                  TextField(
+                    controller: _searchController,
+                    onChanged: _onSearch,
+                    decoration: InputDecoration(
+                      hintText: 'Search contacts...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      filled: true,
+                      fillColor: c.surfaceAlt,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+
+            // ── Contact list ──────────────────────────────────────────────
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _filtered.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Text(
+                              _contacts.isEmpty
+                                  ? 'No contacts yet.\nStart a chat first!'
+                                  : 'No matching contacts.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: c.textMid),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          controller: scrollController,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          itemCount: _filtered.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            indent: 72,
+                            color: c.textLow.withOpacity(0.2),
+                          ),
+                          itemBuilder: (_, i) {
+                            final user = _filtered[i];
+                            final avatar = user.photoUrl ??
+                                'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128';
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundImage: NetworkImage(avatar),
+                                backgroundColor: c.surfaceAlt,
+                              ),
+                              title: Text(
+                                user.name,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  color: c.textHigh,
+                                ),
+                              ),
+                              subtitle: Text(
+                                user.about ?? 'Hey there! I am using GupShupGo.',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 12, color: c.textMid),
+                              ),
+                              trailing: Icon(Icons.chevron_right,
+                                  color: c.textLow, size: 20),
+                              onTap: () => Navigator.pop(context, user),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

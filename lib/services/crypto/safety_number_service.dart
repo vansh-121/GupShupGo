@@ -14,8 +14,6 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart' as crypto;
 
-import 'signal_service.dart';
-
 class SafetyNumberService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -25,16 +23,14 @@ class SafetyNumberService {
     required String selfUserId,
     required String peerUserId,
   }) async {
-    final selfPub = SignalService.instance.publicIdentityKey.serialize();
-    final peerSnap = await _firestore
-        .collection('users')
-        .doc(peerUserId)
-        .collection('devices')
-        .doc('1')
-        .get();
-    final peerBundle = peerSnap.data()?['keyBundle'] as Map<String, dynamic>?;
-    if (peerBundle == null) return null;
-    final peerPub = base64Decode(peerBundle['identityPub'] as String);
+    // Fetch BOTH identity keys from Firestore — the canonical source of
+    // truth. Previously selfPub came from the local runtime store while
+    // peerPub came from Firestore. If the local device isn't device 1, or
+    // the local key diverges from the published key (reinstall, migration),
+    // the two sides would compute different numbers.
+    final selfPub = await _fetchIdentityPub(selfUserId);
+    final peerPub = await _fetchIdentityPub(peerUserId);
+    if (selfPub == null || peerPub == null) return null;
 
     final selfHash = _iterateHash(selfPub, selfUserId);
     final peerHash = _iterateHash(peerPub, peerUserId);
@@ -55,6 +51,26 @@ class SafetyNumberService {
       buf.write(_encodeChunk(combined.sublist(i, i + 5)));
     }
     return buf.toString();
+  }
+
+  /// Fetch the identity public key for a user from Firestore. Checks all
+  /// registered devices (not just device 1) and returns the first published
+  /// identityPub it finds — they're all derived from the same keypair per
+  /// install, so any device document will do.
+  Future<Uint8List?> _fetchIdentityPub(String userId) async {
+    final devicesSnap = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('devices')
+        .get();
+
+    for (final doc in devicesSnap.docs) {
+      final bundle = doc.data()['keyBundle'] as Map<String, dynamic>?;
+      if (bundle != null && bundle['identityPub'] != null) {
+        return base64Decode(bundle['identityPub'] as String);
+      }
+    }
+    return null;
   }
 
   Uint8List _iterateHash(List<int> pub, String userId) {
@@ -78,3 +94,4 @@ class SafetyNumberService {
     return (v % 100000).toString().padLeft(5, '0');
   }
 }
+

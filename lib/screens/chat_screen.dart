@@ -15,6 +15,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/image_compressor.dart';
@@ -326,6 +327,102 @@ class _ChatScreenState extends State<ChatScreen> {
     await _chatService.markMessagesAsRead(
       widget.currentUserId,
       widget.contact.id,
+    );
+  }
+
+  // ─── Safety number verification (from E2EE banner tap) ─────────────────
+  Future<void> _showSafetyNumberForContact() async {
+    final c = AppThemeColors.of(context);
+
+    // Show a loading indicator while computing the 5200-round hash.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final n = await SafetyNumberService().safetyNumberFor(
+      selfUserId: widget.currentUserId,
+      peerUserId: widget.contact.id,
+    );
+
+    if (!mounted) return;
+    Navigator.pop(context); // dismiss loading
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundImage: NetworkImage(widget.contact.avatarUrl),
+              backgroundColor: c.surfaceAlt,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                widget.contact.name,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: n == null
+            ? const Text(
+                'This contact hasn\'t published an encryption key bundle yet. '
+                'They may be using an older version of GupShupGo.')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'If the number below matches on '
+                    '${widget.contact.name}\'s device, your end-to-end '
+                    'encryption is verified.',
+                    style: TextStyle(fontSize: 13, color: c.textMid),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: c.surfaceAlt,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: SelectableText(
+                      n,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 16,
+                        height: 1.8,
+                        letterSpacing: 1.2,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 14, color: c.textLow),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Compare this number in person or over a trusted call.',
+                          style: TextStyle(fontSize: 11, color: c.textLow),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1319,10 +1416,52 @@ class _ChatScreenState extends State<ChatScreen> {
               child: CircularProgressIndicator(color: c.primary))
           : Column(
               children: [
-                // ── Offline / Mesh mode banner ──────────────────────
+                // ── Smart banner: E2EE (online) / No-internet (offline) ──
                 Consumer<ConnectivityProvider>(
                   builder: (_, connectivity, __) {
-                    if (connectivity.isOnline) return const SizedBox.shrink();
+                    if (connectivity.isOnline) {
+                      // ── Online: E2EE trust banner ─────────────────────
+                      final c2 = AppThemeColors.of(context);
+                      return GestureDetector(
+                        onTap: () => _showSafetyNumberForContact(),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 7),
+                          color: c2.isDark
+                              ? const Color(0xFF1A2E1A)
+                              : const Color(0xFFE8F5E9),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.lock_outline_rounded,
+                                  size: 13,
+                                  color: c2.isDark
+                                      ? const Color(0xFF4ADE80)
+                                      : const Color(0xFF2E7D32)),
+                              const SizedBox(width: 6),
+                              Text(
+                                'End-to-end encrypted',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: c2.isDark
+                                      ? const Color(0xFF4ADE80)
+                                      : const Color(0xFF2E7D32),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(Icons.info_outline_rounded,
+                                  size: 14,
+                                  color: c2.isDark
+                                      ? const Color(0xFF4ADE80).withOpacity(0.7)
+                                      : const Color(0xFF2E7D32).withOpacity(0.6)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    // ── Offline: No-internet / mesh banner ──────────────
                     return Consumer<MeshNetworkService>(
                       builder: (_, mesh, __) => Container(
                         width: double.infinity,
