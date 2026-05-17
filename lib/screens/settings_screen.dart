@@ -242,7 +242,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         maxChildSize: 0.9,
         minChildSize: 0.4,
         builder: (context, scrollController) {
-          return Padding(
+          return SafeArea(
+           child: Padding(
             padding: const EdgeInsets.all(20),
             child: ListView(
               controller: scrollController,
@@ -335,7 +336,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ],
-            ),
+           ),
           );
         },
       ),
@@ -744,7 +745,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => Padding(
+      builder: (_) => SafeArea(
+        child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
