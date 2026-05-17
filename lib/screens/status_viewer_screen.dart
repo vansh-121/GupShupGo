@@ -329,7 +329,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             statusItemId: currentItem.id,
           ),
           builder: (context, snapshot) {
-            return Container(
+        return SafeArea(
+          child: Container(
               padding: EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -391,7 +392,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         )),
                 ],
               ),
-            );
+          ),
+        );
           },
         );
       },
@@ -698,16 +700,19 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                   // that the status is encrypted end-to-end.
                                   if (currentItem.type
                                       .startsWith('encrypted')) ...[
-                                    SizedBox(width: 8),
+                                    SizedBox(width: 6),
                                     Icon(Icons.lock_outline_rounded,
                                         color: Colors.white70, size: 11),
                                     SizedBox(width: 3),
-                                    Text(
-                                      'End-to-end encrypted',
-                                      style: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
+                                    Flexible(
+                                      child: Text(
+                                        'End-to-end encrypted',
+                                        style: TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],
