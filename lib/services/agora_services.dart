@@ -106,7 +106,7 @@ class AgoraService {
       enabled: true,
       config: EncryptionConfig(
         encryptionMode: EncryptionMode.aes256Gcm2,
-        encryptionKey: String.fromCharCodes(k.key),
+        encryptionKey: k.key.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
         encryptionKdfSalt: k.salt,
       ),
     );
