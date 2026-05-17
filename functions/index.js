@@ -1,3 +1,4 @@
+// Force redeploy to apply minInstances
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -118,7 +119,7 @@ async function sendToUserDevices(userId, buildMessage) {
 // notification and NEVER invoke the Dart background handler — which is why
 // call notifications were unreliable before this fix.
 exports.sendCallNotification = onRequest(
-  { cors: true, invoker: "public" },
+  { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -155,7 +156,7 @@ exports.sendCallNotification = onRequest(
           if (callerData.name) callerName = callerData.name;
           if (callerData.photoUrl) callerPhotoUrl = callerData.photoUrl;
         }
-      } catch (_) {}
+      } catch (_) { }
 
       const audioOnly = isAudioOnly === true || isAudioOnly === "true";
 
@@ -208,7 +209,7 @@ exports.sendCallNotification = onRequest(
 
 // ─── Send Message Notification ──────────────────────────────────────────────
 exports.sendMessageNotification = onRequest(
-  { cors: true, invoker: "public" },
+  { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -387,7 +388,7 @@ exports.exchangeDeviceSession = onRequest(
         }
       } catch (_) {
         // User deleted — clean up the stale session.
-        await doc.ref.delete().catch(() => {});
+        await doc.ref.delete().catch(() => { });
         res.status(401).json({ error: "Account no longer exists" });
         return;
       }
@@ -395,7 +396,7 @@ exports.exchangeDeviceSession = onRequest(
       // Audit trail. Fire-and-forget — never block the exchange on this.
       doc.ref
         .update({ lastUsedAt: admin.firestore.FieldValue.serverTimestamp() })
-        .catch(() => {});
+        .catch(() => { });
 
       const customToken = await auth.createCustomToken(uid);
       res.status(200).json({ customToken, uid });
@@ -474,7 +475,7 @@ exports.revokeDeviceSession = onRequest(
 // Response: { preKey: { id: number, pub: string } | null }
 // 200 + null preKey when the pool is empty — caller proceeds without OTPK.
 exports.consumeOneTimePreKey = onRequest(
-  { cors: true, invoker: "public" },
+  { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");

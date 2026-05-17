@@ -263,14 +263,21 @@ class PlaintextStore {
     return base64Decode(payload['k'] as String);
   }
 
-  /// Bulk-reads all regular message payloads (excludes status_* rows) into a
-  /// single map. Used by ChatService._preWarmPayloadCache to populate
-  /// _payloadMemo in one SQLite query instead of N per-message queries.
-  Future<Map<String, Map<String, dynamic>>> getAllMessagePayloads() async {
+  /// Bulk-reads the most-recent [limit] regular message payloads (excludes
+  /// status_* rows) into a single map. Used by ChatService._preWarmPayloadCache
+  /// to populate _payloadMemo in one SQLite query instead of N per-message
+  /// queries. Bounded to [limit] rows so the load time stays sub-50ms even on
+  /// heavy accounts; messages outside the window fall through to the per-row
+  /// SQLite path in decryptForRendering.
+  Future<Map<String, Map<String, dynamic>>> getAllMessagePayloads({
+    int limit = 500,
+  }) async {
     final rows = await _db.query(
       _table,
       columns: const ['id', 'payload'],
       where: "id NOT LIKE 'status_%'",
+      orderBy: 'saved_at DESC',
+      limit: limit,
     );
     final result = <String, Map<String, dynamic>>{};
     for (final row in rows) {

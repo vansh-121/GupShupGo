@@ -337,6 +337,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
            ),
+          ),
           );
         },
       ),
@@ -801,6 +802,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   )),
             const SizedBox(height: 12),
           ],
+        ),
         ),
       ),
     );

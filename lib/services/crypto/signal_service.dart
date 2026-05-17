@@ -228,23 +228,31 @@ class SignalService {
     required String recipientUid,
     required Uint8List plaintext,
   }) async {
+    final sw = Stopwatch()..start();
     final out = <String, EncryptedEnvelope>{};
-    final recipientDevices = (await _listDeviceIds(recipientUid)).toList();
+
+    // Fetch both device lists in PARALLEL — previously these were two
+    // sequential awaits, adding a full Firestore round-trip on cache miss.
+    final deviceLists = await Future.wait([
+      _listDeviceIds(recipientUid),
+      _listDeviceIds(senderUid),
+    ]);
+    final recipientDevices = deviceLists[0].toList();
+    final senderOtherDevices = deviceLists[1].toList()
+      ..removeWhere((d) => d == senderDeviceId);
+
     // Never Signal-encrypt to our own posting device: it advances the session
     // ratchet at encrypt time and we'd be unable to decrypt the resulting
-    // ciphertext on the same device. Callers that need the posting device
-    // to access the plaintext later must cache it locally.
+    // ciphertext on the same device.
     if (recipientUid == senderUid) {
       recipientDevices.removeWhere((d) => d == senderDeviceId);
     }
-    final senderOtherDevices = (await _listDeviceIds(senderUid))
-      ..removeWhere((d) => d == senderDeviceId);
+
+    print('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
+        '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
 
     // Parallel fan-out across devices. Each (peerUid, deviceId) is a
-    // separate session, so concurrent encrypts don't race. The dominant
-    // cost of each iteration is the consumeOneTimePreKey HTTP call inside
-    // ensureSession — running them concurrently turns N round-trips into
-    // one round-trip's worth of wall time.
+    // separate session, so concurrent encrypts don't race.
     final tasks = <Future<MapEntry<String, EncryptedEnvelope>>>[
       for (final d in recipientDevices)
         encrypt(recipientUid, d, plaintext)
@@ -256,6 +264,7 @@ class SignalService {
     for (final entry in await Future.wait(tasks)) {
       out[entry.key] = entry.value;
     }
+    print('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
     return out;
   }
 

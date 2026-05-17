@@ -146,6 +146,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // collapses the "first message to a new contact takes 15+ seconds"
     // into 1-2 seconds.
     // ignore: discarded_futures
+    SignalService.invalidateDeviceCache(widget.contact.id);
+    // ignore: discarded_futures
     SignalService.instance.prewarmSessions([widget.contact.id]);
   }
 
@@ -219,14 +221,20 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Checks if either user has blocked the other.
   Future<void> _checkBlockStatus() async {
     try {
-      final myDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.currentUserId)
-          .get();
-      final theirDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.contact.id)
-          .get();
+      // Run both Firestore reads in parallel — saves one round-trip compared
+      // to the previous sequential pair of get() calls (~100-400ms on mobile).
+      final results = await Future.wait([
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.currentUserId)
+            .get(),
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.contact.id)
+            .get(),
+      ]);
+      final myDoc    = results[0];
+      final theirDoc = results[1];
 
       final myBlocked =
           List<String>.from(myDoc.data()?['blockedUsers'] ?? []);
@@ -2108,6 +2116,7 @@ class _ChatScreenState extends State<ChatScreen> {
               const SizedBox(height: 16),
             ],
           ),
+        ),
         ),
       );
     });

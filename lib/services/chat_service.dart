@@ -145,10 +145,15 @@ class ChatService {
   //
   // The Future is memoised per uid so concurrent opens or rapid navigation
   // between chats never trigger duplicate network reads.
-  static final Map<String, Future<void>> _preWarmCache = {};
+  static final Map<String, Future<void>> _preWarmSqliteCache = {};
+  static final Map<String, Future<void>> _preWarmVaultCache = {};
 
-  Future<void> _preWarmPayloadCache(String uid) {
-    return _preWarmCache.putIfAbsent(uid, () => _doPreWarm(uid));
+  Future<void> _preWarmSqlite(String uid) {
+    return _preWarmSqliteCache.putIfAbsent(uid, () => _doPreWarmSqlite(uid));
+  }
+
+  Future<void> _preWarmVault(String uid) {
+    return _preWarmVaultCache.putIfAbsent(uid, () => _doPreWarmVault(uid));
   }
 
   /// Drop the per-uid pre-warm cache AND the process-wide decrypted-
@@ -157,7 +162,8 @@ class ChatService {
   /// vault reads can complete) and after VaultCipher.reset (so wiped
   /// history doesn't keep rendering from RAM).
   static void invalidatePreWarm(String uid) {
-    _preWarmCache.remove(uid);
+    _preWarmSqliteCache.remove(uid);
+    _preWarmVaultCache.remove(uid);
     _payloadMemo.clear();
     // Notify any active chat / chat-list stream subscribers so they can
     // re-decrypt their currently-displayed snapshot without waiting for
@@ -174,9 +180,10 @@ class ChatService {
   static final StreamController<void> _vaultReadyNotifier =
       StreamController<void>.broadcast();
 
-  Future<void> _doPreWarm(String uid) async {
+  Future<void> _doPreWarmSqlite(String uid) async {
     // 1. SQLite bulk-load (local IO, ~10-50ms) — populates memo from prior
-    //    decryption sessions on the same install.
+    //    decryption sessions on the same install. Bounded to the 500 most-
+    //    recent messages so load time stays sub-50ms even on heavy accounts.
     try {
       final store = await PlaintextStore.instance();
       final all = await store.getAllMessagePayloads();
@@ -184,23 +191,35 @@ class ChatService {
         _payloadMemo.putIfAbsent(e.key, () => e.value);
       }
     } catch (_) {}
+  }
 
+  Future<void> _doPreWarmVault(String uid) async {
     // 2. Firestore vault bulk-read (one network query, not N) — restores
     //    history on reinstall where SQLite was wiped but vault survived.
-    //    Each doc is decrypted in-memory with the vault key. If the vault
-    //    isn't unlocked yet we just skip — the chat will refill once the
-    //    user unlocks.
+    //    Bounded to the 500 most-recent docs; older messages fall through to
+    //    the per-message vault fallback in decryptForRendering.
+    //    Decrypts are parallelised with Future.wait — the previous sequential
+    //    loop added seconds on accounts with many vault entries.
     if (!VaultCipher.instance.isReady) return;
     try {
       final snap = await _firestore
           .collection('users')
           .doc(uid)
           .collection(_vaultCollection)
+          .orderBy('createdAt', descending: true)
+          .limit(500)
           .get();
-      for (final doc in snap.docs) {
-        if (_payloadMemo.containsKey(doc.id)) continue;
-        final payload = await VaultCipher.instance.decryptDoc(doc.data());
-        if (payload != null) _payloadMemo[doc.id] = payload;
+      final pending = snap.docs
+          .where((doc) => !_payloadMemo.containsKey(doc.id))
+          .toList();
+      if (pending.isNotEmpty) {
+        final results = await Future.wait(
+          pending.map((doc) => VaultCipher.instance.decryptDoc(doc.data())),
+        );
+        for (var i = 0; i < pending.length; i++) {
+          final payload = results[i];
+          if (payload != null) _payloadMemo[pending[i].id] = payload;
+        }
       }
     } catch (_) {}
   }
@@ -296,7 +315,9 @@ class ChatService {
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
         _payloadMemo[msg.id] = vaultPayload;
-        await store.save(msg.id, vaultPayload);
+        // Fire-and-forget: memo is the source of truth for rendering;
+        // SQLite is only for crash/restart recovery.
+        unawaited(store.save(msg.id, vaultPayload));
       }
       return vaultPayload != null ? _applyPayload(msg, vaultPayload) : null;
     }
@@ -309,17 +330,21 @@ class ChatService {
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       _payloadMemo[msg.id] = payload;
-      await store.save(msg.id, payload);
-      // Mirror to the cross-install vault so future reinstalls can recover.
-      unawaited(_saveToVault(selfUid, msg.id, payload));
-      // Update the chat-list preview from the receiver's side so the most
-      // recent decrypted message shows up immediately on the home screen.
+      // Fire-and-forget all persistence — the in-memory memo is already
+      // set so rendering is instant. SQLite and vault writes are only for
+      // crash recovery and cross-install history. Previously these two
+      // sequential awaits (save + saveRoomPreview) added 50-200ms to the
+      // render path for EVERY received message.
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
-      await store.saveRoomPreview(
-        chatRoomId: chatRoomId,
-        messageId: msg.id,
-        text: (payload['text'] as String?) ?? '',
-      );
+      unawaited(Future.wait([
+        store.save(msg.id, payload),
+        store.saveRoomPreview(
+          chatRoomId: chatRoomId,
+          messageId: msg.id,
+          text: (payload['text'] as String?) ?? '',
+        ),
+      ]));
+      unawaited(_saveToVault(selfUid, msg.id, payload));
       return _applyPayload(msg, payload);
     } catch (e) {
       final errStr = e.toString();
@@ -339,7 +364,7 @@ class ChatService {
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
         _payloadMemo[msg.id] = vaultPayload;
-        await store.save(msg.id, vaultPayload);
+        unawaited(store.save(msg.id, vaultPayload));
         return _applyPayload(msg, vaultPayload);
       }
       // ignore: avoid_print
@@ -521,11 +546,13 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
   }) async {
+    final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
     //         of receiver + sender's other devices (multi-device fan-out).
     final senderDeviceId = await _deviceIdentity.getDeviceId();
     final canEncrypt =
         senderDeviceId != null && await _peerHasKeyBundle(receiverId);
+    print('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;
     String storedText = text;
@@ -560,22 +587,11 @@ class ChatService {
           recipientUid: receiverId,
           plaintext: Uint8List.fromList(utf8.encode(payload)),
         );
+        print('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
-        // Persist our own outgoing plaintext to the local sqflite store so
-        // this device can render the message when the Firestore write loops
-        // back through the chat stream. No envelope is produced for the
-        // sending device in the fan-out, so this is the only way to recover
-        // the body. Survives app restart, unlike a process-local cache.
-        final ps = await PlaintextStore.instance();
-        await ps.saveRoomPreview(
-          chatRoomId: chatRoomId,
-          messageId: messageRef.id,
-          text: statusReplyOwnerId != null
-              ? 'Replied to status: $text'
-              : text,
-        );
+
         final outgoingPayload = <String, dynamic>{
           'text': text,
           'mediaUrl': mediaUrl,
@@ -590,11 +606,26 @@ class ChatService {
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
         };
-        // Populate the in-memory memo BEFORE the Firestore write so the
-        // stream's snapshot for our own message hits the synchronous path
-        // and renders without a SQLite round-trip.
+        // Populate the in-memory memo SYNCHRONOUSLY so the stream's
+        // snapshot for our own message never needs any async lookup.
         _payloadMemo[messageRef.id] = outgoingPayload;
-        await ps.save(messageRef.id, outgoingPayload);
+
+        // Fire SQLite persistence in the background — the in-memory memo
+        // is already set, so rendering is instant. SQLite is only needed
+        // for crash recovery / cold restart. Previously these two
+        // sequential awaits (saveRoomPreview + save) added 50-200ms to
+        // every send BEFORE the Firestore batch.commit() could even start.
+        final ps = await PlaintextStore.instance();
+        unawaited(Future.wait([
+          ps.saveRoomPreview(
+            chatRoomId: chatRoomId,
+            messageId: messageRef.id,
+            text: statusReplyOwnerId != null
+                ? 'Replied to status: $text'
+                : text,
+          ),
+          ps.save(messageRef.id, outgoingPayload),
+        ]));
         // Mirror to the cross-install vault so the sender's history
         // survives a reinstall (new device ID loses the Firestore envelope
         // but can recover from the vault).
@@ -656,15 +687,9 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    await PerformanceService.traceAsync(
-      'chat_send_message',
-      (trace) async {
-        PerformanceService.setAttribute(
-            trace, 'msg_type', type.name);
-        await batch.commit();
-      },
-    );
-    print('Message sent: ${message.id}');
+    print('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
+    await batch.commit();
+    print('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
     // Outbox cleanup happens in the merge layer the moment the Firestore
     // snapshot stream actually delivers the canonical message. Removing
     // here, between commit-ack and Firestore-observe, would cause a brief
@@ -778,20 +803,22 @@ class ChatService {
 
     // ignore: discarded_futures
     Future<void> start() async {
-      // Kick off the SQLite + Firestore-vault bulk prewarm in the
-      // BACKGROUND. Awaiting it here used to add 3-10s to every cold
-      // chat-open (the vault read scales with the user's total message
-      // count, not just this chat's). decryptForRendering already has
-      // its own per-message SQLite + vault fallbacks, so the first emit
-      // can render from cold paths and the bulk prewarm just turns
-      // subsequent emits into pure synchronous memo hits. When the
-      // prewarm completes, we re-decrypt the latest snapshot so any
-      // bubbles that fell back to "locked" auto-recover.
-      // ignore: discarded_futures
-      _preWarmPayloadCache(currentUserId).then((_) {
+      // PERF CRITICAL: Await the SQLite bulk-load (~10-50ms) BEFORE attaching
+      // the Firestore snapshot listener. Otherwise, the snapshot arrives instantly
+      // and triggers 500 parallel individual SQLite `store.get()` queries (one
+      // per message), which blocks the platform channel and stalls rendering
+      // for 15-20 seconds!
+      await _preWarmSqlite(currentUserId);
+
+      // Kick off the Firestore-vault bulk prewarm in the BACKGROUND.
+      // The vault read scales with the user's total message count and requires
+      // a network round-trip. We let it run fire-and-forget; when it completes,
+      // we re-decrypt the latest snapshot so any bubbles that fell back to
+      // "locked" auto-recover.
+      unawaited(_preWarmVault(currentUserId).then((_) {
         // ignore: discarded_futures
         redecryptLatest();
-      });
+      }));
 
       // (1) Track clearedAt independently of the messages subscription.
       chatRoomSub = _firestore
@@ -832,8 +859,20 @@ class ChatService {
         // dropped — so the user sees that something arrived and can ask
         // the sender to resend, rather than wondering why the sender's
         // blue ticks went up with no visible message.
+        //
+        // PERF: skip already-memoized messages entirely — they hit the
+        // synchronous `_payloadMemo[msg.id]` path inside
+        // decryptForRendering, but previously the Future.wait still
+        // created N microtask-hops for every message in the snapshot.
+        // On a 500-message chat this added measurable latency on every
+        // Firestore emission (typing indicator, read receipt, etc.).
+        // Now only truly-new messages enter the decrypt pipeline.
         final resolved = await Future.wait(
           raw.map((m) async {
+            if (m.schemaVersion < 2) return m;
+            if (_payloadMemo.containsKey(m.id)) {
+              return _applyPayload(m, _payloadMemo[m.id]!);
+            }
             final r = await decryptForRendering(m, currentUserId);
             return r ?? _lockedPlaceholder(m);
           }),
@@ -883,7 +922,8 @@ class ChatService {
       // ignore: discarded_futures
       vaultReadySub = _vaultReadyNotifier.stream.listen((_) async {
         try {
-          await _preWarmPayloadCache(currentUserId);
+          await _preWarmSqlite(currentUserId);
+          await _preWarmVault(currentUserId);
           await redecryptLatest();
         } catch (_) {}
       });
@@ -1009,49 +1049,64 @@ class ChatService {
     print('Marked ${sentMessages.docs.length} messages as delivered');
   }
 
-  // Mark ALL messages as delivered across ALL chats when app opens
-  // This simulates WhatsApp behavior - messages are delivered when app syncs
+  // Mark ALL messages as delivered across ALL chats when app opens.
+  // Uses a collectionGroup query (one round-trip) instead of the previous
+  // N+1 pattern (one read per chat room) to avoid hammering Firestore on
+  // every app resume.
+  //
+  // Requires a composite collection-group index on the `messages` group:
+  //   receiverId ASC, status ASC
+  // Add to firestore.indexes.json if Firestore reports a missing index.
   Future<void> markAllMessagesAsDeliveredOnAppOpen(String currentUserId) async {
     try {
-      // Get all chat rooms where user is a participant
-      QuerySnapshot chatRoomsSnapshot = await _firestore
-          .collection(_chatRoomsCollection)
-          .where('participants', arrayContains: currentUserId)
+      final sentSnap = await _firestore
+          .collectionGroup(_messagesCollection)
+          .where('receiverId', isEqualTo: currentUserId)
+          .where('status', isEqualTo: 'sent')
           .get();
 
-      if (chatRoomsSnapshot.docs.isEmpty) return;
+      if (sentSnap.docs.isEmpty) return;
 
-      int totalMarked = 0;
+      // Group docs by chatRoomId so we can update lastMessageStatus per room.
+      final byRoom = <String,
+          List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+      for (final doc in sentSnap.docs) {
+        final chatRoomId = doc.reference.parent.parent?.id;
+        if (chatRoomId == null) continue;
+        byRoom.putIfAbsent(chatRoomId, () => []).add(doc);
+      }
 
-      for (var chatRoomDoc in chatRoomsSnapshot.docs) {
-        // Get all 'sent' messages in this chat room where current user is receiver
-        QuerySnapshot sentMessages = await _firestore
-            .collection(_chatRoomsCollection)
-            .doc(chatRoomDoc.id)
-            .collection(_messagesCollection)
-            .where('receiverId', isEqualTo: currentUserId)
-            .where('status', isEqualTo: 'sent')
-            .get();
+      // Commit in chunks ≤ 490 ops (Firestore hard limit is 500 per batch).
+      const maxOps = 490;
+      var batch = _firestore.batch();
+      var opCount = 0;
 
-        if (sentMessages.docs.isEmpty) continue;
-
-        WriteBatch batch = _firestore.batch();
-
-        for (var doc in sentMessages.docs) {
-          batch.update(doc.reference, {'status': 'delivered'});
+      Future<void> maybeFlush() async {
+        if (opCount >= maxOps) {
+          await batch.commit();
+          batch = _firestore.batch();
+          opCount = 0;
         }
-
-        // Also update the chatRoom's lastMessageStatus
-        batch.update(chatRoomDoc.reference,
-            {'lastMessageStatus': MessageStatus.delivered.name});
-
-        await batch.commit();
-        totalMarked += sentMessages.docs.length;
       }
 
-      if (totalMarked > 0) {
-        print('Marked $totalMarked messages as delivered on app open');
+      for (final entry in byRoom.entries) {
+        for (final doc in entry.value) {
+          batch.update(doc.reference, {'status': 'delivered'});
+          opCount++;
+          await maybeFlush();
+        }
+        batch.update(
+          _firestore.collection(_chatRoomsCollection).doc(entry.key),
+          {'lastMessageStatus': MessageStatus.delivered.name},
+        );
+        opCount++;
+        await maybeFlush();
       }
+
+      if (opCount > 0) await batch.commit();
+
+      final total = sentSnap.docs.length;
+      if (total > 0) print('Marked $total messages as delivered on app open');
     } catch (e) {
       print('Error marking messages as delivered on app open: $e');
     }

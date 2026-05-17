@@ -168,14 +168,19 @@ class _Persistor {
   // ── PreKeys ────────────────────────────────────────────────────────────
   Future<Map<String, String>> _dumpPreKeys(InMemoryPreKeyStore store) async {
     final out = <String, String>{};
-    // No public iterator exposed; we track ids elsewhere. Anything we never
-    // stored locally won't be in the snapshot. (DeviceIdentityService keeps
-    // the canonical id list and re-stores on hydrate failure.)
-    for (var id = 0; id < 200; id++) {
-      if (await store.containsPreKey(id)) {
+    // Fire all slot checks in one parallel batch — avoids 200 sequential
+    // microtask-hops on every flush(). Each containsPreKey / loadPreKey call
+    // is a synchronous HashMap lookup wrapped in an async API; running them
+    // concurrently collapses all 200 into a single event-loop burst.
+    final entries = await Future.wait(
+      List.generate(200, (id) async {
+        if (!await store.containsPreKey(id)) return null;
         final rec = await store.loadPreKey(id);
-        out['$id'] = base64Encode(rec.serialize());
-      }
+        return MapEntry('$id', base64Encode(rec.serialize()));
+      }),
+    );
+    for (final e in entries) {
+      if (e != null) out[e.key] = e.value;
     }
     return out;
   }
