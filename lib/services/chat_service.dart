@@ -198,8 +198,8 @@ class ChatService {
     //    history on reinstall where SQLite was wiped but vault survived.
     //    Bounded to the 500 most-recent docs; older messages fall through to
     //    the per-message vault fallback in decryptForRendering.
-    //    Decrypts are parallelised with Future.wait — the previous sequential
-    //    loop added seconds on accounts with many vault entries.
+    //    Decrypts run on a background isolate via decryptDocsBatch so the
+    //    main thread stays free for rendering during cold start.
     if (!VaultCipher.instance.isReady) return;
     try {
       final snap = await _firestore
@@ -209,17 +209,16 @@ class ChatService {
           .orderBy('createdAt', descending: true)
           .limit(500)
           .get();
-      final pending = snap.docs
-          .where((doc) => !_payloadMemo.containsKey(doc.id))
-          .toList();
-      if (pending.isNotEmpty) {
-        final results = await Future.wait(
-          pending.map((doc) => VaultCipher.instance.decryptDoc(doc.data())),
-        );
-        for (var i = 0; i < pending.length; i++) {
-          final payload = results[i];
-          if (payload != null) _payloadMemo[pending[i].id] = payload;
+      final pending = <String, Map<String, dynamic>>{};
+      for (final doc in snap.docs) {
+        if (!_payloadMemo.containsKey(doc.id)) {
+          pending[doc.id] = doc.data();
         }
+      }
+      if (pending.isNotEmpty) {
+        final results =
+            await VaultCipher.instance.decryptDocsBatch(pending);
+        _payloadMemo.addAll(results);
       }
     } catch (_) {}
   }

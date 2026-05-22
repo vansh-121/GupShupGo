@@ -91,6 +91,39 @@ class StatusService {
     _statusPreWarmCache.remove(uid);
     _plaintextCache.clear();
     _mediaKeyCache.clear();
+    _diskPreWarmed = false;
+  }
+
+  /// Eagerly populates [_plaintextCache] from the local SQLite store so
+  /// previously-seen statuses render on the first frame after app launch,
+  /// without waiting for any Firestore query. Text items are pure data
+  /// (no file I/O), so this is a single fast SQLite scan.
+  static bool _diskPreWarmed = false;
+
+  Future<void> preWarmFromDisk() async {
+    if (_diskPreWarmed) return;
+    _diskPreWarmed = true;
+    try {
+      final ps = await PlaintextStore.instance();
+      // PlaintextStore uses 'status_content:<itemId>' keys for status items.
+      // getAllMessagePayloads excludes status_* rows, so we need a direct query.
+      // Reuse getStatusContent per known-cached id? No — we don't know the ids
+      // ahead of time. Instead, do a lightweight bulk read of all status_content
+      // rows via a new helper.
+      final entries = await ps.getAllStatusContents();
+      for (final e in entries.entries) {
+        if (_plaintextCache.containsKey(e.key)) continue;
+        final data = e.value;
+        if (data['t'] == 'text') {
+          _plaintextCache[e.key] = StatusPlaintext.text(
+            text: (data['tx'] as String?) ?? '',
+            backgroundColor: (data['bg'] as String?) ?? '#6C5CE7',
+          );
+        }
+        // Media items need file I/O — skip for instant first-frame rendering.
+        // They'll be hydrated by _preDecryptOne's disk-cache path on demand.
+      }
+    } catch (_) {}
   }
 
   Future<void> _doPreWarmStatus(String selfUid) async {
@@ -102,24 +135,43 @@ class StatusService {
           .doc(selfUid)
           .collection(_statusVaultCollection)
           .get();
+
+      // Partition docs into text (decrypt to JSON) and media-key (decrypt
+      // to bytes), skipping anything already cached. Both batches run on a
+      // background isolate via compute() so the main thread stays free.
+      final textDocs = <String, Map<String, dynamic>>{};
+      final keyDocs = <String, Map<String, dynamic>>{};
       for (final doc in snap.docs) {
         final data = doc.data();
         final type = data['t'] as String?;
         if (type == 'text' && !_plaintextCache.containsKey(doc.id)) {
-          final payload = await VaultCipher.instance.decryptDoc(data);
-          if (payload == null) continue;
-          _plaintextCache[doc.id] = StatusPlaintext.text(
-            text: (payload['tx'] as String?) ?? '',
-            backgroundColor: (payload['bg'] as String?) ?? '#6C5CE7',
-          );
+          textDocs[doc.id] = data;
         } else if (type == 'media_key' &&
             !_mediaKeyCache.containsKey(doc.id)) {
-          // Restore the AES content key — the encrypted blob is still in
-          // Storage, so we can re-download and decrypt without Signal.
-          final k = await VaultCipher.instance.decryptBytes(data);
-          if (k != null) _mediaKeyCache[doc.id] = k;
+          keyDocs[doc.id] = data;
         }
       }
+
+      // Decrypt text + media-key batches in parallel on isolates.
+      final results = await Future.wait([
+        textDocs.isEmpty
+            ? Future.value(<String, Map<String, dynamic>>{})
+            : VaultCipher.instance.decryptDocsBatch(textDocs),
+        keyDocs.isEmpty
+            ? Future.value(<String, Uint8List>{})
+            : VaultCipher.instance.decryptBytesBatch(keyDocs),
+      ]);
+
+      final textResults = results[0] as Map<String, Map<String, dynamic>>;
+      final keyResults = results[1] as Map<String, Uint8List>;
+
+      for (final e in textResults.entries) {
+        _plaintextCache[e.key] = StatusPlaintext.text(
+          text: (e.value['tx'] as String?) ?? '',
+          backgroundColor: (e.value['bg'] as String?) ?? '#6C5CE7',
+        );
+      }
+      _mediaKeyCache.addAll(keyResults);
     } catch (_) {}
   }
 
@@ -164,29 +216,76 @@ class StatusService {
   /// call repeatedly from a stream listener — already-decrypted items and
   /// already-in-flight items are skipped. Fire-and-forget from the caller's
   /// perspective; never throws.
+  ///
+  /// Text items (vault-only, no network) run unbounded in parallel. Media
+  /// items (require HTTP download from Storage) run with bounded concurrency
+  /// of [_maxConcurrentMediaDownloads] to avoid saturating the connection.
+  static const _maxConcurrentMediaDownloads = 3;
+
   Future<void> preDecryptStatuses(
       List<StatusModel> models, String selfUid) async {
     // Bulk-load the text status vault into _plaintextCache so items that
     // were seen on a previous install (Signal session lost) still render.
     await _preWarmStatusCache(selfUid);
 
-    final tasks = <Future<void>>[];
+    final textTasks = <Future<void>>[];
+    final mediaItems = <(String, StatusItem)>[]; // (ownerUid, item)
     for (final m in models) {
       for (final item in m.activeStatusItems) {
         if (!item.type.startsWith('encrypted')) continue;
         if (_plaintextCache.containsKey(item.id)) continue;
-        final existing = _inFlight[item.id];
-        if (existing != null) {
-          tasks.add(existing);
-          continue;
+        if (item.type == 'encrypted') {
+          // Text items: vault-only decrypt, no network — run unbounded.
+          final existing = _inFlight[item.id];
+          if (existing != null) {
+            textTasks.add(existing);
+            continue;
+          }
+          final future = _preDecryptOne(m.userId, item, selfUid)
+              .whenComplete(() => _inFlight.remove(item.id));
+          _inFlight[item.id] = future;
+          textTasks.add(future);
+        } else {
+          // Media items: collect for bounded-concurrency download.
+          if (!_inFlight.containsKey(item.id)) {
+            mediaItems.add((m.userId, item));
+          }
         }
-        final future = _preDecryptOne(m.userId, item, selfUid)
-            .whenComplete(() => _inFlight.remove(item.id));
-        _inFlight[item.id] = future;
-        tasks.add(future);
       }
     }
-    if (tasks.isNotEmpty) await Future.wait(tasks);
+
+    // Fire text decrypts in parallel (fast, CPU-only).
+    if (textTasks.isNotEmpty) await Future.wait(textTasks);
+
+    // Media downloads: bounded concurrency to avoid saturating the link.
+    if (mediaItems.isNotEmpty) {
+      var active = 0;
+      final completer = Completer<void>();
+      final queue = List<(String, StatusItem)>.of(mediaItems);
+      var completed = 0;
+
+      void scheduleNext() {
+        while (active < _maxConcurrentMediaDownloads && queue.isNotEmpty) {
+          final (ownerUid, item) = queue.removeAt(0);
+          active++;
+          final future = _preDecryptOne(ownerUid, item, selfUid)
+              .whenComplete(() => _inFlight.remove(item.id));
+          _inFlight[item.id] = future;
+          future.whenComplete(() {
+            active--;
+            completed++;
+            if (completed == mediaItems.length) {
+              completer.complete();
+            } else {
+              scheduleNext();
+            }
+          });
+        }
+      }
+
+      scheduleNext();
+      await completer.future;
+    }
   }
 
   /// Public entry point for one-off decryption (from the viewer screen).
@@ -231,10 +330,12 @@ class StatusService {
         }
         final path = disk['mp'] as String?;
         if (path != null) {
-          final file = File(path);
-          if (await file.exists()) {
-            // For video we only need the path (the player opens the file
-            // directly). For images we keep bytes in memory for Image.memory.
+          // Skip the redundant File.exists() syscall — the path came from
+          // our own SQLite store. Try reading directly; if the file was
+          // deleted by the OS we catch the exception and fall through to
+          // the network re-download path.
+          try {
+            final file = File(path);
             final isVideo = (disk['v'] as bool?) ?? false;
             final bytes = isVideo ? Uint8List(0) : await file.readAsBytes();
             _plaintextCache[item.id] = StatusPlaintext.media(
@@ -243,6 +344,8 @@ class StatusService {
               isVideo: isVideo,
             );
             return;
+          } catch (_) {
+            // File gone (OS cache clear, etc.) — fall through to network.
           }
         }
       }

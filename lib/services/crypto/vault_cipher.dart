@@ -29,6 +29,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/key_derivators/argon2.dart';
 import 'package:pointycastle/key_derivators/api.dart' as pc;
@@ -644,6 +645,28 @@ class VaultCipher {
     return _decryptRaw(key, doc);
   }
 
+  // ─── Batch decrypt (isolate-accelerated) ─────────────────────────────────
+
+  /// Decrypts multiple vault docs on a **background isolate** via [compute].
+  /// Returns a map of id → decrypted JSON payload. Entries that fail to
+  /// decrypt (wrong key, corrupt data) are silently omitted. This keeps the
+  /// main isolate free for rendering during bulk pre-warm on cold start.
+  Future<Map<String, Map<String, dynamic>>> decryptDocsBatch(
+      Map<String, Map<String, dynamic>> docs) async {
+    final key = _key;
+    if (key == null || docs.isEmpty) return {};
+    return compute(_batchDecryptDocs, _BatchArgs(key, docs));
+  }
+
+  /// Same as [decryptDocsBatch] but returns raw bytes instead of JSON.
+  /// Used for status media AES-key vault entries.
+  Future<Map<String, Uint8List>> decryptBytesBatch(
+      Map<String, Map<String, dynamic>> docs) async {
+    final key = _key;
+    if (key == null || docs.isEmpty) return {};
+    return compute(_batchDecryptBytes, _BatchArgs(key, docs));
+  }
+
   // ─── Internals ──────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> _encryptRaw(
@@ -716,4 +739,78 @@ class VaultCipher {
     }
     return out;
   }
+}
+
+// ─── Isolate-compatible top-level helpers for compute() ────────────────────
+// compute() requires a top-level or static function — it cannot capture
+// instance state. These receive the symmetric key + docs as a plain
+// serializable argument and return the results. The AesGcm instance is
+// created locally inside the isolate.
+
+class _BatchArgs {
+  _BatchArgs(this.key, this.docs);
+  final Uint8List key;
+  final Map<String, Map<String, dynamic>> docs;
+}
+
+Future<Map<String, Map<String, dynamic>>> _batchDecryptDocs(
+    _BatchArgs args) async {
+  final gcm = AesGcm.with256bits();
+  final secretKey = SecretKey(args.key);
+  final out = <String, Map<String, dynamic>>{};
+  for (final entry in args.docs.entries) {
+    final doc = entry.value;
+    // Legacy plaintext passthrough.
+    final legacy = doc['p'] as String?;
+    if (legacy != null) {
+      try {
+        out[entry.key] = jsonDecode(legacy) as Map<String, dynamic>;
+      } catch (_) {}
+      continue;
+    }
+    final iv = doc['iv'] as String?;
+    final c = doc['c'] as String?;
+    final m = doc['m'] as String?;
+    if (iv == null || c == null || m == null) continue;
+    try {
+      final pt = await gcm.decrypt(
+        SecretBox(base64Decode(c),
+            nonce: base64Decode(iv), mac: Mac(base64Decode(m))),
+        secretKey: secretKey,
+      );
+      out[entry.key] =
+          jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
+    } catch (_) {}
+  }
+  return out;
+}
+
+Future<Map<String, Uint8List>> _batchDecryptBytes(_BatchArgs args) async {
+  final gcm = AesGcm.with256bits();
+  final secretKey = SecretKey(args.key);
+  final out = <String, Uint8List>{};
+  for (final entry in args.docs.entries) {
+    final doc = entry.value;
+    // Legacy passthrough.
+    final legacy = doc['k'] as String?;
+    if (legacy != null) {
+      try {
+        out[entry.key] = base64Decode(legacy);
+      } catch (_) {}
+      continue;
+    }
+    final iv = doc['iv'] as String?;
+    final c = doc['c'] as String?;
+    final m = doc['m'] as String?;
+    if (iv == null || c == null || m == null) continue;
+    try {
+      final pt = await gcm.decrypt(
+        SecretBox(base64Decode(c),
+            nonce: base64Decode(iv), mac: Mac(base64Decode(m))),
+        secretKey: secretKey,
+      );
+      out[entry.key] = Uint8List.fromList(pt);
+    } catch (_) {}
+  }
+  return out;
 }

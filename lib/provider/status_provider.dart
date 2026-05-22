@@ -45,6 +45,10 @@ class StatusProvider extends ChangeNotifier {
       : _statusService = statusService ?? StatusService();
 
   void initialize(String userId) {
+    // Eagerly populate the in-memory cache from local SQLite so
+    // previously-seen text statuses render instantly — before any
+    // Firestore query completes.
+    unawaited(_statusService.preWarmFromDisk());
     _listenToMyStatus(userId);
     _listenToOtherStatuses(userId);
   }

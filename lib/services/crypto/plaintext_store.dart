@@ -301,4 +301,27 @@ class PlaintextStore {
   Future<void> delete(String messageId) async {
     await _db.delete(_table, where: 'id = ?', whereArgs: [messageId]);
   }
+
+  /// Bulk-reads all `status_content:*` rows into a map keyed by the bare
+  /// status item id (prefix stripped). Used by
+  /// StatusService.preWarmFromDisk() to populate the in-memory plaintext
+  /// cache in a single SQLite query at app launch.
+  Future<Map<String, Map<String, dynamic>>> getAllStatusContents() async {
+    final rows = await _db.query(
+      _table,
+      columns: const ['id', 'payload'],
+      where: "id LIKE 'status_content:%'",
+    );
+    final result = <String, Map<String, dynamic>>{};
+    const prefixLen = 'status_content:'.length;
+    for (final row in rows) {
+      try {
+        final rawId = row['id'] as String;
+        final itemId = rawId.substring(prefixLen);
+        result[itemId] =
+            jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+      } catch (_) {}
+    }
+    return result;
+  }
 }
