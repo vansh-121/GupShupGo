@@ -28,11 +28,13 @@ service cloud.firestore {
           && request.auth.uid == userId;
         allow delete: if request.auth != null && request.auth.uid == userId;
 
-        // One-time prekeys: readable by anyone (so we can build a bundle),
-        // writable only by the owner. Atomic consume-on-read happens via
-        // the consumeOneTimePreKey Cloud Function which uses the Admin SDK.
+        // One-time prekeys: readable only by the owner (for the
+        // replenishOneTimePreKeysIfLow count check), writable only by the
+        // owner. Peers never read these directly — the consumeOneTimePreKey
+        // Cloud Function uses the Admin SDK and bypasses rules entirely.
         match /oneTimePreKeys/{preKeyId} {
-          allow read: if request.auth != null;
+          allow read: if request.auth != null
+            && request.auth.uid == userId;
           allow create, update, delete: if request.auth != null
             && request.auth.uid == userId;
         }
