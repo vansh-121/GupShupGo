@@ -146,8 +146,6 @@ class _ChatScreenState extends State<ChatScreen> {
     // collapses the "first message to a new contact takes 15+ seconds"
     // into 1-2 seconds.
     // ignore: discarded_futures
-    SignalService.invalidateDeviceCache(widget.contact.id);
-    // ignore: discarded_futures
     SignalService.instance.prewarmSessions([widget.contact.id]);
   }
 

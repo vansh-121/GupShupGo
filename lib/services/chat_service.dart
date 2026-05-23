@@ -111,7 +111,22 @@ class ChatService {
       }
       return hit.has;
     }
-    return _fetchPeerBundle(peerUid);
+    // Try the SignalService device-id cache before hitting Firestore.
+    // encryptForUser() will call _listDeviceIds() on the same collection
+    // anyway, so reusing its cache saves a redundant Firestore query
+    // (~300-500ms) on the first message after cold start. The prewarm
+    // path populates this cache at app open, so on a warm path this
+    // resolves synchronously from memory.
+    try {
+      final devices =
+          await SignalService.instance.listDeviceIdsCached(peerUid);
+      final has = devices.isNotEmpty;
+      _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
+      return has;
+    } catch (_) {
+      // SignalService not initialized yet — fall back to direct query.
+      return _fetchPeerBundle(peerUid);
+    }
   }
 
   Future<bool> _fetchPeerBundle(String peerUid) async {
@@ -548,9 +563,16 @@ class ChatService {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
     //         of receiver + sender's other devices (multi-device fan-out).
-    final senderDeviceId = await _deviceIdentity.getDeviceId();
+    // Run device-id lookup and peer-bundle check in PARALLEL. Previously
+    // these were sequential awaits, adding one Firestore round-trip
+    // (~200-500ms) to every send when the peer-bundle cache was cold.
+    final setupResults = await Future.wait<dynamic>([
+      _deviceIdentity.getDeviceId(),
+      _peerHasKeyBundle(receiverId),
+    ]);
+    final senderDeviceId = setupResults[0] as int?;
     final canEncrypt =
-        senderDeviceId != null && await _peerHasKeyBundle(receiverId);
+        senderDeviceId != null && (setupResults[1] as bool);
     print('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;

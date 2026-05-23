@@ -93,19 +93,35 @@ class SignalService {
     _stores.markDirty();
   }
 
-  /// Fetches the peer's public PreKeyBundle from Firestore, consuming one
-  /// one-time prekey via the Cloud Function. Returns null if the peer has no
-  /// devices registered for E2EE.
+  /// Fetches the peer's public PreKeyBundle from Firestore. Returns null if
+  /// the peer has no devices registered for E2EE. Uses a local cache to
+  /// skip the Firestore round-trip when prewarmSessions has already fetched
+  /// the bundle.
   Future<PreKeyBundle?> _fetchPreKeyBundle(String peerUid, int deviceId) async {
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(peerUid)
-        .collection('devices')
-        .doc('$deviceId')
-        .get();
-    final data = doc.data();
-    if (data == null || data['keyBundle'] == null) return null;
-    final bundle = data['keyBundle'] as Map<String, dynamic>;
+    final cacheKey = '$peerUid:$deviceId';
+
+    // ── Check the bundle-data cache first ──────────────────────────────
+    // Populated by prewarmSessions or a previous send. Avoids one
+    // Firestore round-trip (~200-500ms) on the actual send path.
+    Map<String, dynamic>? bundle;
+    final cached = _bundleDataCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _bundleFreshWindow) {
+      bundle = cached.bundle;
+    }
+
+    if (bundle == null) {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(peerUid)
+          .collection('devices')
+          .doc('$deviceId')
+          .get();
+      final data = doc.data();
+      if (data == null || data['keyBundle'] == null) return null;
+      bundle = data['keyBundle'] as Map<String, dynamic>;
+      _bundleDataCache[cacheKey] = (at: DateTime.now(), bundle: bundle);
+    }
 
     final registrationId = bundle['registrationId'] as int;
     final identityPub = base64Decode(bundle['identityPub'] as String);
@@ -115,37 +131,25 @@ class SignalService {
     final signedPreKeySig =
         base64Decode(bundle['signedPreKeySig'] as String);
 
-    // Consume a one-time prekey atomically via Cloud Function. Falls back to
-    // a no-OTPK bundle if the peer is out of one-time keys (less forward
-    // secrecy but still functional).
-    int? oneTimePreKeyId;
-    Uint8List? oneTimePreKeyPub;
-    try {
-      // Hard 2s budget. The Cloud Function cold-start can run 3-10s on a
-      // first call after idle; that was the dominant cost of the first
-      // message to a new peer (15-20s total). Without OTPK the session
-      // still establishes via signed prekey + X3DH — the only loss is
-      // initial-message forward secrecy if the signed prekey is later
-      // compromised, which is an acceptable trade for the UX win. The
-      // Cloud Function still runs to consume an OTPK on warmer calls; the
-      // pool is replenished by the periodic refill path.
-      final otpk = await _consumeOneTimePreKey(peerUid, deviceId)
-          .timeout(const Duration(seconds: 2), onTimeout: () => null);
-      if (otpk != null) {
-        oneTimePreKeyId = otpk['id'] as int;
-        oneTimePreKeyPub = base64Decode(otpk['pub'] as String);
-      }
-    } catch (e) {
-      // Falls through to no-OTPK bundle.
-      // ignore: avoid_print
-      print('consumeOneTimePreKey failed: $e — proceeding without OTPK');
-    }
+    // OTPK consumption is fully non-blocking. X3DH establishes a secure
+    // session via signed prekey + identity key alone — the one-time prekey
+    // only adds initial-message forward secrecy. Removing it from the
+    // critical path eliminates the 2-10s Cloud Function cold-start that
+    // was the dominant first-message latency. The OTPK is still consumed
+    // in the background for pool hygiene.
+    // ignore: discarded_futures
+    unawaited(() async {
+      try {
+        await _consumeOneTimePreKey(peerUid, deviceId)
+            .timeout(const Duration(seconds: 10));
+      } catch (_) {}
+    }());
 
     return PreKeyBundle(
       registrationId,
       deviceId,
-      oneTimePreKeyId,
-      oneTimePreKeyPub == null ? null : Curve.decodePoint(oneTimePreKeyPub, 0),
+      null, // no OTPK — session uses signed prekey only (X3DH still safe)
+      null,
       signedPreKeyId,
       Curve.decodePoint(signedPreKeyPub, 0),
       signedPreKeySig,
@@ -332,6 +336,15 @@ class SignalService {
   static void invalidateDeviceCache(String uid) =>
       _deviceIdCache.remove(uid);
 
+  // ── PreKey bundle Firestore cache ──────────────────────────────────────
+  // Caches the raw keyBundle data from Firestore so prewarmSessions →
+  // ensureSession → _fetchPreKeyBundle skips the Firestore round-trip on
+  // the actual send path. Entries are kept for 10 min; the data changes
+  // only on signed-prekey rotation (once per week).
+  static final Map<String, ({DateTime at, Map<String, dynamic> bundle})>
+      _bundleDataCache = {};
+  static const _bundleFreshWindow = Duration(minutes: 10);
+
   /// Pre-establish Signal sessions with every device of every peer in
   /// [peerUids], in the background. After this runs the first encrypt for
   /// each peer becomes a pure local CPU operation — no Firestore read, no
@@ -354,23 +367,28 @@ class SignalService {
     }));
   }
 
-  /// Send a no-op POST to consumeOneTimePreKey to defeat the Firebase
-  /// Functions cold start before the user's first real send. The endpoint
-  /// rejects missing fields with a fast 400; we don't care about the body.
-  /// Best-effort and silent on failure.
+  /// Warms the consumeOneTimePreKey Cloud Function's container so the
+  /// background OTPK consumption after session setup doesn't pay the
+  /// cold-start penalty. Uses a real POST (HEAD/OPTIONS don't trigger
+  /// container boot in Firebase Functions v2). Best-effort, silent on
+  /// failure.
   static Future<void> warmConsumeOneTimePreKey() async {
     try {
       final idToken =
           await FirebaseAuth.instance.currentUser?.getIdToken();
       if (idToken == null) return;
-      // OPTIONS request triggers function startup without consuming a
-      // prekey. (Cloud Functions still pay the cold-start, exactly what we
-      // want to absorb up-front.)
+      // POST with an empty body triggers the container start. The function
+      // returns 400 (missing fields) almost instantly once warm; we don't
+      // care — the goal is to absorb the boot cost here.
       await http
-          .head(
+          .post(
             Uri.parse(
                 'https://us-central1-videocallapp-81166.cloudfunctions.net/consumeOneTimePreKey'),
-            headers: {'Authorization': 'Bearer $idToken'},
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: '{}',
           )
           .timeout(const Duration(seconds: 10));
     } catch (_) {}
