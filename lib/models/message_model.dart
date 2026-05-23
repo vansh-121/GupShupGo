@@ -3,6 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum MessageType { text, image, audio, video }
 
 enum MessageStatus {
+  // Local-only state. The message is in the outbox: the bubble is on
+  // screen but the encrypt + Firestore commit hasn't completed yet.
+  // Never persisted to Firestore — it only exists for the brief window
+  // between user tap and commit, and is replaced by `sent` the moment
+  // the Firestore stream re-delivers the message.
+  sending,
+  // Local-only state. Encrypt or Firestore commit failed; the bubble
+  // stays in the outbox with this status so the user can retry.
+  failed,
   sent, // Message sent but not delivered
   delivered, // Message delivered to device but not read
   read // Message read by receiver
@@ -17,6 +26,21 @@ class MessageModel {
   final DateTime timestamp;
   final MessageStatus status;
   final String? mediaUrl;
+
+  // ─── End-to-end encryption (v2) ─────────────────────────────────────
+  /// 1 = legacy plaintext, 2 = E2EE. Persisted to Firestore. Old clients
+  /// see only schemaVersion=1 messages; new clients can render both.
+  final int schemaVersion;
+
+  /// Sender's deviceId. Needed by the recipient to pick the right Signal
+  /// session for decryption.
+  final int? senderDeviceId;
+
+  /// Map "<recipientUid>:<deviceId>" → { ct: base64, pk: bool }.
+  /// One entry per recipient device + one per sender's other devices
+  /// (self-sync). Only the device that owns the matching session can
+  /// decrypt its own entry.
+  final Map<String, Map<String, dynamic>>? envelopes;
 
   /// Metadata for a reply sent from a status update.
   final String? statusReplyOwnerId;
@@ -68,6 +92,9 @@ class MessageModel {
     this.isOfflineMesh = false,
     this.meshHops = 0,
     this.syncPending = false,
+    this.schemaVersion = 1,
+    this.senderDeviceId,
+    this.envelopes,
   });
 
   // Convenience getters for status
@@ -102,6 +129,9 @@ class MessageModel {
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
+      'schemaVersion': schemaVersion,
+      if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
+      if (envelopes != null) 'envelopes': envelopes,
     };
   }
 
@@ -130,6 +160,9 @@ class MessageModel {
       'isOfflineMesh': isOfflineMesh,
       'meshHops': meshHops,
       'syncPending': syncPending,
+      'schemaVersion': schemaVersion,
+      if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
+      if (envelopes != null) 'envelopes': envelopes,
     };
   }
 
@@ -160,7 +193,17 @@ class MessageModel {
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
+      schemaVersion: (map['schemaVersion'] as int?) ?? 1,
+      senderDeviceId: map['senderDeviceId'] as int?,
+      envelopes: _parseEnvelopes(map['envelopes']),
     );
+  }
+
+  static Map<String, Map<String, dynamic>>? _parseEnvelopes(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is! Map) return null;
+    return raw.map((k, v) =>
+        MapEntry(k as String, Map<String, dynamic>.from(v as Map)));
   }
 
   // Create MessageModel from Firestore document
@@ -187,6 +230,9 @@ class MessageModel {
       isOfflineMesh: map['isOfflineMesh'] ?? false,
       meshHops: map['meshHops'] ?? 0,
       syncPending: map['syncPending'] ?? false,
+      schemaVersion: (map['schemaVersion'] as int?) ?? 1,
+      senderDeviceId: map['senderDeviceId'] as int?,
+      envelopes: _parseEnvelopes(map['envelopes']),
     );
   }
 
@@ -219,6 +265,10 @@ class MessageModel {
         return MessageStatus.delivered;
       case 'read':
         return MessageStatus.read;
+      // `sending` and `failed` are local-only states that should never
+      // appear in a Firestore payload, but a stale write from a buggy
+      // client would otherwise stick a permanent "sending" bubble on the
+      // receiver. Map them back to the safe `sent` baseline.
       default:
         return MessageStatus.sent;
     }
@@ -257,6 +307,9 @@ class MessageModel {
     bool? isOfflineMesh,
     int? meshHops,
     bool? syncPending,
+    int? schemaVersion,
+    int? senderDeviceId,
+    Map<String, Map<String, dynamic>>? envelopes,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -283,6 +336,9 @@ class MessageModel {
       isOfflineMesh: isOfflineMesh ?? this.isOfflineMesh,
       meshHops: meshHops ?? this.meshHops,
       syncPending: syncPending ?? this.syncPending,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+      senderDeviceId: senderDeviceId ?? this.senderDeviceId,
+      envelopes: envelopes ?? this.envelopes,
     );
   }
 }

@@ -41,8 +41,8 @@ android {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.0.6"
+        versionCode = 32
+        versionName = "1.0.7"
         minSdkVersion = 24
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
         resConfigs "en"

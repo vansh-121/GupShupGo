@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.0.6';
+const String kCurrentVersion = '1.0.7';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only when the
@@ -165,18 +165,33 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.bug_report_rounded,
-    'Crash Reporting',
-    'Firebase Crashlytics now automatically captures and reports any app crashes for faster fixes.',
+    Icons.bolt_rounded,
+    'Instant Status Rendering',
+    'Previously seen statuses now load from local cache the moment you open the app — no spinners, no waiting for the network.',
   ),
   _Feature(
-    Icons.speed_rounded,
-    'Performance Monitoring',
-    'Firebase Performance Monitoring tracks call setup time, message speed, and upload performance in real-time.',
+    Icons.lock_clock_rounded,
+    'Faster Message Decryption',
+    'Encrypted messages and status decryption now runs on a background thread, keeping the UI smooth even on low-end devices.',
   ),
   _Feature(
-    Icons.videocam_rounded,
-    'Clearer Video Calls',
-    'Video quality upgraded to 720p @ 2000 kbps with smooth 30 fps — sharper, lag-free calls.',
+    Icons.download_for_offline_rounded,
+    'Smarter Media Downloads',
+    'Status media now pre-downloads in the background the moment your contacts post — tap to view and it plays instantly.',
   ),
+  // _Feature(
+  //   Icons.bug_report_rounded,
+  //   'Crash Reporting',
+  //   'Firebase Crashlytics now automatically captures and reports any app crashes for faster fixes.',
+  // ),
+  // _Feature(
+  //   Icons.speed_rounded,
+  //   'Performance Monitoring',
+  //   'Firebase Performance Monitoring tracks call setup time, message speed, and upload performance in real-time.',
+  // ),
+  // _Feature(
+  //   Icons.videocam_rounded,
+  //   'Clearer Video Calls',
+  //   'Video quality upgraded to 720p @ 2000 kbps with smooth 30 fps — sharper, lag-free calls.',
+  // ),
 ];

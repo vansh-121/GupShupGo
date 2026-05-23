@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
@@ -70,13 +72,36 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
     setState(() => _isUploading = true);
 
     try {
-      await _statusService.uploadTextStatus(
+      // E2EE: encrypt the status under a per-item key and wrap the key for
+      // every viewer's device. If the user has zero contacts, we have no one
+      // to share it with — surface that explicitly rather than silently
+      // dropping the post.
+      final viewers = await _statusService.defaultViewerUids(widget.userId);
+      if (viewers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No contacts yet — start a chat before posting a status.')),
+          );
+        }
+        return;
+      }
+
+      // Fire-and-forget: provider inserts an optimistic StatusItem
+      // immediately and runs the upload + key fan-out + Firestore writes
+      // in the background. The screen pops in the same frame as the tap,
+      // matching WhatsApp's "post feels instant" UX.
+      if (!mounted) return;
+      final provider = context.read<StatusProvider>();
+      provider.postEncryptedTextStatusInBackground(
         userId: widget.userId,
         userName: widget.userName,
         userPhotoUrl: widget.userPhotoUrl,
         userPhoneNumber: widget.userPhoneNumber,
         text: text,
         backgroundColor: _backgroundColors[_currentColorIndex],
+        viewerUids: viewers,
       );
 
       if (mounted) {
@@ -131,34 +156,61 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: TextField(
-            controller: _textController,
-            autofocus: true,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              color: onBg,
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-            ),
-            decoration: InputDecoration(
-              filled: false,
-              hintText: 'Type a status...',
-              hintStyle: GoogleFonts.poppins(
-                color: onBgMuted,
-                fontSize: 24,
-                fontWeight: FontWeight.w400,
+      body: Stack(
+        children: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: TextField(
+                controller: _textController,
+                autofocus: true,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  color: onBg,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  filled: false,
+                  hintText: 'Type a status...',
+                  hintStyle: GoogleFonts.poppins(
+                    color: onBgMuted,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+                maxLines: null,
+                textCapitalization: TextCapitalization.sentences,
               ),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
             ),
-            maxLines: null,
-            textCapitalization: TextCapitalization.sentences,
           ),
-        ),
+          // E2EE notice — same guarantee as a chat message, surfaced
+          // before the user posts so they know who can see their status.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 24,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lock_outline_rounded,
+                    size: 12, color: onBgMuted),
+                const SizedBox(width: 6),
+                Text(
+                  'End-to-end encrypted',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: onBgMuted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.white,

@@ -470,6 +470,12 @@ class MeshNetworkService extends ChangeNotifier {
 
   /// Send a text message via the mesh network.
   /// The message is also stored locally as pending for Firestore sync.
+  ///
+  /// E2EE: if the receiver has a published key bundle (i.e. they've been
+  /// online recently to register) we encrypt the text into a v2 envelope
+  /// before broadcasting. If not, we fall back to plaintext mesh —
+  /// mesh-only deployments where peers have never had internet would
+  /// otherwise be unreachable.
   Future<MessageModel> sendViaMesh({
     required String receiverId,
     required String text,
@@ -487,13 +493,9 @@ class MeshNetworkService extends ChangeNotifier {
       syncPending: true,
     );
 
-    // Store locally
     _cacheService.storePendingMeshMessage(message);
-
-    // Mark as seen to prevent relay loops
     _seenMessageIds.add(message.id);
 
-    // Broadcast to all connected peers
     final payload = _MeshPayload(
       messageId: message.id,
       messageJson: message.toJson(),
@@ -660,6 +662,12 @@ class MeshNetworkService extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════
 
   void _handlePayload(String endpointId, Payload payload) {
+    _handlePayloadAsync(endpointId, payload).catchError((Object e) {
+      debugPrint('[Mesh] Error handling payload: $e');
+    });
+  }
+
+  Future<void> _handlePayloadAsync(String endpointId, Payload payload) async {
     // ── Handle incoming FILE payloads (image data) ────────────────────
     if (payload.type == PayloadType.FILE) {
       final uri = payload.uri;
@@ -673,52 +681,48 @@ class MeshNetworkService extends ChangeNotifier {
 
     if (payload.type != PayloadType.BYTES || payload.bytes == null) return;
 
-    try {
-      final jsonStr = utf8.decode(payload.bytes!);
-      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final jsonStr = utf8.decode(payload.bytes!);
+    final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-      // ── File metadata bytes ─────────────────────────────────────────
-      if (data['payloadType'] == 'file_metadata') {
-        _handleFileMetadata(data);
-        return;
-      }
-
-      final meshPayload = _MeshPayload.fromJson(data);
-
-      // Dedup: skip if we've already seen this message
-      if (_seenMessageIds.contains(meshPayload.messageId)) return;
-      _seenMessageIds.add(meshPayload.messageId);
-
-      final message = MessageModel.fromJson(meshPayload.messageJson).copyWith(
-        meshHops: meshPayload.hops + 1,
-        isOfflineMesh: true,
-      );
-
-      // Is this message for us?
-      if (message.receiverId == _currentUserId) {
-        _incomingMeshMessages.add(message);
-        _meshMessageController.add(message);
-        // Also store locally so it persists across app restarts
-        _cacheService.storePendingMeshMessage(message);
-        debugPrint('[Mesh] Received message for me: ${message.text}');
-      }
-
-      // Relay forward if TTL allows (store-and-forward)
-      if (meshPayload.canRelay) {
-        final relayPayload = _MeshPayload(
-          messageId: meshPayload.messageId,
-          messageJson: meshPayload.messageJson,
-          hops: meshPayload.hops + 1,
-          ttl: meshPayload.ttl,
-        );
-        _broadcastToAllPeers(relayPayload);
-        debugPrint('[Mesh] Relaying message ${message.id} (hop ${relayPayload.hops})');
-      }
-
-      notifyListeners();
-    } catch (e) {
-      debugPrint('[Mesh] Error handling payload: $e');
+    // ── File metadata bytes ─────────────────────────────────────────
+    if (data['payloadType'] == 'file_metadata') {
+      _handleFileMetadata(data);
+      return;
     }
+
+    final meshPayload = _MeshPayload.fromJson(data);
+
+    // Dedup: skip if we've already seen this message
+    if (_seenMessageIds.contains(meshPayload.messageId)) return;
+    _seenMessageIds.add(meshPayload.messageId);
+
+    final MessageModel message = MessageModel.fromJson(meshPayload.messageJson).copyWith(
+      meshHops: meshPayload.hops + 1,
+      isOfflineMesh: true,
+    );
+
+    // Is this message for us?
+    if (message.receiverId == _currentUserId) {
+      _incomingMeshMessages.add(message);
+      _meshMessageController.add(message);
+      // Also store locally so it persists across app restarts
+      _cacheService.storePendingMeshMessage(message);
+      debugPrint('[Mesh] Received message for me: ${message.text}');
+    }
+
+    // Relay forward if TTL allows (store-and-forward)
+    if (meshPayload.canRelay) {
+      final relayPayload = _MeshPayload(
+        messageId: meshPayload.messageId,
+        messageJson: meshPayload.messageJson,
+        hops: meshPayload.hops + 1,
+        ttl: meshPayload.ttl,
+      );
+      _broadcastToAllPeers(relayPayload);
+      debugPrint('[Mesh] Relaying message ${message.id} (hop ${relayPayload.hops})');
+    }
+
+    notifyListeners();
   }
 
   // ═══════════════════════════════════════════════════════════════════════

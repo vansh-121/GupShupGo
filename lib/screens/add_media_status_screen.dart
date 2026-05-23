@@ -2,7 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -269,27 +271,48 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       debugPrint('[Status] File path: ${_selectedFile!.path}');
       debugPrint('[Status] File size: ${await _selectedFile!.length()} bytes');
 
+      // E2EE: encrypt the file and wrap the content key for every viewer.
+      final viewers =
+          await _statusService.defaultViewerUids(widget.userId);
+      if (viewers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'No contacts yet — start a chat before posting a status.')),
+          );
+        }
+        return;
+      }
+      // Fire-and-forget: provider inserts an optimistic StatusItem
+      // immediately, then runs compression + AES-GCM encrypt + Storage
+      // upload + Signal key fan-out + Firestore writes in the background.
+      // The screen closes in the same frame as the tap.
+      if (!mounted) return;
+      final provider = context.read<StatusProvider>();
       if (_isVideo) {
-        await _statusService.uploadVideoStatus(
+        provider.postEncryptedVideoStatusInBackground(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
           userPhoneNumber: widget.userPhoneNumber,
           videoFile: _selectedFile!,
           caption: caption.isNotEmpty ? caption : null,
+          viewerUids: viewers,
         );
       } else {
-        await _statusService.uploadImageStatus(
+        provider.postEncryptedImageStatusInBackground(
           userId: widget.userId,
           userName: widget.userName,
           userPhotoUrl: widget.userPhotoUrl,
           userPhoneNumber: widget.userPhoneNumber,
           imageFile: _selectedFile!,
           caption: caption.isNotEmpty ? caption : null,
+          viewerUids: viewers,
         );
       }
 
-      debugPrint('[Status] Upload successful!');
+      debugPrint('[Status] Upload kicked off in background');
       if (mounted) {
         Navigator.pop(context, true);
       }
@@ -434,13 +457,36 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ],
                 ),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Re-pick media button
-                  IconButton(
-                    icon: Icon(Icons.add_photo_alternate, color: Colors.white),
-                    onPressed: _isUploading ? null : _showMediaSourcePicker,
+                  // E2EE assurance line above the caption row.
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.lock_outline_rounded,
+                            size: 12, color: Colors.white70),
+                        const SizedBox(width: 6),
+                        Text(
+                          'End-to-end encrypted',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  Row(
+                    children: [
+                      // Re-pick media button
+                      IconButton(
+                        icon: Icon(Icons.add_photo_alternate, color: Colors.white),
+                        onPressed: _isUploading ? null : _showMediaSourcePicker,
+                      ),
                   // Caption input — no box, just plain text on gradient
                   Expanded(
                     child: TextField(
@@ -483,6 +529,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                               color: Colors.white, size: 22),
                     ),
                   ),
+                ],
+              ),
                 ],
               ),
             ),

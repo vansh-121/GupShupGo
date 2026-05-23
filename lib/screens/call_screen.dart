@@ -10,6 +10,8 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class CallScreen extends StatefulWidget {
@@ -66,6 +68,17 @@ class _CallScreenState extends State<CallScreen> {
   // the user perceives the call as live). Also stopped early on error.
   Trace? _callSetupTrace;
 
+  // ── E2EE key exchange runs in parallel with Agora engine init ─────────
+  // The Signal-encrypted key publish (caller) or Firestore poll (callee)
+  // has no dependency on the RtcEngine — only the final
+  // enableMediaEncryption() call does. By kicking the exchange off the
+  // moment the screen mounts, we overlap a Firestore round-trip (caller:
+  // ~150ms, callee: 0–3000ms while waiting for the caller to publish) with
+  // engine init + permission prompts. Previously these ran serially after
+  // engine init, adding their full latency to user-perceived "connecting"
+  // time.
+  Future<CallEncryptionKey?>? _callKeyFuture;
+
   @override
   void initState() {
     super.initState();
@@ -80,6 +93,10 @@ class _CallScreenState extends State<CallScreen> {
       },
     ).then((t) => _callSetupTrace = t);
 
+    // Kick off the Signal key exchange immediately, in parallel with the
+    // Agora engine init below. _initAgora awaits this future just before
+    // joinChannel — the only step that needs the key.
+    _callKeyFuture = _exchangeCallKey();
     _initAgora();
     _listenToSignaling();
 
@@ -217,6 +234,55 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  /// Runs the Signal key exchange independently of the Agora engine. Started
+  /// from initState so its Firestore round-trip overlaps engine init.
+  Future<CallEncryptionKey?> _exchangeCallKey() async {
+    final selfUid = FirebaseAuth.instance.currentUser?.uid;
+    final peerUid = widget.calleeId;
+    if (selfUid == null || peerUid == null) return null;
+
+    final selfDeviceId = await DeviceIdentityService().getDeviceId();
+    if (selfDeviceId == null) return null; // E2EE not registered on this device
+
+    final svc = CallEncryptionService();
+    if (widget.isCaller) {
+      return svc.publishKeyForCallees(
+        channelId: widget.channelId,
+        senderUid: selfUid,
+        senderDeviceId: selfDeviceId,
+        calleeUid: peerUid,
+      );
+    }
+    // Callee: poll for the caller's envelope. The 150ms cadence + 20 tries
+    // (~3s budget) matches the previous behaviour but the poll now happens
+    // concurrently with engine init, so its latency is hidden under Agora's
+    // init cost in the common case.
+    for (var i = 0; i < 20; i++) {
+      final key = await svc.fetchKey(
+        channelId: widget.channelId,
+        selfUid: selfUid,
+        selfDeviceId: selfDeviceId,
+        callerUid: peerUid,
+      );
+      if (key != null) return key;
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+    return null;
+  }
+
+  /// Applies the prefetched call key to the Agora engine. Must run before
+  /// joinChannel — Agora silently drops frames if encryption is configured
+  /// after the channel join.
+  Future<void> _applyCallEncryption() async {
+    if (_engine == null) return;
+    final key = await _callKeyFuture;
+    if (key == null) {
+      print('No call encryption key available — call will be unencrypted');
+      return;
+    }
+    await AgoraService.enableMediaEncryption(_engine!, key);
+  }
+
   Future<void> _initAgora() async {
     try {
       // Set initial call start time to avoid null errors
@@ -293,6 +359,18 @@ class _CallScreenState extends State<CallScreen> {
 
       // Small delay to ensure engine is fully initialized
       await Future.delayed(Duration(milliseconds: 200));
+
+      // ── E2EE: enable Agora media encryption with a per-call key ──────
+      // The key is exchanged out-of-band via a Signal-encrypted envelope.
+      // If anything fails (peer not E2EE-ready, no devices, etc.) we fall
+      // back to an unencrypted call rather than blocking the user — this
+      // matches WhatsApp's "best effort" call encryption behaviour for
+      // cross-version compatibility.
+      try {
+        await _applyCallEncryption();
+      } catch (e) {
+        print('Call encryption setup failed (continuing unencrypted): $e');
+      }
 
       // Join channel with null token for testing
       await _engine!.joinChannel(

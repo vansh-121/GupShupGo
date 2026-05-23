@@ -8,6 +8,10 @@ import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -19,6 +23,32 @@ class AuthService {
   final FCMService _fcmService = FCMService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final DeviceSessionService _deviceSession = DeviceSessionService();
+  final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
+
+  /// E2EE: ensures the local Signal stores are initialised and a key bundle
+  /// is published to Firestore for this user/device. Safe to call repeatedly
+  /// — cheap no-op once registered.
+  ///
+  /// On reinstall (local keys wiped) we generate fresh keys and allocate a
+  /// new deviceId. Decrypted message history is recovered lazily from the
+  /// per-user msgVault/statusVault in Firestore (see ChatService /
+  /// StatusService). New sessions with peers re-establish on next
+  /// send/receive via their published key bundles.
+  Future<void> _ensureE2EERegistered(String userId) async {
+    try {
+      await SignalService.init();
+      await _deviceIdentity.registerIfNeeded(userId);
+    } catch (e) {
+      print('E2EE registration failed (non-blocking): $e');
+    }
+  }
+
+  /// Public entry point so screens (HomeScreen on cold start, etc.) can
+  /// trigger E2EE registration without going through a sign-in path.
+  /// Needed for the upgrade case where the user was already signed in
+  /// when E2EE first shipped — no sign-in helper would have fired.
+  Future<void> ensureE2EERegisteredForCurrentSession(String userId) =>
+      _ensureE2EERegistered(userId);
 
   // Get current user
   User? getCurrentUser() {
@@ -60,6 +90,7 @@ class AuthService {
       // own session has been wiped (Redmi/MIUI force-stop), this token
       // is exchanged for a Firebase custom token in attemptSilentReauth().
       await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
 
       print('Setting up FCM...');
       try {
@@ -180,6 +211,7 @@ class AuthService {
           // own session has been wiped (Redmi/MIUI force-stop), this token
           // is exchanged for a Firebase custom token in attemptSilentReauth().
           await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
           await _fcmService.setupFCM(userId: userId);
           await _userService.setupPresence(userId);
 
@@ -271,6 +303,7 @@ class AuthService {
             // See note in other sign-in paths — issue device session token
             // so this user stays signed in across MIUI force-stops, etc.
             await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
             await _fcmService.setupFCM(userId: userId);
             await _userService.setupPresence(userId);
 
@@ -374,6 +407,7 @@ class AuthService {
           // own session has been wiped (Redmi/MIUI force-stop), this token
           // is exchanged for a Firebase custom token in attemptSilentReauth().
           await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
           try {
             await _fcmService.setupFCM(userId: userId);
           } catch (e) {
@@ -459,6 +493,7 @@ class AuthService {
       // own session has been wiped (Redmi/MIUI force-stop), this token
       // is exchanged for a Firebase custom token in attemptSilentReauth().
       await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
 
       print('Setting up FCM...');
       try {
@@ -561,6 +596,7 @@ class AuthService {
           // own session has been wiped (Redmi/MIUI force-stop), this token
           // is exchanged for a Firebase custom token in attemptSilentReauth().
           await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(userId);
 
           print('Setting up FCM...');
           try {
@@ -700,6 +736,25 @@ class AuthService {
       // the request is from the legitimate user. revokeAndClear() always
       // clears local state, even if the network call fails.
       await _deviceSession.revokeAndClear();
+
+      // E2EE: wipe all local key material on signOut. The next sign-in will
+      // generate fresh keys and publish a new bundle. This is intentional —
+      // forward secrecy means historical sessions can't be resurrected on a
+      // different account.
+      await SignalService.wipe();
+      await _deviceIdentity.wipeLocal();
+      // Lock the vault in-memory only. The cached key in secure storage
+      // is keyed by uid — if the same user signs back in we auto-unlock
+      // silently, if a different user signs in _tryAutoUnlock notices
+      // the uid mismatch and prompts. This is what makes the PIN dialog
+      // fire on reinstall but NOT on every signout/signin cycle.
+      VaultCipher.instance.lock();
+      // Also wipe the local decrypted-message cache so the next user signed
+      // in on this device doesn't see the previous user's chat history.
+      try {
+        final ps = await PlaintextStore.instance();
+        await ps.wipe();
+      } catch (_) {}
       await _googleSignIn.signOut();
       await _auth.signOut();
       await _clearUserIdLocally();
@@ -739,7 +794,10 @@ class AuthService {
     try {
       final restoredUid = await _deviceSession.exchangeAndSignIn();
       if (restoredUid != null) {
-        if (restoredUid == savedUserId) return true;
+        if (restoredUid == savedUserId) {
+          await _ensureE2EERegistered(restoredUid);
+          return true;
+        }
         // Server returned a uid that doesn't match local prefs. Shouldn't
         // happen in practice (we only stored a token for the user whose
         // uid is in prefs), but be defensive — sign out and fall through.
@@ -780,6 +838,7 @@ class AuthService {
       // Opportunistically upgrade this user to the device-session-token
       // path so subsequent cold starts don't even need Google round-trips.
       await _deviceSession.issueAndPersist();
+      await _ensureE2EERegistered(restoredUid);
 
       return true;
     } catch (e) {

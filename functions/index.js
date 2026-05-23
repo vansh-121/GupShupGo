@@ -1,3 +1,4 @@
+// Force redeploy to apply minInstances
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -118,7 +119,7 @@ async function sendToUserDevices(userId, buildMessage) {
 // notification and NEVER invoke the Dart background handler — which is why
 // call notifications were unreliable before this fix.
 exports.sendCallNotification = onRequest(
-  { cors: true, invoker: "public" },
+  { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -155,7 +156,7 @@ exports.sendCallNotification = onRequest(
           if (callerData.name) callerName = callerData.name;
           if (callerData.photoUrl) callerPhotoUrl = callerData.photoUrl;
         }
-      } catch (_) {}
+      } catch (_) { }
 
       const audioOnly = isAudioOnly === true || isAudioOnly === "true";
 
@@ -208,7 +209,7 @@ exports.sendCallNotification = onRequest(
 
 // ─── Send Message Notification ──────────────────────────────────────────────
 exports.sendMessageNotification = onRequest(
-  { cors: true, invoker: "public" },
+  { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -387,7 +388,7 @@ exports.exchangeDeviceSession = onRequest(
         }
       } catch (_) {
         // User deleted — clean up the stale session.
-        await doc.ref.delete().catch(() => {});
+        await doc.ref.delete().catch(() => { });
         res.status(401).json({ error: "Account no longer exists" });
         return;
       }
@@ -395,7 +396,7 @@ exports.exchangeDeviceSession = onRequest(
       // Audit trail. Fire-and-forget — never block the exchange on this.
       doc.ref
         .update({ lastUsedAt: admin.firestore.FieldValue.serverTimestamp() })
-        .catch(() => {});
+        .catch(() => { });
 
       const customToken = await auth.createCustomToken(uid);
       res.status(200).json({ customToken, uid });
@@ -457,6 +458,61 @@ exports.revokeDeviceSession = onRequest(
       res.status(200).json({ success: true });
     } catch (error) {
       console.error("revokeDeviceSession error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ─── E2EE: consume one-time prekey ───────────────────────────────────────────
+//
+// Returns one of the target user's published one-time prekeys AND deletes it
+// from Firestore atomically, so the same prekey is never handed out twice.
+// (Atomic consume-on-read is the property that gives X3DH forward secrecy at
+// session setup; without it, a passive logger of Firestore could replay the
+// prekey to re-derive past session keys.)
+//
+// Request:  { targetUid: string, deviceId: number }
+// Response: { preKey: { id: number, pub: string } | null }
+// 200 + null preKey when the pool is empty — caller proceeds without OTPK.
+exports.consumeOneTimePreKey = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      const { targetUid, deviceId } = req.body || {};
+      if (!targetUid || typeof deviceId !== "number") {
+        res.status(400).json({ error: "Missing targetUid or deviceId" });
+        return;
+      }
+
+      const otpkCol = db
+        .collection("users")
+        .doc(targetUid)
+        .collection("devices")
+        .doc(String(deviceId))
+        .collection("oneTimePreKeys");
+
+      // Transactional consume: pick the first prekey, delete it, return it.
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(otpkCol.limit(1));
+        if (snap.empty) return null;
+        const doc = snap.docs[0];
+        tx.delete(doc.ref);
+        return doc.data();
+      });
+
+      res.status(200).json({ preKey: result || null });
+    } catch (error) {
+      console.error("consumeOneTimePreKey error:", error);
       res.status(500).json({ error: error.message });
     }
   }

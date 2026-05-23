@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/models/status_model.dart';
@@ -40,6 +43,12 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
 
+  /// Cache of decrypted bytes for encrypted status items, keyed by item id.
+  /// We decrypt eagerly on screen open so swiping between items is instant.
+  /// For text items we cache the parsed JSON; for media we cache file bytes
+  /// and a temp-file path that VideoPlayer.file / Image.file can consume.
+  final Map<String, _DecryptedStatus> _decrypted = {};
+
   Stream<int> _watchCurrentViewCount() {
     return _statusService.watchStatusViewCount(
       statusOwnerId: widget.statusModel.userId,
@@ -50,7 +59,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   void initState() {
     super.initState();
-    _activeItems = widget.statusModel.activeStatusItems;
+    // Filter out items that can't be decrypted on this install — AES key
+    // was never vaulted (status never opened before reinstall). Showing a
+    // spinner for them forever is worse than silently omitting, which is
+    // exactly what WhatsApp does.
+    _activeItems = widget.statusModel.activeStatusItems
+        .where((item) => !StatusService.isUnrecoverable(item.id))
+        .toList();
     if (widget.initialStatusItemId != null) {
       final initialIndex = _activeItems.indexWhere(
         (item) => item.id == widget.initialStatusItemId,
@@ -65,8 +80,84 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       duration: Duration(seconds: 5),
     )..addStatusListener(_onProgressStatus);
 
+    // Hydrate from the process-wide cache synchronously so the first
+    // frame already renders the plaintext when the provider pre-decrypted
+    // ahead of us. This is the "no spinner" path.
+    for (final item in _activeItems) {
+      if (!item.type.startsWith('encrypted')) continue;
+      final cached = StatusService.cachedPlaintext(item.id);
+      if (cached == null) continue;
+      _decrypted[item.id] = cached.text != null
+          ? _DecryptedStatus.text(
+              text: cached.text ?? '',
+              backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+            )
+          : _DecryptedStatus.media(
+              localFile: cached.localFile!,
+              bytes: cached.bytes!,
+              isVideo: cached.isVideo,
+            );
+    }
+
+    _decryptAllEncrypted();
     _loadCurrentStatus();
     _markCurrentAsViewed();
+  }
+
+  /// Decrypt the currently-visible item first so the user stops staring at
+  /// "Decrypting…" while later items round-trip. The remaining items run in
+  /// parallel and each one rebuilds the UI as soon as it lands.
+  Future<void> _decryptAllEncrypted() async {
+    final encrypted = _activeItems
+        .where((i) => i.type.startsWith('encrypted'))
+        .toList();
+    if (encrypted.isEmpty) return;
+
+    final current = _activeItems[_currentIndex];
+    if (current.type.startsWith('encrypted')) {
+      await _decryptOne(current);
+      if (mounted) setState(() {});
+    }
+
+    await Future.wait(encrypted
+        .where((i) => i.id != current.id)
+        .map((item) async {
+      await _decryptOne(item);
+      if (mounted) setState(() {});
+    }));
+  }
+
+  Future<void> _decryptOne(StatusItem item) async {
+    if (_decrypted.containsKey(item.id)) return;
+
+    // Up to 3 attempts to cover the brief propagation window for a freshly
+    // posted status whose wrappedKey envelope hasn't arrived yet. Each
+    // attempt goes through ensureDecrypted which prefers the persistent
+    // disk cache — so a status the user has already seen renders
+    // instantly even after an app restart (and without network).
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await _statusService.ensureDecrypted(
+        ownerUid: widget.statusModel.userId,
+        item: item,
+        selfUid: widget.currentUserId,
+      );
+      final cached = StatusService.cachedPlaintext(item.id);
+      if (cached != null) {
+        _decrypted[item.id] = cached.text != null
+            ? _DecryptedStatus.text(
+                text: cached.text ?? '',
+                backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+              )
+            : _DecryptedStatus.media(
+                localFile: cached.localFile!,
+                bytes: cached.bytes!,
+                isVideo: cached.isVideo,
+              );
+        return;
+      }
+      if (!mounted) return;
+      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+    }
   }
 
   /// Initialize the current status - set appropriate duration, load video if needed.
@@ -238,7 +329,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             statusItemId: currentItem.id,
           ),
           builder: (context, snapshot) {
-            return Container(
+        return SafeArea(
+          child: Container(
               padding: EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -300,7 +392,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         )),
                 ],
               ),
-            );
+          ),
+        );
           },
         );
       },
@@ -369,9 +462,48 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _videoController?.pause();
 
     final currentItem = _activeItems[_currentIndex];
-    final mediaUrl = currentItem.type == 'image'
-        ? currentItem.imageUrl
-        : currentItem.thumbnailUrl ?? currentItem.videoUrl;
+
+    // For encrypted statuses the on-Firestore fields are opaque metadata
+    // (caption holds a JSON blob with iv/hash, type is "encrypted*", text is
+    // null). Sending those verbatim is what produced the "{enc:true,iv:…}"
+    // reply preview. Project the *decrypted* fields into the reply
+    // payload so the chat preview matches what the user actually saw.
+    String replyType = currentItem.type;
+    String? replyText = currentItem.text;
+    String? replyCaption = currentItem.caption;
+    String? replyBg = currentItem.backgroundColor;
+    String? mediaUrl;
+
+    if (currentItem.type.startsWith('encrypted')) {
+      final cached = StatusService.cachedPlaintext(currentItem.id);
+      String? embeddedCaption;
+      try {
+        final meta = jsonDecode(currentItem.caption ?? '{}')
+            as Map<String, dynamic>;
+        embeddedCaption = meta['caption'] as String?;
+      } catch (_) {}
+
+      if (currentItem.type == 'encrypted') {
+        replyType = 'text';
+        replyText = cached?.text ?? '';
+        replyBg = cached?.backgroundColor ?? '#6C5CE7';
+        replyCaption = null;
+      } else {
+        replyType =
+            currentItem.type == 'encrypted_video' ? 'video' : 'image';
+        replyText = null;
+        replyBg = null;
+        replyCaption = embeddedCaption;
+      }
+      // Never expose the ciphertext blob URL — the receiver couldn't
+      // decrypt it anyway (no wrapped key addressed to them for the
+      // reply context) and the placeholder thumbnail handles this case.
+      mediaUrl = null;
+    } else {
+      mediaUrl = currentItem.type == 'image'
+          ? currentItem.imageUrl
+          : currentItem.thumbnailUrl ?? currentItem.videoUrl;
+    }
 
     try {
       await _chatService.sendMessage(
@@ -383,11 +515,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
         statusReplyItemId: currentItem.id,
         statusReplyOwnerName: widget.statusModel.userName,
         statusReplyOwnerPhotoUrl: widget.statusModel.userPhotoUrl,
-        statusReplyType: currentItem.type,
-        statusReplyText: currentItem.text,
+        statusReplyType: replyType,
+        statusReplyText: replyText,
         statusReplyMediaUrl: mediaUrl,
-        statusReplyCaption: currentItem.caption,
-        statusReplyBackgroundColor: currentItem.backgroundColor,
+        statusReplyCaption: replyCaption,
+        statusReplyBackgroundColor: replyBg,
       );
       _replyController.clear();
       FocusScope.of(context).unfocus();
@@ -456,6 +588,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               itemCount: _activeItems.length,
               itemBuilder: (context, index) {
                 final item = _activeItems[index];
+                if (item.type.startsWith('encrypted')) {
+                  return _buildEncryptedStatus(item);
+                }
                 if (item.type == 'text') {
                   return _buildTextStatus(item);
                 } else if (item.type == 'video') {
@@ -551,12 +686,37 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                   fontSize: 15,
                                 ),
                               ),
-                              Text(
-                                _formatTimeAgo(currentItem.createdAt),
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    _formatTimeAgo(currentItem.createdAt),
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  // E2EE indicator inline next to the
+                                  // timestamp, so viewers see at a glance
+                                  // that the status is encrypted end-to-end.
+                                  if (currentItem.type
+                                      .startsWith('encrypted')) ...[
+                                    SizedBox(width: 6),
+                                    Icon(Icons.lock_outline_rounded,
+                                        color: Colors.white70, size: 11),
+                                    SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        'End-to-end encrypted',
+                                        style: TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),
@@ -585,8 +745,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               ),
             ),
 
-            // Bottom: caption for image/video statuses
+            // Bottom: caption for image/video statuses. Encrypted statuses
+            // store metadata JSON in the `caption` field — never render
+            // that as user-visible text. (The plaintext caption from inside
+            // the encrypted payload is extracted on decrypt and would need
+            // a separate render path; out of scope here.)
             if (currentItem.type != 'text' &&
+                !currentItem.type.startsWith('encrypted') &&
                 currentItem.caption != null &&
                 currentItem.caption!.isNotEmpty)
               Positioned(
@@ -732,6 +897,57 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     );
   }
 
+  /// Renders an encrypted status item, either from the eagerly-decrypted
+  /// cache or as a "couldn't decrypt" placeholder when this device wasn't
+  /// authorised or the envelope hasn't arrived yet.
+  Widget _buildEncryptedStatus(StatusItem item) {
+    final dec = _decrypted[item.id];
+    if (dec == null) {
+      // Subtle spinner on a dark background — no "Decrypting…" text.
+      // The status progress bar at the top already indicates activity;
+      // a second text label just looks broken.
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white30,
+            ),
+          ),
+        ),
+      );
+    }
+    if (dec.text != null) {
+      // Render as a text status using the decrypted text + bg colour.
+      return _buildTextStatus(StatusItem(
+        id: item.id,
+        type: 'text',
+        text: dec.text,
+        backgroundColor: dec.backgroundColor ?? '#6C5CE7',
+        createdAt: item.createdAt,
+        viewedBy: item.viewedBy,
+      ));
+    }
+    if (dec.isVideo && dec.localFile != null) {
+      return Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: _EncryptedVideoView(file: dec.localFile!),
+      );
+    }
+    if (dec.bytes != null) {
+      return Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: Image.memory(dec.bytes!, fit: BoxFit.contain),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
   Widget _buildTextStatus(StatusItem item) {
     return Container(
       width: double.infinity,
@@ -847,4 +1063,70 @@ class StatusAnimatedBuilder extends AnimatedWidget {
   Widget build(BuildContext context) {
     return builder(context, child);
   }
+}
+
+/// Minimal video player for an encrypted status item. Takes a local file
+/// (decrypted plaintext written to the persistent media cache dir) and
+/// plays it once.
+class _EncryptedVideoView extends StatefulWidget {
+  const _EncryptedVideoView({required this.file});
+  final File file;
+  @override
+  State<_EncryptedVideoView> createState() => _EncryptedVideoViewState();
+}
+
+class _EncryptedVideoViewState extends State<_EncryptedVideoView> {
+  VideoPlayerController? _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = VideoPlayerController.file(widget.file);
+    _ctrl = c;
+    c.initialize().then((_) {
+      if (mounted) {
+        setState(() {});
+        c
+          ..setLooping(false)
+          ..play();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) {
+      return const CircularProgressIndicator(color: Colors.white70);
+    }
+    return AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c));
+  }
+}
+
+/// Plaintext form of an encrypted StatusItem after the per-status content
+/// key has been unwrapped and the blob decrypted. Either `text` or
+/// `localFile` is populated, never both.
+class _DecryptedStatus {
+  _DecryptedStatus.text({required this.text, required this.backgroundColor})
+      : localFile = null,
+        bytes = null,
+        isVideo = false;
+  _DecryptedStatus.media({
+    required File this.localFile,
+    required Uint8List this.bytes,
+    required this.isVideo,
+  })  : text = null,
+        backgroundColor = null;
+
+  final String? text;
+  final String? backgroundColor;
+  final File? localFile;
+  final Uint8List? bytes;
+  final bool isVideo;
 }

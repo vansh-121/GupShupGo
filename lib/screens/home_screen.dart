@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
@@ -26,7 +28,10 @@ import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/update_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -55,6 +60,16 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? _recentContactsSub;
   bool _isRefreshingUsers = false; // debounce for background user refresh
   List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
+
+  // Cached chat-list stream. Created lazily on the first build of the
+  // Chats tab and reused for the rest of the screen's lifetime. Without
+  // this, getChatRooms() was being re-invoked on every rebuild (e.g.
+  // when the user switched to Status/Calls and back), producing a fresh
+  // single-subscription StreamController each time — and the
+  // StreamBuilder occasionally tried to re-listen on the same instance
+  // during the rebuild handoff, throwing "Stream has already been
+  // listened to".
+  Stream<List<ChatRoom>>? _chatRoomsStream;
 
   // Tracks Firebase Auth presence so we can show a non-blocking re-verify
   // banner when the local session exists but Firebase has no user (typical
@@ -150,9 +165,30 @@ class _HomeScreenState extends State<HomeScreen>
         _isInitialized = true;
       });
 
-      // ── Show "What's New" dialog on first launch after an update ──
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) maybeShowWhatsNew(context);
+      // ── E2EE restore prompt + What's New — both need the Navigator ────────
+      // addPostFrameCallback guarantees the first frame (including the
+      // Navigator overlay) is built before we call showDialog. Calling
+      // showDialog before the first frame silently no-ops on some devices.
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        // Vault prompt must fire even if Signal registration is offline /
+        // transiently failing — otherwise the user would silently see no
+        // chats with no explanation. Each step is isolated in its own
+        // try/catch so a failure in one never blocks the next.
+        try {
+          await _authService
+              .ensureE2EERegisteredForCurrentSession(_currentUserId!);
+        } catch (e) {
+          debugPrint('[E2EE] registration failed in post-frame: $e');
+        }
+        if (!mounted) return;
+        try {
+          await _ensureVaultReady(_currentUserId!);
+        } catch (e) {
+          debugPrint('[Vault] readiness failed: $e');
+        }
+        if (!mounted) return;
+        maybeShowWhatsNew(context);
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -174,6 +210,15 @@ class _HomeScreenState extends State<HomeScreen>
             .markAllMessagesAsDeliveredOnAppOpen(_currentUserId!)
             .catchError((e) => print('Background delivery sync error: $e')),
       ]);
+
+      // ── Pre-warm Signal sessions + Cloud Function cold start ──
+      // The first send to a peer historically paid for: (a) a Firebase
+      // Functions cold-start to consume a one-time prekey (~3-8s), and
+      // (b) building a Signal session from the prekey bundle. Doing both
+      // here at app open makes the first send feel as instant as the
+      // tenth. Fire-and-forget; never blocks the UI.
+      // ignore: discarded_futures
+      _prewarmEncryption(_currentUserId!);
 
       // ── Check for app updates via Google Play native API ──
       _updateService.checkAndPromptUpdate();
@@ -198,6 +243,38 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  /// Pre-warms the Cloud Function and pre-establishes Signal sessions for
+  /// every contact this user has a chat with, so the first message of the
+  /// session is a pure local encrypt with no network round-trips.
+  Future<void> _prewarmEncryption(String userId) async {
+    // Warm the Functions cold-start in parallel with the peer query.
+    final warmFn = SignalService.warmConsumeOneTimePreKey();
+    List<String> peerUids = const [];
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('chatRooms')
+          .where('participants', arrayContains: userId)
+          .get();
+      final peers = <String>{};
+      for (final d in snap.docs) {
+        final parts =
+            List<String>.from(d.data()['participants'] ?? const []);
+        for (final p in parts) {
+          if (p != userId) peers.add(p);
+        }
+      }
+      peerUids = peers.toList();
+    } catch (e) {
+      debugPrint('[Prewarm] peer fetch failed: $e');
+    }
+    try {
+      await SignalService.instance.prewarmSessions(peerUids);
+    } catch (e) {
+      debugPrint('[Prewarm] session prewarm failed: $e');
+    }
+    await warmFn;
+  }
+
   /// Loads user from local cache (synchronous — no Firestore read).
   void _loadUser() {
     try {
@@ -214,6 +291,96 @@ class _HomeScreenState extends State<HomeScreen>
         );
       }
     }
+  }
+
+  /// Bootstraps the E2EE vault key.
+  ///
+  /// • Auto-unlocks from the cached key in secure storage when possible
+  ///   (warm path on every cold start after the first).
+  /// • If the user has a vault config in Firestore but no local key
+  ///   (reinstall, or first run after this feature shipped on an
+  ///   already-onboarded account) → show the unlock dialog. The dialog
+  ///   blocks until they enter the right PIN or reset.
+  /// • If no vault config exists yet → show setup dialog so the user picks
+  ///   a PIN before any vault writes happen. Until they finish, vault
+  ///   writes silently skip — we never leak plaintext to Firestore.
+  /// • After the vault is ready, drop in-memory pre-warm caches so the
+  ///   next chat / status open re-reads the vault, and kick off a
+  ///   background backfill of any local messages that aren't in the
+  ///   vault yet (e.g. messages sent while the vault was still locked).
+  Future<void> _ensureVaultReady(String uid) async {
+    final state = await VaultCipher.instance.bootstrap(uid);
+    if (state == VaultState.ready) {
+      _migrateAndBackfillInBackground(uid);
+      return;
+    }
+    if (!mounted) return;
+    final ok = await VaultPinDialog.show(
+      context: context,
+      uid: uid,
+      mode: state == VaultState.needsSetup
+          ? VaultPinMode.setup
+          : VaultPinMode.unlock,
+    );
+    if (!ok) return;
+    ChatService.invalidatePreWarm(uid);
+    StatusService.invalidatePreWarm(uid);
+    _migrateAndBackfillInBackground(uid);
+  }
+
+  /// Background sweep that (a) re-encrypts any legacy plaintext vault docs
+  /// produced by older app versions and (b) pushes anything in the local
+  /// PlaintextStore that hasn't made it to the vault yet. Both passes are
+  /// idempotent so a partial run on a previous launch heals on the next.
+  void _migrateAndBackfillInBackground(String uid) {
+    unawaited(() async {
+      try {
+        await VaultCipher.instance.migrateLegacyEntries(uid);
+      } catch (_) {}
+      try {
+        final pruned = await VaultCipher.instance.applyRetention(uid);
+        if (pruned > 0) {
+          // Pruned entries leave stale previews in the in-memory caches;
+          // drop them so the chat list refreshes.
+          ChatService.invalidatePreWarm(uid);
+          StatusService.invalidatePreWarm(uid);
+        }
+      } catch (_) {}
+      _backfillVaultInBackground(uid);
+    }());
+  }
+
+  /// Walks the local PlaintextStore and pushes any message not yet in
+  /// the encrypted msgVault. Fire-and-forget — failures are non-fatal
+  /// and retried opportunistically by future sends/receives.
+  void _backfillVaultInBackground(String uid) {
+    unawaited(() async {
+      try {
+        if (!VaultCipher.instance.isReady) return;
+        final store = await PlaintextStore.instance();
+        final local = await store.getAllMessagePayloads();
+        if (local.isEmpty) return;
+        final col = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('msgVault');
+        // Probe what already lives in the vault — one read up front avoids
+        // a per-message round trip on cold start.
+        final existing = await col.get();
+        final present = existing.docs.map((d) => d.id).toSet();
+        final missing = local.entries
+            .where((e) => !present.contains(e.key))
+            .toList();
+        for (final entry in missing) {
+          final enc =
+              await VaultCipher.instance.encryptPayload(entry.value);
+          if (enc == null) return;
+          try {
+            await col.doc(entry.key).set(enc);
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }());
   }
 
   Future<void> _setupCallListener() async {
@@ -378,8 +545,10 @@ class _HomeScreenState extends State<HomeScreen>
       return Center(child: CircularProgressIndicator());
     }
 
+    _chatRoomsStream ??=
+        _chatService.getChatRooms(_currentUserId!).asBroadcastStream();
     return StreamBuilder<List<ChatRoom>>(
-      stream: _chatService.getChatRooms(_currentUserId!),
+      stream: _chatRoomsStream,
       builder: (context, chatSnapshot) {
         final c = AppThemeColors.of(context);
         // ── Use cached data while Firestore stream is still connecting ──
