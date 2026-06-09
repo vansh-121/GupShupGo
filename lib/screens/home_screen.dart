@@ -279,7 +279,7 @@ class _HomeScreenState extends State<HomeScreen>
       debugPrint('[Prewarm] peer fetch failed: $e');
     }
     try {
-      await SignalService.instance.prewarmSessions(peerUids);
+      await SignalService.instance.prewarmSessions([userId, ...peerUids]);
     } catch (e) {
       debugPrint('[Prewarm] session prewarm failed: $e');
     }
@@ -336,17 +336,19 @@ class _HomeScreenState extends State<HomeScreen>
     if (!ok) return;
     ChatService.invalidatePreWarm(uid);
     StatusService.invalidatePreWarm(uid);
-    _migrateAndBackfillInBackground(uid);
+    _migrateAndBackfillInBackground(uid, full: true);
   }
 
   /// Background sweep that (a) re-encrypts any legacy plaintext vault docs
   /// produced by older app versions and (b) pushes anything in the local
   /// PlaintextStore that hasn't made it to the vault yet. Both passes are
   /// idempotent so a partial run on a previous launch heals on the next.
-  void _migrateAndBackfillInBackground(String uid) {
+  void _migrateAndBackfillInBackground(String uid, {bool full = false}) {
     unawaited(() async {
       // Delay heavy sync operations to avoid network/CPU contention during cold start
-      await Future.delayed(const Duration(seconds: 8));
+      if (!full) {
+        await Future.delayed(const Duration(seconds: 8));
+      }
       try {
         await VaultCipher.instance.migrateLegacyEntries(uid);
       } catch (_) {}
@@ -359,21 +361,21 @@ class _HomeScreenState extends State<HomeScreen>
           StatusService.invalidatePreWarm(uid);
         }
       } catch (_) {}
-      _backfillVaultInBackground(uid);
+      _backfillVaultInBackground(uid, full: full);
     }());
   }
 
   /// Walks the local PlaintextStore and pushes any message not yet in
   /// the encrypted msgVault. Fire-and-forget — failures are non-fatal
   /// and retried opportunistically by future sends/receives.
-  void _backfillVaultInBackground(String uid) {
+  void _backfillVaultInBackground(String uid, {bool full = false}) {
     unawaited(() async {
       try {
         if (!VaultCipher.instance.isReady) return;
         final store = await PlaintextStore.instance();
-        // Limit backfill check to the 20 most recent messages.
-        // This avoids downloading the entire message vault on startup.
-        final local = await store.getAllMessagePayloads(limit: 20);
+        // Limit backfill check to the 20 most recent messages on regular startup,
+        // or check all messages on manual PIN setup/unlock.
+        final local = await store.getAllMessagePayloads(limit: full ? null : 20);
         if (local.isEmpty) return;
         final col = FirebaseFirestore.instance
             .collection('users')
@@ -381,8 +383,15 @@ class _HomeScreenState extends State<HomeScreen>
             .collection('msgVault');
         
         final ids = local.keys.toList();
-        final snap = await col.where(FieldPath.documentId, whereIn: ids).get();
-        final present = snap.docs.map((d) => d.id).toSet();
+        final present = <String>{};
+
+        // Chunk Firestore documentId queries (whereIn limit is 30 items)
+        for (var i = 0; i < ids.length; i += 30) {
+          final chunk = ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
+          final snap = await col.where(FieldPath.documentId, whereIn: chunk).get();
+          present.addAll(snap.docs.map((d) => d.id));
+        }
+
         final missing = local.entries
             .where((e) => !present.contains(e.key))
             .toList();

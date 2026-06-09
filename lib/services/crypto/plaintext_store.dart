@@ -270,7 +270,7 @@ class PlaintextStore {
   /// heavy accounts; messages outside the window fall through to the per-row
   /// SQLite path in decryptForRendering.
   Future<Map<String, Map<String, dynamic>>> getAllMessagePayloads({
-    int limit = 500,
+    int? limit = 500,
   }) async {
     final rows = await _db.query(
       _table,

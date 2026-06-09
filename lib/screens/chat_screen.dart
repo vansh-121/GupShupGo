@@ -150,10 +150,9 @@ class _ChatScreenState extends State<ChatScreen> {
     // peer reinstalled (new deviceId), we detect the change immediately
     // and clean up stale sessions instead of waiting for the 5-min
     // stale-while-revalidate window.
-    // ignore: discarded_futures
     SignalService.refreshDeviceCache(widget.contact.id);
     // ignore: discarded_futures
-    SignalService.instance.prewarmSessions([widget.contact.id]);
+    SignalService.instance.prewarmSessions([widget.currentUserId, widget.contact.id]);
   }
 
   Future<void> _initializeChat() async {

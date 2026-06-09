@@ -338,6 +338,7 @@ class SignalService {
   static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
   static const _deviceIdFreshWindow = Duration(minutes: 5);
   static final Set<String> _deviceIdRefreshInFlight = <String>{};
+  static final Map<String, Future<List<int>>> _deviceIdsQueries = {};
 
   /// Public wrapper around the cached device-id lookup so other services
   /// (e.g. CallEncryptionService when discovering the caller's deviceId)
@@ -402,85 +403,97 @@ class SignalService {
   }
 
   Future<List<int>> _fetchAndCacheDeviceIds(String uid) async {
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('devices')
-        .where('keyBundle', isNull: false)
-        .get();
-    final ids = <int>[];
+    final existing = _deviceIdsQueries[uid];
+    if (existing != null) return existing;
 
-    // ── Populate bundle-data cache from the bulk query ──────────────────
-    // We're already downloading every device doc (including its full
-    // keyBundle data) just to discover the device IDs. Previously that
-    // bundle data was thrown away, and ensureSession → _fetchPreKeyBundle
-    // re-read each device doc individually (~200-500ms per read). Now we
-    // cache the bundle data here so those reads become free cache hits.
-    // On the send path this eliminates ~10 redundant Firestore reads.
-    final now = DateTime.now();
-    for (final doc in snap.docs) {
-      final deviceId = int.tryParse(doc.id);
-      if (deviceId == null) continue;
-      ids.add(deviceId);
-      final data = doc.data();
-      final bundle = data['keyBundle'] as Map<String, dynamic>?;
-      if (bundle != null) {
-        _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+    final future = () async {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('devices')
+            .where('keyBundle', isNull: false)
+            .get();
+        final ids = <int>[];
 
-        // Check if identity key changed (indicating a reinstall on the same deviceId)
-        final identityPubStr = bundle['identityPub'] as String?;
-        if (identityPubStr != null) {
-          final addr = SignalProtocolAddress(uid, deviceId);
-          final trustedKey = _stores.identityStore.trustedKeys[addr];
-          if (trustedKey != null) {
-            final currentPubBytes = trustedKey.serialize();
-            final newPubBytes = base64Decode(identityPubStr);
-            if (!listEquals(currentPubBytes, newPubBytes)) {
-              // ignore: avoid_print
-              print('[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
-              await _stores.sessionStore.deleteSession(addr);
-              _stores.identityStore.trustedKeys.remove(addr);
-              _stores.markDirty();
+        // ── Populate bundle-data cache from the bulk query ──────────────────
+        // We're already downloading every device doc (including its full
+        // keyBundle data) just to discover the device IDs. Previously that
+        // bundle data was thrown away, and ensureSession → _fetchPreKeyBundle
+        // re-read each device doc individually (~200-500ms per read). Now we
+        // cache the bundle data here so those reads become free cache hits.
+        // On the send path this eliminates ~10 redundant Firestore reads.
+        final now = DateTime.now();
+        for (final doc in snap.docs) {
+          final deviceId = int.tryParse(doc.id);
+          if (deviceId == null) continue;
+          ids.add(deviceId);
+          final data = doc.data();
+          final bundle = data['keyBundle'] as Map<String, dynamic>?;
+          if (bundle != null) {
+            _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+
+            // Check if identity key changed (indicating a reinstall on the same deviceId)
+            final identityPubStr = bundle['identityPub'] as String?;
+            if (identityPubStr != null) {
+              final addr = SignalProtocolAddress(uid, deviceId);
+              final trustedKey = _stores.identityStore.trustedKeys[addr];
+              if (trustedKey != null) {
+                final currentPubBytes = trustedKey.serialize();
+                final newPubBytes = base64Decode(identityPubStr);
+                if (!listEquals(currentPubBytes, newPubBytes)) {
+                  // ignore: avoid_print
+                  print('[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
+                  await _stores.sessionStore.deleteSession(addr);
+                  _stores.identityStore.trustedKeys.remove(addr);
+                  _stores.markDirty();
+                }
+              }
             }
           }
         }
-      }
-    }
 
-    // ── Detect device-list changes (peer reinstall / new device) ────────
-    // If any device IDs disappeared since our last fetch, the peer
-    // reinstalled or rotated their identity. Delete the stale Signal
-    // sessions and bundle-data cache so the next ensureSession() fetches
-    // the new key bundle and does a fresh X3DH handshake instead of
-    // encrypting with a dead session the receiver can never decrypt.
-    final prev = _deviceIdCache[uid];
-    if (prev != null) {
-      final prevSet = prev.ids.toSet();
-      final currSet = ids.toSet();
-      final removed = prevSet.difference(currSet);
-      if (removed.isNotEmpty) {
-        // ignore: avoid_print
-        print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
-        // Parallel cleanup — the previous sequential await-in-loop created
-        // 27+ microtask hops that interleaved with GC pauses.
-        await Future.wait(removed.map((d) async {
-          try {
-            await _stores.sessionStore.deleteSession(
-              SignalProtocolAddress(uid, d),
-            );
-          } catch (_) {}
-          _bundleDataCache.remove('$uid:$d');
-        }));
-        // Also clear bundle cache for any new devices so we fetch fresh bundles
-        for (final d in currSet.difference(prevSet)) {
-          _bundleDataCache.remove('$uid:$d');
+        // ── Detect device-list changes (peer reinstall / new device) ────────
+        // If any device IDs disappeared since our last fetch, the peer
+        // reinstalled or rotated their identity. Delete the stale Signal
+        // sessions and bundle-data cache so the next ensureSession() fetches
+        // the new key bundle and does a fresh X3DH handshake instead of
+        // encrypting with a dead session the receiver can never decrypt.
+        final prev = _deviceIdCache[uid];
+        if (prev != null) {
+          final prevSet = prev.ids.toSet();
+          final currSet = ids.toSet();
+          final removed = prevSet.difference(currSet);
+          if (removed.isNotEmpty) {
+            // ignore: avoid_print
+            print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
+            // Parallel cleanup — the previous sequential await-in-loop created
+            // 27+ microtask hops that interleaved with GC pauses.
+            await Future.wait(removed.map((d) async {
+              try {
+                await _stores.sessionStore.deleteSession(
+                  SignalProtocolAddress(uid, d),
+                );
+              } catch (_) {}
+              _bundleDataCache.remove('$uid:$d');
+            }));
+            // Also clear bundle cache for any new devices so we fetch fresh bundles
+            for (final d in currSet.difference(prevSet)) {
+              _bundleDataCache.remove('$uid:$d');
+            }
+            _stores.markDirty();
+          }
         }
-        _stores.markDirty();
-      }
-    }
 
-    _deviceIdCache[uid] = (at: now, ids: ids);
-    return ids;
+        _deviceIdCache[uid] = (at: now, ids: ids);
+        return ids;
+      } finally {
+        _deviceIdsQueries.remove(uid);
+      }
+    }();
+
+    _deviceIdsQueries[uid] = future;
+    return future;
   }
 
   void _refreshDeviceIds(String uid) {
@@ -546,6 +559,13 @@ class SignalService {
   Future<void> _prewarmSingle(String uid) async {
     try {
       final devices = await _listDeviceIds(uid);
+
+      // If we are prewarming our own device list, we only need to fetch the device list
+      // (which _listDeviceIds above did) to populate _deviceIdCache[uid].
+      // We can skip ensureSession because we don't build sessions with our own devices.
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == currentUid) return;
+
       // Apply the same cap as encryptForUser so we don't build sessions
       // for stale devices that will never be used.
       var capped = devices.toList();
