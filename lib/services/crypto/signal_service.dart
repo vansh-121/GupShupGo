@@ -317,6 +317,37 @@ class SignalService {
         .map((d) => int.tryParse(d.id))
         .whereType<int>()
         .toList();
+
+    // ── Detect device-list changes (peer reinstall / new device) ────────
+    // If any device IDs disappeared since our last fetch, the peer
+    // reinstalled or rotated their identity. Delete the stale Signal
+    // sessions and bundle-data cache so the next ensureSession() fetches
+    // the new key bundle and does a fresh X3DH handshake instead of
+    // encrypting with a dead session the receiver can never decrypt.
+    final prev = _deviceIdCache[uid];
+    if (prev != null) {
+      final prevSet = prev.ids.toSet();
+      final currSet = ids.toSet();
+      final removed = prevSet.difference(currSet);
+      if (removed.isNotEmpty) {
+        // ignore: avoid_print
+        print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
+        for (final d in removed) {
+          try {
+            await _stores.sessionStore.deleteSession(
+              SignalProtocolAddress(uid, d),
+            );
+          } catch (_) {}
+          _bundleDataCache.remove('$uid:$d');
+        }
+        // Also clear bundle cache for any new devices so we fetch fresh bundles
+        for (final d in currSet.difference(prevSet)) {
+          _bundleDataCache.remove('$uid:$d');
+        }
+        _stores.markDirty();
+      }
+    }
+
     _deviceIdCache[uid] = (at: DateTime.now(), ids: ids);
     return ids;
   }
@@ -335,6 +366,21 @@ class SignalService {
   /// see the new device immediately.
   static void invalidateDeviceCache(String uid) =>
       _deviceIdCache.remove(uid);
+
+  /// Trigger a non-blocking background refresh of the device-id cache for
+  /// [uid]. Unlike [invalidateDeviceCache] (which wipes the cache and forces
+  /// the next lookup to block on Firestore), this keeps the cached data
+  /// available for immediate use while fetching fresh data in the background.
+  /// When the refresh completes, [_fetchAndCacheDeviceIds] auto-detects
+  /// device-list changes and cleans up stale sessions / bundle caches.
+  ///
+  /// Call from chat screen open so that if the peer reinstalled, we detect
+  /// the change within seconds rather than waiting for the 5-min
+  /// stale-while-revalidate window.
+  static void refreshDeviceCache(String uid) {
+    if (_instance == null) return; // Signal not initialized yet
+    _instance!._refreshDeviceIds(uid);
+  }
 
   // ── PreKey bundle Firestore cache ──────────────────────────────────────
   // Caches the raw keyBundle data from Firestore so prewarmSessions →

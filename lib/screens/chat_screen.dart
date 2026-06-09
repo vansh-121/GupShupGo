@@ -145,6 +145,13 @@ class _ChatScreenState extends State<ChatScreen> {
     // fetch, no consumeOneTimePreKey HTTP round-trip. This is what
     // collapses the "first message to a new contact takes 15+ seconds"
     // into 1-2 seconds.
+    //
+    // We also trigger a non-blocking device-list refresh so that if the
+    // peer reinstalled (new deviceId), we detect the change immediately
+    // and clean up stale sessions instead of waiting for the 5-min
+    // stale-while-revalidate window.
+    // ignore: discarded_futures
+    SignalService.refreshDeviceCache(widget.contact.id);
     // ignore: discarded_futures
     SignalService.instance.prewarmSessions([widget.contact.id]);
   }
