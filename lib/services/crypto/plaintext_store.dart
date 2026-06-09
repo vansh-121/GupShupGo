@@ -410,6 +410,40 @@ class PlaintextStore {
     return list;
   }
 
+  /// Get the latest message timestamp stored locally for a chat room
+  Future<int?> getLatestMessageTimestamp(String chatRoomId) async {
+    final rows = await _db.query(
+      _messagesTable,
+      columns: const ['timestamp'],
+      where: 'chat_room_id = ?',
+      whereArgs: [chatRoomId],
+      orderBy: 'timestamp DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['timestamp'] as int?;
+  }
+
+  /// Fetch specific messages by ID
+  Future<List<MessageModel>> getMessagesByIds(List<String> ids) async {
+    if (ids.isEmpty) return [];
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final rows = await _db.query(
+      _messagesTable,
+      where: 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
+    final list = <MessageModel>[];
+    for (final r in rows) {
+      try {
+        final jsonStr = r['message_json'] as String;
+        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        list.add(MessageModel.fromJson(map));
+      } catch (_) {}
+    }
+    return list;
+  }
+
   /// Delete a message locally
   Future<void> deleteMessage(String messageId, String chatRoomId) async {
     await _db.delete(

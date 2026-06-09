@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -478,6 +482,7 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
     int? audioDuration,
+    String? localFilePath,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -520,6 +525,7 @@ class ChatService {
       statusReplyMediaUrl: statusReplyMediaUrl,
       statusReplyCaption: statusReplyCaption,
       statusReplyBackgroundColor: statusReplyBackgroundColor,
+      localFilePath: localFilePath,
     );
     final ps = await PlaintextStore.instance();
     await ps.saveMessage(optimistic, chatRoomId);
@@ -545,6 +551,7 @@ class ChatService {
         statusReplyMediaUrl: statusReplyMediaUrl,
         statusReplyCaption: statusReplyCaption,
         statusReplyBackgroundColor: statusReplyBackgroundColor,
+        localFilePath: localFilePath,
       );
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
@@ -574,6 +581,7 @@ class ChatService {
     String? statusReplyMediaUrl,
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
+    String? localFilePath,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -644,6 +652,7 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+          if (localFilePath != null) 'localFilePath': localFilePath,
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
         // snapshot for our own message never needs any async lookup.
@@ -698,6 +707,7 @@ class ChatService {
       schemaVersion: schemaVersion,
       senderDeviceId: senderDeviceId,
       envelopes: envelopes,
+      localFilePath: localFilePath,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -1321,6 +1331,64 @@ class ChatService {
 
       return false;
     });
+  }
+
+  /// Downloads a media file from [message.mediaUrl] and stores it locally.
+  /// Returns the local file path if successful, or null otherwise.
+  Future<String?> downloadAndCacheMedia(MessageModel message) async {
+    final urlStr = message.mediaUrl;
+    if (urlStr == null || urlStr.isEmpty) return null;
+
+    try {
+      final dbDir = await getDatabasesPath();
+      final cacheDir = Directory(p.join(dbDir, 'gsg_chat_media'));
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      // Determine the extension (simple check)
+      String extension = 'bin';
+      if (message.type == MessageType.image) {
+        extension = 'jpg';
+      } else if (message.type == MessageType.audio) {
+        extension = 'm4a';
+      } else if (message.type == MessageType.video) {
+        extension = 'mp4';
+      } else {
+        // Fallback: parse from URL path if possible
+        try {
+          final uri = Uri.parse(urlStr);
+          final pathSegments = uri.pathSegments;
+          if (pathSegments.isNotEmpty) {
+            final fileName = pathSegments.last;
+            final dotIdx = fileName.lastIndexOf('.');
+            if (dotIdx != -1) {
+              extension = fileName.substring(dotIdx + 1);
+            }
+          }
+        } catch (_) {}
+      }
+
+      final localPath = p.join(cacheDir.path, '${message.id}.$extension');
+      final localFile = File(localPath);
+
+      if (await localFile.exists()) {
+        return localPath;
+      }
+
+      // Fetch from network
+      final response = await http.get(Uri.parse(urlStr));
+      if (response.statusCode == 200) {
+        await localFile.writeAsBytes(response.bodyBytes);
+        return localPath;
+      } else {
+        if (kDebugMode) debugPrint('[ChatService] Failed to download media: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[ChatService] Error downloading media: $e');
+      return null;
+    }
   }
 }
 

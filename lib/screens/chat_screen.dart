@@ -2091,6 +2091,7 @@ class _ChatScreenState extends State<ChatScreen> {
           type: MessageType.audio,
           mediaUrl: audioUrl,
           audioDuration: durationSeconds,
+          localFilePath: filePath,
         );
 
         _scrollToBottom();
@@ -2376,6 +2377,7 @@ class _ChatScreenState extends State<ChatScreen> {
           senderName: widget.currentUserName,
           type: MessageType.image,
           mediaUrl: imageUrl,
+          localFilePath: compressed.path,
         );
 
         _scrollToBottom();

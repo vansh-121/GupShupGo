@@ -92,19 +92,21 @@ class SyncService {
 
     if (kDebugMode) debugPrint('[SyncService] Starting sync for room: $roomId');
 
+    // 1. Set up the sliding-window real-time listener for the last 50 messages
     final sub = _firestore
         .collection('chatRooms')
         .doc(roomId)
         .collection('messages')
         .orderBy('timestamp', descending: true)
-        .limit(100)
+        .limit(50)
         .snapshots()
         .listen((snapshot) async {
       try {
         final store = await PlaintextStore.instance();
         
-        // Load existing local messages for diffing
-        final localMessages = await store.getMessages(roomId);
+        // Fetch only recent local messages corresponding to document IDs in snapshot
+        final messageIds = snapshot.docs.map((doc) => doc.id).toList();
+        final localMessages = await store.getMessagesByIds(messageIds);
         final localMap = {for (final m in localMessages) m.id: m};
 
         final toSave = <MessageModel>[];
@@ -116,22 +118,19 @@ class SyncService {
 
           final isLockedPlaceholder = localMsg != null && localMsg.text.startsWith('🔒');
           if (localMsg == null || isLockedPlaceholder) {
-            // Message is not present locally or is currently a locked placeholder.
-            // Attempt to decrypt it.
             final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
             if (decrypted != null) {
               toSave.add(decrypted);
               hasChanges = true;
-            } else if (localMsg == null) {
-              // Only write the locked placeholder if the vault is unlocked/ready.
-              // If the vault is locked, skip writing this message to SQLite so we can retry on unlock.
-              if (VaultCipher.instance.isReady) {
-                toSave.add(_lockedPlaceholder(serverMsg));
-                hasChanges = true;
+              if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
+                _triggerMediaDownload(decrypted, roomId);
               }
+            } else if (localMsg == null && VaultCipher.instance.isReady) {
+              toSave.add(_lockedPlaceholder(serverMsg));
+              hasChanges = true;
             }
           } else {
-            // Message is present and successfully decrypted. Check if status, sync status, or media changed.
+            // Check if status, sync status, or media changed
             if (localMsg.status != serverMsg.status ||
                 localMsg.syncPending != serverMsg.syncPending ||
                 localMsg.mediaUrl != serverMsg.mediaUrl) {
@@ -142,6 +141,14 @@ class SyncService {
               );
               toSave.add(updated);
               hasChanges = true;
+              if (updated.mediaUrl != null && updated.localFilePath == null) {
+                _triggerMediaDownload(updated, roomId);
+              }
+            } else {
+              // Trigger media download if the local message hasn't cached it yet
+              if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
+                _triggerMediaDownload(localMsg, roomId);
+              }
             }
           }
         }
@@ -184,6 +191,69 @@ class SyncService {
     });
 
     _messageSubs[roomId] = sub;
+
+    // 2. Perform background delta sync for historical messages since lastSavedTimestamp
+    unawaited(() async {
+      try {
+        final store = await PlaintextStore.instance();
+        final lastSavedTimestamp = await store.getLatestMessageTimestamp(roomId);
+        if (lastSavedTimestamp != null) {
+          if (kDebugMode) {
+            debugPrint('[SyncService] Delta query for room $roomId from timestamp $lastSavedTimestamp');
+          }
+          final querySnap = await _firestore
+              .collection('chatRooms')
+              .doc(roomId)
+              .collection('messages')
+              .where('timestamp', isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(lastSavedTimestamp))
+              .orderBy('timestamp')
+              .get();
+
+          if (querySnap.docs.isNotEmpty) {
+            if (kDebugMode) {
+              debugPrint('[SyncService] Found ${querySnap.docs.length} messages in delta query for room $roomId');
+            }
+            final toSave = <MessageModel>[];
+            for (final doc in querySnap.docs) {
+              final serverMsg = MessageModel.fromFirestore(doc);
+              final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
+              if (decrypted != null) {
+                toSave.add(decrypted);
+                if (decrypted.mediaUrl != null) {
+                  _triggerMediaDownload(decrypted, roomId);
+                }
+              } else if (VaultCipher.instance.isReady) {
+                toSave.add(_lockedPlaceholder(serverMsg));
+              }
+            }
+            if (toSave.isNotEmpty) {
+              await store.saveMessagesBatch(toSave, roomId);
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SyncService] Error performing background delta sync in room $roomId: $e');
+        }
+      }
+    }());
+  }
+
+  void _triggerMediaDownload(MessageModel message, String chatRoomId) {
+    unawaited(() async {
+      try {
+        final localPath = await ChatService.instance.downloadAndCacheMedia(message);
+        if (localPath != null) {
+          final store = await PlaintextStore.instance();
+          final updatedMsg = message.copyWith(localFilePath: localPath);
+          await store.saveMessage(updatedMsg, chatRoomId);
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SyncService] Error downloading media for message ${message.id}: $e');
+        }
+      }
+    }());
   }
 
   MessageModel _lockedPlaceholder(MessageModel msg) {
