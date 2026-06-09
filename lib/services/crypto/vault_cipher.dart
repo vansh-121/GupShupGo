@@ -235,6 +235,10 @@ class VaultCipher {
 
     await _ss.delete(key: _localKeyKey);
     await _ss.delete(key: _localUidKey);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('gsg_vault_migrated_$uid');
+    } catch (_) {}
     _key = null;
     _uid = null;
 
@@ -257,6 +261,10 @@ class VaultCipher {
   Future<void> migrateLegacyEntries(String uid) async {
     final key = _key;
     if (key == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final prefKey = 'gsg_vault_migrated_$uid';
+    if (prefs.getBool(prefKey) == true) return;
 
     // msgVault: legacy format is { p: <json string> }
     await _sweep(
@@ -296,6 +304,8 @@ class VaultCipher {
         }
       },
     );
+
+    await prefs.setBool(prefKey, true);
   }
 
   Future<void> _sweep(
@@ -578,6 +588,10 @@ class VaultCipher {
     try {
       final ps = await PlaintextStore.instance();
       await ps.wipe();
+    } catch (_) {}
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('gsg_vault_migrated_$uid');
     } catch (_) {}
   }
 

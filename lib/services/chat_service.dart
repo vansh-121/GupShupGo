@@ -268,6 +268,16 @@ class ChatService {
 
   Future<Map<String, dynamic>?> _loadFromVault(
       String uid, String messageId) async {
+    // Await any in-flight bulk prewarm first. If it's already completed, this returns instantly.
+    // This prevents firing 100+ concurrent individual Firestore reads when the bulk load
+    // is already fetching them or has completed.
+    final prewarm = _preWarmVaultCache[uid];
+    if (prewarm != null) {
+      await prewarm;
+      final memo = _payloadMemo[messageId];
+      if (memo != null) return memo;
+    }
+
     try {
       final doc = await _firestore
           .collection('users')

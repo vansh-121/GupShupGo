@@ -41,6 +41,23 @@ class SignalService {
   SignalService._(this._stores);
   final PersistentSignalStores _stores;
 
+  Future<T> _runSignalAction<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    runZonedGuarded(() async {
+      try {
+        final res = await action();
+        completer.complete(res);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    }, (error, stack) {
+      if (!completer.isCompleted) {
+        completer.completeError(error, stack);
+      }
+    });
+    return completer.future;
+  }
+
   static SignalService? _instance;
   static SignalService get instance {
     final i = _instance;
@@ -73,25 +90,27 @@ class SignalService {
 
   /// Build a session by fetching the peer's PreKeyBundle from Firestore.
   /// Idempotent — bails out cheaply if a session already exists.
-  Future<void> ensureSession(String peerUid, int peerDeviceId) async {
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    if (await _stores.sessionStore.containsSession(addr)) return;
+  Future<void> ensureSession(String peerUid, int peerDeviceId) {
+    return _runSignalAction(() async {
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      if (await _stores.sessionStore.containsSession(addr)) return;
 
-    final bundle = await _fetchPreKeyBundle(peerUid, peerDeviceId);
-    if (bundle == null) {
-      throw StateError(
-          'No keyBundle for $peerUid:$peerDeviceId — peer is not E2EE-ready.');
-    }
+      final bundle = await _fetchPreKeyBundle(peerUid, peerDeviceId);
+      if (bundle == null) {
+        throw StateError(
+            'No keyBundle for $peerUid:$peerDeviceId — peer is not E2EE-ready.');
+      }
 
-    final builder = SessionBuilder(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
-    await builder.processPreKeyBundle(bundle);
-    _stores.markDirty();
+      final builder = SessionBuilder(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
+      await builder.processPreKeyBundle(bundle);
+      _stores.markDirty();
+    });
   }
 
   /// Fetches the peer's public PreKeyBundle from Firestore. Returns null if
@@ -182,46 +201,50 @@ class SignalService {
 
   /// Encrypt for a single peer device.
   Future<EncryptedEnvelope> encrypt(
-      String peerUid, int peerDeviceId, Uint8List plaintext) async {
-    await ensureSession(peerUid, peerDeviceId);
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    final cipher = SessionCipher(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
-    final ct = await cipher.encrypt(plaintext);
-    _stores.markDirty();
-    return EncryptedEnvelope(
-      bytes: ct.serialize(),
-      isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
-    );
+      String peerUid, int peerDeviceId, Uint8List plaintext) {
+    return _runSignalAction(() async {
+      await ensureSession(peerUid, peerDeviceId);
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      final cipher = SessionCipher(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
+      final ct = await cipher.encrypt(plaintext);
+      _stores.markDirty();
+      return EncryptedEnvelope(
+        bytes: ct.serialize(),
+        isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
+      );
+    });
   }
 
   /// Decrypt from a single peer device.
   Future<Uint8List> decrypt(
-      String peerUid, int peerDeviceId, EncryptedEnvelope env) async {
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    final cipher = SessionCipher(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
+      String peerUid, int peerDeviceId, EncryptedEnvelope env) {
+    return _runSignalAction(() async {
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      final cipher = SessionCipher(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
 
-    Uint8List plaintext;
-    if (env.isPreKeyMessage) {
-      final msg = PreKeySignalMessage(env.bytes);
-      plaintext = await cipher.decrypt(msg);
-    } else {
-      final msg = SignalMessage.fromSerialized(env.bytes);
-      plaintext = await cipher.decryptFromSignal(msg);
-    }
-    _stores.markDirty();
-    return plaintext;
+      Uint8List plaintext;
+      if (env.isPreKeyMessage) {
+        final msg = PreKeySignalMessage(env.bytes);
+        plaintext = await cipher.decrypt(msg);
+      } else {
+        final msg = SignalMessage.fromSerialized(env.bytes);
+        plaintext = await cipher.decryptFromSignal(msg);
+      }
+      _stores.markDirty();
+      return plaintext;
+    });
   }
 
   /// Fan-out encrypt for every device the recipient (and the sender's other
