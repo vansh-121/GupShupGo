@@ -321,14 +321,57 @@ class SignalService {
   /// can reuse the same cache instead of re-querying Firestore.
   Future<List<int>> listDeviceIdsCached(String uid) => _listDeviceIds(uid);
 
+  // Background check for peer reinstalls. Compares the peer's Firestore
+  // `deviceUpdatedAt` timestamp (written by DeviceIdentityService on every
+  // new device registration) against our cache age. If the peer registered
+  // a new device after our cache was populated, we invalidate and force a
+  // fresh query so the next message encrypts to the correct device(s).
+  void _checkDeviceUpdatedAt(String uid, DateTime cacheTime) {
+    // Don't re-check if we already have an in-flight refresh.
+    if (_deviceIdRefreshInFlight.contains(uid)) return;
+    _deviceIdRefreshInFlight.add(uid);
+    () async {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        final data = userDoc.data();
+        if (data != null) {
+          final ts = data['deviceUpdatedAt'];
+          if (ts is Timestamp) {
+            final updatedAt = ts.toDate();
+            if (updatedAt.isAfter(cacheTime)) {
+              // Peer registered a new device AFTER our cache was built.
+              // Bust the cache and fetch fresh device IDs.
+              _deviceIdCache.remove(uid);
+              _bundleDataCache.removeWhere((k, _) => k.startsWith('$uid:'));
+              await _fetchAndCacheDeviceIds(uid);
+            }
+          }
+        }
+      } catch (_) {}
+      _deviceIdRefreshInFlight.remove(uid);
+    }();
+  }
+
   Future<List<int>> _listDeviceIds(String uid) async {
     final hit = _deviceIdCache[uid];
     if (hit != null) {
+      final age = DateTime.now().difference(hit.at);
       // Stale-but-usable: return cached IDs immediately, refresh in the
       // background. The send path NEVER blocks on this query after the
       // first lookup for a peer.
-      if (DateTime.now().difference(hit.at) > _deviceIdFreshWindow) {
+      if (age > _deviceIdFreshWindow) {
         _refreshDeviceIds(uid);
+      } else {
+        // Cache is fresh enough by TTL, but the peer may have reinstalled.
+        // Kick off a lightweight background check against the peer's
+        // Firestore `deviceUpdatedAt` field. If they registered a new
+        // device after our cache was built, the cache is busted for the
+        // NEXT send (this send still uses the cached value — the check
+        // runs in parallel and is non-blocking).
+        _checkDeviceUpdatedAt(uid, hit.at);
       }
       return hit.ids;
     }
@@ -360,6 +403,24 @@ class SignalService {
       final bundle = data['keyBundle'] as Map<String, dynamic>?;
       if (bundle != null) {
         _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+
+        // Check if identity key changed (indicating a reinstall on the same deviceId)
+        final identityPubStr = bundle['identityPub'] as String?;
+        if (identityPubStr != null) {
+          final addr = SignalProtocolAddress(uid, deviceId);
+          final trustedKey = _stores.identityStore.trustedKeys[addr];
+          if (trustedKey != null) {
+            final currentPubBytes = trustedKey.serialize();
+            final newPubBytes = base64Decode(identityPubStr);
+            if (!listEquals(currentPubBytes, newPubBytes)) {
+              // ignore: avoid_print
+              print('[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
+              await _stores.sessionStore.deleteSession(addr);
+              _stores.identityStore.trustedKeys.remove(addr);
+              _stores.markDirty();
+            }
+          }
+        }
       }
     }
 

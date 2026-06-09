@@ -39,8 +39,8 @@ class PersistentSignalStores {
     required _Persistor persistor,
   })  : identityStore =
             InMemoryIdentityKeyStore(identityKeyPair, registrationId),
-        preKeyStore = InMemoryPreKeyStore(),
-        signedPreKeyStore = InMemorySignedPreKeyStore(),
+        preKeyStore = SafePreKeyStore(),
+        signedPreKeyStore = SafeSignedPreKeyStore(),
         sessionStore = InMemorySessionStore(),
         _persistor = persistor;
 
@@ -51,8 +51,8 @@ class PersistentSignalStores {
   final int registrationId;
 
   final InMemoryIdentityKeyStore identityStore;
-  final InMemoryPreKeyStore preKeyStore;
-  final InMemorySignedPreKeyStore signedPreKeyStore;
+  final SafePreKeyStore preKeyStore;
+  final SafeSignedPreKeyStore signedPreKeyStore;
   final InMemorySessionStore sessionStore;
   final _Persistor _persistor;
 
@@ -269,4 +269,89 @@ Uint8List signalRandomBytes(int length) {
   // Uses the same RNG libsignal uses internally; falls through to the
   // platform-secure RNG.
   return generateRandomBytes(length);
+}
+
+class SafePreKeyStore extends InMemoryPreKeyStore {
+  @override
+  Future<PreKeyRecord> loadPreKey(int preKeyId) async {
+    try {
+      return await super.loadPreKey(preKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<void> storePreKey(int preKeyId, PreKeyRecord record) async {
+    try {
+      await super.storePreKey(preKeyId, record);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<bool> containsPreKey(int preKeyId) async {
+    try {
+      return await super.containsPreKey(preKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<void> removePreKey(int preKeyId) async {
+    try {
+      await super.removePreKey(preKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+}
+
+class SafeSignedPreKeyStore extends InMemorySignedPreKeyStore {
+  @override
+  Future<SignedPreKeyRecord> loadSignedPreKey(int signedPreKeyId) async {
+    try {
+      return await super.loadSignedPreKey(signedPreKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<void> storeSignedPreKey(int signedPreKeyId, SignedPreKeyRecord record) async {
+    try {
+      await super.storeSignedPreKey(signedPreKeyId, record);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<bool> containsSignedPreKey(int signedPreKeyId) async {
+    try {
+      return await super.containsSignedPreKey(signedPreKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<void> removeSignedPreKey(int signedPreKeyId) async {
+    try {
+      await super.removeSignedPreKey(signedPreKeyId);
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
+
+  @override
+  Future<List<SignedPreKeyRecord>> loadSignedPreKeys() async {
+    try {
+      return await super.loadSignedPreKeys();
+    } catch (e, st) {
+      return Future.error(e, st);
+    }
+  }
 }

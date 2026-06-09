@@ -202,6 +202,19 @@ class DeviceIdentityService {
     await _ss.write(key: _deviceIdKey, value: '$deviceId');
     await _ss.write(key: _registeredFlagKey, value: userId);
     _cachedDeviceId = deviceId;
+
+    // Write a device-change timestamp to the user's profile so peers
+    // whose device-id cache is stale can detect the change within one
+    // Firestore read instead of waiting up to 5 minutes for the
+    // stale-while-revalidate TTL to expire. Without this, messages sent
+    // by the peer during that window are encrypted to the old deviceId
+    // and are permanently lost on the new install.
+    try {
+      await _firestore.collection('users').doc(userId).set({
+        'deviceUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
+
     // Drop the cached device list so peers see this device on their next
     // send instead of waiting up to 60s for the TTL to expire.
     SignalService.invalidateDeviceCache(userId);
