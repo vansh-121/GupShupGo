@@ -22,6 +22,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -323,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen>
     final state = await VaultCipher.instance.bootstrap(uid);
     if (state == VaultState.ready) {
       _migrateAndBackfillInBackground(uid);
+      SyncService.instance.init(uid, force: true);
       return;
     }
     if (!mounted) return;
@@ -336,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (!ok) return;
     ChatService.invalidatePreWarm(uid);
     StatusService.invalidatePreWarm(uid);
+    SyncService.instance.init(uid, force: true);
     _migrateAndBackfillInBackground(uid, full: true);
   }
 

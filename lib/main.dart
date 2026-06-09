@@ -22,10 +22,12 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/crypto/crypto_worker.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
+import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
@@ -97,6 +99,13 @@ void main() async {
   // cache for the current user removes the ~100ms first-send Firestore
   // query. Both are fire-and-forget — failure here is non-fatal, the
   // downstream code paths still work, they just pay first-use latency.
+  //
+  // CryptoWorker: spawn the persistent background isolate for vault
+  // operations so it's warm before the first batch decrypt request.
+  // ignore: discarded_futures
+  CryptoWorker.instance.init().catchError((e) {
+    debugPrint('CryptoWorker warm-up failed (non-fatal): $e');
+  });
   // ignore: discarded_futures
   PlaintextStore.instance().catchError((e) {
     debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
@@ -104,6 +113,7 @@ void main() async {
   });
   final cachedUid = FirebaseAuth.instance.currentUser?.uid;
   if (cachedUid != null) {
+    SyncService.instance.init(cachedUid);
     // ignore: discarded_futures
     SignalService.instance.listDeviceIdsCached(cachedUid).catchError((_) =>
         const <int>[]); // best-effort warm; cache is self-healing on miss

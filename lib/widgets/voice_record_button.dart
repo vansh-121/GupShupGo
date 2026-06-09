@@ -299,17 +299,17 @@ class _PulsingDotState extends State<_PulsingDot>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (_, __) => Opacity(
-        opacity: _animation.value,
-        child: Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: widget.color,
-            shape: BoxShape.circle,
-          ),
+    // GPU-friendly: FadeTransition uses the compositing framework's built-in
+    // opacity optimization and avoids creating an offscreen layer, unlike the
+    // Opacity widget which forces a saveLayer() on every frame.
+    return FadeTransition(
+      opacity: _animation,
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          color: widget.color,
+          shape: BoxShape.circle,
         ),
       ),
     );

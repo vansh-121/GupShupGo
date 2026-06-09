@@ -28,6 +28,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'package:video_chat_app/models/message_model.dart';
 
 class PlaintextStore {
   PlaintextStore._(this._db);
@@ -36,9 +37,12 @@ class PlaintextStore {
   static const _dbName = 'gsg_plaintext.db';
   static const _table = 'message_plaintext';
   static const _roomTable = 'chat_room_preview';
+  static const _messagesTable = 'local_messages';
 
   static PlaintextStore? _instance;
   static Completer<PlaintextStore>? _opening;
+
+  final _messageUpdates = StreamController<String>.broadcast();
 
   /// Lazily opens the DB on first call. Concurrent callers share the same
   /// Future so we don't open twice from different code paths.
@@ -50,7 +54,7 @@ class PlaintextStore {
       final dbDir = await getDatabasesPath();
       final db = await openDatabase(
         p.join(dbDir, _dbName),
-        version: 2,
+        version: 3,
         onCreate: (db, _) async {
           await db.execute('''
             CREATE TABLE $_table (
@@ -67,6 +71,14 @@ class PlaintextStore {
               updated_at INTEGER NOT NULL
             )
           ''');
+          await db.execute('''
+            CREATE TABLE $_messagesTable (
+              id TEXT PRIMARY KEY,
+              chat_room_id TEXT NOT NULL,
+              message_json TEXT NOT NULL,
+              timestamp INTEGER NOT NULL
+            )
+          ''');
         },
         onUpgrade: (db, oldV, newV) async {
           if (oldV < 2) {
@@ -76,6 +88,16 @@ class PlaintextStore {
                 last_message_text TEXT NOT NULL,
                 last_message_id TEXT NOT NULL,
                 updated_at INTEGER NOT NULL
+              )
+            ''');
+          }
+          if (oldV < 3) {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS $_messagesTable (
+                id TEXT PRIMARY KEY,
+                chat_room_id TEXT NOT NULL,
+                message_json TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
               )
             ''');
           }
@@ -293,6 +315,7 @@ class PlaintextStore {
   Future<void> wipe() async {
     await _db.delete(_table);
     await _db.delete(_roomTable);
+    await _db.delete(_messagesTable);
   }
 
   /// Removes the cached plaintext for a single message id. Used by the
@@ -323,5 +346,110 @@ class PlaintextStore {
       } catch (_) {}
     }
     return result;
+  }
+
+  // ─── Local Messages CRUD & Reactive Stream API ────────────────────────────
+
+  Stream<String> get messageUpdates => _messageUpdates.stream;
+
+  void notifyUpdate(String chatRoomId) {
+    _messageUpdates.add(chatRoomId);
+  }
+
+  /// Save a single MessageModel locally
+  Future<void> saveMessage(MessageModel message, String chatRoomId) async {
+    await _db.insert(
+      _messagesTable,
+      {
+        'id': message.id,
+        'chat_room_id': chatRoomId,
+        'message_json': jsonEncode(message.toJson()),
+        'timestamp': message.timestamp.millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    notifyUpdate(chatRoomId);
+  }
+
+  /// Batch save messages locally
+  Future<void> saveMessagesBatch(List<MessageModel> messages, String chatRoomId) async {
+    if (messages.isEmpty) return;
+    final batch = _db.batch();
+    for (final msg in messages) {
+      batch.insert(
+        _messagesTable,
+        {
+          'id': msg.id,
+          'chat_room_id': chatRoomId,
+          'message_json': jsonEncode(msg.toJson()),
+          'timestamp': msg.timestamp.millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+    notifyUpdate(chatRoomId);
+  }
+
+  /// Fetch all messages for a chat room, sorted by timestamp ascending
+  Future<List<MessageModel>> getMessages(String chatRoomId) async {
+    final rows = await _db.query(
+      _messagesTable,
+      where: 'chat_room_id = ?',
+      whereArgs: [chatRoomId],
+      orderBy: 'timestamp ASC',
+    );
+    final list = <MessageModel>[];
+    for (final r in rows) {
+      try {
+        final jsonStr = r['message_json'] as String;
+        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        list.add(MessageModel.fromJson(map));
+      } catch (_) {}
+    }
+    return list;
+  }
+
+  /// Delete a message locally
+  Future<void> deleteMessage(String messageId, String chatRoomId) async {
+    await _db.delete(
+      _messagesTable,
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+    notifyUpdate(chatRoomId);
+  }
+
+  /// Returns a reactive stream of messages for [chatRoomId], updating whenever
+  /// any message in that room is saved or deleted.
+  Stream<List<MessageModel>> watchMessages(String chatRoomId) {
+    final controller = StreamController<List<MessageModel>>();
+    StreamSubscription? sub;
+
+    Future<void> emit() async {
+      try {
+        final msgs = await getMessages(chatRoomId);
+        if (!controller.isClosed) {
+          controller.add(msgs);
+        }
+      } catch (e) {
+        if (!controller.isClosed) {
+          controller.addError(e);
+        }
+      }
+    }
+
+    controller.onListen = () {
+      emit();
+      sub = _messageUpdates.stream
+          .where((updatedId) => updatedId == chatRoomId)
+          .listen((_) => emit());
+    };
+
+    controller.onCancel = () async {
+      await sub?.cancel();
+    };
+
+    return controller.stream;
   }
 }

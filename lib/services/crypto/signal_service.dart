@@ -307,18 +307,21 @@ class SignalService {
     if (kDebugMode) debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
         '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
 
-    // Parallel fan-out across devices. Each (peerUid, deviceId) is a
-    // separate session, so concurrent encrypts don't race.
-    final tasks = <Future<MapEntry<String, EncryptedEnvelope>>>[
-      for (final d in recipientDevices)
-        encrypt(recipientUid, d, plaintext)
-            .then((env) => MapEntry('$recipientUid:$d', env)),
-      for (final d in senderOtherDevices)
-        encrypt(senderUid, d, plaintext)
-            .then((env) => MapEntry('$senderUid:$d', env)),
-    ];
-    for (final entry in await Future.wait(tasks)) {
-      out[entry.key] = entry.value;
+    // Sequential fan-out across devices with event loop yielding.
+    // Since Dart is single-threaded on the main isolate, parallelizing CPU-bound
+    // encryption tasks doesn't yield actual concurrency. Instead, we run them
+    // sequentially and yield control to the event loop before each task using
+    // Future.delayed(Duration.zero). This allows Flutter's engine to render
+    // frames in between, keeping the UI perfectly smooth (WhatsApp-level).
+    for (final d in recipientDevices) {
+      await Future.delayed(Duration.zero);
+      final env = await encrypt(recipientUid, d, plaintext);
+      out['$recipientUid:$d'] = env;
+    }
+    for (final d in senderOtherDevices) {
+      await Future.delayed(Duration.zero);
+      final env = await encrypt(senderUid, d, plaintext);
+      out['$senderUid:$d'] = env;
     }
     if (kDebugMode) debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
     return out;
@@ -573,11 +576,12 @@ class SignalService {
         capped.sort();
         capped = capped.sublist(capped.length - _maxDevicesPerUser);
       }
-      await Future.wait(capped.map((d) async {
+      for (final d in capped) {
+        await Future.delayed(Duration.zero);
         try {
           await ensureSession(uid, d);
         } catch (_) {}
-      }));
+      }
     } catch (_) {} finally {
       _prewarmFutures.remove(uid);
     }

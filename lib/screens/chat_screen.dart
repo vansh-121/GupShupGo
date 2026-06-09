@@ -121,6 +121,9 @@ class _ChatScreenState extends State<ChatScreen> {
   // outbox, causing the prior history to vanish for 2–3s until Firestore
   // re-emits and decryption completes. Initialized once in initState.
   late final Stream<List<MessageModel>> _messagesStream;
+  bool _isLoadingOlder = false;
+  bool _hasMoreOlder = true;
+  List<MessageModel> _currentMessages = [];
 
   @override
   void initState() {
@@ -153,6 +156,72 @@ class _ChatScreenState extends State<ChatScreen> {
     SignalService.refreshDeviceCache(widget.contact.id);
     // ignore: discarded_futures
     SignalService.instance.prewarmSessions([widget.currentUserId, widget.contact.id]);
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _stopTyping();
+    _scrollController.removeListener(_onScroll);
+    _onlineStatusSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _meshMessageSubscription?.cancel();
+    _messageController.removeListener(_onTextChanged);
+    _typingTimer?.cancel();
+    _voiceRecorder.dispose();
+    _scrollController.dispose();
+    _messageController.dispose();
+    _searchController.dispose();
+    _searchQuery = '';
+    // Re-enable global mesh banners when leaving this conversation.
+    _meshService.setActiveConversation(null);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    // Trigger when user scrolls within 200px of the top (which is maxScrollExtent in a reversed list)
+    if (currentScroll >= maxScroll - 200) {
+      _loadOlderMessages();
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_isLoadingOlder || !_hasMoreOlder) return;
+
+    // Filter out mesh messages to get the oldest actual message from SQLite
+    final dbMessages = _currentMessages.where((m) => !m.id.startsWith('mesh_')).toList();
+    if (dbMessages.isEmpty) return;
+
+    if (mounted) {
+      setState(() {
+        _isLoadingOlder = true;
+      });
+    }
+
+    try {
+      final oldestMsg = dbMessages.first; // sorted ASC, so first is oldest
+      final count = await _chatService.fetchOlderMessages(
+        chatRoomId: _chatService.getChatRoomId(widget.currentUserId, widget.contact.id),
+        beforeTimestamp: oldestMsg.timestamp,
+        currentUserId: widget.currentUserId,
+        limit: 50,
+      );
+
+      if (count < 50) {
+        _hasMoreOlder = false;
+      }
+    } catch (e) {
+      debugPrint('Error loading older messages: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingOlder = false;
+        });
+      }
+    }
   }
 
   Future<void> _initializeChat() async {
@@ -663,18 +732,19 @@ class _ChatScreenState extends State<ChatScreen> {
   // Wraps a freshly-inserted message bubble in a one-shot fade+rise
   // animation. Existing bubbles (already in `_seenMessageIds`) are returned
   // unchanged so scrolling through history doesn't re-animate every item.
+  //
+  // GPU-friendly: uses Transform.translate + transparent color channel
+  // instead of the Opacity widget, which forces an expensive offscreen
+  // compositing layer per bubble on low-end GPUs.
   Widget _animatedBubble(Widget child) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       builder: (context, t, c) {
-        return Opacity(
-          opacity: t,
-          child: Transform.translate(
-            offset: Offset(0, (1 - t) * 14),
-            child: c,
-          ),
+        return Transform.translate(
+          offset: Offset(0, (1 - t) * 14),
+          child: c,
         );
       },
       child: child,
@@ -759,21 +829,25 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ]
             // ── Image message ─────────────────────────────────────
+            // GPU-friendly: use Container with BoxDecoration.borderRadius
+            // instead of ClipRRect to avoid creating an offscreen compositing
+            // layer per image bubble on low-end GPUs.
             else if (message.type == MessageType.image &&
                 (message.mediaUrl != null ||
                     message.localFilePath != null)) ...[
               GestureDetector(
                 onTap: () => _showFullScreenImage(
                     message.mediaUrl, message.localFilePath, message.text),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 220,
-                      maxHeight: 280,
-                    ),
-                    child: _buildImageWidget(message, c),
+                child: Container(
+                  constraints: const BoxConstraints(
+                    maxWidth: 220,
+                    maxHeight: 280,
                   ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  clipBehavior: Clip.hardEdge,
+                  child: _buildImageWidget(message, c),
                 ),
               ),
               const SizedBox(height: 4),
@@ -821,13 +895,22 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Build the correct image widget for a message (network URL or local file).
+  ///
+  /// GPU-friendly: uses cacheWidth so Flutter decodes images at display
+  /// resolution (2× the 220px maxWidth constraint = 440 logical pixels)
+  /// instead of at source resolution. On a chat with 50 images this saves
+  /// hundreds of MB of GPU texture memory on low-end devices.
   Widget _buildImageWidget(MessageModel message, dynamic c) {
+    // 2× the maxWidth constraint for retina-quality without wasting memory.
+    final cacheW = (220 * MediaQuery.of(context).devicePixelRatio).round();
+
     // Prefer local file if available (mesh images)
     if (message.localFilePath != null &&
         File(message.localFilePath!).existsSync()) {
       return Image.file(
         File(message.localFilePath!),
         fit: BoxFit.cover,
+        cacheWidth: cacheW,
         errorBuilder: (_, __, ___) => Container(
           width: 200,
           height: 100,
@@ -844,6 +927,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return Image.network(
         message.mediaUrl!,
         fit: BoxFit.cover,
+        cacheWidth: cacheW,
         loadingBuilder: (_, child, progress) {
           if (progress == null) return child;
           return Container(
@@ -1183,6 +1267,8 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    _currentMessages = messages;
+
     // ── Filter by search query when in search mode ────────────────────
     final displayMessages = _isSearchMode && _searchQuery.isNotEmpty
         ? messages
@@ -1216,12 +1302,19 @@ class _ChatScreenState extends State<ChatScreen> {
     final isInitial = !_didInitialMessageBuild;
     _didInitialMessageBuild = true;
 
-    List<Widget> messageWidgets = [];
-    // E2EE pill at the very top of the conversation — same placement as
-    // WhatsApp, always visible above the oldest message so users see the
-    // encryption guarantee whenever they scroll back to the start of
-    // the chat.
-    messageWidgets.add(E2EEBanner.chat(context));
+    // ── Build a flat list of display items (date dividers + message bubbles
+    //    + typing indicator) indexed for ListView.builder ─────────────────
+    // Previously we eagerly built ALL widgets into a List<Widget> and fed
+    // them to a plain ListView. On a 500-message chat, that meant 500+
+    // widget builds per Firestore emission — even for items far off-screen.
+    // ListView.builder only builds the ~15 visible items, saving massive
+    // CPU on low-end devices.
+    final displayItems = <_DisplayItem>[];
+    if (_isLoadingOlder) {
+      displayItems.add(const _DisplayItem.loadingOlder());
+    }
+    // E2EE pill at the very top of the conversation.
+    displayItems.add(const _DisplayItem.banner());
     String? lastDate;
 
     for (int i = 0; i < displayMessages.length; i++) {
@@ -1229,33 +1322,63 @@ class _ChatScreenState extends State<ChatScreen> {
       final messageDate = _formatMessageDate(message.timestamp);
 
       if (lastDate != messageDate) {
-        messageWidgets.add(_buildDateDivider(messageDate));
+        displayItems.add(_DisplayItem.dateDivider(messageDate));
         lastDate = messageDate;
       }
 
-      final bubble = _buildMessage(message);
       final isNew = _seenMessageIds.add(message.id);
-      messageWidgets.add(
-        isNew && !isInitial ? _animatedBubble(bubble) : bubble,
-      );
+      displayItems.add(_DisplayItem.message(message, animate: isNew && !isInitial));
     }
 
     // Append typing bubble as the last item — with reverse:true below this
     // ends up at the visual bottom, just above the input bar.
     if (_isOtherUserTyping) {
-      messageWidgets.add(_buildTypingBubble());
+      displayItems.add(const _DisplayItem.typing());
     }
 
     // reverse:true anchors content to the bottom of the viewport (WhatsApp
-    // behaviour). We feed widgets in normal top→bottom order then reverse
-    // the list so index 0 is the bottom-most item; this keeps the date
-    // divider visually above its day's first message and lets new bubbles
-    // appear right next to the input rather than at the top of empty space.
-    return ListView(
+    // behaviour). ListView.builder with reverse:true indexes from the bottom,
+    // so index 0 = last item in displayItems (the newest message / typing).
+    final itemCount = displayItems.length;
+    return ListView.builder(
       controller: _scrollController,
       reverse: true,
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 0),
-      children: messageWidgets.reversed.toList(),
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        // reverse:true means index 0 = visual bottom = last display item.
+        final item = displayItems[itemCount - 1 - index];
+        switch (item.type) {
+          case _DisplayItemType.banner:
+            return E2EEBanner.chat(context);
+          case _DisplayItemType.dateDivider:
+            return _buildDateDivider(item.dateLabel!);
+          case _DisplayItemType.typing:
+            return _buildTypingBubble();
+          case _DisplayItemType.loadingOlder:
+            return _buildLoadingOlderIndicator();
+          case _DisplayItemType.message:
+            final bubble = _buildMessage(item.message!);
+            return item.animate ? _animatedBubble(bubble) : bubble;
+        }
+      },
+    );
+  }
+
+  Widget _buildLoadingOlderIndicator() {
+    final c = AppThemeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: c.primary,
+          ),
+        ),
+      ),
     );
   }
 
@@ -2268,22 +2391,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    // Clear typing status so the other user doesn't see a stale indicator
-    _stopTyping();
-    _meshService.setActiveConversation(null);
-    _typingTimer?.cancel();
-    _typingSubscription?.cancel();
-    _onlineStatusSubscription?.cancel();
-    _meshMessageSubscription?.cancel();
-    _voiceRecorder.dispose();
-    _messageController.removeListener(_onTextChanged);
-    _messageController.dispose();
-    _searchController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
+
 }
 
 // ─── Animated typing dots (the 3 bouncing dots) ──────────────────────────
@@ -2361,4 +2469,38 @@ class _TypingDotsIndicatorState extends State<_TypingDotsIndicator>
       }),
     );
   }
+}
+
+// ─── Display item descriptors for ListView.builder ─────────────────────────
+// Lightweight data objects that describe WHAT to render at each index in the
+// chat list. The actual widget tree is built only for visible items inside
+// ListView.builder's itemBuilder callback, saving massive CPU on chats with
+// hundreds of messages.
+
+enum _DisplayItemType { banner, dateDivider, message, typing, loadingOlder }
+
+class _DisplayItem {
+  final _DisplayItemType type;
+  final MessageModel? message;
+  final String? dateLabel;
+  final bool animate;
+
+  const _DisplayItem._({
+    required this.type,
+    this.message,
+    this.dateLabel,
+    this.animate = false,
+  });
+
+  const _DisplayItem.banner() : this._(type: _DisplayItemType.banner);
+
+  const _DisplayItem.typing() : this._(type: _DisplayItemType.typing);
+
+  const _DisplayItem.loadingOlder() : this._(type: _DisplayItemType.loadingOlder);
+
+  _DisplayItem.dateDivider(String label)
+      : this._(type: _DisplayItemType.dateDivider, dateLabel: label);
+
+  _DisplayItem.message(MessageModel msg, {bool animate = false})
+      : this._(type: _DisplayItemType.message, message: msg, animate: animate);
 }

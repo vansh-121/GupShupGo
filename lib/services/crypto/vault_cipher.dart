@@ -29,12 +29,11 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:pointycastle/key_derivators/argon2.dart';
 import 'package:pointycastle/key_derivators/api.dart' as pc;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'crypto_worker.dart';
 import 'plaintext_store.dart';
 
 enum VaultState {
@@ -79,6 +78,8 @@ class VaultCipher {
   static const _localKeyKey = 'gsg_vault_key_v1';
   static const _localUidKey = 'gsg_vault_uid_v1';
   static const _verifierConstant = 'gsg-vault-v1';
+  static const String undecryptablePlaceholderText =
+      '🔒 This message can\'t be decrypted on this device. Ask sender to resend.';
   // SharedPreferences is wiped on app uninstall on both Android and iOS,
   // which lets us detect a fresh install even when iOS Keychain survives.
   // If this marker is missing on launch we treat any cached vault key as
@@ -659,17 +660,16 @@ class VaultCipher {
     return _decryptRaw(key, doc);
   }
 
-  // ─── Batch decrypt (isolate-accelerated) ─────────────────────────────────
-
-  /// Decrypts multiple vault docs on a **background isolate** via [compute].
-  /// Returns a map of id → decrypted JSON payload. Entries that fail to
-  /// decrypt (wrong key, corrupt data) are silently omitted. This keeps the
-  /// main isolate free for rendering during bulk pre-warm on cold start.
+  /// Decrypts multiple vault docs on a **background isolate** via the
+  /// persistent [CryptoWorker]. Returns a map of id → decrypted JSON
+  /// payload. Entries that fail to decrypt (wrong key, corrupt data) are
+  /// silently omitted. This keeps the main isolate free for rendering
+  /// during bulk pre-warm on cold start.
   Future<Map<String, Map<String, dynamic>>> decryptDocsBatch(
       Map<String, Map<String, dynamic>> docs) async {
     final key = _key;
     if (key == null || docs.isEmpty) return {};
-    return compute(_batchDecryptDocs, _BatchArgs(key, docs));
+    return CryptoWorker.instance.batchDecryptDocs(key, docs);
   }
 
   /// Same as [decryptDocsBatch] but returns raw bytes instead of JSON.
@@ -678,7 +678,7 @@ class VaultCipher {
       Map<String, Map<String, dynamic>> docs) async {
     final key = _key;
     if (key == null || docs.isEmpty) return {};
-    return compute(_batchDecryptBytes, _BatchArgs(key, docs));
+    return CryptoWorker.instance.batchDecryptBytes(key, docs);
   }
 
   // ─── Internals ──────────────────────────────────────────────────────────
@@ -724,8 +724,11 @@ class VaultCipher {
     return utf8.decode(pt) == _verifierConstant;
   }
 
+  /// Derives a 32-byte AES key from a PIN and salt using Argon2id.
+  /// Runs on the persistent [CryptoWorker] isolate to keep the main
+  /// thread free for rendering during PIN setup/unlock.
   Future<Uint8List> _deriveKey(String pin, List<int> salt) async {
-    return compute(_deriveKeyIsolate, (pin, List<int>.from(salt)));
+    return CryptoWorker.instance.deriveKey(pin, List<int>.from(salt));
   }
 
   Future<void> _cacheKey(String uid, Uint8List key) async {
@@ -743,95 +746,7 @@ class VaultCipher {
   }
 }
 
-// ─── Isolate-compatible top-level helpers for compute() ────────────────────
-// compute() requires a top-level or static function — it cannot capture
-// instance state. These receive the symmetric key + docs as a plain
-// serializable argument and return the results. The AesGcm instance is
-// created locally inside the isolate.
-
-class _BatchArgs {
-  _BatchArgs(this.key, this.docs);
-  final Uint8List key;
-  final Map<String, Map<String, dynamic>> docs;
-}
-
-Future<Map<String, Map<String, dynamic>>> _batchDecryptDocs(
-    _BatchArgs args) async {
-  final gcm = AesGcm.with256bits();
-  final secretKey = SecretKey(args.key);
-  final out = <String, Map<String, dynamic>>{};
-  for (final entry in args.docs.entries) {
-    final doc = entry.value;
-    // Legacy plaintext passthrough.
-    final legacy = doc['p'] as String?;
-    if (legacy != null) {
-      try {
-        out[entry.key] = jsonDecode(legacy) as Map<String, dynamic>;
-      } catch (_) {}
-      continue;
-    }
-    final iv = doc['iv'] as String?;
-    final c = doc['c'] as String?;
-    final m = doc['m'] as String?;
-    if (iv == null || c == null || m == null) continue;
-    try {
-      final pt = await gcm.decrypt(
-        SecretBox(base64Decode(c),
-            nonce: base64Decode(iv), mac: Mac(base64Decode(m))),
-        secretKey: secretKey,
-      );
-      out[entry.key] =
-          jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
-    } catch (_) {}
-  }
-  return out;
-}
-
-Future<Map<String, Uint8List>> _batchDecryptBytes(_BatchArgs args) async {
-  final gcm = AesGcm.with256bits();
-  final secretKey = SecretKey(args.key);
-  final out = <String, Uint8List>{};
-  for (final entry in args.docs.entries) {
-    final doc = entry.value;
-    // Legacy passthrough.
-    final legacy = doc['k'] as String?;
-    if (legacy != null) {
-      try {
-        out[entry.key] = base64Decode(legacy);
-      } catch (_) {}
-      continue;
-    }
-    final iv = doc['iv'] as String?;
-    final c = doc['c'] as String?;
-    final m = doc['m'] as String?;
-    if (iv == null || c == null || m == null) continue;
-    try {
-      final pt = await gcm.decrypt(
-        SecretBox(base64Decode(c),
-            nonce: base64Decode(iv), mac: Mac(base64Decode(m))),
-        secretKey: secretKey,
-      );
-      out[entry.key] = Uint8List.fromList(pt);
-    } catch (_) {}
-  }
-  return out;
-}
-
-/// Argon2id key derivation — runs on a background isolate so the main
-/// thread doesn't freeze during PIN setup/unlock.
-Uint8List _deriveKeyIsolate((String, List<int>) args) {
-  final (pin, salt) = args;
-  final params = pc.Argon2Parameters(
-    pc.Argon2Parameters.ARGON2_id,
-    Uint8List.fromList(salt),
-    version: pc.Argon2Parameters.ARGON2_VERSION_13,
-    iterations: 3,
-    lanes: 4,
-    memoryPowerOf2: 16,
-    desiredKeyLength: 32,
-  );
-  final kd = Argon2BytesGenerator()..init(params);
-  final out = Uint8List(32);
-  kd.deriveKey(Uint8List.fromList(utf8.encode(pin)), 0, out, 0);
-  return out;
-}
+// ─── Isolate-compatible top-level helpers ──────────────────────────────────
+// These are now only used as fallbacks within CryptoWorker itself.
+// The _BatchArgs class and top-level functions are retained for backward
+// compatibility and are called from within the CryptoWorker isolate.

@@ -15,6 +15,8 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class ChatService {
+  static final ChatService instance = ChatService();
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FCMService _fcmService = FCMService();
   final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
@@ -34,7 +36,7 @@ class ChatService {
   // sender to resend rather than wondering why blue ticks went up without
   // them seeing anything.
   static const String _undecryptablePlaceholderText =
-      '🔒 This message can\'t be decrypted on this device. Ask sender to resend.';
+      VaultCipher.undecryptablePlaceholderText;
 
   /// Build a placeholder MessageModel for E2EE messages we can't decrypt.
   /// Marks schemaVersion=1 so downstream code skips re-decrypt attempts.
@@ -55,35 +57,7 @@ class ChatService {
   // success the entry is removed (Firestore re-delivers the canonical
   // message with status=sent), on failure the entry is updated to
   // status=failed so the user sees an error indicator and can retry.
-  //
-  // Static because ChatService is constructed per-screen but the outbox
-  // must outlive any single screen — a send from the chat list preview
-  // bar (hypothetical) should appear instantly when the user opens the
-  // chat screen a moment later. Keyed by chatRoomId.
-  static final Map<String, List<MessageModel>> _outbox = {};
 
-  // Broadcasts whenever _outbox changes so the merged stream in
-  // getMessages can re-emit. We use a void signal rather than passing the
-  // full outbox map to avoid forcing a copy on every notification — every
-  // listener reads _outbox directly during the merge step.
-  static final StreamController<void> _outboxNotifier =
-      StreamController<void>.broadcast();
-
-  static void _addToOutbox(String chatRoomId, MessageModel message) {
-    final list = _outbox.putIfAbsent(chatRoomId, () => <MessageModel>[]);
-    list.add(message);
-    _outboxNotifier.add(null);
-  }
-
-  static void _updateOutbox(
-      String chatRoomId, String messageId, MessageModel Function(MessageModel) update) {
-    final list = _outbox[chatRoomId];
-    if (list == null) return;
-    final idx = list.indexWhere((m) => m.id == messageId);
-    if (idx == -1) return;
-    list[idx] = update(list[idx]);
-    _outboxNotifier.add(null);
-  }
 
 
   // All decrypted message bodies (both incoming and outgoing) live in a
@@ -171,6 +145,15 @@ class ChatService {
 
   Future<void> _preWarmVault(String uid) {
     return _preWarmVaultCache.putIfAbsent(uid, () => _doPreWarmVault(uid));
+  }
+
+  /// Public entry point to trigger both SQLite and Firestore Vault pre-warming
+  /// in parallel. Called by SyncService during initialization.
+  Future<void> preWarmCaches(String uid) async {
+    await Future.wait([
+      _preWarmSqlite(uid),
+      _preWarmVault(uid),
+    ]);
   }
 
   /// Drop the per-uid pre-warm cache AND the process-wide decrypted-
@@ -538,7 +521,8 @@ class ChatService {
       statusReplyCaption: statusReplyCaption,
       statusReplyBackgroundColor: statusReplyBackgroundColor,
     );
-    _addToOutbox(chatRoomId, optimistic);
+    final ps = await PlaintextStore.instance();
+    await ps.saveMessage(optimistic, chatRoomId);
 
     try {
       return await _commitMessage(
@@ -564,11 +548,8 @@ class ChatService {
       );
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
-      // see what didn't go through and (in a future revision) tap to
-      // retry. The bubble is removed only on a successful commit, when
-      // Firestore re-delivers the canonical message.
-      _updateOutbox(chatRoomId, messageRef.id,
-          (m) => m.copyWith(status: MessageStatus.failed));
+      // see what didn't go through.
+      await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
       rethrow;
     }
   }
@@ -798,210 +779,71 @@ class ChatService {
   // the asyncExpand teardown right after the optimistic bubble appeared).
   Stream<List<MessageModel>> getMessages(
       String currentUserId, String otherUserId) {
-    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
-
-    DateTime? clearedAt;
-    List<MessageModel> latestRaw = const [];
-    List<MessageModel> latestDecrypted = const [];
-    List<MessageModel> latestCommitted = const [];
-    bool gotFirstFirestoreEmission = false;
+    final chatRoomId = getChatRoomId(currentUserId, otherUserId);
     final controller = StreamController<List<MessageModel>>();
+    
+    StreamSubscription<List<MessageModel>>? dbSub;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? chatRoomSub;
+    
+    DateTime? clearedAt;
+    List<MessageModel> latestMessages = const [];
 
-    void recomputeCommittedFromLatest() {
-      // Re-apply the clearedAt filter against the latest decrypted list
-      // without re-decrypting anything. clearedAt changes are rare (only
-      // when the user taps "Clear all chats"), but we still want a fresh
-      // filter pass to be cheap when it does happen.
+    void emit() {
+      if (controller.isClosed) return;
       if (clearedAt == null) {
-        latestCommitted = latestDecrypted;
+        controller.add(latestMessages);
       } else {
-        latestCommitted = latestDecrypted
+        final filtered = latestMessages
             .where((m) => m.timestamp.isAfter(clearedAt!))
             .toList();
+        controller.add(filtered);
       }
     }
 
-    List<MessageModel> combine() {
-      final outboxList = _outbox[chatRoomId] ?? const <MessageModel>[];
-      if (outboxList.isEmpty) return latestCommitted;
-      final committedIds = {for (final m in latestCommitted) m.id};
-      final merged = <MessageModel>[
-        ...latestCommitted,
-        ...outboxList.where((m) => !committedIds.contains(m.id)),
-      ];
-      merged.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      return merged;
-    }
-
-    // Re-runs the decrypt pass over the last raw Firestore snapshot.
-    // Called on vault-ready ticks so the moment the user unlocks
-    // (typically right after reinstall) every currently-displayed
-    // "🔒 can't decrypt" bubble retries against the now-readable vault
-    // and recovers its plaintext — without waiting for an unrelated
-    // Firestore change to force a fresh snapshot.
-    Future<void> redecryptLatest() async {
-      if (latestRaw.isEmpty) return;
-      final resolved = await Future.wait(
-        latestRaw.map((m) async {
-          final r = await decryptForRendering(m, currentUserId);
-          return r ?? _lockedPlaceholder(m);
-        }),
-      );
-      latestDecrypted = resolved;
-      recomputeCommittedFromLatest();
-      if (!controller.isClosed) controller.add(combine());
-    }
-
-    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
-        chatRoomSub;
-    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? messagesSub;
-    StreamSubscription<void>? outboxSub;
-    StreamSubscription<void>? vaultReadySub;
-
-    // ignore: discarded_futures
-    Future<void> start() async {
-      // PERF CRITICAL: Await the SQLite bulk-load (~10-50ms) BEFORE attaching
-      // the Firestore snapshot listener. Otherwise, the snapshot arrives instantly
-      // and triggers 500 parallel individual SQLite `store.get()` queries (one
-      // per message), which blocks the platform channel and stalls rendering
-      // for 15-20 seconds!
-      await _preWarmSqlite(currentUserId);
-
-      // Kick off the Firestore-vault bulk prewarm in the BACKGROUND.
-      // The vault read scales with the user's total message count and requires
-      // a network round-trip. We let it run fire-and-forget; when it completes,
-      // we re-decrypt the latest snapshot so any bubbles that fell back to
-      // "locked" auto-recover.
-      unawaited(_preWarmVault(currentUserId).then((_) {
-        // ignore: discarded_futures
-        redecryptLatest();
-      }).catchError((_) {}));
-
-      // (1) Track clearedAt independently of the messages subscription.
-      chatRoomSub = _firestore
-          .collection(_chatRoomsCollection)
-          .doc(chatRoomId)
-          .snapshots()
-          .listen((snap) {
-        DateTime? newClearedAt;
-        if (snap.exists) {
-          final data = snap.data();
-          final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
-          final ts = clearedAtMap?[currentUserId];
-          if (ts is Timestamp) newClearedAt = ts.toDate();
-        }
-        if (newClearedAt == clearedAt) return; // no-op for unrelated changes
-        clearedAt = newClearedAt;
-        recomputeCommittedFromLatest();
-        if (!controller.isClosed && gotFirstFirestoreEmission) {
-          controller.add(combine());
-        }
-      });
-
-      // (2) Messages subscription — started once, never torn down.
-      messagesSub = _firestore
-          .collection(_chatRoomsCollection)
-          .doc(chatRoomId)
-          .collection(_messagesCollection)
-          .orderBy('timestamp', descending: false)
-          .snapshots()
-          .listen((snapshot) async {
-        // Wrap in try-catch: errors thrown from an async .listen callback
-        // escape to the zone instead of going through onError. Without
-        // this, any unexpected throw (stale Signal key, broken protobuf,
-        // etc.) floods the console via the runZonedGuarded handler.
-        try {
-        final raw = snapshot.docs
-            .map((doc) => MessageModel.fromFirestore(doc))
-            .toList();
-        latestRaw = raw;
-        // Decrypt E2EE messages in parallel. v1 messages pass through.
-        // Messages we can't decrypt (post-reinstall, lost session, etc.)
-        // are surfaced as a "locked" placeholder bubble instead of being
-        // dropped — so the user sees that something arrived and can ask
-        // the sender to resend, rather than wondering why the sender's
-        // blue ticks went up with no visible message.
-        //
-        // PERF: skip already-memoized messages entirely — they hit the
-        // synchronous `_payloadMemo[msg.id]` path inside
-        // decryptForRendering, but previously the Future.wait still
-        // created N microtask-hops for every message in the snapshot.
-        // On a 500-message chat this added measurable latency on every
-        // Firestore emission (typing indicator, read receipt, etc.).
-        // Now only truly-new messages enter the decrypt pipeline.
-        final resolved = await Future.wait(
-          raw.map((m) async {
-            if (m.schemaVersion < 2) return m;
-            if (_payloadMemo.containsKey(m.id)) {
-              return _applyPayload(m, _payloadMemo[m.id]!);
-            }
-            final r = await decryptForRendering(m, currentUserId);
-            return r ?? _lockedPlaceholder(m);
-          }),
+    controller.onListen = () async {
+      try {
+        final ps = await PlaintextStore.instance();
+        dbSub = ps.watchMessages(chatRoomId).listen(
+          (data) {
+            latestMessages = data;
+            emit();
+          },
+          onError: (e, st) {
+            if (!controller.isClosed) controller.addError(e, st);
+          },
         );
-        latestDecrypted = resolved;
-        recomputeCommittedFromLatest();
-        gotFirstFirestoreEmission = true;
 
-        // Cleanup outbox entries whose canonical Firestore copy has now
-        // landed. Done here (not in sendMessage's commit-ack) so there's
-        // no frame where the bubble disappears before the canonical
-        // version is in the list.
-        final outboxList = _outbox[chatRoomId];
-        if (outboxList != null && outboxList.isNotEmpty) {
-          final committedIds = {for (final m in latestCommitted) m.id};
-          final stillPending = outboxList
-              .where((m) => !committedIds.contains(m.id))
-              .toList();
-          if (stillPending.length != outboxList.length) {
-            if (stillPending.isEmpty) {
-              _outbox.remove(chatRoomId);
-            } else {
-              _outbox[chatRoomId] = stillPending;
-            }
+        // Listen to chatRoom document to track clearedAt (cleared chats)
+        chatRoomSub = _firestore
+            .collection(_chatRoomsCollection)
+            .doc(chatRoomId)
+            .snapshots()
+            .listen((snap) {
+          DateTime? newClearedAt;
+          if (snap.exists) {
+            final data = snap.data();
+            final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
+            final ts = clearedAtMap?[currentUserId];
+            if (ts is Timestamp) newClearedAt = ts.toDate();
           }
+          if (newClearedAt != clearedAt) {
+            clearedAt = newClearedAt;
+            emit();
+          }
+        });
+      } catch (e, st) {
+        if (!controller.isClosed) {
+          controller.addError(e, st);
+          controller.close();
         }
-
-        if (!controller.isClosed) controller.add(combine());
-        } catch (e, st) {
-          if (kDebugMode) debugPrint('Message stream decrypt/render error (non-fatal): $e');
-          if (!controller.isClosed) controller.addError(e, st);
-        }
-      }, onError: (e, st) {
-        if (!controller.isClosed) controller.addError(e, st);
-      });
-
-      // (3) Outbox ticks: emit the combined view on every change. Until
-      // Firestore has emitted at least once, latestCommitted is empty
-      // and combine() falls back to outbox-only — which is the right
-      // behaviour on cold open with a pending send.
-      outboxSub = _outboxNotifier.stream.listen((_) {
-        if (!controller.isClosed) controller.add(combine());
-      });
-
-      // (4) Vault-ready ticks: re-decrypt the cached raw snapshot the
-      // moment the vault becomes usable. Fixes the post-reinstall case
-      // where the home screen and chat both rendered with the "🔒 can't
-      // decrypt" placeholder because the vault was still locked when the
-      // first message snapshot arrived — once the user enters their PIN,
-      // the bubbles auto-recover their plaintext from the vault.
-      // ignore: discarded_futures
-      vaultReadySub = _vaultReadyNotifier.stream.listen((_) async {
-        try {
-          await _preWarmSqlite(currentUserId);
-          await _preWarmVault(currentUserId);
-          await redecryptLatest();
-        } catch (_) {}
-      });
-    }
-
-    controller.onListen = start;
-    controller.onCancel = () async {
-      await chatRoomSub?.cancel();
-      await messagesSub?.cancel();
-      await outboxSub?.cancel();
-      await vaultReadySub?.cancel();
+      }
     };
+
+    controller.onCancel = () async {
+      await dbSub?.cancel();
+      await chatRoomSub?.cancel();
+    };
+
     return controller.stream;
   }
 
@@ -1040,6 +882,41 @@ class ChatService {
       }),
     );
     return resolved;
+  }
+
+  /// Fetches older messages from Firestore, decrypts them, and batch-saves them to SQLite.
+  /// Returns the number of new older messages fetched.
+  Future<int> fetchOlderMessages({
+    required String chatRoomId,
+    required DateTime beforeTimestamp,
+    required String currentUserId,
+    int limit = 50,
+  }) async {
+    final snap = await _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .collection(_messagesCollection)
+        .where('timestamp', isLessThan: Timestamp.fromDate(beforeTimestamp))
+        .orderBy('timestamp', descending: true)
+        .limit(limit)
+        .get();
+
+    if (snap.docs.isEmpty) return 0;
+
+    final store = await PlaintextStore.instance();
+    final toSave = <MessageModel>[];
+
+    for (final doc in snap.docs) {
+      final msg = MessageModel.fromFirestore(doc);
+      final decrypted = await decryptForRendering(msg, currentUserId);
+      toSave.add(decrypted ?? _lockedPlaceholder(msg));
+    }
+
+    if (toSave.isNotEmpty) {
+      await store.saveMessagesBatch(toSave, chatRoomId);
+    }
+
+    return snap.docs.length;
   }
 
   // Mark messages as read
