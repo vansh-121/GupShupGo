@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import 'package:video_chat_app/models/message_model.dart';
@@ -297,6 +299,11 @@ class ChatService {
   // along with the rest of the crypto state.
   static final Map<String, Map<String, dynamic>> _payloadMemo = {};
 
+  // Dedup set for decrypt-skip log messages. Without this, the same
+  // message ID would log every time a Firestore emission re-triggers
+  // decryptForRendering (typing, read receipts, etc.).
+  static final Set<String> _loggedDecryptSkips = {};
+
   Future<MessageModel?> decryptForRendering(
       MessageModel msg, String selfUid) async {
     if (msg.schemaVersion < 2) return msg;
@@ -362,11 +369,17 @@ class ChatService {
       return _applyPayload(msg, payload);
     } catch (e) {
       final errStr = e.toString();
-      // If the session is missing, drop it so the next PreKey message from
-      // this peer can rebuild from scratch. This is invisible to the user.
+      // If the session is broken (missing, stale signed prekey after
+      // reinstall, identity mismatch), drop it so the next PreKey message
+      // from this peer can rebuild from scratch. This is invisible to the
+      // user. InvalidKeyId covers the "No such signedprekeyrecord" error
+      // that fires when the sender's cached keyBundle references a signed
+      // prekey the receiver lost on reinstall.
       if (errStr.contains('NoSession') ||
           errStr.contains('No session') ||
-          errStr.contains('InvalidMessage')) {
+          errStr.contains('InvalidMessage') ||
+          errStr.contains('InvalidKeyId') ||
+          errStr.contains('UntrustedIdentity')) {
         try {
           await SignalService.instance.stores.sessionStore.deleteSession(
             SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1),
@@ -381,9 +394,20 @@ class ChatService {
         unawaited(store.save(msg.id, vaultPayload));
         return _applyPayload(msg, vaultPayload);
       }
-      // ignore: avoid_print
-      print('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
-      return null;
+      // Cache the failure so we don't re-attempt on every Firestore
+      // stream emission (typing indicator, read receipt, delivery status,
+      // etc.). Without this, the same decrypt error fires and logs every
+      // few seconds — visible as Crashlytics spam.
+      final lockedPayload = <String, dynamic>{
+        'text': _undecryptablePlaceholderText,
+      };
+      _payloadMemo[msg.id] = lockedPayload;
+      // Log once per message to avoid flooding the console on every
+      // Firestore re-emission (typing, read receipt, etc.).
+      if (kDebugMode && _loggedDecryptSkips.add(msg.id)) {
+        debugPrint('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
+      }
+      return _applyPayload(msg, lockedPayload);
     }
   }
 
@@ -563,17 +587,20 @@ class ChatService {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
     //         of receiver + sender's other devices (multi-device fan-out).
-    // Run device-id lookup and peer-bundle check in PARALLEL. Previously
-    // these were sequential awaits, adding one Firestore round-trip
-    // (~200-500ms) to every send when the peer-bundle cache was cold.
+    // Run device-id lookup, peer-bundle check, AND in-flight prewarm join
+    // in PARALLEL. The awaitPrewarm is the critical coordination: if
+    // prewarmSessions from initState is still running, we piggyback on it
+    // instead of firing redundant Firestore queries. When no prewarm is
+    // running, awaitPrewarm returns instantly (zero cost).
     final setupResults = await Future.wait<dynamic>([
       _deviceIdentity.getDeviceId(),
       _peerHasKeyBundle(receiverId),
+      SignalService.instance.awaitPrewarm(receiverId),
     ]);
     final senderDeviceId = setupResults[0] as int?;
     final canEncrypt =
         senderDeviceId != null && (setupResults[1] as bool);
-    print('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
+    if (kDebugMode) debugPrint('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;
     String storedText = text;
@@ -608,7 +635,7 @@ class ChatService {
           recipientUid: receiverId,
           plaintext: Uint8List.fromList(utf8.encode(payload)),
         );
-        print('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
+        if (kDebugMode) debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
@@ -652,8 +679,7 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        // ignore: avoid_print
-        print('E2EE encrypt failed, falling back to plaintext: $e');
+        if (kDebugMode) debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
       }
     }
 
@@ -708,9 +734,9 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    print('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
-    print('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
+    if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
     // Outbox cleanup happens in the merge layer the moment the Firestore
     // snapshot stream actually delivers the canonical message. Removing
     // here, between commit-ack and Firestore-observe, would cause a brief
@@ -737,7 +763,7 @@ class ChatService {
           chatRoomId: chatRoomId,
         );
       } catch (e) {
-        print('Error sending message notification: $e');
+        if (kDebugMode) debugPrint('Error sending message notification: $e');
       }
     }());
 
@@ -839,7 +865,7 @@ class ChatService {
       unawaited(_preWarmVault(currentUserId).then((_) {
         // ignore: discarded_futures
         redecryptLatest();
-      }));
+      }).catchError((_) {}));
 
       // (1) Track clearedAt independently of the messages subscription.
       chatRoomSub = _firestore
@@ -870,6 +896,11 @@ class ChatService {
           .orderBy('timestamp', descending: false)
           .snapshots()
           .listen((snapshot) async {
+        // Wrap in try-catch: errors thrown from an async .listen callback
+        // escape to the zone instead of going through onError. Without
+        // this, any unexpected throw (stale Signal key, broken protobuf,
+        // etc.) floods the console via the runZonedGuarded handler.
+        try {
         final raw = snapshot.docs
             .map((doc) => MessageModel.fromFirestore(doc))
             .toList();
@@ -922,6 +953,10 @@ class ChatService {
         }
 
         if (!controller.isClosed) controller.add(combine());
+        } catch (e, st) {
+          if (kDebugMode) debugPrint('Message stream decrypt/render error (non-fatal): $e');
+          if (!controller.isClosed) controller.addError(e, st);
+        }
       }, onError: (e, st) {
         if (!controller.isClosed) controller.addError(e, st);
       });

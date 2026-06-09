@@ -61,13 +61,92 @@ class DeviceIdentityService {
     return id;
   }
 
+  /// Deletes ALL device docs for [uid] except the newly registered [keepDeviceId].
+  ///
+  /// Every app reinstall registers a new deviceId but never cleaned up the old
+  /// one. Over time this causes 50+ stale entries, each with a valid keyBundle.
+  /// The send path then encrypts one copy per device — bloating every message
+  /// doc to 50+ envelopes (~50-100 KB) and slowing Firestore reads/writes for
+  /// everyone in the conversation. The old devices can never decrypt anyway
+  /// (their Signal keys were wiped on uninstall), so removing them is safe.
+  Future<void> _pruneStaleDevices(String uid, int keepDeviceId) async {
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('devices')
+          .get();
+      final stale = snap.docs.where((d) {
+        final id = int.tryParse(d.id);
+        return id != null && id != keepDeviceId;
+      }).toList();
+      if (stale.isEmpty) return;
+      // Batch-delete stale devices + their oneTimePreKeys subcollections.
+      // Firestore batches are limited to 500 ops; chunk if needed.
+      const maxOps = 490;
+      var batch = _firestore.batch();
+      var ops = 0;
+      for (final doc in stale) {
+        batch.delete(doc.reference);
+        ops++;
+        if (ops >= maxOps) {
+          await batch.commit();
+          batch = _firestore.batch();
+          ops = 0;
+        }
+        // Best-effort: also wipe the oneTimePreKeys subcollection. Firestore
+        // doesn't cascade-delete subcollections, so orphaned OTPKs stay around
+        // forever otherwise. We cap at 110 docs per device (100 OTPKs + margin)
+        // to avoid unbounded reads.
+        try {
+          final otpkSnap = await doc.reference
+              .collection('oneTimePreKeys')
+              .limit(110)
+              .get();
+          for (final otpk in otpkSnap.docs) {
+            batch.delete(otpk.reference);
+            ops++;
+            if (ops >= maxOps) {
+              await batch.commit();
+              batch = _firestore.batch();
+              ops = 0;
+            }
+          }
+        } catch (_) {}
+      }
+      if (ops > 0) await batch.commit();
+      // ignore: avoid_print
+      print('[E2EE] pruned ${stale.length} stale device(s) for $uid, '
+          'kept device $keepDeviceId');
+    } catch (e) {
+      // ignore: avoid_print
+      print('[E2EE] stale device prune failed (non-fatal): $e');
+    }
+  }
+
+  static const _prunedFlagKey = 'gsg_e2ee_pruned_stale_v1';
+
   /// Idempotent: registers this device for the given user iff not already
   /// registered. Returns the deviceId in use.
   Future<int> registerIfNeeded(String userId) async {
     final already = await _ss.read(key: _registeredFlagKey);
     if (already == userId) {
       final id = await getDeviceId();
-      if (id != null) return id;
+      if (id != null) {
+        // One-time retroactive prune for existing users. New installs get
+        // cleaned during registration (below); this catches users who
+        // already have 40+ stale device docs from prior reinstalls.
+        final pruned = await _ss.read(key: _prunedFlagKey);
+        if (pruned != userId) {
+          unawaited(() async {
+            try {
+              await _pruneStaleDevices(userId, id);
+              await _ss.write(key: _prunedFlagKey, value: userId);
+            } catch (_) {}
+          }());
+        }
+        return id;
+      }
     }
 
     final svc = await SignalService.init();
@@ -126,6 +205,11 @@ class DeviceIdentityService {
     // Drop the cached device list so peers see this device on their next
     // send instead of waiting up to 60s for the TTL to expire.
     SignalService.invalidateDeviceCache(userId);
+
+    // Clean up stale device entries from previous installs. Fire-and-forget
+    // so registration returns quickly; the prune is best-effort.
+    unawaited(_pruneStaleDevices(userId, deviceId));
+
     return deviceId;
   }
 
@@ -179,6 +263,15 @@ class DeviceIdentityService {
 
   /// Rotates the SignedPreKey if it's older than 7 days. Call from the
   /// app-resume hook or a background task.
+  ///
+  /// IMPORTANT: Old signed pre-keys are retained for [_signedPreKeyRetention]
+  /// rotation periods. A peer may cache our Firestore keyBundle for minutes
+  /// or hours; if we delete the old signed pre-key immediately after
+  /// rotation, their PreKeyMessage references a signedPreKeyId we no
+  /// longer have → InvalidKeyIdException on decrypt. Keeping the last 3
+  /// weeks' worth ensures those in-flight sessions still decrypt.
+  static const _signedPreKeyRetention = 3; // keep last N rotation periods
+
   Future<void> rotateSignedPreKeyIfStale(String userId) async {
     final deviceId = await getDeviceId();
     if (deviceId == null) return;
@@ -192,6 +285,29 @@ class DeviceIdentityService {
         generateSignedPreKey(svc.stores.identityKeyPair, newId);
     await svc.stores.signedPreKeyStore
         .storeSignedPreKey(signedPreKey.id, signedPreKey);
+
+    // ── Prune signed pre-keys older than the retention window ──────────
+    // We keep the current + previous N rotation-period keys. Each rotation
+    // period is one week, so _signedPreKeyRetention = 3 means we keep
+    // ~4 weeks of keys total (current + 3 previous).
+    try {
+      final allSpks = await svc.stores.signedPreKeyStore.loadSignedPreKeys();
+      final currentWeek = newId;
+      for (final spk in allSpks) {
+        // Only prune keys whose ID is a rotation-period ID and is old
+        // enough. IDs wrap at 0xFFFFFF but in practice they increase
+        // monotonically, so a simple difference check works for the
+        // lifetime of the app.
+        if (spk.id != currentWeek &&
+            (currentWeek - spk.id) > _signedPreKeyRetention) {
+          await svc.stores.signedPreKeyStore.removeSignedPreKey(spk.id);
+        }
+      }
+    } catch (e) {
+      // Non-fatal: worst case we keep a few extra keys in memory/storage.
+      // ignore: avoid_print
+      print('[E2EE] signed pre-key prune failed (non-fatal): $e');
+    }
 
     await _firestore
         .collection('users')

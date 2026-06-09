@@ -31,6 +31,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
@@ -226,6 +227,13 @@ class SignalService {
   /// Fan-out encrypt for every device the recipient (and the sender's other
   /// devices, for self-sync) has registered. Returns a map keyed by
   /// "<uid>:<deviceId>" → envelope.
+  /// Max devices to encrypt to per user. No real user has more than 3-4
+  /// devices; entries beyond this are stale registrations from reinstalls
+  /// whose keys were wiped. Encrypting to them wastes CPU, bloats the
+  /// message doc (each envelope is ~500 bytes of ciphertext), and slows
+  /// Firestore reads/writes for the entire conversation.
+  static const _maxDevicesPerUser = 5;
+
   Future<Map<String, EncryptedEnvelope>> encryptForUser({
     required String senderUid,
     required int senderDeviceId,
@@ -241,7 +249,7 @@ class SignalService {
       _listDeviceIds(recipientUid),
       _listDeviceIds(senderUid),
     ]);
-    final recipientDevices = deviceLists[0].toList();
+    var recipientDevices = deviceLists[0].toList();
     final senderOtherDevices = deviceLists[1].toList()
       ..removeWhere((d) => d == senderDeviceId);
 
@@ -252,7 +260,28 @@ class SignalService {
       recipientDevices.removeWhere((d) => d == senderDeviceId);
     }
 
-    print('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
+    // ── Safety cap: keep only the N highest (= most recent) device IDs ──
+    // Stale device entries from reinstalls accumulate in Firestore. Until
+    // every user's DeviceIdentityService prunes them on next registration,
+    // this cap prevents the 50+ envelope bloat that makes every message doc
+    // huge. Highest IDs are kept because _allocateDeviceId picks the
+    // smallest unused, so the latest install always has the highest ID.
+    if (recipientDevices.length > _maxDevicesPerUser) {
+      if (kDebugMode) debugPrint('[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
+          'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
+      recipientDevices.sort();
+      recipientDevices = recipientDevices
+          .sublist(recipientDevices.length - _maxDevicesPerUser);
+    }
+    if (senderOtherDevices.length > _maxDevicesPerUser) {
+      if (kDebugMode) debugPrint('[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
+          'capping other-device fan-out to $_maxDevicesPerUser');
+      senderOtherDevices.sort();
+      senderOtherDevices.removeRange(
+          0, senderOtherDevices.length - _maxDevicesPerUser);
+    }
+
+    if (kDebugMode) debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
         '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
 
     // Parallel fan-out across devices. Each (peerUid, deviceId) is a
@@ -268,7 +297,7 @@ class SignalService {
     for (final entry in await Future.wait(tasks)) {
       out[entry.key] = entry.value;
     }
-    print('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode) debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
     return out;
   }
 
@@ -313,10 +342,26 @@ class SignalService {
         .collection('devices')
         .where('keyBundle', isNull: false)
         .get();
-    final ids = snap.docs
-        .map((d) => int.tryParse(d.id))
-        .whereType<int>()
-        .toList();
+    final ids = <int>[];
+
+    // ── Populate bundle-data cache from the bulk query ──────────────────
+    // We're already downloading every device doc (including its full
+    // keyBundle data) just to discover the device IDs. Previously that
+    // bundle data was thrown away, and ensureSession → _fetchPreKeyBundle
+    // re-read each device doc individually (~200-500ms per read). Now we
+    // cache the bundle data here so those reads become free cache hits.
+    // On the send path this eliminates ~10 redundant Firestore reads.
+    final now = DateTime.now();
+    for (final doc in snap.docs) {
+      final deviceId = int.tryParse(doc.id);
+      if (deviceId == null) continue;
+      ids.add(deviceId);
+      final data = doc.data();
+      final bundle = data['keyBundle'] as Map<String, dynamic>?;
+      if (bundle != null) {
+        _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+      }
+    }
 
     // ── Detect device-list changes (peer reinstall / new device) ────────
     // If any device IDs disappeared since our last fetch, the peer
@@ -332,14 +377,16 @@ class SignalService {
       if (removed.isNotEmpty) {
         // ignore: avoid_print
         print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
-        for (final d in removed) {
+        // Parallel cleanup — the previous sequential await-in-loop created
+        // 27+ microtask hops that interleaved with GC pauses.
+        await Future.wait(removed.map((d) async {
           try {
             await _stores.sessionStore.deleteSession(
               SignalProtocolAddress(uid, d),
             );
           } catch (_) {}
           _bundleDataCache.remove('$uid:$d');
-        }
+        }));
         // Also clear bundle cache for any new devices so we fetch fresh bundles
         for (final d in currSet.difference(prevSet)) {
           _bundleDataCache.remove('$uid:$d');
@@ -348,7 +395,7 @@ class SignalService {
       }
     }
 
-    _deviceIdCache[uid] = (at: DateTime.now(), ids: ids);
+    _deviceIdCache[uid] = (at: now, ids: ids);
     return ids;
   }
 
@@ -399,18 +446,45 @@ class SignalService {
   ///
   /// Idempotent and safe to call repeatedly. Best-effort: errors per peer
   /// are swallowed so one unreachable peer doesn't stall the rest.
+  // Memoized prewarm futures so the send path can join an in-flight
+  // prewarm instead of starting redundant Firestore queries. Without this,
+  // prewarmSessions from initState and _commitMessage race: the user sends
+  // before prewarm completes, and the send path repeats all the same work.
+  static final Map<String, Future<void>> _prewarmFutures = {};
+
   Future<void> prewarmSessions(List<String> peerUids) async {
     if (peerUids.isEmpty) return;
-    await Future.wait(peerUids.map((uid) async {
-      try {
-        final devices = await _listDeviceIds(uid);
-        await Future.wait(devices.map((d) async {
-          try {
-            await ensureSession(uid, d);
-          } catch (_) {}
-        }));
-      } catch (_) {}
+    await Future.wait(peerUids.map((uid) {
+      return _prewarmFutures.putIfAbsent(uid, () => _prewarmSingle(uid));
     }));
+  }
+
+  Future<void> _prewarmSingle(String uid) async {
+    try {
+      final devices = await _listDeviceIds(uid);
+      // Apply the same cap as encryptForUser so we don't build sessions
+      // for stale devices that will never be used.
+      var capped = devices.toList();
+      if (capped.length > _maxDevicesPerUser) {
+        capped.sort();
+        capped = capped.sublist(capped.length - _maxDevicesPerUser);
+      }
+      await Future.wait(capped.map((d) async {
+        try {
+          await ensureSession(uid, d);
+        } catch (_) {}
+      }));
+    } catch (_) {} finally {
+      _prewarmFutures.remove(uid);
+    }
+  }
+
+  /// Await any in-flight prewarm for [peerUid] so the send path
+  /// piggybacks on work already running rather than duplicating it.
+  /// Returns immediately if no prewarm is running.
+  Future<void> awaitPrewarm(String peerUid) async {
+    final f = _prewarmFutures[peerUid];
+    if (f != null) await f;
   }
 
   /// Warms the consumeOneTimePreKey Cloud Function's container so the

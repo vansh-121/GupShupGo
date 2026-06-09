@@ -58,16 +58,23 @@ void main() async {
   await FirebaseCrashlytics.instance
       .setCrashlyticsCollectionEnabled(!kDebugMode);
 
-  // 1️⃣  Flutter framework errors (widget build errors, layout overflow, etc.)
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-  };
+  // Only wire up Crashlytics error handlers in release/profile builds.
+  // In debug mode, collection is disabled above — but calling recordError()
+  // still pokes the native SDK, which repeatedly tries (and fails) to create
+  // its marker file, flooding the log with "Could not create app exception
+  // marker file" spam.
+  if (!kDebugMode) {
+    // 1️⃣  Flutter framework errors (widget build errors, layout overflow, etc.)
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
 
-  // 2️⃣  Platform-level uncaught async errors (Zone boundary escapes)
-  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    return true; // mark as handled so the app doesn't also crash the isolate
-  };
+    // 2️⃣  Platform-level uncaught async errors (Zone boundary escapes)
+    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true; // mark as handled so the app doesn't also crash the isolate
+    };
+  }
 
   // ── Firebase Performance Monitoring ────────────────────────────────────
   await PerformanceService.init();
@@ -143,7 +150,13 @@ void main() async {
       );
     },
     (Object error, StackTrace stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      if (kDebugMode) {
+        // Single-line summary — the full stack trace was flooding the
+        // terminal for every decrypt / Signal error that escaped a catch.
+        debugPrint('⚠ Zone error (${error.runtimeType}): $error');
+      } else {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      }
     },
   );
 
