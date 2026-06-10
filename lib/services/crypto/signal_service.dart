@@ -151,20 +151,9 @@ class SignalService {
     final signedPreKeySig =
         base64Decode(bundle['signedPreKeySig'] as String);
 
-    // OTPK consumption is fully non-blocking. X3DH establishes a secure
-    // session via signed prekey + identity key alone — the one-time prekey
-    // only adds initial-message forward secrecy. Removing it from the
-    // critical path eliminates the 2-10s Cloud Function cold-start that
-    // was the dominant first-message latency. The OTPK is still consumed
-    // in the background for pool hygiene.
-    // ignore: discarded_futures
-    unawaited(() async {
-      try {
-        await _consumeOneTimePreKey(peerUid, deviceId)
-            .timeout(const Duration(seconds: 10));
-      } catch (_) {}
-    }());
-
+    // Since we are establishing the session without using a one-time prekey (OPK),
+    // we do not consume it on the server. This preserves the peer's OPK pool
+    // for future sessions that actually require it.
     return PreKeyBundle(
       registrationId,
       deviceId,

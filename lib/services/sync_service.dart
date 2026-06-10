@@ -32,6 +32,7 @@ class SyncService {
   StreamSubscription? _roomsSub;
   String? _currentUserId;
   final _inFlightDownloads = <String>{};
+  int _syncToken = 0;
 
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
@@ -39,6 +40,7 @@ class SyncService {
     if (_currentUserId == currentUserId && !force) return;
     stop();
     _currentUserId = currentUserId;
+    final token = ++_syncToken;
 
     if (kDebugMode) debugPrint('[SyncService] Initializing background sync for user: $currentUserId');
 
@@ -47,6 +49,11 @@ class SyncService {
       await ChatService.instance.preWarmCaches(currentUserId);
     } catch (e) {
       if (kDebugMode) debugPrint('[SyncService] Cache pre-warm failed: $e');
+    }
+
+    if (token != _syncToken) {
+      if (kDebugMode) debugPrint('[SyncService] Initialization aborted: newer sync started');
+      return;
     }
 
     _roomsSub = _firestore
@@ -122,10 +129,13 @@ class SyncService {
           if (localMsg == null || isLockedPlaceholder) {
             final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
             if (decrypted != null) {
-              toSave.add(decrypted);
-              hasChanges = true;
-              if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
-                _triggerMediaDownload(decrypted, roomId);
+              final isStillPlaceholder = isLockedPlaceholder && decrypted.text.startsWith('🔒');
+              if (!isStillPlaceholder) {
+                toSave.add(decrypted);
+                hasChanges = true;
+                if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
+                  _triggerMediaDownload(decrypted, roomId);
+                }
               }
             } else if (localMsg == null && VaultCipher.instance.isReady) {
               toSave.add(_lockedPlaceholder(serverMsg));
