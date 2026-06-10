@@ -51,13 +51,18 @@ class CryptoWorker {
   final _pendingRequests = <int, Completer<dynamic>>{};
   int _nextId = 0;
 
+  Future<void>? _initFuture;
+
   bool get isReady => _workerPort != null;
 
   /// Spawns the background isolate. Safe to call multiple times — subsequent
   /// calls are no-ops if the worker is already running.
   Future<void> init() async {
     if (_workerPort != null) return;
+    return _initFuture ??= _init();
+  }
 
+  Future<void> _init() async {
     final receivePort = ReceivePort();
     _isolate = await Isolate.spawn(
       _workerEntryPoint,
@@ -88,6 +93,7 @@ class CryptoWorker {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _workerPort = null;
+    _initFuture = null;
     // Fail any pending requests.
     for (final c in _pendingRequests.values) {
       c.completeError(StateError('CryptoWorker disposed'));

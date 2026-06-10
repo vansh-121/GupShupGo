@@ -31,6 +31,7 @@ class SyncService {
   final Map<String, StreamSubscription> _messageSubs = {};
   StreamSubscription? _roomsSub;
   String? _currentUserId;
+  final _inFlightDownloads = <String>{};
 
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
@@ -85,6 +86,7 @@ class SyncService {
     }
     _messageSubs.clear();
     _currentUserId = null;
+    _inFlightDownloads.clear();
   }
 
   void _startSyncingRoom(String roomId, String currentUserId) {
@@ -240,6 +242,9 @@ class SyncService {
   }
 
   void _triggerMediaDownload(MessageModel message, String chatRoomId) {
+    if (_inFlightDownloads.contains(message.id)) return;
+    _inFlightDownloads.add(message.id);
+
     unawaited(() async {
       try {
         final localPath = await ChatService.instance.downloadAndCacheMedia(message);
@@ -252,6 +257,8 @@ class SyncService {
         if (kDebugMode) {
           debugPrint('[SyncService] Error downloading media for message ${message.id}: $e');
         }
+      } finally {
+        _inFlightDownloads.remove(message.id);
       }
     }());
   }
