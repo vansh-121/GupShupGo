@@ -1,6 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -10,9 +15,10 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
-import 'package:video_chat_app/services/performance_service.dart';
 
 class ChatService {
+  static final ChatService instance = ChatService();
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FCMService _fcmService = FCMService();
   final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
@@ -32,7 +38,7 @@ class ChatService {
   // sender to resend rather than wondering why blue ticks went up without
   // them seeing anything.
   static const String _undecryptablePlaceholderText =
-      '🔒 This message can\'t be decrypted on this device. Ask sender to resend.';
+      VaultCipher.undecryptablePlaceholderText;
 
   /// Build a placeholder MessageModel for E2EE messages we can't decrypt.
   /// Marks schemaVersion=1 so downstream code skips re-decrypt attempts.
@@ -53,35 +59,7 @@ class ChatService {
   // success the entry is removed (Firestore re-delivers the canonical
   // message with status=sent), on failure the entry is updated to
   // status=failed so the user sees an error indicator and can retry.
-  //
-  // Static because ChatService is constructed per-screen but the outbox
-  // must outlive any single screen — a send from the chat list preview
-  // bar (hypothetical) should appear instantly when the user opens the
-  // chat screen a moment later. Keyed by chatRoomId.
-  static final Map<String, List<MessageModel>> _outbox = {};
 
-  // Broadcasts whenever _outbox changes so the merged stream in
-  // getMessages can re-emit. We use a void signal rather than passing the
-  // full outbox map to avoid forcing a copy on every notification — every
-  // listener reads _outbox directly during the merge step.
-  static final StreamController<void> _outboxNotifier =
-      StreamController<void>.broadcast();
-
-  static void _addToOutbox(String chatRoomId, MessageModel message) {
-    final list = _outbox.putIfAbsent(chatRoomId, () => <MessageModel>[]);
-    list.add(message);
-    _outboxNotifier.add(null);
-  }
-
-  static void _updateOutbox(
-      String chatRoomId, String messageId, MessageModel Function(MessageModel) update) {
-    final list = _outbox[chatRoomId];
-    if (list == null) return;
-    final idx = list.indexWhere((m) => m.id == messageId);
-    if (idx == -1) return;
-    list[idx] = update(list[idx]);
-    _outboxNotifier.add(null);
-  }
 
 
   // All decrypted message bodies (both incoming and outgoing) live in a
@@ -111,7 +89,22 @@ class ChatService {
       }
       return hit.has;
     }
-    return _fetchPeerBundle(peerUid);
+    // Try the SignalService device-id cache before hitting Firestore.
+    // encryptForUser() will call _listDeviceIds() on the same collection
+    // anyway, so reusing its cache saves a redundant Firestore query
+    // (~300-500ms) on the first message after cold start. The prewarm
+    // path populates this cache at app open, so on a warm path this
+    // resolves synchronously from memory.
+    try {
+      final devices =
+          await SignalService.instance.listDeviceIdsCached(peerUid);
+      final has = devices.isNotEmpty;
+      _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
+      return has;
+    } catch (_) {
+      // SignalService not initialized yet — fall back to direct query.
+      return _fetchPeerBundle(peerUid);
+    }
   }
 
   Future<bool> _fetchPeerBundle(String peerUid) async {
@@ -154,6 +147,15 @@ class ChatService {
 
   Future<void> _preWarmVault(String uid) {
     return _preWarmVaultCache.putIfAbsent(uid, () => _doPreWarmVault(uid));
+  }
+
+  /// Public entry point to trigger both SQLite and Firestore Vault pre-warming
+  /// in parallel. Called by SyncService during initialization.
+  Future<void> preWarmCaches(String uid) async {
+    await Future.wait([
+      _preWarmSqlite(uid),
+      _preWarmVault(uid),
+    ]);
   }
 
   /// Drop the per-uid pre-warm cache AND the process-wide decrypted-
@@ -251,6 +253,16 @@ class ChatService {
 
   Future<Map<String, dynamic>?> _loadFromVault(
       String uid, String messageId) async {
+    // Await any in-flight bulk prewarm first. If it's already completed, this returns instantly.
+    // This prevents firing 100+ concurrent individual Firestore reads when the bulk load
+    // is already fetching them or has completed.
+    final prewarm = _preWarmVaultCache[uid];
+    if (prewarm != null) {
+      await prewarm;
+      final memo = _payloadMemo[messageId];
+      if (memo != null) return memo;
+    }
+
     try {
       final doc = await _firestore
           .collection('users')
@@ -281,6 +293,11 @@ class ChatService {
   // small — a Map<String, dynamic> per message — and it's wiped on signOut
   // along with the rest of the crypto state.
   static final Map<String, Map<String, dynamic>> _payloadMemo = {};
+
+  // Dedup set for decrypt-skip log messages. Without this, the same
+  // message ID would log every time a Firestore emission re-triggers
+  // decryptForRendering (typing, read receipts, etc.).
+  static final Set<String> _loggedDecryptSkips = {};
 
   Future<MessageModel?> decryptForRendering(
       MessageModel msg, String selfUid) async {
@@ -347,11 +364,17 @@ class ChatService {
       return _applyPayload(msg, payload);
     } catch (e) {
       final errStr = e.toString();
-      // If the session is missing, drop it so the next PreKey message from
-      // this peer can rebuild from scratch. This is invisible to the user.
+      // If the session is broken (missing, stale signed prekey after
+      // reinstall, identity mismatch), drop it so the next PreKey message
+      // from this peer can rebuild from scratch. This is invisible to the
+      // user. InvalidKeyId covers the "No such signedprekeyrecord" error
+      // that fires when the sender's cached keyBundle references a signed
+      // prekey the receiver lost on reinstall.
       if (errStr.contains('NoSession') ||
           errStr.contains('No session') ||
-          errStr.contains('InvalidMessage')) {
+          errStr.contains('InvalidMessage') ||
+          errStr.contains('InvalidKeyId') ||
+          errStr.contains('UntrustedIdentity')) {
         try {
           await SignalService.instance.stores.sessionStore.deleteSession(
             SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1),
@@ -366,9 +389,20 @@ class ChatService {
         unawaited(store.save(msg.id, vaultPayload));
         return _applyPayload(msg, vaultPayload);
       }
-      // ignore: avoid_print
-      print('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
-      return null;
+      // Cache the failure so we don't re-attempt on every Firestore
+      // stream emission (typing indicator, read receipt, delivery status,
+      // etc.). Without this, the same decrypt error fires and logs every
+      // few seconds — visible as Crashlytics spam.
+      final lockedPayload = <String, dynamic>{
+        'text': _undecryptablePlaceholderText,
+      };
+      _payloadMemo[msg.id] = lockedPayload;
+      // Log once per message to avoid flooding the console on every
+      // Firestore re-emission (typing, read receipt, etc.).
+      if (kDebugMode && _loggedDecryptSkips.add(msg.id)) {
+        debugPrint('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
+      }
+      return _applyPayload(msg, lockedPayload);
     }
   }
 
@@ -446,6 +480,7 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
     int? audioDuration,
+    String? localFilePath,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -488,8 +523,10 @@ class ChatService {
       statusReplyMediaUrl: statusReplyMediaUrl,
       statusReplyCaption: statusReplyCaption,
       statusReplyBackgroundColor: statusReplyBackgroundColor,
+      localFilePath: localFilePath,
     );
-    _addToOutbox(chatRoomId, optimistic);
+    final ps = await PlaintextStore.instance();
+    await ps.saveMessage(optimistic, chatRoomId);
 
     try {
       return await _commitMessage(
@@ -512,14 +549,12 @@ class ChatService {
         statusReplyMediaUrl: statusReplyMediaUrl,
         statusReplyCaption: statusReplyCaption,
         statusReplyBackgroundColor: statusReplyBackgroundColor,
+        localFilePath: localFilePath,
       );
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
-      // see what didn't go through and (in a future revision) tap to
-      // retry. The bubble is removed only on a successful commit, when
-      // Firestore re-delivers the canonical message.
-      _updateOutbox(chatRoomId, messageRef.id,
-          (m) => m.copyWith(status: MessageStatus.failed));
+      // see what didn't go through.
+      await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
       rethrow;
     }
   }
@@ -544,14 +579,25 @@ class ChatService {
     String? statusReplyMediaUrl,
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
+    String? localFilePath,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
     //         of receiver + sender's other devices (multi-device fan-out).
-    final senderDeviceId = await _deviceIdentity.getDeviceId();
+    // Run device-id lookup, peer-bundle check, AND in-flight prewarm join
+    // in PARALLEL. The awaitPrewarm is the critical coordination: if
+    // prewarmSessions from initState is still running, we piggyback on it
+    // instead of firing redundant Firestore queries. When no prewarm is
+    // running, awaitPrewarm returns instantly (zero cost).
+    final setupResults = await Future.wait<dynamic>([
+      _deviceIdentity.getDeviceId(),
+      _peerHasKeyBundle(receiverId),
+      SignalService.instance.awaitPrewarm(receiverId),
+    ]);
+    final senderDeviceId = setupResults[0] as int?;
     final canEncrypt =
-        senderDeviceId != null && await _peerHasKeyBundle(receiverId);
-    print('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
+        senderDeviceId != null && (setupResults[1] as bool);
+    if (kDebugMode) debugPrint('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;
     String storedText = text;
@@ -586,7 +632,7 @@ class ChatService {
           recipientUid: receiverId,
           plaintext: Uint8List.fromList(utf8.encode(payload)),
         );
-        print('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
+        if (kDebugMode) debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
@@ -604,6 +650,7 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+          if (localFilePath != null) 'localFilePath': localFilePath,
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
         // snapshot for our own message never needs any async lookup.
@@ -630,8 +677,7 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        // ignore: avoid_print
-        print('E2EE encrypt failed, falling back to plaintext: $e');
+        if (kDebugMode) debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
       }
     }
 
@@ -659,6 +705,7 @@ class ChatService {
       schemaVersion: schemaVersion,
       senderDeviceId: senderDeviceId,
       envelopes: envelopes,
+      localFilePath: localFilePath,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -686,9 +733,9 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    print('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
-    print('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
+    if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
     // Outbox cleanup happens in the merge layer the moment the Firestore
     // snapshot stream actually delivers the canonical message. Removing
     // here, between commit-ack and Firestore-observe, would cause a brief
@@ -715,7 +762,7 @@ class ChatService {
           chatRoomId: chatRoomId,
         );
       } catch (e) {
-        print('Error sending message notification: $e');
+        if (kDebugMode) debugPrint('Error sending message notification: $e');
       }
     }());
 
@@ -740,201 +787,71 @@ class ChatService {
   // the asyncExpand teardown right after the optimistic bubble appeared).
   Stream<List<MessageModel>> getMessages(
       String currentUserId, String otherUserId) {
-    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
-
-    DateTime? clearedAt;
-    List<MessageModel> latestRaw = const [];
-    List<MessageModel> latestDecrypted = const [];
-    List<MessageModel> latestCommitted = const [];
-    bool gotFirstFirestoreEmission = false;
+    final chatRoomId = getChatRoomId(currentUserId, otherUserId);
     final controller = StreamController<List<MessageModel>>();
+    
+    StreamSubscription<List<MessageModel>>? dbSub;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? chatRoomSub;
+    
+    DateTime? clearedAt;
+    List<MessageModel> latestMessages = const [];
 
-    void recomputeCommittedFromLatest() {
-      // Re-apply the clearedAt filter against the latest decrypted list
-      // without re-decrypting anything. clearedAt changes are rare (only
-      // when the user taps "Clear all chats"), but we still want a fresh
-      // filter pass to be cheap when it does happen.
+    void emit() {
+      if (controller.isClosed) return;
       if (clearedAt == null) {
-        latestCommitted = latestDecrypted;
+        controller.add(latestMessages);
       } else {
-        latestCommitted = latestDecrypted
+        final filtered = latestMessages
             .where((m) => m.timestamp.isAfter(clearedAt!))
             .toList();
+        controller.add(filtered);
       }
     }
 
-    List<MessageModel> combine() {
-      final outboxList = _outbox[chatRoomId] ?? const <MessageModel>[];
-      if (outboxList.isEmpty) return latestCommitted;
-      final committedIds = {for (final m in latestCommitted) m.id};
-      final merged = <MessageModel>[
-        ...latestCommitted,
-        ...outboxList.where((m) => !committedIds.contains(m.id)),
-      ];
-      merged.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      return merged;
-    }
-
-    // Re-runs the decrypt pass over the last raw Firestore snapshot.
-    // Called on vault-ready ticks so the moment the user unlocks
-    // (typically right after reinstall) every currently-displayed
-    // "🔒 can't decrypt" bubble retries against the now-readable vault
-    // and recovers its plaintext — without waiting for an unrelated
-    // Firestore change to force a fresh snapshot.
-    Future<void> redecryptLatest() async {
-      if (latestRaw.isEmpty) return;
-      final resolved = await Future.wait(
-        latestRaw.map((m) async {
-          final r = await decryptForRendering(m, currentUserId);
-          return r ?? _lockedPlaceholder(m);
-        }),
-      );
-      latestDecrypted = resolved;
-      recomputeCommittedFromLatest();
-      if (!controller.isClosed) controller.add(combine());
-    }
-
-    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
-        chatRoomSub;
-    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? messagesSub;
-    StreamSubscription<void>? outboxSub;
-    StreamSubscription<void>? vaultReadySub;
-
-    // ignore: discarded_futures
-    Future<void> start() async {
-      // PERF CRITICAL: Await the SQLite bulk-load (~10-50ms) BEFORE attaching
-      // the Firestore snapshot listener. Otherwise, the snapshot arrives instantly
-      // and triggers 500 parallel individual SQLite `store.get()` queries (one
-      // per message), which blocks the platform channel and stalls rendering
-      // for 15-20 seconds!
-      await _preWarmSqlite(currentUserId);
-
-      // Kick off the Firestore-vault bulk prewarm in the BACKGROUND.
-      // The vault read scales with the user's total message count and requires
-      // a network round-trip. We let it run fire-and-forget; when it completes,
-      // we re-decrypt the latest snapshot so any bubbles that fell back to
-      // "locked" auto-recover.
-      unawaited(_preWarmVault(currentUserId).then((_) {
-        // ignore: discarded_futures
-        redecryptLatest();
-      }));
-
-      // (1) Track clearedAt independently of the messages subscription.
-      chatRoomSub = _firestore
-          .collection(_chatRoomsCollection)
-          .doc(chatRoomId)
-          .snapshots()
-          .listen((snap) {
-        DateTime? newClearedAt;
-        if (snap.exists) {
-          final data = snap.data();
-          final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
-          final ts = clearedAtMap?[currentUserId];
-          if (ts is Timestamp) newClearedAt = ts.toDate();
-        }
-        if (newClearedAt == clearedAt) return; // no-op for unrelated changes
-        clearedAt = newClearedAt;
-        recomputeCommittedFromLatest();
-        if (!controller.isClosed && gotFirstFirestoreEmission) {
-          controller.add(combine());
-        }
-      });
-
-      // (2) Messages subscription — started once, never torn down.
-      messagesSub = _firestore
-          .collection(_chatRoomsCollection)
-          .doc(chatRoomId)
-          .collection(_messagesCollection)
-          .orderBy('timestamp', descending: false)
-          .snapshots()
-          .listen((snapshot) async {
-        final raw = snapshot.docs
-            .map((doc) => MessageModel.fromFirestore(doc))
-            .toList();
-        latestRaw = raw;
-        // Decrypt E2EE messages in parallel. v1 messages pass through.
-        // Messages we can't decrypt (post-reinstall, lost session, etc.)
-        // are surfaced as a "locked" placeholder bubble instead of being
-        // dropped — so the user sees that something arrived and can ask
-        // the sender to resend, rather than wondering why the sender's
-        // blue ticks went up with no visible message.
-        //
-        // PERF: skip already-memoized messages entirely — they hit the
-        // synchronous `_payloadMemo[msg.id]` path inside
-        // decryptForRendering, but previously the Future.wait still
-        // created N microtask-hops for every message in the snapshot.
-        // On a 500-message chat this added measurable latency on every
-        // Firestore emission (typing indicator, read receipt, etc.).
-        // Now only truly-new messages enter the decrypt pipeline.
-        final resolved = await Future.wait(
-          raw.map((m) async {
-            if (m.schemaVersion < 2) return m;
-            if (_payloadMemo.containsKey(m.id)) {
-              return _applyPayload(m, _payloadMemo[m.id]!);
-            }
-            final r = await decryptForRendering(m, currentUserId);
-            return r ?? _lockedPlaceholder(m);
-          }),
+    controller.onListen = () async {
+      try {
+        final ps = await PlaintextStore.instance();
+        dbSub = ps.watchMessages(chatRoomId).listen(
+          (data) {
+            latestMessages = data;
+            emit();
+          },
+          onError: (e, st) {
+            if (!controller.isClosed) controller.addError(e, st);
+          },
         );
-        latestDecrypted = resolved;
-        recomputeCommittedFromLatest();
-        gotFirstFirestoreEmission = true;
 
-        // Cleanup outbox entries whose canonical Firestore copy has now
-        // landed. Done here (not in sendMessage's commit-ack) so there's
-        // no frame where the bubble disappears before the canonical
-        // version is in the list.
-        final outboxList = _outbox[chatRoomId];
-        if (outboxList != null && outboxList.isNotEmpty) {
-          final committedIds = {for (final m in latestCommitted) m.id};
-          final stillPending = outboxList
-              .where((m) => !committedIds.contains(m.id))
-              .toList();
-          if (stillPending.length != outboxList.length) {
-            if (stillPending.isEmpty) {
-              _outbox.remove(chatRoomId);
-            } else {
-              _outbox[chatRoomId] = stillPending;
-            }
+        // Listen to chatRoom document to track clearedAt (cleared chats)
+        chatRoomSub = _firestore
+            .collection(_chatRoomsCollection)
+            .doc(chatRoomId)
+            .snapshots()
+            .listen((snap) {
+          DateTime? newClearedAt;
+          if (snap.exists) {
+            final data = snap.data();
+            final clearedAtMap = data?['clearedAt'] as Map<String, dynamic>?;
+            final ts = clearedAtMap?[currentUserId];
+            if (ts is Timestamp) newClearedAt = ts.toDate();
           }
+          if (newClearedAt != clearedAt) {
+            clearedAt = newClearedAt;
+            emit();
+          }
+        });
+      } catch (e, st) {
+        if (!controller.isClosed) {
+          controller.addError(e, st);
+          controller.close();
         }
-
-        if (!controller.isClosed) controller.add(combine());
-      }, onError: (e, st) {
-        if (!controller.isClosed) controller.addError(e, st);
-      });
-
-      // (3) Outbox ticks: emit the combined view on every change. Until
-      // Firestore has emitted at least once, latestCommitted is empty
-      // and combine() falls back to outbox-only — which is the right
-      // behaviour on cold open with a pending send.
-      outboxSub = _outboxNotifier.stream.listen((_) {
-        if (!controller.isClosed) controller.add(combine());
-      });
-
-      // (4) Vault-ready ticks: re-decrypt the cached raw snapshot the
-      // moment the vault becomes usable. Fixes the post-reinstall case
-      // where the home screen and chat both rendered with the "🔒 can't
-      // decrypt" placeholder because the vault was still locked when the
-      // first message snapshot arrived — once the user enters their PIN,
-      // the bubbles auto-recover their plaintext from the vault.
-      // ignore: discarded_futures
-      vaultReadySub = _vaultReadyNotifier.stream.listen((_) async {
-        try {
-          await _preWarmSqlite(currentUserId);
-          await _preWarmVault(currentUserId);
-          await redecryptLatest();
-        } catch (_) {}
-      });
-    }
-
-    controller.onListen = start;
-    controller.onCancel = () async {
-      await chatRoomSub?.cancel();
-      await messagesSub?.cancel();
-      await outboxSub?.cancel();
-      await vaultReadySub?.cancel();
+      }
     };
+
+    controller.onCancel = () async {
+      await dbSub?.cancel();
+      await chatRoomSub?.cancel();
+    };
+
     return controller.stream;
   }
 
@@ -973,6 +890,41 @@ class ChatService {
       }),
     );
     return resolved;
+  }
+
+  /// Fetches older messages from Firestore, decrypts them, and batch-saves them to SQLite.
+  /// Returns the number of new older messages fetched.
+  Future<int> fetchOlderMessages({
+    required String chatRoomId,
+    required DateTime beforeTimestamp,
+    required String currentUserId,
+    int limit = 50,
+  }) async {
+    final snap = await _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .collection(_messagesCollection)
+        .where('timestamp', isLessThan: Timestamp.fromDate(beforeTimestamp))
+        .orderBy('timestamp', descending: true)
+        .limit(limit)
+        .get();
+
+    if (snap.docs.isEmpty) return 0;
+
+    final store = await PlaintextStore.instance();
+    final toSave = <MessageModel>[];
+
+    for (final doc in snap.docs) {
+      final msg = MessageModel.fromFirestore(doc);
+      final decrypted = await decryptForRendering(msg, currentUserId);
+      toSave.add(decrypted ?? _lockedPlaceholder(msg));
+    }
+
+    if (toSave.isNotEmpty) {
+      await store.saveMessagesBatch(toSave, chatRoomId);
+    }
+
+    return snap.docs.length;
   }
 
   // Mark messages as read
@@ -1377,6 +1329,64 @@ class ChatService {
 
       return false;
     });
+  }
+
+  /// Downloads a media file from [message.mediaUrl] and stores it locally.
+  /// Returns the local file path if successful, or null otherwise.
+  Future<String?> downloadAndCacheMedia(MessageModel message) async {
+    final urlStr = message.mediaUrl;
+    if (urlStr == null || urlStr.isEmpty) return null;
+
+    try {
+      final dbDir = (await getApplicationSupportDirectory()).path;
+      final cacheDir = Directory(p.join(dbDir, 'gsg_chat_media'));
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      // Determine the extension (simple check)
+      String extension = 'bin';
+      if (message.type == MessageType.image) {
+        extension = 'jpg';
+      } else if (message.type == MessageType.audio) {
+        extension = 'm4a';
+      } else if (message.type == MessageType.video) {
+        extension = 'mp4';
+      } else {
+        // Fallback: parse from URL path if possible
+        try {
+          final uri = Uri.parse(urlStr);
+          final pathSegments = uri.pathSegments;
+          if (pathSegments.isNotEmpty) {
+            final fileName = pathSegments.last;
+            final dotIdx = fileName.lastIndexOf('.');
+            if (dotIdx != -1) {
+              extension = fileName.substring(dotIdx + 1);
+            }
+          }
+        } catch (_) {}
+      }
+
+      final localPath = p.join(cacheDir.path, '${message.id}.$extension');
+      final localFile = File(localPath);
+
+      if (await localFile.exists()) {
+        return localPath;
+      }
+
+      // Fetch from network
+      final response = await http.get(Uri.parse(urlStr));
+      if (response.statusCode == 200) {
+        await localFile.writeAsBytes(response.bodyBytes);
+        return localPath;
+      } else {
+        if (kDebugMode) debugPrint('[ChatService] Failed to download media: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[ChatService] Error downloading media: $e');
+      return null;
+    }
   }
 }
 

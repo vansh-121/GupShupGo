@@ -16,6 +16,7 @@ import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
+import 'package:video_chat_app/services/sync_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -214,6 +215,7 @@ class AuthService {
       await _ensureE2EERegistered(userId);
           await _fcmService.setupFCM(userId: userId);
           await _userService.setupPresence(userId);
+          SyncService.instance.init(userId);
 
           // Tag user in Crashlytics.
           await CrashlyticsService.setUser(
@@ -306,6 +308,7 @@ class AuthService {
       await _ensureE2EERegistered(userId);
             await _fcmService.setupFCM(userId: userId);
             await _userService.setupPresence(userId);
+            SyncService.instance.init(userId);
 
             // Tag user in Crashlytics.
             await CrashlyticsService.setUser(
@@ -414,6 +417,7 @@ class AuthService {
             print('FCM setup failed (non-critical): $e');
           }
           await _userService.setupPresence(userId);
+          SyncService.instance.init(userId);
 
           // Tag user in Crashlytics.
           await CrashlyticsService.setUser(uid: userId, displayName: user.name);
@@ -504,6 +508,7 @@ class AuthService {
 
       print('Setting up presence...');
       await _userService.setupPresence(userId);
+      SyncService.instance.init(userId);
 
       // Tag user in Crashlytics.
       await CrashlyticsService.setUser(uid: userId, displayName: user.name);
@@ -607,6 +612,7 @@ class AuthService {
 
           print('Setting up presence...');
           await _userService.setupPresence(userId);
+          SyncService.instance.init(userId);
 
           // Tag user in Crashlytics.
           await CrashlyticsService.setUser(uid: userId, displayName: user.name);
@@ -749,6 +755,7 @@ class AuthService {
       // the uid mismatch and prompts. This is what makes the PIN dialog
       // fire on reinstall but NOT on every signout/signin cycle.
       VaultCipher.instance.lock();
+      SyncService.instance.stop();
       // Also wipe the local decrypted-message cache so the next user signed
       // in on this device doesn't see the previous user's chat history.
       try {
@@ -796,6 +803,7 @@ class AuthService {
       if (restoredUid != null) {
         if (restoredUid == savedUserId) {
           await _ensureE2EERegistered(restoredUid);
+          SyncService.instance.init(restoredUid);
           return true;
         }
         // Server returned a uid that doesn't match local prefs. Shouldn't
@@ -839,6 +847,7 @@ class AuthService {
       // path so subsequent cold starts don't even need Google round-trips.
       await _deviceSession.issueAndPersist();
       await _ensureE2EERegistered(restoredUid);
+      SyncService.instance.init(restoredUid);
 
       return true;
     } catch (e) {

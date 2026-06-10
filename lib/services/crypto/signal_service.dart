@@ -31,6 +31,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
@@ -39,6 +40,23 @@ import 'persistent_signal_stores.dart';
 class SignalService {
   SignalService._(this._stores);
   final PersistentSignalStores _stores;
+
+  Future<T> _runSignalAction<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    runZonedGuarded(() async {
+      try {
+        final res = await action();
+        completer.complete(res);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    }, (error, stack) {
+      if (!completer.isCompleted) {
+        completer.completeError(error, stack);
+      }
+    });
+    return completer.future;
+  }
 
   static SignalService? _instance;
   static SignalService get instance {
@@ -72,40 +90,58 @@ class SignalService {
 
   /// Build a session by fetching the peer's PreKeyBundle from Firestore.
   /// Idempotent — bails out cheaply if a session already exists.
-  Future<void> ensureSession(String peerUid, int peerDeviceId) async {
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    if (await _stores.sessionStore.containsSession(addr)) return;
+  Future<void> ensureSession(String peerUid, int peerDeviceId) {
+    return _runSignalAction(() async {
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      if (await _stores.sessionStore.containsSession(addr)) return;
 
-    final bundle = await _fetchPreKeyBundle(peerUid, peerDeviceId);
-    if (bundle == null) {
-      throw StateError(
-          'No keyBundle for $peerUid:$peerDeviceId — peer is not E2EE-ready.');
-    }
+      final bundle = await _fetchPreKeyBundle(peerUid, peerDeviceId);
+      if (bundle == null) {
+        throw StateError(
+            'No keyBundle for $peerUid:$peerDeviceId — peer is not E2EE-ready.');
+      }
 
-    final builder = SessionBuilder(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
-    await builder.processPreKeyBundle(bundle);
-    _stores.markDirty();
+      final builder = SessionBuilder(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
+      await builder.processPreKeyBundle(bundle);
+      _stores.markDirty();
+    });
   }
 
-  /// Fetches the peer's public PreKeyBundle from Firestore, consuming one
-  /// one-time prekey via the Cloud Function. Returns null if the peer has no
-  /// devices registered for E2EE.
+  /// Fetches the peer's public PreKeyBundle from Firestore. Returns null if
+  /// the peer has no devices registered for E2EE. Uses a local cache to
+  /// skip the Firestore round-trip when prewarmSessions has already fetched
+  /// the bundle.
   Future<PreKeyBundle?> _fetchPreKeyBundle(String peerUid, int deviceId) async {
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(peerUid)
-        .collection('devices')
-        .doc('$deviceId')
-        .get();
-    final data = doc.data();
-    if (data == null || data['keyBundle'] == null) return null;
-    final bundle = data['keyBundle'] as Map<String, dynamic>;
+    final cacheKey = '$peerUid:$deviceId';
+
+    // ── Check the bundle-data cache first ──────────────────────────────
+    // Populated by prewarmSessions or a previous send. Avoids one
+    // Firestore round-trip (~200-500ms) on the actual send path.
+    Map<String, dynamic>? bundle;
+    final cached = _bundleDataCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _bundleFreshWindow) {
+      bundle = cached.bundle;
+    }
+
+    if (bundle == null) {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(peerUid)
+          .collection('devices')
+          .doc('$deviceId')
+          .get();
+      final data = doc.data();
+      if (data == null || data['keyBundle'] == null) return null;
+      bundle = data['keyBundle'] as Map<String, dynamic>;
+      _bundleDataCache[cacheKey] = (at: DateTime.now(), bundle: bundle);
+    }
 
     final registrationId = bundle['registrationId'] as int;
     final identityPub = base64Decode(bundle['identityPub'] as String);
@@ -115,37 +151,14 @@ class SignalService {
     final signedPreKeySig =
         base64Decode(bundle['signedPreKeySig'] as String);
 
-    // Consume a one-time prekey atomically via Cloud Function. Falls back to
-    // a no-OTPK bundle if the peer is out of one-time keys (less forward
-    // secrecy but still functional).
-    int? oneTimePreKeyId;
-    Uint8List? oneTimePreKeyPub;
-    try {
-      // Hard 2s budget. The Cloud Function cold-start can run 3-10s on a
-      // first call after idle; that was the dominant cost of the first
-      // message to a new peer (15-20s total). Without OTPK the session
-      // still establishes via signed prekey + X3DH — the only loss is
-      // initial-message forward secrecy if the signed prekey is later
-      // compromised, which is an acceptable trade for the UX win. The
-      // Cloud Function still runs to consume an OTPK on warmer calls; the
-      // pool is replenished by the periodic refill path.
-      final otpk = await _consumeOneTimePreKey(peerUid, deviceId)
-          .timeout(const Duration(seconds: 2), onTimeout: () => null);
-      if (otpk != null) {
-        oneTimePreKeyId = otpk['id'] as int;
-        oneTimePreKeyPub = base64Decode(otpk['pub'] as String);
-      }
-    } catch (e) {
-      // Falls through to no-OTPK bundle.
-      // ignore: avoid_print
-      print('consumeOneTimePreKey failed: $e — proceeding without OTPK');
-    }
-
+    // Since we are establishing the session without using a one-time prekey (OPK),
+    // we do not consume it on the server. This preserves the peer's OPK pool
+    // for future sessions that actually require it.
     return PreKeyBundle(
       registrationId,
       deviceId,
-      oneTimePreKeyId,
-      oneTimePreKeyPub == null ? null : Curve.decodePoint(oneTimePreKeyPub, 0),
+      null, // no OTPK — session uses signed prekey only (X3DH still safe)
+      null,
       signedPreKeyId,
       Curve.decodePoint(signedPreKeyPub, 0),
       signedPreKeySig,
@@ -177,51 +190,62 @@ class SignalService {
 
   /// Encrypt for a single peer device.
   Future<EncryptedEnvelope> encrypt(
-      String peerUid, int peerDeviceId, Uint8List plaintext) async {
-    await ensureSession(peerUid, peerDeviceId);
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    final cipher = SessionCipher(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
-    final ct = await cipher.encrypt(plaintext);
-    _stores.markDirty();
-    return EncryptedEnvelope(
-      bytes: ct.serialize(),
-      isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
-    );
+      String peerUid, int peerDeviceId, Uint8List plaintext) {
+    return _runSignalAction(() async {
+      await ensureSession(peerUid, peerDeviceId);
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      final cipher = SessionCipher(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
+      final ct = await cipher.encrypt(plaintext);
+      _stores.markDirty();
+      return EncryptedEnvelope(
+        bytes: ct.serialize(),
+        isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
+      );
+    });
   }
 
   /// Decrypt from a single peer device.
   Future<Uint8List> decrypt(
-      String peerUid, int peerDeviceId, EncryptedEnvelope env) async {
-    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-    final cipher = SessionCipher(
-      _stores.sessionStore,
-      _stores.preKeyStore,
-      _stores.signedPreKeyStore,
-      _stores.identityStore,
-      addr,
-    );
+      String peerUid, int peerDeviceId, EncryptedEnvelope env) {
+    return _runSignalAction(() async {
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      final cipher = SessionCipher(
+        _stores.sessionStore,
+        _stores.preKeyStore,
+        _stores.signedPreKeyStore,
+        _stores.identityStore,
+        addr,
+      );
 
-    Uint8List plaintext;
-    if (env.isPreKeyMessage) {
-      final msg = PreKeySignalMessage(env.bytes);
-      plaintext = await cipher.decrypt(msg);
-    } else {
-      final msg = SignalMessage.fromSerialized(env.bytes);
-      plaintext = await cipher.decryptFromSignal(msg);
-    }
-    _stores.markDirty();
-    return plaintext;
+      Uint8List plaintext;
+      if (env.isPreKeyMessage) {
+        final msg = PreKeySignalMessage(env.bytes);
+        plaintext = await cipher.decrypt(msg);
+      } else {
+        final msg = SignalMessage.fromSerialized(env.bytes);
+        plaintext = await cipher.decryptFromSignal(msg);
+      }
+      _stores.markDirty();
+      return plaintext;
+    });
   }
 
   /// Fan-out encrypt for every device the recipient (and the sender's other
   /// devices, for self-sync) has registered. Returns a map keyed by
   /// "<uid>:<deviceId>" → envelope.
+  /// Max devices to encrypt to per user. No real user has more than 3-4
+  /// devices; entries beyond this are stale registrations from reinstalls
+  /// whose keys were wiped. Encrypting to them wastes CPU, bloats the
+  /// message doc (each envelope is ~500 bytes of ciphertext), and slows
+  /// Firestore reads/writes for the entire conversation.
+  static const _maxDevicesPerUser = 5;
+
   Future<Map<String, EncryptedEnvelope>> encryptForUser({
     required String senderUid,
     required int senderDeviceId,
@@ -237,7 +261,7 @@ class SignalService {
       _listDeviceIds(recipientUid),
       _listDeviceIds(senderUid),
     ]);
-    final recipientDevices = deviceLists[0].toList();
+    var recipientDevices = deviceLists[0].toList();
     final senderOtherDevices = deviceLists[1].toList()
       ..removeWhere((d) => d == senderDeviceId);
 
@@ -248,23 +272,47 @@ class SignalService {
       recipientDevices.removeWhere((d) => d == senderDeviceId);
     }
 
-    print('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
+    // ── Safety cap: keep only the N highest (= most recent) device IDs ──
+    // Stale device entries from reinstalls accumulate in Firestore. Until
+    // every user's DeviceIdentityService prunes them on next registration,
+    // this cap prevents the 50+ envelope bloat that makes every message doc
+    // huge. Highest IDs are kept because _allocateDeviceId picks the
+    // smallest unused, so the latest install always has the highest ID.
+    if (recipientDevices.length > _maxDevicesPerUser) {
+      if (kDebugMode) debugPrint('[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
+          'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
+      recipientDevices.sort();
+      recipientDevices = recipientDevices
+          .sublist(recipientDevices.length - _maxDevicesPerUser);
+    }
+    if (senderOtherDevices.length > _maxDevicesPerUser) {
+      if (kDebugMode) debugPrint('[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
+          'capping other-device fan-out to $_maxDevicesPerUser');
+      senderOtherDevices.sort();
+      senderOtherDevices.removeRange(
+          0, senderOtherDevices.length - _maxDevicesPerUser);
+    }
+
+    if (kDebugMode) debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
         '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
 
-    // Parallel fan-out across devices. Each (peerUid, deviceId) is a
-    // separate session, so concurrent encrypts don't race.
-    final tasks = <Future<MapEntry<String, EncryptedEnvelope>>>[
-      for (final d in recipientDevices)
-        encrypt(recipientUid, d, plaintext)
-            .then((env) => MapEntry('$recipientUid:$d', env)),
-      for (final d in senderOtherDevices)
-        encrypt(senderUid, d, plaintext)
-            .then((env) => MapEntry('$senderUid:$d', env)),
-    ];
-    for (final entry in await Future.wait(tasks)) {
-      out[entry.key] = entry.value;
+    // Sequential fan-out across devices with event loop yielding.
+    // Since Dart is single-threaded on the main isolate, parallelizing CPU-bound
+    // encryption tasks doesn't yield actual concurrency. Instead, we run them
+    // sequentially and yield control to the event loop before each task using
+    // Future.delayed(Duration.zero). This allows Flutter's engine to render
+    // frames in between, keeping the UI perfectly smooth (WhatsApp-level).
+    for (final d in recipientDevices) {
+      await Future.delayed(Duration.zero);
+      final env = await encrypt(recipientUid, d, plaintext);
+      out['$recipientUid:$d'] = env;
     }
-    print('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
+    for (final d in senderOtherDevices) {
+      await Future.delayed(Duration.zero);
+      final env = await encrypt(senderUid, d, plaintext);
+      out['$senderUid:$d'] = env;
+    }
+    if (kDebugMode) debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
     return out;
   }
 
@@ -282,20 +330,64 @@ class SignalService {
   static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
   static const _deviceIdFreshWindow = Duration(minutes: 5);
   static final Set<String> _deviceIdRefreshInFlight = <String>{};
+  static final Map<String, Future<List<int>>> _deviceIdsQueries = {};
 
   /// Public wrapper around the cached device-id lookup so other services
   /// (e.g. CallEncryptionService when discovering the caller's deviceId)
   /// can reuse the same cache instead of re-querying Firestore.
   Future<List<int>> listDeviceIdsCached(String uid) => _listDeviceIds(uid);
 
+  // Background check for peer reinstalls. Compares the peer's Firestore
+  // `deviceUpdatedAt` timestamp (written by DeviceIdentityService on every
+  // new device registration) against our cache age. If the peer registered
+  // a new device after our cache was populated, we invalidate and force a
+  // fresh query so the next message encrypts to the correct device(s).
+  void _checkDeviceUpdatedAt(String uid, DateTime cacheTime) {
+    // Don't re-check if we already have an in-flight refresh.
+    if (_deviceIdRefreshInFlight.contains(uid)) return;
+    _deviceIdRefreshInFlight.add(uid);
+    () async {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        final data = userDoc.data();
+        if (data != null) {
+          final ts = data['deviceUpdatedAt'];
+          if (ts is Timestamp) {
+            final updatedAt = ts.toDate();
+            if (updatedAt.isAfter(cacheTime)) {
+              // Peer registered a new device AFTER our cache was built.
+              // Bust the cache and fetch fresh device IDs.
+              _deviceIdCache.remove(uid);
+              _bundleDataCache.removeWhere((k, _) => k.startsWith('$uid:'));
+              await _fetchAndCacheDeviceIds(uid);
+            }
+          }
+        }
+      } catch (_) {}
+      _deviceIdRefreshInFlight.remove(uid);
+    }();
+  }
+
   Future<List<int>> _listDeviceIds(String uid) async {
     final hit = _deviceIdCache[uid];
     if (hit != null) {
+      final age = DateTime.now().difference(hit.at);
       // Stale-but-usable: return cached IDs immediately, refresh in the
       // background. The send path NEVER blocks on this query after the
       // first lookup for a peer.
-      if (DateTime.now().difference(hit.at) > _deviceIdFreshWindow) {
+      if (age > _deviceIdFreshWindow) {
         _refreshDeviceIds(uid);
+      } else {
+        // Cache is fresh enough by TTL, but the peer may have reinstalled.
+        // Kick off a lightweight background check against the peer's
+        // Firestore `deviceUpdatedAt` field. If they registered a new
+        // device after our cache was built, the cache is busted for the
+        // NEXT send (this send still uses the cached value — the check
+        // runs in parallel and is non-blocking).
+        _checkDeviceUpdatedAt(uid, hit.at);
       }
       return hit.ids;
     }
@@ -303,18 +395,97 @@ class SignalService {
   }
 
   Future<List<int>> _fetchAndCacheDeviceIds(String uid) async {
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('devices')
-        .where('keyBundle', isNull: false)
-        .get();
-    final ids = snap.docs
-        .map((d) => int.tryParse(d.id))
-        .whereType<int>()
-        .toList();
-    _deviceIdCache[uid] = (at: DateTime.now(), ids: ids);
-    return ids;
+    final existing = _deviceIdsQueries[uid];
+    if (existing != null) return existing;
+
+    final future = () async {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('devices')
+            .where('keyBundle', isNull: false)
+            .get();
+        final ids = <int>[];
+
+        // ── Populate bundle-data cache from the bulk query ──────────────────
+        // We're already downloading every device doc (including its full
+        // keyBundle data) just to discover the device IDs. Previously that
+        // bundle data was thrown away, and ensureSession → _fetchPreKeyBundle
+        // re-read each device doc individually (~200-500ms per read). Now we
+        // cache the bundle data here so those reads become free cache hits.
+        // On the send path this eliminates ~10 redundant Firestore reads.
+        final now = DateTime.now();
+        for (final doc in snap.docs) {
+          final deviceId = int.tryParse(doc.id);
+          if (deviceId == null) continue;
+          ids.add(deviceId);
+          final data = doc.data();
+          final bundle = data['keyBundle'] as Map<String, dynamic>?;
+          if (bundle != null) {
+            _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+
+            // Check if identity key changed (indicating a reinstall on the same deviceId)
+            final identityPubStr = bundle['identityPub'] as String?;
+            if (identityPubStr != null) {
+              final addr = SignalProtocolAddress(uid, deviceId);
+              final trustedKey = _stores.identityStore.trustedKeys[addr];
+              if (trustedKey != null) {
+                final currentPubBytes = trustedKey.serialize();
+                final newPubBytes = base64Decode(identityPubStr);
+                if (!listEquals(currentPubBytes, newPubBytes)) {
+                  // ignore: avoid_print
+                  print('[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
+                  await _stores.sessionStore.deleteSession(addr);
+                  _stores.identityStore.trustedKeys.remove(addr);
+                  _stores.markDirty();
+                }
+              }
+            }
+          }
+        }
+
+        // ── Detect device-list changes (peer reinstall / new device) ────────
+        // If any device IDs disappeared since our last fetch, the peer
+        // reinstalled or rotated their identity. Delete the stale Signal
+        // sessions and bundle-data cache so the next ensureSession() fetches
+        // the new key bundle and does a fresh X3DH handshake instead of
+        // encrypting with a dead session the receiver can never decrypt.
+        final prev = _deviceIdCache[uid];
+        if (prev != null) {
+          final prevSet = prev.ids.toSet();
+          final currSet = ids.toSet();
+          final removed = prevSet.difference(currSet);
+          if (removed.isNotEmpty) {
+            // ignore: avoid_print
+            print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
+            // Parallel cleanup — the previous sequential await-in-loop created
+            // 27+ microtask hops that interleaved with GC pauses.
+            await Future.wait(removed.map((d) async {
+              try {
+                await _stores.sessionStore.deleteSession(
+                  SignalProtocolAddress(uid, d),
+                );
+              } catch (_) {}
+              _bundleDataCache.remove('$uid:$d');
+            }));
+            // Also clear bundle cache for any new devices so we fetch fresh bundles
+            for (final d in currSet.difference(prevSet)) {
+              _bundleDataCache.remove('$uid:$d');
+            }
+            _stores.markDirty();
+          }
+        }
+
+        _deviceIdCache[uid] = (at: now, ids: ids);
+        return ids;
+      } finally {
+        _deviceIdsQueries.remove(uid);
+      }
+    }();
+
+    _deviceIdsQueries[uid] = future;
+    return future;
   }
 
   void _refreshDeviceIds(String uid) {
@@ -332,6 +503,30 @@ class SignalService {
   static void invalidateDeviceCache(String uid) =>
       _deviceIdCache.remove(uid);
 
+  /// Trigger a non-blocking background refresh of the device-id cache for
+  /// [uid]. Unlike [invalidateDeviceCache] (which wipes the cache and forces
+  /// the next lookup to block on Firestore), this keeps the cached data
+  /// available for immediate use while fetching fresh data in the background.
+  /// When the refresh completes, [_fetchAndCacheDeviceIds] auto-detects
+  /// device-list changes and cleans up stale sessions / bundle caches.
+  ///
+  /// Call from chat screen open so that if the peer reinstalled, we detect
+  /// the change within seconds rather than waiting for the 5-min
+  /// stale-while-revalidate window.
+  static void refreshDeviceCache(String uid) {
+    if (_instance == null) return; // Signal not initialized yet
+    _instance!._refreshDeviceIds(uid);
+  }
+
+  // ── PreKey bundle Firestore cache ──────────────────────────────────────
+  // Caches the raw keyBundle data from Firestore so prewarmSessions →
+  // ensureSession → _fetchPreKeyBundle skips the Firestore round-trip on
+  // the actual send path. Entries are kept for 10 min; the data changes
+  // only on signed-prekey rotation (once per week).
+  static final Map<String, ({DateTime at, Map<String, dynamic> bundle})>
+      _bundleDataCache = {};
+  static const _bundleFreshWindow = Duration(minutes: 10);
+
   /// Pre-establish Signal sessions with every device of every peer in
   /// [peerUids], in the background. After this runs the first encrypt for
   /// each peer becomes a pure local CPU operation — no Firestore read, no
@@ -340,37 +535,77 @@ class SignalService {
   ///
   /// Idempotent and safe to call repeatedly. Best-effort: errors per peer
   /// are swallowed so one unreachable peer doesn't stall the rest.
+  // Memoized prewarm futures so the send path can join an in-flight
+  // prewarm instead of starting redundant Firestore queries. Without this,
+  // prewarmSessions from initState and _commitMessage race: the user sends
+  // before prewarm completes, and the send path repeats all the same work.
+  static final Map<String, Future<void>> _prewarmFutures = {};
+
   Future<void> prewarmSessions(List<String> peerUids) async {
     if (peerUids.isEmpty) return;
-    await Future.wait(peerUids.map((uid) async {
-      try {
-        final devices = await _listDeviceIds(uid);
-        await Future.wait(devices.map((d) async {
-          try {
-            await ensureSession(uid, d);
-          } catch (_) {}
-        }));
-      } catch (_) {}
+    await Future.wait(peerUids.map((uid) {
+      return _prewarmFutures.putIfAbsent(uid, () => _prewarmSingle(uid));
     }));
   }
 
-  /// Send a no-op POST to consumeOneTimePreKey to defeat the Firebase
-  /// Functions cold start before the user's first real send. The endpoint
-  /// rejects missing fields with a fast 400; we don't care about the body.
-  /// Best-effort and silent on failure.
+  Future<void> _prewarmSingle(String uid) async {
+    try {
+      final devices = await _listDeviceIds(uid);
+
+      // If we are prewarming our own device list, we only need to fetch the device list
+      // (which _listDeviceIds above did) to populate _deviceIdCache[uid].
+      // We can skip ensureSession because we don't build sessions with our own devices.
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == currentUid) return;
+
+      // Apply the same cap as encryptForUser so we don't build sessions
+      // for stale devices that will never be used.
+      var capped = devices.toList();
+      if (capped.length > _maxDevicesPerUser) {
+        capped.sort();
+        capped = capped.sublist(capped.length - _maxDevicesPerUser);
+      }
+      for (final d in capped) {
+        await Future.delayed(Duration.zero);
+        try {
+          await ensureSession(uid, d);
+        } catch (_) {}
+      }
+    } catch (_) {} finally {
+      _prewarmFutures.remove(uid);
+    }
+  }
+
+  /// Await any in-flight prewarm for [peerUid] so the send path
+  /// piggybacks on work already running rather than duplicating it.
+  /// Returns immediately if no prewarm is running.
+  Future<void> awaitPrewarm(String peerUid) async {
+    final f = _prewarmFutures[peerUid];
+    if (f != null) await f;
+  }
+
+  /// Warms the consumeOneTimePreKey Cloud Function's container so the
+  /// background OTPK consumption after session setup doesn't pay the
+  /// cold-start penalty. Uses a real POST (HEAD/OPTIONS don't trigger
+  /// container boot in Firebase Functions v2). Best-effort, silent on
+  /// failure.
   static Future<void> warmConsumeOneTimePreKey() async {
     try {
       final idToken =
           await FirebaseAuth.instance.currentUser?.getIdToken();
       if (idToken == null) return;
-      // OPTIONS request triggers function startup without consuming a
-      // prekey. (Cloud Functions still pay the cold-start, exactly what we
-      // want to absorb up-front.)
+      // POST with an empty body triggers the container start. The function
+      // returns 400 (missing fields) almost instantly once warm; we don't
+      // care — the goal is to absorb the boot cost here.
       await http
-          .head(
+          .post(
             Uri.parse(
                 'https://us-central1-videocallapp-81166.cloudfunctions.net/consumeOneTimePreKey'),
-            headers: {'Authorization': 'Bearer $idToken'},
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: '{}',
           )
           .timeout(const Duration(seconds: 10));
     } catch (_) {}

@@ -22,6 +22,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -247,6 +248,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// every contact this user has a chat with, so the first message of the
   /// session is a pure local encrypt with no network round-trips.
   Future<void> _prewarmEncryption(String userId) async {
+    // Delay slightly to let initial UI rendering and Firestore connection settle
+    await Future.delayed(const Duration(seconds: 3));
     // Warm the Functions cold-start in parallel with the peer query.
     final warmFn = SignalService.warmConsumeOneTimePreKey();
     List<String> peerUids = const [];
@@ -255,8 +258,17 @@ class _HomeScreenState extends State<HomeScreen>
           .collection('chatRooms')
           .where('participants', arrayContains: userId)
           .get();
+      // Sort chat rooms in memory by lastMessageTime descending
+      final docs = snap.docs.toList()
+        ..sort((a, b) {
+          final aTime = (a.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
+          final bTime = (b.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
+          return bTime.compareTo(aTime);
+        });
+
       final peers = <String>{};
-      for (final d in snap.docs) {
+      // Only prewarm the top 5 most recent chats to prevent startup saturation
+      for (final d in docs.take(5)) {
         final parts =
             List<String>.from(d.data()['participants'] ?? const []);
         for (final p in parts) {
@@ -268,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen>
       debugPrint('[Prewarm] peer fetch failed: $e');
     }
     try {
-      await SignalService.instance.prewarmSessions(peerUids);
+      await SignalService.instance.prewarmSessions([userId, ...peerUids]);
     } catch (e) {
       debugPrint('[Prewarm] session prewarm failed: $e');
     }
@@ -312,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen>
     final state = await VaultCipher.instance.bootstrap(uid);
     if (state == VaultState.ready) {
       _migrateAndBackfillInBackground(uid);
+      SyncService.instance.init(uid, force: true);
       return;
     }
     if (!mounted) return;
@@ -325,15 +338,20 @@ class _HomeScreenState extends State<HomeScreen>
     if (!ok) return;
     ChatService.invalidatePreWarm(uid);
     StatusService.invalidatePreWarm(uid);
-    _migrateAndBackfillInBackground(uid);
+    SyncService.instance.init(uid, force: true);
+    _migrateAndBackfillInBackground(uid, full: true);
   }
 
   /// Background sweep that (a) re-encrypts any legacy plaintext vault docs
   /// produced by older app versions and (b) pushes anything in the local
   /// PlaintextStore that hasn't made it to the vault yet. Both passes are
   /// idempotent so a partial run on a previous launch heals on the next.
-  void _migrateAndBackfillInBackground(String uid) {
+  void _migrateAndBackfillInBackground(String uid, {bool full = false}) {
     unawaited(() async {
+      // Delay heavy sync operations to avoid network/CPU contention during cold start
+      if (!full) {
+        await Future.delayed(const Duration(seconds: 8));
+      }
       try {
         await VaultCipher.instance.migrateLegacyEntries(uid);
       } catch (_) {}
@@ -346,31 +364,41 @@ class _HomeScreenState extends State<HomeScreen>
           StatusService.invalidatePreWarm(uid);
         }
       } catch (_) {}
-      _backfillVaultInBackground(uid);
+      _backfillVaultInBackground(uid, full: full);
     }());
   }
 
   /// Walks the local PlaintextStore and pushes any message not yet in
   /// the encrypted msgVault. Fire-and-forget — failures are non-fatal
   /// and retried opportunistically by future sends/receives.
-  void _backfillVaultInBackground(String uid) {
+  void _backfillVaultInBackground(String uid, {bool full = false}) {
     unawaited(() async {
       try {
         if (!VaultCipher.instance.isReady) return;
         final store = await PlaintextStore.instance();
-        final local = await store.getAllMessagePayloads();
+        // Limit backfill check to the 20 most recent messages on regular startup,
+        // or check all messages on manual PIN setup/unlock.
+        final local = await store.getAllMessagePayloads(limit: full ? null : 20);
         if (local.isEmpty) return;
         final col = FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
             .collection('msgVault');
-        // Probe what already lives in the vault — one read up front avoids
-        // a per-message round trip on cold start.
-        final existing = await col.get();
-        final present = existing.docs.map((d) => d.id).toSet();
+        
+        final ids = local.keys.toList();
+        final present = <String>{};
+
+        // Chunk Firestore documentId queries (whereIn limit is 30 items)
+        for (var i = 0; i < ids.length; i += 30) {
+          final chunk = ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
+          final snap = await col.where(FieldPath.documentId, whereIn: chunk).get();
+          present.addAll(snap.docs.map((d) => d.id));
+        }
+
         final missing = local.entries
             .where((e) => !present.contains(e.key))
             .toList();
+
         for (final entry in missing) {
           final enc =
               await VaultCipher.instance.encryptPayload(entry.value);

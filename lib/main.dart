@@ -22,10 +22,12 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
+import 'package:video_chat_app/services/crypto/crypto_worker.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
+import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
@@ -58,16 +60,23 @@ void main() async {
   await FirebaseCrashlytics.instance
       .setCrashlyticsCollectionEnabled(!kDebugMode);
 
-  // 1️⃣  Flutter framework errors (widget build errors, layout overflow, etc.)
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-  };
+  // Only wire up Crashlytics error handlers in release/profile builds.
+  // In debug mode, collection is disabled above — but calling recordError()
+  // still pokes the native SDK, which repeatedly tries (and fails) to create
+  // its marker file, flooding the log with "Could not create app exception
+  // marker file" spam.
+  if (!kDebugMode) {
+    // 1️⃣  Flutter framework errors (widget build errors, layout overflow, etc.)
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
 
-  // 2️⃣  Platform-level uncaught async errors (Zone boundary escapes)
-  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    return true; // mark as handled so the app doesn't also crash the isolate
-  };
+    // 2️⃣  Platform-level uncaught async errors (Zone boundary escapes)
+    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true; // mark as handled so the app doesn't also crash the isolate
+    };
+  }
 
   // ── Firebase Performance Monitoring ────────────────────────────────────
   await PerformanceService.init();
@@ -85,11 +94,18 @@ void main() async {
   }
 
   // ── Warm the encryption-adjacent caches in the background ──────────────
-  // Opening the sqflite-backed PlaintextStore on the first message render
+  // Opening the Drift-backed PlaintextStore on the first message render
   // adds a ~30–80ms hitch (disk open + schema check); seeding the device-id
   // cache for the current user removes the ~100ms first-send Firestore
   // query. Both are fire-and-forget — failure here is non-fatal, the
   // downstream code paths still work, they just pay first-use latency.
+  //
+  // CryptoWorker: spawn the persistent background isolate for vault
+  // operations so it's warm before the first batch decrypt request.
+  // ignore: discarded_futures
+  CryptoWorker.instance.init().catchError((e) {
+    debugPrint('CryptoWorker warm-up failed (non-fatal): $e');
+  });
   // ignore: discarded_futures
   PlaintextStore.instance().catchError((e) {
     debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
@@ -97,6 +113,7 @@ void main() async {
   });
   final cachedUid = FirebaseAuth.instance.currentUser?.uid;
   if (cachedUid != null) {
+    SyncService.instance.init(cachedUid);
     // ignore: discarded_futures
     SignalService.instance.listDeviceIdsCached(cachedUid).catchError((_) =>
         const <int>[]); // best-effort warm; cache is self-healing on miss
@@ -143,7 +160,13 @@ void main() async {
       );
     },
     (Object error, StackTrace stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      if (kDebugMode) {
+        // Single-line summary — the full stack trace was flooding the
+        // terminal for every decrypt / Signal error that escaped a catch.
+        debugPrint('⚠ Zone error (${error.runtimeType}): $error');
+      } else {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      }
     },
   );
 
