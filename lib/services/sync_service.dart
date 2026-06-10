@@ -1,4 +1,4 @@
-// SyncService — background sync pipeline from Firestore to local SQLite.
+// SyncService — background sync pipeline from Firestore to local Drift database.
 //
 // Why this exists:
 //

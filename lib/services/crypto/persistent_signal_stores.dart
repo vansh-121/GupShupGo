@@ -4,16 +4,16 @@
 // app launches, so we wrap them: load a snapshot at startup, mark dirty on
 // every write, and flush periodically (and on app pause) to secure storage.
 //
-// Why secure storage and not sqflite for everything:
+// Why secure storage and not SQLite/Drift for everything:
 // - Identity *private* key MUST be in Keystore/Keychain. flutter_secure_storage
 //   gives us that with no extra ceremony.
 // - PreKeys, SignedPreKeys, and Sessions contain sensitive ratchet state
-//   (chain keys, root key, ephemeral private keys). On a rooted device, sqflite
+//   (chain keys, root key, ephemeral private keys). On a rooted device, SQLite/Drift
 //   files are readable; flutter_secure_storage is not. So we keep them all in
 //   secure storage.
 // - The snapshot is small in practice (≤100 prekeys + a handful of sessions ≈
 //   tens of KB). When it grows beyond ~256 KB we'll migrate sessions to an
-//   sqflite DB encrypted with a Keystore-held key.
+//   encrypted Drift database with a Keystore-held key.
 //
 // Concurrency: all mutations route through `markDirty()` which debounces
 // writes by 1500ms. `flush()` forces an immediate write — called before app

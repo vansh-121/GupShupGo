@@ -94,7 +94,7 @@ void main() async {
   }
 
   // ── Warm the encryption-adjacent caches in the background ──────────────
-  // Opening the sqflite-backed PlaintextStore on the first message render
+  // Opening the Drift-backed PlaintextStore on the first message render
   // adds a ~30–80ms hitch (disk open + schema check); seeding the device-id
   // cache for the current user removes the ~100ms first-send Firestore
   // query. Both are fire-and-forget — failure here is non-fatal, the

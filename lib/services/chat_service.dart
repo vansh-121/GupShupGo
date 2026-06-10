@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -16,7 +15,6 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
-import 'package:video_chat_app/services/performance_service.dart';
 
 class ChatService {
   static final ChatService instance = ChatService();
@@ -1340,7 +1338,7 @@ class ChatService {
     if (urlStr == null || urlStr.isEmpty) return null;
 
     try {
-      final dbDir = await getDatabasesPath();
+      final dbDir = (await getApplicationSupportDirectory()).path;
       final cacheDir = Directory(p.join(dbDir, 'gsg_chat_media'));
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);

@@ -1,4 +1,4 @@
-// PlaintextStore — local sqflite-backed cache of decrypted message bodies.
+// PlaintextStore — Drift-backed cache of decrypted message bodies.
 //
 // Why this exists:
 //
@@ -24,25 +24,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/services/database/app_database.dart';
 
 class PlaintextStore {
   PlaintextStore._(this._db);
-  final Database _db;
-
-  static const _dbName = 'gsg_plaintext.db';
-  static const _table = 'message_plaintext';
-  static const _roomTable = 'chat_room_preview';
-  static const _messagesTable = 'local_messages';
+  final AppDatabase _db;
 
   static PlaintextStore? _instance;
   static Completer<PlaintextStore>? _opening;
-
-  final _messageUpdates = StreamController<String>.broadcast();
 
   /// Lazily opens the DB on first call. Concurrent callers share the same
   /// Future so we don't open twice from different code paths.
@@ -51,58 +44,7 @@ class PlaintextStore {
     if (_opening != null) return _opening!.future;
     _opening = Completer<PlaintextStore>();
     try {
-      final dbDir = await getDatabasesPath();
-      final db = await openDatabase(
-        p.join(dbDir, _dbName),
-        version: 3,
-        onCreate: (db, _) async {
-          await db.execute('''
-            CREATE TABLE $_table (
-              id TEXT PRIMARY KEY,
-              payload TEXT NOT NULL,
-              saved_at INTEGER NOT NULL
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE $_roomTable (
-              chat_room_id TEXT PRIMARY KEY,
-              last_message_text TEXT NOT NULL,
-              last_message_id TEXT NOT NULL,
-              updated_at INTEGER NOT NULL
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE $_messagesTable (
-              id TEXT PRIMARY KEY,
-              chat_room_id TEXT NOT NULL,
-              message_json TEXT NOT NULL,
-              timestamp INTEGER NOT NULL
-            )
-          ''');
-        },
-        onUpgrade: (db, oldV, newV) async {
-          if (oldV < 2) {
-            await db.execute('''
-              CREATE TABLE IF NOT EXISTS $_roomTable (
-                chat_room_id TEXT PRIMARY KEY,
-                last_message_text TEXT NOT NULL,
-                last_message_id TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-              )
-            ''');
-          }
-          if (oldV < 3) {
-            await db.execute('''
-              CREATE TABLE IF NOT EXISTS $_messagesTable (
-                id TEXT PRIMARY KEY,
-                chat_room_id TEXT NOT NULL,
-                message_json TEXT NOT NULL,
-                timestamp INTEGER NOT NULL
-              )
-            ''');
-          }
-        },
-      );
+      final db = AppDatabase.instance;
       _instance = PlaintextStore._(db);
       _opening!.complete(_instance!);
       return _instance!;
@@ -116,30 +58,24 @@ class PlaintextStore {
   /// Persists the plaintext payload for `messageId`. Idempotent — re-saving
   /// the same id is a no-op (we keep the earliest entry).
   Future<void> save(String messageId, Map<String, dynamic> payload) async {
-    await _db.insert(
-      _table,
-      {
-        'id': messageId,
-        'payload': jsonEncode(payload),
-        'saved_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
+    await _db.into(_db.messagePlaintexts).insert(
+      MessagePlaintextsCompanion.insert(
+        id: messageId,
+        payload: jsonEncode(payload),
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrIgnore,
     );
   }
 
   /// Fetches the saved plaintext for `messageId`, or null if we never
   /// decrypted/sent it on this device.
   Future<Map<String, dynamic>?> get(String messageId) async {
-    final rows = await _db.query(
-      _table,
-      columns: const ['payload'],
-      where: 'id = ?',
-      whereArgs: [messageId],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    return jsonDecode(rows.first['payload'] as String)
-        as Map<String, dynamic>;
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.equals(messageId));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    return jsonDecode(row.payload) as Map<String, dynamic>;
   }
 
   /// Persists the last decrypted text for a chat room. Called on both
@@ -150,30 +86,24 @@ class PlaintextStore {
     required String messageId,
     required String text,
   }) async {
-    await _db.insert(
-      _roomTable,
-      {
-        'chat_room_id': chatRoomId,
-        'last_message_text': text,
-        'last_message_id': messageId,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    await _db.into(_db.chatRoomPreviews).insert(
+      ChatRoomPreviewsCompanion.insert(
+        chatRoomId: chatRoomId,
+        lastMessageText: text,
+        lastMessageId: messageId,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrReplace,
     );
   }
 
   /// Fetches the local preview text for one chat room, or null if we don't
   /// have one yet.
   Future<String?> getRoomPreview(String chatRoomId) async {
-    final rows = await _db.query(
-      _roomTable,
-      columns: const ['last_message_text'],
-      where: 'chat_room_id = ?',
-      whereArgs: [chatRoomId],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    return rows.first['last_message_text'] as String?;
+    final query = _db.select(_db.chatRoomPreviews)
+      ..where((tbl) => tbl.chatRoomId.equals(chatRoomId));
+    final row = await query.getSingleOrNull();
+    return row?.lastMessageText;
   }
 
   /// Bulk preview lookup that also returns each preview's `updated_at`
@@ -184,18 +114,13 @@ class PlaintextStore {
   /// replied) and must be re-derived.
   Future<Map<String, ({String text, String messageId, int updatedAt})>>
       getAllRoomPreviewsWithMeta() async {
-    final rows = await _db.query(_roomTable, columns: const [
-      'chat_room_id',
-      'last_message_text',
-      'last_message_id',
-      'updated_at',
-    ]);
+    final rows = await _db.select(_db.chatRoomPreviews).get();
     return {
       for (final r in rows)
-        r['chat_room_id'] as String: (
-          text: r['last_message_text'] as String,
-          messageId: (r['last_message_id'] as String?) ?? '',
-          updatedAt: (r['updated_at'] as int?) ?? 0,
+        r.chatRoomId: (
+          text: r.lastMessageText,
+          messageId: r.lastMessageId,
+          updatedAt: r.updatedAt,
         ),
     };
   }
@@ -213,34 +138,28 @@ class PlaintextStore {
     String? mediaPath,
     bool isVideo = false,
   }) async {
-    await _db.insert(
-      _table,
-      {
-        'id': 'status_content:$itemId',
-        'payload': jsonEncode({
+    await _db.into(_db.messagePlaintexts).insert(
+      MessagePlaintextsCompanion.insert(
+        id: 'status_content:$itemId',
+        payload: jsonEncode({
           't': type,
           if (text != null) 'tx': text,
           if (backgroundColor != null) 'bg': backgroundColor,
           if (mediaPath != null) 'mp': mediaPath,
           'v': isVideo,
         }),
-        'saved_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrReplace,
     );
   }
 
   Future<Map<String, dynamic>?> getStatusContent(String itemId) async {
-    final rows = await _db.query(
-      _table,
-      columns: const ['payload'],
-      where: 'id = ?',
-      whereArgs: ['status_content:$itemId'],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    return jsonDecode(rows.first['payload'] as String)
-        as Map<String, dynamic>;
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.equals('status_content:$itemId'));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    return jsonDecode(row.payload) as Map<String, dynamic>;
   }
 
   /// Persistent directory for decrypted status media. Lives next to the
@@ -258,30 +177,24 @@ class PlaintextStore {
   /// (which would advance the ratchet and break local decrypt). Stored in
   /// the same table with a `status_key:` id prefix to avoid a schema bump.
   Future<void> saveStatusKey(String statusItemId, Uint8List key) async {
-    await _db.insert(
-      _table,
-      {
-        'id': 'status_key:$statusItemId',
-        'payload': jsonEncode({'k': base64Encode(key)}),
-        'saved_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    await _db.into(_db.messagePlaintexts).insert(
+      MessagePlaintextsCompanion.insert(
+        id: 'status_key:$statusItemId',
+        payload: jsonEncode({'k': base64Encode(key)}),
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrReplace,
     );
   }
 
   /// Fetches the locally-cached content key for an owner's own status item,
   /// or null if this device didn't post it.
   Future<Uint8List?> getStatusKey(String statusItemId) async {
-    final rows = await _db.query(
-      _table,
-      columns: const ['payload'],
-      where: 'id = ?',
-      whereArgs: ['status_key:$statusItemId'],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    final payload =
-        jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.equals('status_key:$statusItemId'));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    final payload = jsonDecode(row.payload) as Map<String, dynamic>;
     return base64Decode(payload['k'] as String);
   }
 
@@ -294,18 +207,17 @@ class PlaintextStore {
   Future<Map<String, Map<String, dynamic>>> getAllMessagePayloads({
     int? limit = 500,
   }) async {
-    final rows = await _db.query(
-      _table,
-      columns: const ['id', 'payload'],
-      where: "id NOT LIKE 'status_%'",
-      orderBy: 'saved_at DESC',
-      limit: limit,
-    );
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.like('status_%').not())
+      ..orderBy([(tbl) => OrderingTerm(expression: tbl.savedAt, mode: OrderingMode.desc)]);
+    if (limit != null) {
+      query.limit(limit);
+    }
+    final rows = await query.get();
     final result = <String, Map<String, dynamic>>{};
     for (final row in rows) {
       try {
-        result[row['id'] as String] =
-            jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+        result[row.id] = jsonDecode(row.payload) as Map<String, dynamic>;
       } catch (_) {}
     }
     return result;
@@ -313,16 +225,20 @@ class PlaintextStore {
 
   /// Drops all rows. Called from AuthService.signOut.
   Future<void> wipe() async {
-    await _db.delete(_table);
-    await _db.delete(_roomTable);
-    await _db.delete(_messagesTable);
+    await _db.transaction(() async {
+      await _db.delete(_db.messagePlaintexts).go();
+      await _db.delete(_db.chatRoomPreviews).go();
+      await _db.delete(_db.localMessages).go();
+    });
   }
 
   /// Removes the cached plaintext for a single message id. Used by the
   /// retention sweep so previews of pruned messages don't linger in the
   /// chat list. Best-effort: missing rows are a no-op.
   Future<void> delete(String messageId) async {
-    await _db.delete(_table, where: 'id = ?', whereArgs: [messageId]);
+    await (_db.delete(_db.messagePlaintexts)
+          ..where((tbl) => tbl.id.equals(messageId)))
+        .go();
   }
 
   /// Bulk-reads all `status_content:*` rows into a map keyed by the bare
@@ -330,19 +246,16 @@ class PlaintextStore {
   /// StatusService.preWarmFromDisk() to populate the in-memory plaintext
   /// cache in a single SQLite query at app launch.
   Future<Map<String, Map<String, dynamic>>> getAllStatusContents() async {
-    final rows = await _db.query(
-      _table,
-      columns: const ['id', 'payload'],
-      where: "id LIKE 'status_content:%'",
-    );
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.like('status_content:%'));
+    final rows = await query.get();
     final result = <String, Map<String, dynamic>>{};
     const prefixLen = 'status_content:'.length;
     for (final row in rows) {
       try {
-        final rawId = row['id'] as String;
+        final rawId = row.id;
         final itemId = rawId.substring(prefixLen);
-        result[itemId] =
-            jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+        result[itemId] = jsonDecode(row.payload) as Map<String, dynamic>;
       } catch (_) {}
     }
     return result;
@@ -350,60 +263,48 @@ class PlaintextStore {
 
   // ─── Local Messages CRUD & Reactive Stream API ────────────────────────────
 
-  Stream<String> get messageUpdates => _messageUpdates.stream;
-
-  void notifyUpdate(String chatRoomId) {
-    _messageUpdates.add(chatRoomId);
-  }
-
   /// Save a single MessageModel locally
   Future<void> saveMessage(MessageModel message, String chatRoomId) async {
-    await _db.insert(
-      _messagesTable,
-      {
-        'id': message.id,
-        'chat_room_id': chatRoomId,
-        'message_json': jsonEncode(message.toJson()),
-        'timestamp': message.timestamp.millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    await _db.into(_db.localMessages).insert(
+      LocalMessagesCompanion.insert(
+        id: message.id,
+        chatRoomId: chatRoomId,
+        messageJson: jsonEncode(message.toJson()),
+        timestamp: message.timestamp.millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrReplace,
     );
-    notifyUpdate(chatRoomId);
   }
 
   /// Batch save messages locally
   Future<void> saveMessagesBatch(List<MessageModel> messages, String chatRoomId) async {
     if (messages.isEmpty) return;
-    final batch = _db.batch();
-    for (final msg in messages) {
-      batch.insert(
-        _messagesTable,
-        {
-          'id': msg.id,
-          'chat_room_id': chatRoomId,
-          'message_json': jsonEncode(msg.toJson()),
-          'timestamp': msg.timestamp.millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await batch.commit(noResult: true);
-    notifyUpdate(chatRoomId);
+    await _db.batch((batch) {
+      for (final msg in messages) {
+        batch.insert(
+          _db.localMessages,
+          LocalMessagesCompanion.insert(
+            id: msg.id,
+            chatRoomId: chatRoomId,
+            messageJson: jsonEncode(msg.toJson()),
+            timestamp: msg.timestamp.millisecondsSinceEpoch,
+          ),
+          mode: InsertMode.insertOrReplace,
+        );
+      }
+    });
   }
 
   /// Fetch all messages for a chat room, sorted by timestamp ascending
   Future<List<MessageModel>> getMessages(String chatRoomId) async {
-    final rows = await _db.query(
-      _messagesTable,
-      where: 'chat_room_id = ?',
-      whereArgs: [chatRoomId],
-      orderBy: 'timestamp ASC',
-    );
+    final query = _db.select(_db.localMessages)
+      ..where((tbl) => tbl.chatRoomId.equals(chatRoomId))
+      ..orderBy([(tbl) => OrderingTerm(expression: tbl.timestamp, mode: OrderingMode.asc)]);
+    final rows = await query.get();
     final list = <MessageModel>[];
     for (final r in rows) {
       try {
-        final jsonStr = r['message_json'] as String;
-        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        final map = jsonDecode(r.messageJson) as Map<String, dynamic>;
         list.add(MessageModel.fromJson(map));
       } catch (_) {}
     }
@@ -412,32 +313,24 @@ class PlaintextStore {
 
   /// Get the latest message timestamp stored locally for a chat room
   Future<int?> getLatestMessageTimestamp(String chatRoomId) async {
-    final rows = await _db.query(
-      _messagesTable,
-      columns: const ['timestamp'],
-      where: 'chat_room_id = ?',
-      whereArgs: [chatRoomId],
-      orderBy: 'timestamp DESC',
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    return rows.first['timestamp'] as int?;
+    final query = _db.select(_db.localMessages)
+      ..where((tbl) => tbl.chatRoomId.equals(chatRoomId))
+      ..orderBy([(tbl) => OrderingTerm(expression: tbl.timestamp, mode: OrderingMode.desc)])
+      ..limit(1);
+    final row = await query.getSingleOrNull();
+    return row?.timestamp;
   }
 
   /// Fetch specific messages by ID
   Future<List<MessageModel>> getMessagesByIds(List<String> ids) async {
     if (ids.isEmpty) return [];
-    final placeholders = List.filled(ids.length, '?').join(',');
-    final rows = await _db.query(
-      _messagesTable,
-      where: 'id IN ($placeholders)',
-      whereArgs: ids,
-    );
+    final query = _db.select(_db.localMessages)
+      ..where((tbl) => tbl.id.isIn(ids));
+    final rows = await query.get();
     final list = <MessageModel>[];
     for (final r in rows) {
       try {
-        final jsonStr = r['message_json'] as String;
-        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        final map = jsonDecode(r.messageJson) as Map<String, dynamic>;
         list.add(MessageModel.fromJson(map));
       } catch (_) {}
     }
@@ -446,44 +339,26 @@ class PlaintextStore {
 
   /// Delete a message locally
   Future<void> deleteMessage(String messageId, String chatRoomId) async {
-    await _db.delete(
-      _messagesTable,
-      where: 'id = ?',
-      whereArgs: [messageId],
-    );
-    notifyUpdate(chatRoomId);
+    await (_db.delete(_db.localMessages)
+          ..where((tbl) => tbl.id.equals(messageId)))
+        .go();
   }
 
   /// Returns a reactive stream of messages for [chatRoomId], updating whenever
   /// any message in that room is saved or deleted.
   Stream<List<MessageModel>> watchMessages(String chatRoomId) {
-    final controller = StreamController<List<MessageModel>>();
-    StreamSubscription? sub;
-
-    Future<void> emit() async {
-      try {
-        final msgs = await getMessages(chatRoomId);
-        if (!controller.isClosed) {
-          controller.add(msgs);
-        }
-      } catch (e) {
-        if (!controller.isClosed) {
-          controller.addError(e);
-        }
+    final query = _db.select(_db.localMessages)
+      ..where((tbl) => tbl.chatRoomId.equals(chatRoomId))
+      ..orderBy([(tbl) => OrderingTerm(expression: tbl.timestamp, mode: OrderingMode.asc)]);
+    return query.watch().map((rows) {
+      final list = <MessageModel>[];
+      for (final r in rows) {
+        try {
+          final map = jsonDecode(r.messageJson) as Map<String, dynamic>;
+          list.add(MessageModel.fromJson(map));
+        } catch (_) {}
       }
-    }
-
-    controller.onListen = () {
-      emit();
-      sub = _messageUpdates.stream
-          .where((updatedId) => updatedId == chatRoomId)
-          .listen((_) => emit());
-    };
-
-    controller.onCancel = () async {
-      await sub?.cancel();
-    };
-
-    return controller.stream;
+      return list;
+    });
   }
 }

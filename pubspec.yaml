@@ -102,13 +102,19 @@ dependencies:
 
   # Local persistent store for ratchet sessions, prekeys, and decrypted
   # message cache (so we don't re-decrypt on every render).
-  sqflite: ^2.3.3+1
+  # Drift — type-safe reactive SQLite wrapper (replaces raw sqflite).
+  # Pinned to 2.18.x: 2.19.2+ depends on `web ^1.0.0` which conflicts
+  # with firebase_core 2.x / firebase_app_check 0.2.x.
+  drift: ">=2.18.0 <2.19.2"
+  sqlite3_flutter_libs: ^0.5.24
   path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  drift_dev: ">=2.18.0 <2.19.2"
+  build_runner: ^2.4.0
   flutter_launcher_icons: ^0.13.1
 
 flutter_launcher_icons:
