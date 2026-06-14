@@ -337,6 +337,23 @@ class PlaintextStore {
     return list;
   }
 
+  /// Add a reaction to a specific message locally
+  Future<void> addReaction({
+    required String targetMessageId,
+    required String chatRoomId,
+    required String userId,
+    required String emoji,
+  }) async {
+    final list = await getMessagesByIds([targetMessageId]);
+    if (list.isNotEmpty) {
+      final msg = list.first;
+      final currentReactions = Map<String, String>.from(msg.reactions ?? {});
+      currentReactions[userId] = emoji;
+      final updatedMsg = msg.copyWith(reactions: currentReactions);
+      await saveMessage(updatedMsg, chatRoomId);
+    }
+  }
+
   /// Delete a message locally
   Future<void> deleteMessage(String messageId, String chatRoomId) async {
     await (_db.delete(_db.localMessages)

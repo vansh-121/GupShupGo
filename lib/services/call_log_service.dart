@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
+import 'package:video_chat_app/services/gamification_service.dart';
 
 class CallLogService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -40,6 +42,10 @@ class CallLogService {
       };
 
       await _firestore.collection(_callLogsCollection).doc(logId).set(logData);
+
+      // Award points for completing a call
+      unawaited(GamificationService.instance.earnPoints(callerId, 10));
+      unawaited(GamificationService.instance.earnPoints(calleeId, 10));
 
       print('Call log created: $logId');
     } catch (e) {

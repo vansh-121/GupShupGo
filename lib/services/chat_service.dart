@@ -15,6 +15,7 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/gamification_service.dart';
 
 class ChatService {
   static final ChatService instance = ChatService();
@@ -346,19 +347,39 @@ class ChatService {
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       _payloadMemo[msg.id] = payload;
-      // Fire-and-forget all persistence — the in-memory memo is already
-      // set so rendering is instant. SQLite and vault writes are only for
-      // crash recovery and cross-install history. Previously these two
-      // sequential awaits (save + saveRoomPreview) added 50-200ms to the
-      // render path for EVERY received message.
+      
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
+
+      // Handle reaction processing E2EE client-side
+      if (payload['type'] == 'reaction') {
+        final targetId = payload['reactionTargetMessageId'] as String?;
+        final emoji = payload['text'] as String?;
+        if (targetId != null && emoji != null) {
+          unawaited(store.addReaction(
+            targetMessageId: targetId,
+            chatRoomId: chatRoomId,
+            userId: msg.senderId,
+            emoji: emoji,
+          ));
+          // Earn points for the receiver of the reaction (the owner of target message)
+          unawaited(() async {
+            final list = await store.getMessagesByIds([targetId]);
+            if (list.isNotEmpty && list.first.senderId == selfUid) {
+              await GamificationService.instance.earnPoints(selfUid, 5);
+            }
+          }());
+        }
+      }
+
+      // Fire-and-forget all persistence
       unawaited(Future.wait([
         store.save(msg.id, payload),
-        store.saveRoomPreview(
-          chatRoomId: chatRoomId,
-          messageId: msg.id,
-          text: (payload['text'] as String?) ?? '',
-        ),
+        if (payload['type'] != 'reaction')
+          store.saveRoomPreview(
+            chatRoomId: chatRoomId,
+            messageId: msg.id,
+            text: (payload['text'] as String?) ?? '',
+          ),
       ]));
       unawaited(_saveToVault(selfUid, msg.id, payload));
       return _applyPayload(msg, payload);
@@ -412,6 +433,7 @@ class ChatService {
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
       audioDuration: payload['audioDuration'] as int?,
+      reactionTargetMessageId: payload['reactionTargetMessageId'] as String?,
       statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
       statusReplyItemId: payload['statusReplyItemId'] as String?,
       statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
@@ -481,6 +503,7 @@ class ChatService {
     String? statusReplyBackgroundColor,
     int? audioDuration,
     String? localFilePath,
+    String? reactionTargetMessageId,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -493,17 +516,6 @@ class ChatService {
         .doc();
 
     // ── Optimistic bubble: WhatsApp behaviour ───────────────────────────
-    // Drop a `status: sending` MessageModel into the outbox immediately so
-    // the chat stream emits it in the same frame as the tap. Once the
-    // Firestore commit lands, the canonical message arrives via the
-    // snapshot stream and we remove the outbox entry. On failure we flip
-    // it to status=failed so the bubble stays on screen with an error
-    // indicator the user can retry from.
-    // WhatsApp-parity perceived speed: show the single tick (sent) in the
-    // same frame as the tap. Firestore's offline persistence queues the
-    // batch commit locally and rarely fails when online, so the lie is
-    // tiny and self-correcting — on failure we flip to `failed` in the
-    // catch below, same as before.
     final optimistic = MessageModel(
       id: messageRef.id,
       senderId: senderId,
@@ -524,9 +536,22 @@ class ChatService {
       statusReplyCaption: statusReplyCaption,
       statusReplyBackgroundColor: statusReplyBackgroundColor,
       localFilePath: localFilePath,
+      reactionTargetMessageId: reactionTargetMessageId,
     );
     final ps = await PlaintextStore.instance();
-    await ps.saveMessage(optimistic, chatRoomId);
+
+    // If this is a reaction type message, do not save it as a new message bubble in outbox.
+    // Instead, update the target message's reactions directly in local SQLite!
+    if (type == MessageType.reaction && reactionTargetMessageId != null) {
+      await ps.addReaction(
+        targetMessageId: reactionTargetMessageId,
+        chatRoomId: chatRoomId,
+        userId: senderId,
+        emoji: text,
+      );
+    } else {
+      await ps.saveMessage(optimistic, chatRoomId);
+    }
 
     try {
       return await _commitMessage(
@@ -550,11 +575,14 @@ class ChatService {
         statusReplyCaption: statusReplyCaption,
         statusReplyBackgroundColor: statusReplyBackgroundColor,
         localFilePath: localFilePath,
+        reactionTargetMessageId: reactionTargetMessageId,
       );
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
       // see what didn't go through.
-      await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+      if (type != MessageType.reaction) {
+        await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+      }
       rethrow;
     }
   }
@@ -580,6 +608,7 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
     String? localFilePath,
+    String? reactionTargetMessageId,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -612,6 +641,7 @@ class ChatService {
         'text': text,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (audioDuration != null) 'audioDuration': audioDuration,
+        if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
         if (statusReplyOwnerId != null) ...{
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
@@ -641,6 +671,7 @@ class ChatService {
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
+          if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
           'statusReplyOwnerName': statusReplyOwnerName,
@@ -658,18 +689,17 @@ class ChatService {
 
         // Fire SQLite persistence in the background — the in-memory memo
         // is already set, so rendering is instant. SQLite is only needed
-        // for crash recovery / cold restart. Previously these two
-        // sequential awaits (saveRoomPreview + save) added 50-200ms to
-        // every send BEFORE the Firestore batch.commit() could even start.
+        // for crash recovery / cold restart.
         final ps = await PlaintextStore.instance();
         unawaited(Future.wait([
-          ps.saveRoomPreview(
-            chatRoomId: chatRoomId,
-            messageId: messageRef.id,
-            text: statusReplyOwnerId != null
-                ? 'Replied to status: $text'
-                : text,
-          ),
+          if (type != MessageType.reaction)
+            ps.saveRoomPreview(
+              chatRoomId: chatRoomId,
+              messageId: messageRef.id,
+              text: statusReplyOwnerId != null
+                  ? 'Replied to status: $text'
+                  : text,
+            ),
           ps.save(messageRef.id, outgoingPayload),
         ]));
         // Mirror to the cross-install vault so the sender's history
@@ -706,6 +736,7 @@ class ChatService {
       senderDeviceId: senderDeviceId,
       envelopes: envelopes,
       localFilePath: localFilePath,
+      reactionTargetMessageId: reactionTargetMessageId,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -717,41 +748,81 @@ class ChatService {
     // Add message
     batch.set(messageRef, message.toMap());
 
-    // Update chat room with last message info
+    // Update chat room details (only update preview fields if NOT a reaction)
+    final roomUpdates = <String, dynamic>{
+      'id': chatRoomId,
+      'participants': [senderId, receiverId]..sort(),
+    };
+
+    if (type != MessageType.reaction) {
+      roomUpdates['lastMessage'] = lastMessagePreview;
+      roomUpdates['lastMessageTime'] = Timestamp.fromDate(message.timestamp);
+      roomUpdates['lastMessageSenderId'] = senderId;
+      roomUpdates['lastMessageStatus'] = MessageStatus.sent.name;
+      roomUpdates['unreadCount.$senderId'] = FieldValue.increment(0);
+      roomUpdates['unreadCount.$receiverId'] = FieldValue.increment(1);
+    }
+
+    // Calculate streaks dynamically
+    try {
+      final chatRoomSnap = await chatRoomRef.get();
+      int currentStreak = 0;
+      DateTime? lastInteraction;
+      if (chatRoomSnap.exists) {
+        final data = chatRoomSnap.data() as Map<String, dynamic>;
+        currentStreak = data['streakCount'] as int? ?? 0;
+        final timestamp = data['lastInteractionDate'] as Timestamp?;
+        lastInteraction = timestamp?.toDate();
+      }
+
+      int newStreak = currentStreak;
+      final now = DateTime.now();
+      if (lastInteraction == null) {
+        newStreak = 1;
+      } else {
+        final diff = now.difference(lastInteraction);
+        if (diff.inHours >= 24 && diff.inHours <= 48) {
+          newStreak = currentStreak + 1;
+        } else if (diff.inHours > 48) {
+          newStreak = 1;
+        }
+      }
+      roomUpdates['streakCount'] = newStreak;
+      roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+    } catch (_) {}
+
     batch.set(
       chatRoomRef,
-      {
-        'id': chatRoomId,
-        'participants': [senderId, receiverId]..sort(),
-        'lastMessage': lastMessagePreview,
-        'lastMessageTime': Timestamp.fromDate(message.timestamp),
-        'lastMessageSenderId': senderId,
-        'lastMessageStatus': MessageStatus.sent.name,
-        'unreadCount.$senderId': FieldValue.increment(0),
-        'unreadCount.$receiverId': FieldValue.increment(1),
-      },
+      roomUpdates,
       SetOptions(merge: true),
     );
 
     if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
     if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
-    // Outbox cleanup happens in the merge layer the moment the Firestore
-    // snapshot stream actually delivers the canonical message. Removing
-    // here, between commit-ack and Firestore-observe, would cause a brief
-    // 1-frame flicker where the bubble disappears and then reappears.
 
-    // Fire-and-forget the FCM push. Awaiting it added 200ms–1s to every
-    // send while the HTTP call to the notifications endpoint ran. The
-    // message is already committed to Firestore by this point, so the
-    // receiver will get it via the chat stream regardless — the FCM ping
-    // is only there to wake a backgrounded app.
-    //
-    // E2EE: NEVER include the plaintext in the FCM payload. The FCM
-    // backend can read whatever we put in here; the receiver's device
-    // renders the real text after decryption.
+    // Award points and progress challenge after a successful Firestore commit
     unawaited(() async {
       try {
+        if (type != MessageType.reaction) {
+          await GamificationService.instance.earnPoints(senderId, 1);
+          await GamificationService.instance.incrementChallengeProgress(senderId, 'messages_sent', 1);
+
+          if (type == MessageType.audio) {
+            await GamificationService.instance.incrementChallengeProgress(senderId, 'voice_notes', 1);
+          }
+        }
+      } catch (e) {
+        debugPrint('Error awarding points on commit: $e');
+      }
+    }());
+
+    // Fire-and-forget the FCM push.
+    unawaited(() async {
+      try {
+        // Skip notification for reaction message types
+        if (type == MessageType.reaction) return;
+
         final displayName = senderName ?? 'Someone';
         final previewText = schemaVersion == 2 ? 'New message' : text;
         await _fcmService.sendMessageNotification(

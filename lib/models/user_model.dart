@@ -12,6 +12,12 @@ class UserModel {
   final DateTime? lastSeen;
   final DateTime? createdAt;
 
+  // Gamification fields
+  final int gupPoints;
+  final List<String> badges;
+  final Map<String, int> challengeProgress;
+  final List<String> completedChallenges;
+
   UserModel({
     required this.id,
     required this.name,
@@ -23,7 +29,15 @@ class UserModel {
     this.isOnline = false,
     this.lastSeen,
     this.createdAt,
+    this.gupPoints = 0,
+    this.badges = const [],
+    this.challengeProgress = const {},
+    this.completedChallenges = const [],
   });
+
+  // Level computation: e.g. 100 points per level
+  int get level => (gupPoints / 100).floor() + 1;
+  double get levelProgress => (gupPoints % 100) / 100.0;
 
   // Convert UserModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -38,6 +52,10 @@ class UserModel {
       'isOnline': isOnline,
       'lastSeen': lastSeen?.millisecondsSinceEpoch,
       'createdAt': createdAt?.millisecondsSinceEpoch,
+      'gupPoints': gupPoints,
+      'badges': badges,
+      'challengeProgress': challengeProgress,
+      'completedChallenges': completedChallenges,
     };
   }
 
@@ -58,6 +76,10 @@ class UserModel {
       createdAt: map['createdAt'] != null
           ? _parseDateTime(map['createdAt'])
           : null,
+      gupPoints: map['gupPoints'] ?? 0,
+      badges: List<String>.from(map['badges'] ?? []),
+      challengeProgress: Map<String, int>.from(map['challengeProgress'] ?? {}),
+      completedChallenges: List<String>.from(map['completedChallenges'] ?? []),
     );
   }
 
@@ -88,6 +110,10 @@ class UserModel {
     bool? isOnline,
     DateTime? lastSeen,
     DateTime? createdAt,
+    int? gupPoints,
+    List<String>? badges,
+    Map<String, int>? challengeProgress,
+    List<String>? completedChallenges,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -100,6 +126,10 @@ class UserModel {
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       createdAt: createdAt ?? this.createdAt,
+      gupPoints: gupPoints ?? this.gupPoints,
+      badges: badges ?? this.badges,
+      challengeProgress: challengeProgress ?? this.challengeProgress,
+      completedChallenges: completedChallenges ?? this.completedChallenges,
     );
   }
 }
