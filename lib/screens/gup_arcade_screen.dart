@@ -10,6 +10,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 
 class GupArcadeScreen extends StatefulWidget {
@@ -611,8 +612,27 @@ class _OverviewTab extends StatelessWidget {
         final name = user?.name ?? '...';
         final avatarUrl = user?.photoUrl ??
             'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
-        final isAtRisk = room.lastInteractionDate != null &&
-            DateTime.now().difference(room.lastInteractionDate!).inHours >= 20;
+        final risk = computeStreakRisk(room.lastInteractionDate);
+
+        final cardColors = switch (risk) {
+          StreakRiskLevel.normal => c.isDark
+              ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
+              : [const Color(0xFFFFF3E0), Colors.white],
+          StreakRiskLevel.atRisk => [
+              const Color(0xFFFFB300).withOpacity(0.12),
+              const Color(0xFFFFD54F).withOpacity(0.04),
+            ],
+          StreakRiskLevel.critical => [
+              const Color(0xFFFF6B6B).withOpacity(0.15),
+              const Color(0xFFFF6B6B).withOpacity(0.04),
+            ],
+        };
+
+        final borderColor = switch (risk) {
+          StreakRiskLevel.normal => Colors.orange.withOpacity(0.2),
+          StreakRiskLevel.atRisk => Colors.amber.withOpacity(0.35),
+          StreakRiskLevel.critical => Colors.red.withOpacity(0.35),
+        };
 
         return Container(
           width: 100,
@@ -620,18 +640,12 @@ class _OverviewTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: isAtRisk
-                  ? [const Color(0xFFFF6B6B).withOpacity(0.12), const Color(0xFFFF6B6B).withOpacity(0.04)]
-                  : c.isDark
-                      ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
-                      : [const Color(0xFFFFF3E0), Colors.white],
+              colors: cardColors,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: isAtRisk ? Colors.red.withOpacity(0.3) : Colors.orange.withOpacity(0.2),
-            ),
+            border: Border.all(color: borderColor),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -647,34 +661,9 @@ class _OverviewTab extends StatelessWidget {
                   Positioned(
                     bottom: -5,
                     right: -8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: isAtRisk
-                              ? [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)]
-                              : [const Color(0xFFFF8008), const Color(0xFFFFC837)],
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isAtRisk ? Colors.red : Colors.orange).withOpacity(0.35),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(isAtRisk ? '⚠️' : '🔥', style: const TextStyle(fontSize: 10)),
-                          const SizedBox(width: 1),
-                          Text(
-                            '${room.streakCount}',
-                            style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
-                          ),
-                        ],
-                      ),
+                    child: StreakArcadeBadge(
+                      streakCount: room.streakCount,
+                      lastInteractionDate: room.lastInteractionDate,
                     ),
                   ),
                 ],
@@ -687,11 +676,6 @@ class _OverviewTab extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              if (isAtRisk)
-                Text(
-                  'Send soon!',
-                  style: GoogleFonts.poppins(fontSize: 8, fontWeight: FontWeight.w600, color: Colors.red[400]),
-                ),
             ],
           ),
         );

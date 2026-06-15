@@ -28,6 +28,7 @@ import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
+import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 class Contact {
@@ -104,6 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
   int _streakCount = 0;
   int _previousStreakCount = 0;
   DateTime? _streakBrokenAt;
+  DateTime? _streakLastInteractionDate;
   StreamSubscription? _chatRoomSubscription;
 
   // ─── Typing indicator state ───────────────────────────────────────
@@ -160,6 +162,8 @@ class _ChatScreenState extends State<ChatScreen> {
         final prevStreak = data?['previousStreakCount'] as int? ?? 0;
         final brokenTs = data?['streakBrokenAt'] as Timestamp?;
         final brokenAt = brokenTs?.toDate();
+        final interactionTs = data?['lastInteractionDate'] as Timestamp?;
+        final interactionDate = interactionTs?.toDate();
 
         // Clean up expired restore windows locally
         final isExpired = brokenAt != null &&
@@ -167,11 +171,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
         if (streak != _streakCount ||
             prevStreak != _previousStreakCount ||
-            brokenAt != _streakBrokenAt) {
+            brokenAt != _streakBrokenAt ||
+            interactionDate != _streakLastInteractionDate) {
           setState(() {
             _streakCount = streak;
             _previousStreakCount = isExpired ? 0 : prevStreak;
             _streakBrokenAt = isExpired ? null : brokenAt;
+            _streakLastInteractionDate = interactionDate;
           });
         }
       }
@@ -1591,28 +1597,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       if (_streakCount > 0) ...[
                         if (_isOtherUserTyping || _isContactOnline)
                           const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.withOpacity(0.25), width: 0.5),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('🔥', style: TextStyle(fontSize: 10)),
-                              const SizedBox(width: 2),
-                              Text(
-                                '$_streakCount day streak',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.orange[400],
-                                ),
-                              ),
-                            ],
-                          ),
+                        StreakBadge(
+                          streakCount: _streakCount,
+                          lastInteractionDate: _streakLastInteractionDate,
+                          compact: false,
                         ),
                       ]
                       // Broken streak badge (tappable → restore dialog)

@@ -37,6 +37,7 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
+import 'package:video_chat_app/widgets/streak_badge.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -948,28 +949,10 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                             if (chatRoom.streakCount > 0) ...[
                               const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.orange.withOpacity(0.25), width: 0.5),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text('🔥', style: TextStyle(fontSize: 10)),
-                                    const SizedBox(width: 1),
-                                    Text(
-                                      '${chatRoom.streakCount}',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange[400],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              StreakBadge(
+                                streakCount: chatRoom.streakCount,
+                                lastInteractionDate: chatRoom.lastInteractionDate,
+                                compact: true,
                               ),
                             ] else if (chatRoom.previousStreakCount > 0 &&
                                 chatRoom.streakBrokenAt != null &&
