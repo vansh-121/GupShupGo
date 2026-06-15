@@ -1729,31 +1729,31 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: c.isDark ? const Color(0xFF2A2040) : c.surface,
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: c.primary.withOpacity(0.25),
-                        width: 1,
+                        width: 0.8,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: c.primary.withOpacity(0.15),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
+                          color: c.primary.withOpacity(0.12),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
                         ),
                       ],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('⚡', style: TextStyle(fontSize: 15)),
-                        const SizedBox(width: 5),
+                        const Text('⚡', style: TextStyle(fontSize: 12)),
+                        const SizedBox(width: 3),
                         Text(
                           '$pts',
                           style: GoogleFonts.poppins(
-                            fontSize: 14,
+                            fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: c.primary,
                           ),
