@@ -1514,38 +1514,56 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    widget.contact.name,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: c.textHigh,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  // Subtitle row: typing / online / streak
                   Row(
                     children: [
-                      Flexible(
-                        child: Text(
-                          widget.contact.name,
+                      if (_isOtherUserTyping)
+                        Text(
+                          'typing...',
                           style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: c.textHigh,
+                            fontSize: 11,
+                            color: c.primary,
+                            fontStyle: FontStyle.italic,
                           ),
-                          overflow: TextOverflow.ellipsis,
+                        )
+                      else if (_isContactOnline)
+                        Text(
+                          'Online',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: c.online,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
                       if (_streakCount > 0) ...[
-                        const SizedBox(width: 6),
+                        if (_isOtherUserTyping || _isContactOnline)
+                          const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.orange.withOpacity(0.3), width: 0.5),
+                            color: Colors.orange.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange.withOpacity(0.25), width: 0.5),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text('🔥', style: TextStyle(fontSize: 12)),
+                              const Text('🔥', style: TextStyle(fontSize: 10)),
                               const SizedBox(width: 2),
                               Text(
-                                '$_streakCount',
+                                '$_streakCount day streak',
                                 style: GoogleFonts.poppins(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
                                   color: Colors.orange[400],
                                 ),
                               ),
@@ -1555,24 +1573,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       ],
                     ],
                   ),
-                  if (_isOtherUserTyping)
-                    Text(
-                      'typing...',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: c.primary,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_isContactOnline)
-                    Text(
-                      'Online',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: c.online,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
                 ],
               ),
             ),

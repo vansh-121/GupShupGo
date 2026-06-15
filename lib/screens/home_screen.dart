@@ -1695,7 +1695,82 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-      floatingActionButton: _buildFAB(),
+      floatingActionButton: _buildFABRow(),
+    );
+  }
+
+  Widget _buildFABRow() {
+    final c = AppThemeColors.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // ── Gup Arcade mini-FAB (bottom-left) ──────────────────────
+        if (_currentUserId != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(_currentUserId)
+                  .snapshots(),
+              builder: (context, snap) {
+                int pts = _currentUser?.gupPoints ?? 0;
+                if (snap.hasData && snap.data!.exists) {
+                  final data = snap.data!.data() as Map<String, dynamic>?;
+                  pts = data?['gupPoints'] as int? ?? 0;
+                }
+                return GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GupArcadeScreen(
+                        currentUserId: _currentUserId!,
+                      ),
+                    ),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: c.isDark ? const Color(0xFF2A2040) : c.surface,
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: c.primary.withOpacity(0.25),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: c.primary.withOpacity(0.15),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('⚡', style: TextStyle(fontSize: 15)),
+                        const SizedBox(width: 5),
+                        Text(
+                          '$pts',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: c.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          )
+        else
+          const SizedBox.shrink(),
+
+        // ── Original FAB (bottom-right) ────────────────────────────
+        _buildFAB(),
+      ],
     );
   }
 

@@ -96,6 +96,8 @@ class ChatCacheService {
       'lastMessageSenderId': room.lastMessageSenderId,
       'lastMessageStatus': room.lastMessageStatus?.name,
       'unreadCount': room.unreadCount,
+      'streakCount': room.streakCount,
+      'lastInteractionDate': room.lastInteractionDate?.millisecondsSinceEpoch,
     };
   }
 
@@ -110,6 +112,10 @@ class ChatCacheService {
       lastMessageSenderId: map['lastMessageSenderId'],
       lastMessageStatus: _parseStatus(map['lastMessageStatus']),
       unreadCount: Map<String, int>.from(map['unreadCount'] ?? {}),
+      streakCount: map['streakCount'] ?? 0,
+      lastInteractionDate: map['lastInteractionDate'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['lastInteractionDate'])
+          : null,
     );
   }
 

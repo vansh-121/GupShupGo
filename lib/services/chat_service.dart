@@ -1193,6 +1193,8 @@ class ChatService {
             lastMessageSenderId: chatRoom.lastMessageSenderId,
             lastMessageStatus: chatRoom.lastMessageStatus,
             unreadCount: chatRoom.unreadCount,
+            streakCount: chatRoom.streakCount,
+            lastInteractionDate: chatRoom.lastInteractionDate,
           );
         } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
             localPreview != null) {
@@ -1248,6 +1250,8 @@ class ChatService {
               lastMessageSenderId: room.lastMessageSenderId,
               lastMessageStatus: room.lastMessageStatus,
               unreadCount: room.unreadCount,
+              streakCount: room.streakCount,
+              lastInteractionDate: room.lastInteractionDate,
             );
           } catch (_) {
             // Leave the placeholder in place; next snapshot will retry.
