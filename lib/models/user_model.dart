@@ -17,6 +17,9 @@ class UserModel {
   final List<String> badges;
   final Map<String, int> challengeProgress;
   final List<String> completedChallenges;
+  final int reactionsGiven;
+  final int nightMessages;
+  final int longestStreak;
 
   UserModel({
     required this.id,
@@ -33,6 +36,9 @@ class UserModel {
     this.badges = const [],
     this.challengeProgress = const {},
     this.completedChallenges = const [],
+    this.reactionsGiven = 0,
+    this.nightMessages = 0,
+    this.longestStreak = 0,
   });
 
   // Level computation: e.g. 100 points per level
@@ -56,6 +62,9 @@ class UserModel {
       'badges': badges,
       'challengeProgress': challengeProgress,
       'completedChallenges': completedChallenges,
+      'reactionsGiven': reactionsGiven,
+      'nightMessages': nightMessages,
+      'longestStreak': longestStreak,
     };
   }
 
@@ -80,6 +89,9 @@ class UserModel {
       badges: List<String>.from(map['badges'] ?? []),
       challengeProgress: Map<String, int>.from(map['challengeProgress'] ?? {}),
       completedChallenges: List<String>.from(map['completedChallenges'] ?? []),
+      reactionsGiven: map['reactionsGiven'] ?? 0,
+      nightMessages: map['nightMessages'] ?? 0,
+      longestStreak: map['longestStreak'] ?? 0,
     );
   }
 
@@ -114,6 +126,9 @@ class UserModel {
     List<String>? badges,
     Map<String, int>? challengeProgress,
     List<String>? completedChallenges,
+    int? reactionsGiven,
+    int? nightMessages,
+    int? longestStreak,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -130,6 +145,9 @@ class UserModel {
       badges: badges ?? this.badges,
       challengeProgress: challengeProgress ?? this.challengeProgress,
       completedChallenges: completedChallenges ?? this.completedChallenges,
+      reactionsGiven: reactionsGiven ?? this.reactionsGiven,
+      nightMessages: nightMessages ?? this.nightMessages,
+      longestStreak: longestStreak ?? this.longestStreak,
     );
   }
 }

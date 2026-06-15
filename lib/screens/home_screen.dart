@@ -9,6 +9,7 @@ import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/status_model.dart';
+import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
@@ -1758,56 +1759,12 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  static const Map<String, Map<String, dynamic>> _badgeDetails = {
-    'early_adopter': {
-      'title': 'Early Adopter',
-      'icon': '🚀',
-      'colors': [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-      'description': 'Awarded for joining GupShupGo as an early pioneer.',
-    },
-    'chatterbox': {
-      'title': 'Chatterbox',
-      'icon': '💬',
-      'colors': [Color(0xFF11998e), Color(0xFF38ef7d)],
-      'description': 'Awarded for sending 100 messages total.',
-    },
-    'vocalist': {
-      'title': 'Vocalist',
-      'icon': '🎤',
-      'colors': [Color(0xFFFF416C), Color(0xFFFF4B2B)],
-      'description': 'Awarded for sending 10 voice messages.',
-    },
-    'offline_hero': {
-      'title': 'Offline Hero',
-      'icon': '📡',
-      'colors': [Color(0xFFf21b3f), Color(0xFFab0e2d)],
-      'description': 'Awarded for sending 10 local mesh messages.',
-    },
-    'status_superstar': {
-      'title': 'Status Superstar',
-      'icon': '🌟',
-      'colors': [Color(0xFFF12711), Color(0xFFF5AF19)],
-      'description': 'Awarded for posting 5 status updates.',
-    },
-    'reputation_master': {
-      'title': 'Reputation Master',
-      'icon': '🏆',
-      'colors': [Color(0xFFf857a6), Color(0xFFff5858)],
-      'description': 'Awarded for reaching 500 Gup Points.',
-    },
-  };
-
   void _showBadgeUnlockDialog(BuildContext context, String badgeId) {
-    final details = _badgeDetails[badgeId] ?? {
-      'title': 'New Achievement',
-      'icon': '🎉',
-      'colors': [Colors.blue, Colors.purple],
-      'description': 'You unlocked a new badge!',
-    };
-    final title = details['title'] as String;
-    final icon = details['icon'] as String;
-    final colors = details['colors'] as List<Color>;
-    final desc = details['description'] as String;
+    final badge = BadgeDefinition.fromId(badgeId);
+    final title = badge?.title ?? 'New Achievement';
+    final icon = badge?.icon ?? '🎉';
+    final colors = badge?.gradientColors ?? [Colors.blue, Colors.purple];
+    final desc = badge?.description ?? 'You unlocked a new badge!';
 
     showDialog(
       context: context,

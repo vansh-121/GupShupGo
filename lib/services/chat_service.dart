@@ -789,6 +789,11 @@ class ChatService {
       }
       roomUpdates['streakCount'] = newStreak;
       roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+
+      // Fire streak milestone rewards in the background
+      if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
+        unawaited(GamificationService.instance.handleStreakMilestone(senderId, newStreak));
+      }
     } catch (_) {}
 
     batch.set(
@@ -801,19 +806,17 @@ class ChatService {
     await batch.commit();
     if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
 
-    // Award points and progress challenge after a successful Firestore commit
+    // Award points, progress challenges, and unlock badges in a single
+    // Firestore transaction — avoids the race condition where multiple
+    // sequential transactions on the same user doc cause stale reads.
     unawaited(() async {
       try {
-        if (type != MessageType.reaction) {
-          await GamificationService.instance.earnPoints(senderId, 1);
-          await GamificationService.instance.incrementChallengeProgress(senderId, 'messages_sent', 1);
-
-          if (type == MessageType.audio) {
-            await GamificationService.instance.incrementChallengeProgress(senderId, 'voice_notes', 1);
-          }
-        }
+        await GamificationService.instance.handleMessageSent(
+          userId: senderId,
+          messageType: type.name, // 'text', 'audio', 'image', 'video', 'reaction'
+        );
       } catch (e) {
-        debugPrint('Error awarding points on commit: $e');
+        debugPrint('Error awarding gamification on commit: $e');
       }
     }());
 
