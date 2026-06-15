@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
@@ -19,6 +20,7 @@ import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
@@ -79,6 +81,10 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription<User?>? _authSub;
   bool _hasFirebaseSession = FirebaseAuth.instance.currentUser != null;
 
+  // ─── Gamification real-time listener ─────────────────────────────────
+  StreamSubscription<DocumentSnapshot>? _currentUserSubscription;
+  List<String>? _previousBadges;
+
   @override
   void initState() {
     super.initState();
@@ -97,6 +103,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _authSub?.cancel();
     _recentContactsSub?.cancel();
+    _currentUserSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     if (_currentUserId != null) {
@@ -223,6 +230,29 @@ class _HomeScreenState extends State<HomeScreen>
 
       // ── Check for app updates via Google Play native API ──
       _updateService.checkAndPromptUpdate();
+
+      // ── Listen to user document in real-time to detect badge unlocks ──
+      _currentUserSubscription = FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUserId)
+          .snapshots()
+          .listen((snap) {
+        if (snap.exists && mounted) {
+          final user = UserModel.fromFirestore(snap);
+          if (_previousBadges != null) {
+            final newBadges = user.badges.where((b) => !_previousBadges!.contains(b)).toList();
+            if (newBadges.isNotEmpty) {
+              for (final badgeId in newBadges) {
+                final navContext = navigatorKey.currentContext;
+                if (navContext != null) {
+                  _showBadgeUnlockDialog(navContext, badgeId);
+                }
+              }
+            }
+          }
+          _previousBadges = user.badges;
+        }
+      });
 
       // ── Refresh user profile from Firestore in background ──
       _authService.refreshUserFromFirestore().then((freshUser) {
@@ -1723,6 +1753,208 @@ class _HomeScreenState extends State<HomeScreen>
             }
           },
           child: const Icon(Icons.message_rounded, color: Colors.white),
+        );
+      },
+    );
+  }
+
+  static const Map<String, Map<String, dynamic>> _badgeDetails = {
+    'early_adopter': {
+      'title': 'Early Adopter',
+      'icon': '🚀',
+      'colors': [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+      'description': 'Awarded for joining GupShupGo as an early pioneer.',
+    },
+    'chatterbox': {
+      'title': 'Chatterbox',
+      'icon': '💬',
+      'colors': [Color(0xFF11998e), Color(0xFF38ef7d)],
+      'description': 'Awarded for sending 100 messages total.',
+    },
+    'vocalist': {
+      'title': 'Vocalist',
+      'icon': '🎤',
+      'colors': [Color(0xFFFF416C), Color(0xFFFF4B2B)],
+      'description': 'Awarded for sending 10 voice messages.',
+    },
+    'offline_hero': {
+      'title': 'Offline Hero',
+      'icon': '📡',
+      'colors': [Color(0xFFf21b3f), Color(0xFFab0e2d)],
+      'description': 'Awarded for sending 10 local mesh messages.',
+    },
+    'status_superstar': {
+      'title': 'Status Superstar',
+      'icon': '🌟',
+      'colors': [Color(0xFFF12711), Color(0xFFF5AF19)],
+      'description': 'Awarded for posting 5 status updates.',
+    },
+    'reputation_master': {
+      'title': 'Reputation Master',
+      'icon': '🏆',
+      'colors': [Color(0xFFf857a6), Color(0xFFff5858)],
+      'description': 'Awarded for reaching 500 Gup Points.',
+    },
+  };
+
+  void _showBadgeUnlockDialog(BuildContext context, String badgeId) {
+    final details = _badgeDetails[badgeId] ?? {
+      'title': 'New Achievement',
+      'icon': '🎉',
+      'colors': [Colors.blue, Colors.purple],
+      'description': 'You unlocked a new badge!',
+    };
+    final title = details['title'] as String;
+    final icon = details['icon'] as String;
+    final colors = details['colors'] as List<Color>;
+    final desc = details['description'] as String;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.85),
+      builder: (BuildContext context) {
+        final c = AppThemeColors.of(context);
+        return Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: c.surface.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: colors[0].withOpacity(0.35),
+                  blurRadius: 25,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'CONGRATULATIONS!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.amber,
+                      letterSpacing: 2.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Badge Unlocked!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: c.textHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: colors,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withOpacity(0.5), width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: colors[0].withOpacity(0.5),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        icon,
+                        style: const TextStyle(fontSize: 54),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: c.textHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    desc,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: c.textMid,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: c.border),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: Text(
+                            'Awesome',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                              color: c.textHigh,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => GupArcadeScreen(
+                                  currentUserId: _currentUserId!,
+                                ),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: c.primary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 2,
+                          ),
+                          child: Text(
+                            'View Arcade',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
