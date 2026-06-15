@@ -560,117 +560,100 @@ class _OverviewTab extends StatelessWidget {
                   final room = roomsWithStreaks[index];
                   final otherUserId = room.participants
                       .firstWhere((id) => id != currentUserId, orElse: () => '');
-
                   if (otherUserId.isEmpty) return const SizedBox.shrink();
-                  final cachedUser = chatCacheService.getCachedUser(otherUserId);
-                  final name = cachedUser?.name ?? 'Someone';
-                  final avatarUrl = cachedUser?.photoUrl ??
-                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
 
-                  // Streak-at-risk: check if last interaction was > 20 hours ago
-                  final isAtRisk = room.lastInteractionDate != null &&
-                      DateTime.now().difference(room.lastInteractionDate!).inHours >= 20;
+                  return FutureBuilder<UserModel?>(
+                    future: _resolveUser(otherUserId),
+                    builder: (context, userSnap) {
+                      final user = userSnap.data;
+                      final name = user?.name ?? '...';
+                      final avatarUrl = user?.photoUrl ??
+                          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
+                      final isAtRisk = room.lastInteractionDate != null &&
+                          DateTime.now().difference(room.lastInteractionDate!).inHours >= 20;
 
-                  return Container(
-                    width: 100,
-                    margin: const EdgeInsets.only(right: 12),
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: isAtRisk
-                            ? [const Color(0xFFFF6B6B).withOpacity(0.12), const Color(0xFFFF6B6B).withOpacity(0.04)]
-                            : c.isDark
-                                ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
-                                : [const Color(0xFFFFF3E0), Colors.white],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: isAtRisk
-                            ? Colors.red.withOpacity(0.3)
-                            : Colors.orange.withOpacity(0.2),
-                        width: 1,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
+                      return Container(
+                        width: 100,
+                        margin: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: isAtRisk
+                                ? [const Color(0xFFFF6B6B).withOpacity(0.12), const Color(0xFFFF6B6B).withOpacity(0.04)]
+                                : c.isDark
+                                    ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
+                                    : [const Color(0xFFFFF3E0), Colors.white],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: isAtRisk ? Colors.red.withOpacity(0.3) : Colors.orange.withOpacity(0.2),
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            CircleAvatar(
-                              radius: 22,
-                              backgroundImage: NetworkImage(avatarUrl),
-                              backgroundColor: c.primaryLt,
-                            ),
-                            // Fire badge with count
-                            Positioned(
-                              bottom: -5,
-                              right: -8,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: isAtRisk
-                                        ? [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)]
-                                        : [const Color(0xFFFF8008), const Color(0xFFFFC837)],
-                                  ),
-                                  borderRadius: BorderRadius.circular(10),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: (isAtRisk ? Colors.red : Colors.orange)
-                                          .withOpacity(0.35),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                CircleAvatar(
+                                  radius: 22,
+                                  backgroundImage: NetworkImage(avatarUrl),
+                                  backgroundColor: c.primaryLt,
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      isAtRisk ? '⚠️' : '🔥',
-                                      style: const TextStyle(fontSize: 10),
-                                    ),
-                                    const SizedBox(width: 1),
-                                    Text(
-                                      '${room.streakCount}',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.white,
+                                Positioned(
+                                  bottom: -5,
+                                  right: -8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: isAtRisk
+                                            ? [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)]
+                                            : [const Color(0xFFFF8008), const Color(0xFFFFC837)],
                                       ),
+                                      borderRadius: BorderRadius.circular(10),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: (isAtRisk ? Colors.red : Colors.orange).withOpacity(0.35),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
                                     ),
-                                  ],
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(isAtRisk ? '⚠️' : '🔥', style: const TextStyle(fontSize: 10)),
+                                        const SizedBox(width: 1),
+                                        Text(
+                                          '${room.streakCount}',
+                                          style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
+                            const SizedBox(height: 10),
+                            Text(
+                              name,
+                              style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: c.textHigh),
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (isAtRisk)
+                              Text(
+                                'Send soon!',
+                                style: GoogleFonts.poppins(fontSize: 8, fontWeight: FontWeight.w600, color: Colors.red[400]),
+                              ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          name,
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: c.textHigh,
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (isAtRisk)
-                          Text(
-                            'Send soon!',
-                            style: GoogleFonts.poppins(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.red[400],
-                            ),
-                          ),
-                      ],
-                    ),
+                      );
+                    },
                   );
                 },
               ),
@@ -679,6 +662,21 @@ class _OverviewTab extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// Resolves a user by checking cache first, then fetching from Firestore.
+  Future<UserModel?> _resolveUser(String userId) async {
+    final cached = chatCacheService.getCachedUser(userId);
+    if (cached != null) return cached;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      if (doc.exists) {
+        final u = UserModel.fromFirestore(doc);
+        chatCacheService.cacheUser(u);
+        return u;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Widget _buildBadgesLocker(AppThemeColors c) {
