@@ -18,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class FCMService {
@@ -68,6 +69,9 @@ class FCMService {
     if (!_listenersRegistered) {
       _listenersRegistered = true;
 
+      // Initialise local notification channels & tap routing
+      await NotificationService.instance.initialize();
+
       FirebaseMessaging.onBackgroundMessage(
           _firebaseMessagingBackgroundHandler);
 
@@ -109,6 +113,15 @@ class FCMService {
               _isIncomingCallScreenShowing = false;
             }
           }
+        } else if (messageType == 'streak_broken' ||
+            messageType == 'streak_warning' ||
+            messageType == 'streak_milestone' ||
+            messageType == 'gup_points_earned' ||
+            messageType == 'unread_reminder' ||
+            messageType == 'daily_digest') {
+          // Show as a local notification via NotificationService so the user
+          // sees it even when the app is in the foreground.
+          await NotificationService.instance.handleForegroundMessage(message);
         }
         // Chat messages are handled by StreamBuilder — no action needed here.
       });

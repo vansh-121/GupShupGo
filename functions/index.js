@@ -1,5 +1,7 @@
 // Force redeploy to apply minInstances
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 
@@ -18,6 +20,8 @@ function isInvalidFcmTokenError(error) {
   if (INVALID_FCM_TOKEN_CODES.has(error.code)) return true;
   return String(error.message || "").includes("Requested entity was not found");
 }
+
+// ─── Core Helpers ──────────────────────────────────────────────────────────
 
 async function getNotificationTargets(userId) {
   const userRef = db.collection("users").doc(userId);
@@ -111,13 +115,79 @@ async function sendToUserDevices(userId, buildMessage) {
   };
 }
 
+// ─── Batch Multicast Helper ────────────────────────────────────────────────
+// Chunks a flat list of tokens into groups of 500 and fires one
+// sendEachForMulticast call per chunk. One call reaches up to 500 devices.
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function sendMulticastBatch(tokens, message) {
+  if (!tokens || tokens.length === 0) return;
+  const chunks = chunkArray([...new Set(tokens)], 500); // deduplicate first
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      messaging.sendEachForMulticast({ ...message, tokens: chunk }).catch((e) => {
+        console.error("Multicast chunk failed:", e.message);
+        return null;
+      })
+    )
+  );
+  const total = results.reduce((acc, r) => acc + (r ? r.successCount : 0), 0);
+  console.log(`Multicast: ${total} successful deliveries across ${chunks.length} chunks`);
+  return total;
+}
+
+// ─── Batch Token Fetcher ───────────────────────────────────────────────────
+// Fetches FCM tokens for multiple users in parallel.
+
+async function getTokensForUsers(userIds) {
+  const tokenMap = {};
+  await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        const devicesSnap = await db
+          .collection("users")
+          .doc(userId)
+          .collection("devices")
+          .get();
+        const tokens = [];
+        devicesSnap.forEach((doc) => {
+          const token = doc.data().fcmToken;
+          if (token) tokens.push(token);
+        });
+        tokenMap[userId] = tokens;
+      } catch (_) {
+        tokenMap[userId] = [];
+      }
+    })
+  );
+  return tokenMap;
+}
+
+// ─── Batch Name Fetcher ────────────────────────────────────────────────────
+
+async function getUserNames(userIds) {
+  const nameMap = {};
+  await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        const doc = await db.collection("users").doc(userId).get();
+        nameMap[userId] = doc.data()?.name || "Someone";
+      } catch (_) {
+        nameMap[userId] = "Someone";
+      }
+    })
+  );
+  return nameMap;
+}
+
 // ─── Send Call Notification ──────────────────────────────────────────────────
-// IMPORTANT: This sends a DATA-ONLY message (no "notification" block).
-// On Android, data-only messages ALWAYS reach the background handler even when
-// the app is killed, allowing us to show the native CallKit full-screen call UI.
-// If a "notification" block were present, Android would display a plain text
-// notification and NEVER invoke the Dart background handler — which is why
-// call notifications were unreliable before this fix.
 exports.sendCallNotification = onRequest(
   { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
@@ -126,7 +196,6 @@ exports.sendCallNotification = onRequest(
       return;
     }
 
-    // Verify Firebase Auth ID token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       res.status(401).json({ error: "Unauthorized" });
@@ -146,7 +215,6 @@ exports.sendCallNotification = onRequest(
         return;
       }
 
-      // Fetch caller details for display in the CallKit UI
       let callerName = callerId;
       let callerPhotoUrl = "";
       try {
@@ -160,10 +228,6 @@ exports.sendCallNotification = onRequest(
 
       const audioOnly = isAudioOnly === true || isAudioOnly === "true";
 
-      // Data-only message — no "notification" block.
-      // This guarantees the Dart background handler fires on every platform
-      // state (foreground, background, killed) so CallKit can display the
-      // native full-screen call UI with Accept / Decline buttons.
       const result = await sendToUserDevices(calleeId, (fcmToken) => ({
         token: fcmToken,
         data: {
@@ -175,11 +239,8 @@ exports.sendCallNotification = onRequest(
           type: "incoming_call",
           isAudioOnly: String(audioOnly),
         },
-        // No "notification" key — intentional.
         android: {
           priority: "high",
-          // Time-to-live: auto-dismiss if not delivered within 60 seconds
-          // Firebase Admin SDK requires TTL in milliseconds (number)
           ttl: 60000,
         },
         apns: {
@@ -216,7 +277,6 @@ exports.sendMessageNotification = onRequest(
       return;
     }
 
-    // Verify Firebase Auth ID token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       res.status(401).json({ error: "Unauthorized" });
@@ -273,20 +333,6 @@ exports.sendMessageNotification = onRequest(
 );
 
 // ─── Device Session Tokens ───────────────────────────────────────────────────
-// Lets the app maintain its own long-lived "remember this device" session,
-// independent of Firebase Auth's internal refresh-token store. We hand the
-// app an opaque random token at sign-in; on cold starts where Firebase Auth
-// has lost its session (e.g. MIUI cleared the store), the app trades that
-// token back for a Firebase custom token and re-authenticates silently.
-//
-// Security model:
-//   • Tokens are random 32-byte values (256 bits of entropy).
-//   • We persist only a SHA-256 hash of the token in Firestore — leaks of
-//     the deviceSessions docs alone are not enough to impersonate a user.
-//   • Exchange increments lastUsedAt (audit trail) and is rate-limited by
-//     the natural latency of a custom token mint (~100 ms).
-//   • Revocation deletes the doc; the app deletes the local token too.
-// ─────────────────────────────────────────────────────────────────────────────
 
 const DEVICE_SESSION_COLLECTION = "deviceSessions";
 const TOKEN_BYTES = 32;
@@ -295,9 +341,6 @@ function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken, "utf8").digest("hex");
 }
 
-// Issue a new device session token. Requires a valid Firebase ID token —
-// the user has just signed in (phone OTP, Google, email/password, etc.)
-// and we trust their current uid.
 exports.issueDeviceSession = onRequest(
   { cors: true, invoker: "public" },
   async (req, res) => {
@@ -334,8 +377,6 @@ exports.issueDeviceSession = onRequest(
         lastUsedAt: now,
       });
 
-      // Return the raw token ONCE — the app must persist it locally; the
-      // server only ever stores the hash and cannot recover it later.
       res.status(200).json({ token: rawToken });
     } catch (error) {
       console.error("issueDeviceSession error:", error);
@@ -344,9 +385,6 @@ exports.issueDeviceSession = onRequest(
   }
 );
 
-// Exchange a device session token for a Firebase custom token. No Bearer
-// auth required — that's the whole point: this restores a session when
-// the client has no live Firebase ID token.
 exports.exchangeDeviceSession = onRequest(
   { cors: true, invoker: "public" },
   async (req, res) => {
@@ -368,7 +406,6 @@ exports.exchangeDeviceSession = onRequest(
         .get();
 
       if (!doc.exists) {
-        // Either never issued, or has been revoked. Treat identically.
         res.status(401).json({ error: "Invalid session" });
         return;
       }
@@ -379,7 +416,6 @@ exports.exchangeDeviceSession = onRequest(
         return;
       }
 
-      // Confirm the user account still exists and isn't disabled.
       try {
         const userRecord = await auth.getUser(uid);
         if (userRecord.disabled) {
@@ -387,13 +423,11 @@ exports.exchangeDeviceSession = onRequest(
           return;
         }
       } catch (_) {
-        // User deleted — clean up the stale session.
         await doc.ref.delete().catch(() => { });
         res.status(401).json({ error: "Account no longer exists" });
         return;
       }
 
-      // Audit trail. Fire-and-forget — never block the exchange on this.
       doc.ref
         .update({ lastUsedAt: admin.firestore.FieldValue.serverTimestamp() })
         .catch(() => { });
@@ -407,10 +441,6 @@ exports.exchangeDeviceSession = onRequest(
   }
 );
 
-// Revoke a device session token. Called on explicit sign-out. Bearer auth
-// optional — we accept either a valid ID token (preferred) OR the raw
-// token itself, so a user can always invalidate a token even if they no
-// longer have a working Firebase session.
 exports.revokeDeviceSession = onRequest(
   { cors: true, invoker: "public" },
   async (req, res) => {
@@ -429,16 +459,10 @@ exports.revokeDeviceSession = onRequest(
       const ref = db.collection(DEVICE_SESSION_COLLECTION).doc(tokenHash);
       const doc = await ref.get();
       if (!doc.exists) {
-        // Already gone — succeed silently so retries are safe.
         res.status(200).json({ success: true });
         return;
       }
 
-      // If a Bearer token is supplied, require it to match the session's uid.
-      // (Optional but blocks a third party who scraped the raw token from
-      // doing nothing useful — they'd need the user's current ID token to
-      // pass this check. Without an ID token, holding the raw token is
-      // already proof of access on this device, so revoking is allowed.)
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith("Bearer ")) {
         try {
@@ -449,9 +473,7 @@ exports.revokeDeviceSession = onRequest(
             res.status(403).json({ error: "Forbidden" });
             return;
           }
-        } catch (_) {
-          // Bad ID token — fall through; raw-token possession is still proof.
-        }
+        } catch (_) { }
       }
 
       await ref.delete();
@@ -464,16 +486,6 @@ exports.revokeDeviceSession = onRequest(
 );
 
 // ─── E2EE: consume one-time prekey ───────────────────────────────────────────
-//
-// Returns one of the target user's published one-time prekeys AND deletes it
-// from Firestore atomically, so the same prekey is never handed out twice.
-// (Atomic consume-on-read is the property that gives X3DH forward secrecy at
-// session setup; without it, a passive logger of Firestore could replay the
-// prekey to re-derive past session keys.)
-//
-// Request:  { targetUid: string, deviceId: number }
-// Response: { preKey: { id: number, pub: string } | null }
-// 200 + null preKey when the pool is empty — caller proceeds without OTPK.
 exports.consumeOneTimePreKey = onRequest(
   { cors: true, invoker: "public", minInstances: 0 },
   async (req, res) => {
@@ -501,7 +513,6 @@ exports.consumeOneTimePreKey = onRequest(
         .doc(String(deviceId))
         .collection("oneTimePreKeys");
 
-      // Transactional consume: pick the first prekey, delete it, return it.
       const result = await db.runTransaction(async (tx) => {
         const snap = await tx.get(otpkCol.limit(1));
         if (snap.empty) return null;
@@ -515,5 +526,394 @@ exports.consumeOneTimePreKey = onRequest(
       console.error("consumeOneTimePreKey error:", error);
       res.status(500).json({ error: error.message });
     }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATION SYSTEM — Automated, Batched, Multicast
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Trigger 1: Streak Broken ─────────────────────────────────────────────────
+// Fires the instant streakBrokenAt is written (null → timestamp).
+// Both participants get an immediate personalised push.
+exports.streakBrokenTrigger = onDocumentUpdated(
+  { document: "chatRooms/{roomId}", region: "us-central1" },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    // Only react when streakBrokenAt goes from absent → present
+    if (before.streakBrokenAt || !after.streakBrokenAt) return null;
+
+    const participants = after.participants || [];
+    const previousStreakCount = after.previousStreakCount || 0;
+    const roomId = event.params.roomId;
+
+    if (participants.length < 2 || previousStreakCount === 0) return null;
+
+    const nameMap = await getUserNames(participants);
+
+    await Promise.all(
+      participants.map((userId) => {
+        const otherUserId = participants.find((id) => id !== userId);
+        const otherName = nameMap[otherUserId] || "your friend";
+        const streakLabel = `${previousStreakCount}-day`;
+
+        return sendToUserDevices(userId, (token) => ({
+          token,
+          notification: {
+            title: "💔 Streak Broken",
+            body: `Your ${streakLabel} streak with ${otherName} just broke! Restore it within 24 hours.`,
+          },
+          data: {
+            type: "streak_broken",
+            screen: "chat",
+            chatRoomId: roomId,
+            contactId: otherUserId,
+            previousStreakCount: String(previousStreakCount),
+          },
+          android: { priority: "high" },
+          apns: { headers: { "apns-priority": "10" } },
+        }));
+      })
+    );
+
+    console.log(`streakBrokenTrigger: notified ${participants.length} users for room ${roomId}`);
+    return null;
+  }
+);
+
+// ─── Trigger 2: Streak Milestone ──────────────────────────────────────────────
+// Fires when streakCount crosses 7, 30, 100, or 365 days.
+exports.streakMilestoneTrigger = onDocumentUpdated(
+  { document: "chatRooms/{roomId}", region: "us-central1" },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    const oldStreak = before.streakCount || 0;
+    const newStreak = after.streakCount || 0;
+    const MILESTONES = [7, 30, 100, 365];
+
+    const milestone = MILESTONES.find((m) => oldStreak < m && newStreak >= m);
+    if (!milestone) return null;
+
+    const participants = after.participants || [];
+    const roomId = event.params.roomId;
+    const nameMap = await getUserNames(participants);
+
+    const emoji = milestone >= 365 ? "👑" : milestone >= 100 ? "🏆" : milestone >= 30 ? "💎" : "🔥";
+    const title = milestone >= 365 ? "Year-long Legend!" : milestone >= 100 ? "Century Streak!" : milestone >= 30 ? "Month Milestone!" : "Week Streak!";
+
+    await Promise.all(
+      participants.map((userId) => {
+        const otherUserId = participants.find((id) => id !== userId);
+        const otherName = nameMap[otherUserId] || "your friend";
+
+        return sendToUserDevices(userId, (token) => ({
+          token,
+          notification: {
+            title: `${emoji} ${title}`,
+            body: `${milestone} days straight with ${otherName}! You're on fire! 🔥`,
+          },
+          data: {
+            type: "streak_milestone",
+            screen: "arcade",
+            milestoneCount: String(milestone),
+            chatRoomId: roomId,
+            contactId: otherUserId,
+          },
+          android: { priority: "high" },
+          apns: { headers: { "apns-priority": "10" } },
+        }));
+      })
+    );
+
+    console.log(`streakMilestoneTrigger: milestone ${milestone} for room ${roomId}`);
+    return null;
+  }
+);
+
+// ─── Trigger 3: Gup Points Reward ─────────────────────────────────────────────
+// Fires when a user's gupPoints increases by ≥ 20 in one write.
+// Cooldown: once per hour per user.
+exports.gupPointsEarnedTrigger = onDocumentUpdated(
+  { document: "users/{userId}", region: "us-central1" },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    const oldPoints = before.gupPoints || 0;
+    const newPoints = after.gupPoints || 0;
+    const gained = newPoints - oldPoints;
+
+    if (gained < 20) return null;
+
+    const userId = event.params.userId;
+
+    // Hourly cooldown — don't spam for every small earn
+    const lastNotified = after.notifiedAt?.gup_points;
+    if (lastNotified) {
+      const hoursSince = (Date.now() - lastNotified.toMillis()) / 3600000;
+      if (hoursSince < 1) return null;
+    }
+
+    await sendToUserDevices(userId, (token) => ({
+      token,
+      notification: {
+        title: "⚡ Gup Points Earned!",
+        body: `+${gained} Gup Points! You now have ${newPoints} points. Keep it up!`,
+      },
+      data: {
+        type: "gup_points_earned",
+        screen: "arcade",
+        pointsGained: String(gained),
+        totalPoints: String(newPoints),
+      },
+      android: { priority: "normal" },
+      apns: { headers: { "apns-priority": "5" } },
+    }));
+
+    // Write cooldown timestamp
+    await db.collection("users").doc(userId).update({
+      "notifiedAt.gup_points": admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`gupPointsEarnedTrigger: user ${userId} earned ${gained} points`);
+    return null;
+  }
+);
+
+// ─── Scheduled: Hourly At-Risk Streak Batch ───────────────────────────────────
+// Runs every 60 minutes. Queries all active-streak chatRooms, groups users into
+// "warning" (22–35h) and "critical" (36–47h) buckets, then fires one multicast
+// per bucket (500 tokens per HTTP call). Updates notifiedAt to prevent re-spam.
+exports.hourlyStreakWarningBatch = onSchedule(
+  { schedule: "every 60 minutes", region: "us-central1" },
+  async () => {
+    const now = new Date();
+    const COOLDOWN_HOURS = 12; // don't re-notify the same room within 12h
+
+    const chatRoomsSnap = await db
+      .collection("chatRooms")
+      .where("streakCount", ">", 0)
+      .get();
+
+    const warningUserIds = new Set();
+    const criticalUserIds = new Set();
+    const roomUpdates = [];
+
+    for (const roomDoc of chatRoomsSnap.docs) {
+      const room = roomDoc.data();
+      const lastInteraction = room.lastInteractionDate;
+      if (!lastInteraction) continue;
+
+      const hoursSince = (now - lastInteraction.toDate()) / 3600000;
+      let riskLevel = null;
+
+      if (hoursSince >= 36 && hoursSince < 48) riskLevel = "critical";
+      else if (hoursSince >= 22 && hoursSince < 36) riskLevel = "warning";
+      if (!riskLevel) continue;
+
+      // Check per-room cooldown
+      const lastNotified = room.notifiedAt?.[`streak_${riskLevel}`];
+      if (lastNotified) {
+        const hoursSinceNotified = (now - lastNotified.toDate()) / 3600000;
+        if (hoursSinceNotified < COOLDOWN_HOURS) continue;
+      }
+
+      // Add participants to the right bucket
+      (room.participants || []).forEach((uid) => {
+        if (riskLevel === "critical") criticalUserIds.add(uid);
+        else warningUserIds.add(uid);
+      });
+
+      // Mark as notified
+      roomUpdates.push(
+        roomDoc.ref.update({
+          [`notifiedAt.streak_${riskLevel}`]: admin.firestore.FieldValue.serverTimestamp(),
+        })
+      );
+    }
+
+    // Batch-fetch tokens for all affected users in parallel
+    const allUserIds = [...new Set([...warningUserIds, ...criticalUserIds])];
+    const tokenMap = await getTokensForUsers(allUserIds);
+
+    const warningTokens = [...warningUserIds].flatMap((uid) => tokenMap[uid] || []);
+    const criticalTokens = [...criticalUserIds].flatMap((uid) => tokenMap[uid] || []);
+
+    const sends = [];
+
+    if (warningTokens.length > 0) {
+      sends.push(
+        sendMulticastBatch(warningTokens, {
+          notification: {
+            title: "⚠️ Streak at Risk!",
+            body: "One of your streaks needs attention. Send a message to keep the fire alive!",
+          },
+          data: { type: "streak_warning", screen: "home", riskLevel: "warning" },
+          android: { priority: "high" },
+          apns: { headers: { "apns-priority": "10" } },
+        })
+      );
+    }
+
+    if (criticalTokens.length > 0) {
+      sends.push(
+        sendMulticastBatch(criticalTokens, {
+          notification: {
+            title: "🔥 Last Chance!",
+            body: "A streak is breaking in under 12 hours! Open GupShupGo now.",
+          },
+          data: { type: "streak_warning", screen: "home", riskLevel: "critical" },
+          android: { priority: "high" },
+          apns: { headers: { "apns-priority": "10" } },
+        })
+      );
+    }
+
+    await Promise.all([...sends, ...roomUpdates]);
+
+    console.log(
+      `hourlyStreakWarningBatch done: ${warningTokens.length} warning, ` +
+      `${criticalTokens.length} critical tokens notified across ` +
+      `${chatRoomsSnap.size} streak rooms.`
+    );
+  }
+);
+
+// ─── Scheduled: Daily Digest (8 AM IST = 2:30 AM UTC) ────────────────────────
+// Collects all users' device tokens and sends one personalised morning digest.
+// Cooldown: once per 20 hours per user (stored in user.notifiedAt.daily_digest).
+exports.dailyDigestJob = onSchedule(
+  { schedule: "30 2 * * *", timeZone: "UTC", region: "us-central1" },
+  async () => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
+
+    // Fetch recently-active users
+    const usersSnap = await db
+      .collection("users")
+      .where("lastSeen", ">", admin.firestore.Timestamp.fromDate(sevenDaysAgo))
+      .get();
+
+    const allTokens = [];
+    const cooldownUpdates = [];
+
+    await Promise.all(
+      usersSnap.docs.map(async (userDoc) => {
+        const userData = userDoc.data();
+
+        // Skip if already got a digest in the last 20 hours
+        const lastDigest = userData.notifiedAt?.daily_digest;
+        if (lastDigest) {
+          const hoursSince = (now - lastDigest.toDate()) / 3600000;
+          if (hoursSince < 20) return;
+        }
+
+        const devicesSnap = await db
+          .collection("users")
+          .doc(userDoc.id)
+          .collection("devices")
+          .get();
+
+        devicesSnap.forEach((doc) => {
+          const token = doc.data().fcmToken;
+          if (token) allTokens.push(token);
+        });
+
+        cooldownUpdates.push(
+          userDoc.ref.update({
+            "notifiedAt.daily_digest": admin.firestore.FieldValue.serverTimestamp(),
+          })
+        );
+      })
+    );
+
+    if (allTokens.length > 0) {
+      await sendMulticastBatch(allTokens, {
+        notification: {
+          title: "🌅 Good Morning!",
+          body: "Check your streaks, earn Gup Points, and keep conversations going today.",
+        },
+        data: { type: "daily_digest", screen: "home" },
+        android: { priority: "normal" },
+        apns: { headers: { "apns-priority": "5" } },
+      });
+    }
+
+    await Promise.all(cooldownUpdates);
+    console.log(`dailyDigestJob: sent to ${allTokens.length} devices.`);
+  }
+);
+
+// ─── Scheduled: Unread Message Reminder (every 2 hours) ──────────────────────
+// If a user has unread messages older than 2 hours and hasn't opened the app,
+// send a gentle reminder. Uses lastSeen on the user document.
+exports.unreadReminderBatch = onSchedule(
+  { schedule: "every 120 minutes", region: "us-central1" },
+  async () => {
+    const now = new Date();
+    const twoHoursAgo = new Date(now - 2 * 3600000);
+    const COOLDOWN_HOURS = 4;
+
+    // Find chatRooms that have unread messages older than 2 hours
+    const chatRoomsSnap = await db
+      .collection("chatRooms")
+      .where("lastMessageTime", "<", admin.firestore.Timestamp.fromDate(twoHoursAgo))
+      .get();
+
+    const userIdsToRemind = new Set();
+    const roomUpdates = [];
+
+    for (const roomDoc of chatRoomsSnap.docs) {
+      const room = roomDoc.data();
+      const unreadMap = room.unreadCount || {};
+
+      for (const [uid, count] of Object.entries(unreadMap)) {
+        if (count <= 0) continue;
+
+        // Check cooldown
+        const lastNotified = room.notifiedAt?.unread_reminder;
+        if (lastNotified) {
+          const hoursSince = (now - lastNotified.toDate()) / 3600000;
+          if (hoursSince < COOLDOWN_HOURS) continue;
+        }
+
+        userIdsToRemind.add(uid);
+      }
+
+      if (userIdsToRemind.size > 0) {
+        roomUpdates.push(
+          roomDoc.ref.update({
+            "notifiedAt.unread_reminder": admin.firestore.FieldValue.serverTimestamp(),
+          })
+        );
+      }
+    }
+
+    if (userIdsToRemind.size === 0) {
+      console.log("unreadReminderBatch: no users to remind");
+      return;
+    }
+
+    const tokenMap = await getTokensForUsers([...userIdsToRemind]);
+    const allTokens = [...userIdsToRemind].flatMap((uid) => tokenMap[uid] || []);
+
+    if (allTokens.length > 0) {
+      await sendMulticastBatch(allTokens, {
+        notification: {
+          title: "💬 You have unread messages",
+          body: "Someone is waiting for your reply. Open GupShupGo now!",
+        },
+        data: { type: "unread_reminder", screen: "home" },
+        android: { priority: "normal" },
+        apns: { headers: { "apns-priority": "5" } },
+      });
+    }
+
+    await Promise.all(roomUpdates);
+    console.log(`unreadReminderBatch: reminded ${userIdsToRemind.size} users.`);
   }
 );
