@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 class Contact {
@@ -100,6 +102,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Streaks state ──────────────────────────────────────────────────
   int _streakCount = 0;
+  int _previousStreakCount = 0;
+  DateTime? _streakBrokenAt;
   StreamSubscription? _chatRoomSubscription;
 
   // ─── Typing indicator state ───────────────────────────────────────
@@ -153,9 +157,21 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted && snap.exists) {
         final data = snap.data();
         final streak = data?['streakCount'] as int? ?? 0;
-        if (streak != _streakCount) {
+        final prevStreak = data?['previousStreakCount'] as int? ?? 0;
+        final brokenTs = data?['streakBrokenAt'] as Timestamp?;
+        final brokenAt = brokenTs?.toDate();
+
+        // Clean up expired restore windows locally
+        final isExpired = brokenAt != null &&
+            DateTime.now().difference(brokenAt).inHours > 24;
+
+        if (streak != _streakCount ||
+            prevStreak != _previousStreakCount ||
+            brokenAt != _streakBrokenAt) {
           setState(() {
             _streakCount = streak;
+            _previousStreakCount = isExpired ? 0 : prevStreak;
+            _streakBrokenAt = isExpired ? null : brokenAt;
           });
         }
       }
@@ -207,6 +223,33 @@ class _ChatScreenState extends State<ChatScreen> {
     if (currentScroll >= maxScroll - 200) {
       _loadOlderMessages();
     }
+  }
+
+  /// Shows the streak-restore dialog when the user taps the broken-streak badge.
+  Future<void> _showStreakRestoreDialog() async {
+    if (_previousStreakCount <= 0 || _streakBrokenAt == null) return;
+    final chatRoomId = _chatService.getChatRoomId(
+        widget.currentUserId, widget.contact.id);
+    // Fetch current user's Gup Points
+    int gupPoints = 0;
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.currentUserId)
+          .get();
+      gupPoints = (userDoc.data()?['gupPoints'] as int?) ?? 0;
+    } catch (_) {}
+
+    if (!mounted) return;
+    await StreakRestoreDialog.show(
+      context,
+      previousStreakCount: _previousStreakCount,
+      streakBrokenAt: _streakBrokenAt!,
+      userGupPoints: gupPoints,
+      contactName: widget.contact.name,
+      userId: widget.currentUserId,
+      chatRoomId: chatRoomId,
+    );
   }
 
   Future<void> _loadOlderMessages() async {
@@ -1544,6 +1587,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                      // Active streak badge
                       if (_streakCount > 0) ...[
                         if (_isOtherUserTyping || _isContactOnline)
                           const SizedBox(width: 8),
@@ -1568,6 +1612,37 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+                      ]
+                      // Broken streak badge (tappable → restore dialog)
+                      else if (_previousStreakCount > 0 && _streakBrokenAt != null) ...[
+                        if (_isOtherUserTyping || _isContactOnline)
+                          const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => _showStreakRestoreDialog(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('💔', style: TextStyle(fontSize: 10)),
+                                const SizedBox(width: 2),
+                                Text(
+                                  'Streak lost!',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.red[400],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],

@@ -10,6 +10,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 
 class GupArcadeScreen extends StatefulWidget {
   final String currentUserId;
@@ -532,12 +533,21 @@ class _OverviewTab extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox.shrink();
 
-        final roomsWithStreaks = snapshot.data!
+        final allRooms = snapshot.data!;
+        final roomsWithStreaks = allRooms
             .where((room) => room.streakCount > 0)
             .toList()
           ..sort((a, b) => b.streakCount.compareTo(a.streakCount));
 
-        if (roomsWithStreaks.isEmpty) {
+        final brokenStreaks = allRooms
+            .where((room) =>
+                room.previousStreakCount > 0 &&
+                room.streakBrokenAt != null &&
+                DateTime.now().difference(room.streakBrokenAt!).inHours <= 24)
+            .toList()
+          ..sort((a, b) => b.previousStreakCount.compareTo(a.previousStreakCount));
+
+        if (roomsWithStreaks.isEmpty && brokenStreaks.isEmpty) {
           return _buildEmptySection(
             c,
             title: 'Active Streaks',
@@ -549,118 +559,265 @@ class _OverviewTab extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionHeader('Active Streaks', '🔥', c),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 120,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: roomsWithStreaks.length,
-                itemBuilder: (context, index) {
-                  final room = roomsWithStreaks[index];
-                  final otherUserId = room.participants
-                      .firstWhere((id) => id != currentUserId, orElse: () => '');
-                  if (otherUserId.isEmpty) return const SizedBox.shrink();
-
-                  return FutureBuilder<UserModel?>(
-                    future: _resolveUser(otherUserId),
-                    builder: (context, userSnap) {
-                      final user = userSnap.data;
-                      final name = user?.name ?? '...';
-                      final avatarUrl = user?.photoUrl ??
-                          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
-                      final isAtRisk = room.lastInteractionDate != null &&
-                          DateTime.now().difference(room.lastInteractionDate!).inHours >= 20;
-
-                      return Container(
-                        width: 100,
-                        margin: const EdgeInsets.only(right: 12),
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: isAtRisk
-                                ? [const Color(0xFFFF6B6B).withOpacity(0.12), const Color(0xFFFF6B6B).withOpacity(0.04)]
-                                : c.isDark
-                                    ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
-                                    : [const Color(0xFFFFF3E0), Colors.white],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: isAtRisk ? Colors.red.withOpacity(0.3) : Colors.orange.withOpacity(0.2),
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                CircleAvatar(
-                                  radius: 22,
-                                  backgroundImage: NetworkImage(avatarUrl),
-                                  backgroundColor: c.primaryLt,
-                                ),
-                                Positioned(
-                                  bottom: -5,
-                                  right: -8,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: isAtRisk
-                                            ? [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)]
-                                            : [const Color(0xFFFF8008), const Color(0xFFFFC837)],
-                                      ),
-                                      borderRadius: BorderRadius.circular(10),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: (isAtRisk ? Colors.red : Colors.orange).withOpacity(0.35),
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(isAtRisk ? '⚠️' : '🔥', style: const TextStyle(fontSize: 10)),
-                                        const SizedBox(width: 1),
-                                        Text(
-                                          '${room.streakCount}',
-                                          style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              name,
-                              style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: c.textHigh),
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (isAtRisk)
-                              Text(
-                                'Send soon!',
-                                style: GoogleFonts.poppins(fontSize: 8, fontWeight: FontWeight.w600, color: Colors.red[400]),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
+            // ── Active Streaks ─────────────────────────────────────────
+            if (roomsWithStreaks.isNotEmpty) ...[
+              _sectionHeader('Active Streaks', '🔥', c),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 120,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: roomsWithStreaks.length,
+                  itemBuilder: (context, index) {
+                    final room = roomsWithStreaks[index];
+                    return _buildActiveStreakCard(room, c);
+                  },
+                ),
               ),
-            ),
+            ],
+
+            // ── Broken Streaks ─────────────────────────────────────────
+            if (brokenStreaks.isNotEmpty) ...[
+              if (roomsWithStreaks.isNotEmpty) const SizedBox(height: 20),
+              _sectionHeader('Broken Streaks', '💔', c),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 130,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: brokenStreaks.length,
+                  itemBuilder: (context, index) {
+                    final room = brokenStreaks[index];
+                    return _buildBrokenStreakCard(context, room, c);
+                  },
+                ),
+              ),
+            ],
           ],
         );
       },
+    );
+  }
+
+  Widget _buildActiveStreakCard(ChatRoom room, AppThemeColors c) {
+    final otherUserId = room.participants
+        .firstWhere((id) => id != currentUserId, orElse: () => '');
+    if (otherUserId.isEmpty) return const SizedBox.shrink();
+
+    return FutureBuilder<UserModel?>(
+      future: _resolveUser(otherUserId),
+      builder: (context, userSnap) {
+        final user = userSnap.data;
+        final name = user?.name ?? '...';
+        final avatarUrl = user?.photoUrl ??
+            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
+        final isAtRisk = room.lastInteractionDate != null &&
+            DateTime.now().difference(room.lastInteractionDate!).inHours >= 20;
+
+        return Container(
+          width: 100,
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isAtRisk
+                  ? [const Color(0xFFFF6B6B).withOpacity(0.12), const Color(0xFFFF6B6B).withOpacity(0.04)]
+                  : c.isDark
+                      ? [const Color(0xFF2A2040), const Color(0xFF1E1830)]
+                      : [const Color(0xFFFFF3E0), Colors.white],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isAtRisk ? Colors.red.withOpacity(0.3) : Colors.orange.withOpacity(0.2),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundColor: c.primaryLt,
+                  ),
+                  Positioned(
+                    bottom: -5,
+                    right: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isAtRisk
+                              ? [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)]
+                              : [const Color(0xFFFF8008), const Color(0xFFFFC837)],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: (isAtRisk ? Colors.red : Colors.orange).withOpacity(0.35),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(isAtRisk ? '⚠️' : '🔥', style: const TextStyle(fontSize: 10)),
+                          const SizedBox(width: 1),
+                          Text(
+                            '${room.streakCount}',
+                            style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                name,
+                style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: c.textHigh),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (isAtRisk)
+                Text(
+                  'Send soon!',
+                  style: GoogleFonts.poppins(fontSize: 8, fontWeight: FontWeight.w600, color: Colors.red[400]),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBrokenStreakCard(BuildContext context, ChatRoom room, AppThemeColors c) {
+    final otherUserId = room.participants
+        .firstWhere((id) => id != currentUserId, orElse: () => '');
+    if (otherUserId.isEmpty) return const SizedBox.shrink();
+
+    final cost = GamificationService.getRestoreCost(room.previousStreakCount);
+
+    return FutureBuilder<UserModel?>(
+      future: _resolveUser(otherUserId),
+      builder: (context, userSnap) {
+        final user = userSnap.data;
+        final name = user?.name ?? '...';
+        final avatarUrl = user?.photoUrl ??
+            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
+
+        return Container(
+          width: 110,
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: c.isDark
+                  ? [const Color(0xFF2A1A1A), const Color(0xFF1A1020)]
+                  : [const Color(0xFFFFF5F5), const Color(0xFFFFF0E0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.red.withOpacity(0.25)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundColor: c.primaryLt,
+                  ),
+                  Positioned(
+                    bottom: -5,
+                    right: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFFF6B6B), Color(0xFFEE5A24)],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('💔', style: TextStyle(fontSize: 9)),
+                          const SizedBox(width: 1),
+                          Text(
+                            '${room.previousStreakCount}',
+                            style: GoogleFonts.poppins(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name,
+                style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: c.textHigh),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => _handleStreakRestore(context, room, name),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFF8008), Color(0xFFFFC837)],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '⚡$cost Restore',
+                    style: GoogleFonts.poppins(fontSize: 8, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _handleStreakRestore(BuildContext context, ChatRoom room, String contactName) async {
+    int gupPoints = 0;
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUserId)
+          .get();
+      gupPoints = (userDoc.data()?['gupPoints'] as int?) ?? 0;
+    } catch (_) {}
+
+    if (!context.mounted || room.streakBrokenAt == null) return;
+
+    await StreakRestoreDialog.show(
+      context,
+      previousStreakCount: room.previousStreakCount,
+      streakBrokenAt: room.streakBrokenAt!,
+      userGupPoints: gupPoints,
+      contactName: contactName,
+      userId: currentUserId,
+      chatRoomId: room.id,
     );
   }
 

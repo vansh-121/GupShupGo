@@ -195,6 +195,70 @@ class GamificationService {
     }
   }
 
+  /// Returns the Gup Point cost to restore a broken streak (tiered).
+  static int getRestoreCost(int streakCount) {
+    if (streakCount >= 100) return 100;
+    if (streakCount >= 30) return 50;
+    if (streakCount >= 10) return 25;
+    return 10;
+  }
+
+  /// Restore a broken streak by spending Gup Points.
+  /// Returns `true` if the restore succeeded, `false` if the user has
+  /// insufficient points or the restore window has expired.
+  Future<bool> restoreStreak({
+    required String userId,
+    required String chatRoomId,
+    required int cost,
+  }) async {
+    try {
+      if (userId.isEmpty || chatRoomId.isEmpty) return false;
+
+      final userDocRef = _firestore.collection(_usersCollection).doc(userId);
+      final chatRoomRef = _firestore.collection('chatRooms').doc(chatRoomId);
+
+      return await _firestore.runTransaction<bool>((transaction) async {
+        final userSnap = await transaction.get(userDocRef);
+        final roomSnap = await transaction.get(chatRoomRef);
+        if (!userSnap.exists || !roomSnap.exists) return false;
+
+        final userData = userSnap.data() as Map<String, dynamic>;
+        final roomData = roomSnap.data() as Map<String, dynamic>;
+
+        final currentPoints = userData['gupPoints'] as int? ?? 0;
+        if (currentPoints < cost) return false; // Insufficient points
+
+        final previousStreak = roomData['previousStreakCount'] as int? ?? 0;
+        if (previousStreak <= 0) return false; // Nothing to restore
+
+        final brokenTs = roomData['streakBrokenAt'] as Timestamp?;
+        if (brokenTs == null) return false;
+        final brokenAt = brokenTs.toDate();
+        if (DateTime.now().difference(brokenAt).inHours > 24) {
+          return false; // Restore window expired
+        }
+
+        // Deduct points from user
+        transaction.update(userDocRef, {
+          'gupPoints': currentPoints - cost,
+        });
+
+        // Restore the streak on the chatRoom
+        transaction.update(chatRoomRef, {
+          'streakCount': previousStreak,
+          'previousStreakCount': 0,
+          'streakBrokenAt': null,
+          'lastInteractionDate': Timestamp.fromDate(DateTime.now()),
+        });
+
+        return true;
+      });
+    } catch (e) {
+      debugPrint('[Gamification] restoreStreak failed: $e');
+      return false;
+    }
+  }
+
   /// Increment challenge progress for non-message actions (e.g. status posts).
   Future<void> incrementChallengeProgress(String userId, String challengeKey, int amount) async {
     try {

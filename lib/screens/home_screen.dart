@@ -971,6 +971,19 @@ class _HomeScreenState extends State<HomeScreen>
                                   ],
                                 ),
                               ),
+                            ] else if (chatRoom.previousStreakCount > 0 &&
+                                chatRoom.streakBrokenAt != null &&
+                                DateTime.now().difference(chatRoom.streakBrokenAt!).inHours <= 24) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                                ),
+                                child: const Text('💔', style: TextStyle(fontSize: 10)),
+                              ),
                             ],
                           ],
                         ),

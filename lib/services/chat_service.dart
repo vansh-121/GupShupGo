@@ -763,32 +763,87 @@ class ChatService {
       roomUpdates['unreadCount.$receiverId'] = FieldValue.increment(1);
     }
 
-    // Calculate streaks dynamically
+    // ── Mutual streak logic (Snapchat-style) ────────────────────────────
+    // Both participants must send at least one message for the streak to
+    // count. The streak increments only when the second person replies
+    // within the 24-48h window after the last mutual interaction.
     try {
       final chatRoomSnap = await chatRoomRef.get();
       int currentStreak = 0;
       DateTime? lastInteraction;
+      Map<String, DateTime> lastSentAt = {};
+      int previousStreakCount = 0;
+      DateTime? streakBrokenAt;
+
       if (chatRoomSnap.exists) {
         final data = chatRoomSnap.data() as Map<String, dynamic>;
         currentStreak = data['streakCount'] as int? ?? 0;
         final timestamp = data['lastInteractionDate'] as Timestamp?;
         lastInteraction = timestamp?.toDate();
+        previousStreakCount = data['previousStreakCount'] as int? ?? 0;
+        final brokenTs = data['streakBrokenAt'] as Timestamp?;
+        streakBrokenAt = brokenTs?.toDate();
+
+        final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
+        rawSent.forEach((key, value) {
+          if (value is Timestamp) lastSentAt[key] = value.toDate();
+        });
       }
 
-      int newStreak = currentStreak;
       final now = DateTime.now();
-      if (lastInteraction == null) {
-        newStreak = 1;
-      } else {
-        final diff = now.difference(lastInteraction);
-        if (diff.inHours >= 24 && diff.inHours <= 48) {
-          newStreak = currentStreak + 1;
-        } else if (diff.inHours > 48) {
+
+      // Clean up expired restore windows (>24h after break)
+      if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
+        previousStreakCount = 0;
+        streakBrokenAt = null;
+        roomUpdates['previousStreakCount'] = 0;
+        roomUpdates['streakBrokenAt'] = null;
+      }
+
+      // Record this sender's last-send time
+      lastSentAt[senderId] = now;
+      roomUpdates['lastSentAt.$senderId'] = Timestamp.fromDate(now);
+
+      // Determine the other participant
+      final otherUserId = senderId == receiverId
+          ? senderId
+          : receiverId;
+      final otherLastSent = lastSentAt[otherUserId];
+
+      int newStreak = currentStreak;
+
+      // Only evaluate streak if BOTH participants have sent at least once
+      if (otherLastSent != null) {
+        // The mutual window = the later of the two last-sent times
+        final mutualWindow = now.isAfter(otherLastSent) ? now : otherLastSent;
+
+        if (lastInteraction == null) {
+          // First mutual interaction — start the streak
           newStreak = 1;
+          roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
+        } else {
+          final diff = mutualWindow.difference(lastInteraction);
+          if (diff.inHours >= 24 && diff.inHours <= 48) {
+            // Both sent within the next-day window → streak increments
+            newStreak = currentStreak + 1;
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
+          } else if (diff.inHours > 48) {
+            // Streak broken — save for restore
+            if (currentStreak > 0) {
+              previousStreakCount = currentStreak;
+              streakBrokenAt = now;
+              roomUpdates['previousStreakCount'] = currentStreak;
+              roomUpdates['streakBrokenAt'] = Timestamp.fromDate(now);
+            }
+            newStreak = 1; // Start fresh mutual interaction
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
+          }
+          // diff < 24h → no change, already counted today
         }
       }
+      // If only one person has sent, no streak change — waiting for reply.
+
       roomUpdates['streakCount'] = newStreak;
-      roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
 
       // Fire streak milestone rewards in the background
       if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
@@ -1195,6 +1250,9 @@ class ChatService {
             unreadCount: chatRoom.unreadCount,
             streakCount: chatRoom.streakCount,
             lastInteractionDate: chatRoom.lastInteractionDate,
+            lastSentAt: chatRoom.lastSentAt,
+            previousStreakCount: chatRoom.previousStreakCount,
+            streakBrokenAt: chatRoom.streakBrokenAt,
           );
         } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
             localPreview != null) {
@@ -1252,6 +1310,9 @@ class ChatService {
               unreadCount: room.unreadCount,
               streakCount: room.streakCount,
               lastInteractionDate: room.lastInteractionDate,
+              lastSentAt: room.lastSentAt,
+              previousStreakCount: room.previousStreakCount,
+              streakBrokenAt: room.streakBrokenAt,
             );
           } catch (_) {
             // Leave the placeholder in place; next snapshot will retry.

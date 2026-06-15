@@ -377,6 +377,13 @@ class ChatRoom {
   final Map<String, int> unreadCount;
   final int streakCount;
   final DateTime? lastInteractionDate;
+  /// Per-participant last-send timestamps for mutual streak tracking.
+  final Map<String, DateTime> lastSentAt;
+  /// The streak count before it was broken — used for the restore flow.
+  final int previousStreakCount;
+  /// When the streak was broken. Non-null means the streak is in a
+  /// "broken but restorable" state (within a 24-hour restore window).
+  final DateTime? streakBrokenAt;
 
   ChatRoom({
     required this.id,
@@ -388,6 +395,9 @@ class ChatRoom {
     this.unreadCount = const {},
     this.streakCount = 0,
     this.lastInteractionDate,
+    this.lastSentAt = const {},
+    this.previousStreakCount = 0,
+    this.streakBrokenAt,
   });
 
   Map<String, dynamic> toMap() {
@@ -403,10 +413,22 @@ class ChatRoom {
       'streakCount': streakCount,
       'lastInteractionDate':
           lastInteractionDate != null ? Timestamp.fromDate(lastInteractionDate!) : null,
+      'lastSentAt': lastSentAt.map((k, v) => MapEntry(k, Timestamp.fromDate(v))),
+      'previousStreakCount': previousStreakCount,
+      'streakBrokenAt':
+          streakBrokenAt != null ? Timestamp.fromDate(streakBrokenAt!) : null,
     };
   }
 
   factory ChatRoom.fromMap(Map<String, dynamic> map, String documentId) {
+    // Parse lastSentAt map: each value can be a Timestamp or int (from cache).
+    final rawLastSent = map['lastSentAt'] as Map<String, dynamic>? ?? {};
+    final parsedLastSent = <String, DateTime>{};
+    rawLastSent.forEach((key, value) {
+      final dt = _parseDateTime(value);
+      if (dt != null) parsedLastSent[key] = dt;
+    });
+
     return ChatRoom(
       id: documentId,
       participants: List<String>.from(map['participants'] ?? []),
@@ -420,6 +442,11 @@ class ChatRoom {
       streakCount: map['streakCount'] ?? 0,
       lastInteractionDate: map['lastInteractionDate'] != null
           ? _parseDateTime(map['lastInteractionDate'])
+          : null,
+      lastSentAt: parsedLastSent,
+      previousStreakCount: map['previousStreakCount'] ?? 0,
+      streakBrokenAt: map['streakBrokenAt'] != null
+          ? _parseDateTime(map['streakBrokenAt'])
           : null,
     );
   }
