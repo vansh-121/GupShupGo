@@ -97,6 +97,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isBlocked = false;      // current user blocked the contact
   bool _isBlockedByContact = false; // contact blocked the current user
 
+  // ─── Cached user profile futures (avoids re-fetching on rebuild) ───
+  final Map<String, Future<DocumentSnapshot>> _userProfileFutures = {};
+
   // ─── Online status state (real-time from Firestore) ───────────────
   late bool _isContactOnline;
   StreamSubscription? _onlineStatusSubscription;
@@ -2671,7 +2674,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 final isSelf = userId == widget.currentUserId;
                 
                 return FutureBuilder<DocumentSnapshot>(
-                  future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
+                  future: _userProfileFutures.putIfAbsent(
+                    userId,
+                    () => FirebaseFirestore.instance.collection('users').doc(userId).get(),
+                  ),
                   builder: (context, snapshot) {
                     final name = isSelf 
                         ? 'You' 

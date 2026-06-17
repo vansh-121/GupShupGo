@@ -871,20 +871,21 @@ exports.unreadReminderBatch = onSchedule(
       const room = roomDoc.data();
       const unreadMap = room.unreadCount || {};
 
-      for (const [uid, count] of Object.entries(unreadMap)) {
-        if (count <= 0) continue;
-
-        // Check cooldown
-        const lastNotified = room.notifiedAt?.unread_reminder;
-        if (lastNotified) {
-          const hoursSince = (now - lastNotified.toDate()) / 3600000;
-          if (hoursSince < COOLDOWN_HOURS) continue;
-        }
-
-        userIdsToRemind.add(uid);
+      // Check cooldown once per room
+      const lastNotified = room.notifiedAt?.unread_reminder;
+      if (lastNotified) {
+        const hoursSince = (now - lastNotified.toDate()) / 3600000;
+        if (hoursSince < COOLDOWN_HOURS) continue;
       }
 
-      if (userIdsToRemind.size > 0) {
+      let roomHasUnread = false;
+      for (const [uid, count] of Object.entries(unreadMap)) {
+        if (count <= 0) continue;
+        userIdsToRemind.add(uid);
+        roomHasUnread = true;
+      }
+
+      if (roomHasUnread) {
         roomUpdates.push(
           roomDoc.ref.update({
             "notifiedAt.unread_reminder": admin.firestore.FieldValue.serverTimestamp(),

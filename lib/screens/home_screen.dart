@@ -35,6 +35,7 @@ import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -199,6 +200,42 @@ class _HomeScreenState extends State<HomeScreen>
         }
         if (!mounted) return;
         maybeShowWhatsNew(context);
+
+        // ── Consume pending deep links from notification taps ──────────
+        final pendingTab = NotificationService.consumePendingTabDeepLink();
+        if (pendingTab != null && mounted) {
+          _tabController.animateTo(pendingTab);
+        }
+
+        final pendingChatContactId = NotificationService.consumePendingChatDeepLink();
+        if (pendingChatContactId != null && pendingChatContactId.isNotEmpty && mounted) {
+          try {
+            final user = await _userService.getUserById(pendingChatContactId);
+            if (user != null && mounted) {
+              final contact = Contact(
+                id: user.id,
+                name: user.name,
+                lastMessage: '',
+                time: '',
+                avatarUrl: user.photoUrl ??
+                    'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=6C5CE7&color=fff&size=128',
+                isOnline: user.isOnline,
+              );
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    contact: contact,
+                    currentUserId: _currentUserId!,
+                    currentUserName: _currentUser?.name,
+                  ),
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[DeepLink] failed to open chat: $e');
+          }
+        }
       });
 
       // ── Run non-blocking setup concurrently ──
