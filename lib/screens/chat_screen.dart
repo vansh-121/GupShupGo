@@ -1603,7 +1603,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         StreakBadge(
                           streakCount: _streakCount,
                           lastInteractionDate: _streakLastInteractionDate,
-                          compact: false,
+                          compact: _isOtherUserTyping || _isContactOnline,
                         ),
                       ]
                       // Broken streak badge (tappable → restore dialog)
