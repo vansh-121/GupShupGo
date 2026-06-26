@@ -811,9 +811,14 @@ class ChatService {
         roomUpdates['streakBrokenAt'] = null;
       }
 
-      // Record this sender's last-send time
+      // Record this sender's last-send time (in-memory for the logic below)
       lastSentAt[senderId] = now;
-      roomUpdates['lastSentAt.$senderId'] = Timestamp.fromDate(now);
+      // NOTE: We intentionally do NOT write lastSentAt via roomUpdates here.
+      // set(merge:true) treats dot-notation keys like 'lastSentAt.$uid' as
+      // literal top-level field names, not nested paths — so the nested
+      // lastSentAt map never gets populated.  Instead, we use update()
+      // after the batch commit (see below), which reliably supports
+      // dot-notation for nested fields.
 
       // Determine the other participant
       final otherUserId = senderId == receiverId
@@ -896,7 +901,9 @@ class ChatService {
       if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
         unawaited(GamificationService.instance.handleStreakMilestone(senderId, newStreak));
       }
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('[STREAK] Error computing streak: $e\n$st');
+    }
 
     batch.set(
       chatRoomRef,
@@ -907,6 +914,15 @@ class ChatService {
     if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
     if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
+
+    // Write lastSentAt using update(), which reliably interprets dot-notation
+    // as nested field paths (e.g. 'lastSentAt.uid' → lastSentAt/{uid}).
+    // This MUST happen after batch.commit() so the document already exists.
+    unawaited(chatRoomRef.update({
+      'lastSentAt.$senderId': Timestamp.fromDate(DateTime.now()),
+    }).catchError((e) {
+      debugPrint('[STREAK] Failed to update lastSentAt: $e');
+    }));
 
     // Award points, progress challenges, and unlock badges in a single
     // Firestore transaction — avoids the race condition where multiple
