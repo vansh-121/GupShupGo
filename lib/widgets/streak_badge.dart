@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,10 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// The risk level of a streak based on how long ago the last mutual message was.
 enum StreakRiskLevel {
-  /// 0–21 hours: Streak is healthy. Show 🔥 with normal orange glow.
+  /// 0–19 hours: Streak is healthy. Show 🔥 with normal orange glow.
   normal,
 
-  /// 22–35 hours: Streak is at risk. Show ⚠️ with amber pulse.
+  /// 20–35 hours: Streak is at risk. Show ⚠️ with amber pulse.
   atRisk,
 
   /// 36–47 hours: Streak is critical. Show ⏳ with aggressive red pulse.
@@ -20,14 +21,41 @@ StreakRiskLevel computeStreakRisk(DateTime? lastInteractionDate) {
   if (lastInteractionDate == null) return StreakRiskLevel.normal;
   final hoursSince = DateTime.now().difference(lastInteractionDate).inHours;
   if (hoursSince >= 36) return StreakRiskLevel.critical;
-  if (hoursSince >= 22) return StreakRiskLevel.atRisk;
+  if (hoursSince >= 20) return StreakRiskLevel.atRisk;
   return StreakRiskLevel.normal;
+}
+
+/// Computes the remaining time until the streak expires (48h from last interaction).
+/// Returns null if the streak is healthy or the date is null.
+Duration? computeTimeRemaining(DateTime? lastInteractionDate) {
+  if (lastInteractionDate == null) return null;
+  final expiry = lastInteractionDate.add(const Duration(hours: 48));
+  final remaining = expiry.difference(DateTime.now());
+  if (remaining.isNegative) return Duration.zero;
+  return remaining;
+}
+
+/// Formats a remaining duration as a compact string:
+///  - "12h" if > 6 hours remaining
+///  - "2:05" (H:MM) if between 1-6 hours
+///  - "45m" if < 1 hour remaining
+String formatTimeRemaining(Duration d) {
+  if (d.inHours >= 6) return '${d.inHours}h';
+  if (d.inHours >= 1) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+  return '${d.inMinutes}m';
 }
 
 /// A self-animating streak badge that displays:
 ///  - 🔥 N  for normal streaks
-///  - ⚠️ N  for at-risk streaks (amber pulsing border)
-///  - ⏳ N  for critical streaks (red aggressive pulsing glow)
+///  - ⚠️ N · Xh left  for at-risk streaks (amber pulsing border)
+///  - ⏳ N · X:MM  for critical streaks (red aggressive pulsing glow)
+///
+/// Includes a live countdown timer that updates every minute when
+/// the streak is at risk or critical (like Snapchat's hourglass).
 ///
 /// Usage:
 /// ```dart
@@ -55,6 +83,7 @@ class _StreakBadgeState extends State<StreakBadge>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -67,6 +96,7 @@ class _StreakBadgeState extends State<StreakBadge>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
     _updateAnimation();
+    _startCountdownIfNeeded();
   }
 
   @override
@@ -74,6 +104,7 @@ class _StreakBadgeState extends State<StreakBadge>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.lastInteractionDate != widget.lastInteractionDate) {
       _updateAnimation();
+      _startCountdownIfNeeded();
     }
   }
 
@@ -92,8 +123,20 @@ class _StreakBadgeState extends State<StreakBadge>
     }
   }
 
+  void _startCountdownIfNeeded() {
+    _countdownTimer?.cancel();
+    final risk = computeStreakRisk(widget.lastInteractionDate);
+    if (risk != StreakRiskLevel.normal) {
+      // Update every minute for the countdown display
+      _countdownTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _countdownTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
@@ -145,9 +188,20 @@ class _StreakBadgeState extends State<StreakBadge>
         Colors.red.withOpacity(0.25 * _pulseAnim.value),
     };
 
-    final label = widget.compact
-        ? '${widget.streakCount}'
-        : '${widget.streakCount} day streak';
+    // Build the label with countdown for at-risk / critical
+    String label;
+    if (risk == StreakRiskLevel.normal) {
+      label = widget.compact
+          ? '${widget.streakCount}'
+          : '${widget.streakCount} day streak';
+    } else {
+      final remaining = computeTimeRemaining(widget.lastInteractionDate);
+      if (remaining != null && remaining > Duration.zero) {
+        label = '${widget.streakCount} · ${formatTimeRemaining(remaining)}';
+      } else {
+        label = '${widget.streakCount}';
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),

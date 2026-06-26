@@ -30,6 +30,7 @@ import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 
 class Contact {
   final String id;
@@ -151,6 +152,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // Suppress global mesh banners for this conversation while it's open.
     _meshService = Provider.of<MeshNetworkService>(context, listen: false);
     _meshService.setActiveConversation(widget.contact.id);
+    // Suppress foreground chat notifications for this conversation.
+    NotificationService.activeChatRoomId = chatRoomId;
     _initializeChat();
     _messageController.addListener(_onTextChanged);
 
@@ -220,6 +223,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _searchQuery = '';
     // Re-enable global mesh banners when leaving this conversation.
     _meshService.setActiveConversation(null);
+    // Re-enable foreground chat notifications.
+    NotificationService.activeChatRoomId = null;
     _chatRoomSubscription?.cancel();
     super.dispose();
   }

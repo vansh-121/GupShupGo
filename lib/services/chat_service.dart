@@ -763,10 +763,16 @@ class ChatService {
       roomUpdates['unreadCount.$receiverId'] = FieldValue.increment(1);
     }
 
-    // ── Mutual streak logic (Snapchat-style) ────────────────────────────
-    // Both participants must send at least one message for the streak to
-    // count. The streak increments only when the second person replies
-    // within the 24-48h window after the last mutual interaction.
+    // ── Mutual streak logic (Snapchat-style, calendar-day based) ───────
+    // Both participants must send at least one message within the SAME
+    // local calendar day for it to count as a mutual day.  When the
+    // second person replies (completing the pair), we compare today's
+    // date with the last mutual date:
+    //   • same day    → no change (already counted today)
+    //   • yesterday   → streak increments
+    //   • 2+ days ago → streak broken (saved for restore)
+    //   • first time  → streak starts at 1
+    // Uses local time (DateTime.now()) — same as Snapchat.
     try {
       final chatRoomSnap = await chatRoomRef.get();
       int currentStreak = 0;
@@ -791,6 +797,7 @@ class ChatService {
       }
 
       final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
 
       // Clean up expired restore windows (>24h after break)
       if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
@@ -812,36 +819,49 @@ class ChatService {
 
       int newStreak = currentStreak;
 
-      // Only evaluate streak if BOTH participants have sent at least once
-      if (otherLastSent != null) {
-        // The mutual window = the later of the two last-sent times
-        final mutualWindow = now.isAfter(otherLastSent) ? now : otherLastSent;
+      // Check if BOTH participants have sent at least one message TODAY
+      final senderSentToday = true; // we just sent right now
+      final otherSentToday = otherLastSent != null &&
+          otherLastSent.year == today.year &&
+          otherLastSent.month == today.month &&
+          otherLastSent.day == today.day;
 
+      // Only evaluate streak when today becomes a mutual day
+      if (senderSentToday && otherSentToday) {
         if (lastInteraction == null) {
-          // First mutual interaction — start the streak
+          // First-ever mutual day — start the streak
           newStreak = 1;
-          roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
+          roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
         } else {
-          final diff = mutualWindow.difference(lastInteraction);
-          if (diff.inHours >= 24 && diff.inHours <= 48) {
-            // Both sent within the next-day window → streak increments
+          // Compare the last mutual date with today (calendar-day diff)
+          final lastMutualDay = DateTime(
+            lastInteraction.year,
+            lastInteraction.month,
+            lastInteraction.day,
+          );
+          final daysDiff = today.difference(lastMutualDay).inDays;
+
+          if (daysDiff == 0) {
+            // Same day — already counted, no change
+          } else if (daysDiff == 1) {
+            // Yesterday → streak increments!
             newStreak = currentStreak + 1;
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
-          } else if (diff.inHours > 48) {
-            // Streak broken — save for restore
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+          } else {
+            // 2+ days gap → streak broken
             if (currentStreak > 0) {
               previousStreakCount = currentStreak;
               streakBrokenAt = now;
               roomUpdates['previousStreakCount'] = currentStreak;
               roomUpdates['streakBrokenAt'] = Timestamp.fromDate(now);
             }
-            newStreak = 1; // Start fresh mutual interaction
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(mutualWindow);
+            newStreak = 1; // Fresh mutual day starts a new streak
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
           }
-          // diff < 24h → no change, already counted today
         }
       }
-      // If only one person has sent, no streak change — waiting for reply.
+      // If only one person has sent today, no streak change — waiting for
+      // the other to reply within today for mutual credit.
 
       roomUpdates['streakCount'] = newStreak;
 

@@ -684,23 +684,23 @@ exports.gupPointsEarnedTrigger = onDocumentUpdated(
   }
 );
 
-// ─── Scheduled: Hourly At-Risk Streak Batch ───────────────────────────────────
-// Runs every 60 minutes. Queries all active-streak chatRooms, groups users into
-// "warning" (22–35h) and "critical" (36–47h) buckets, then fires one multicast
-// per bucket (500 tokens per HTTP call). Updates notifiedAt to prevent re-spam.
+// ─── Scheduled: Hourly At-Risk Streak Warnings ───────────────────────────────
+// Runs every 60 minutes. For each active-streak chatRoom, checks if the last
+// mutual interaction was 20–47 hours ago. Sends PERSONALISED per-room
+// notifications (with the contact's name) instead of generic batched ones.
+// Cooldown: 6h per room per risk level to avoid spam.
 exports.hourlyStreakWarningBatch = onSchedule(
   { schedule: "every 60 minutes", region: "us-central1" },
   async () => {
     const now = new Date();
-    const COOLDOWN_HOURS = 12; // don't re-notify the same room within 12h
+    const COOLDOWN_HOURS = 6;
 
     const chatRoomsSnap = await db
       .collection("chatRooms")
       .where("streakCount", ">", 0)
       .get();
 
-    const warningUserIds = new Set();
-    const criticalUserIds = new Set();
+    const roomNotifications = []; // { userId, otherName, streakCount, riskLevel, roomRef }
     const roomUpdates = [];
 
     for (const roomDoc of chatRoomsSnap.docs) {
@@ -712,7 +712,7 @@ exports.hourlyStreakWarningBatch = onSchedule(
       let riskLevel = null;
 
       if (hoursSince >= 36 && hoursSince < 48) riskLevel = "critical";
-      else if (hoursSince >= 22 && hoursSince < 36) riskLevel = "warning";
+      else if (hoursSince >= 20 && hoursSince < 36) riskLevel = "warning";
       if (!riskLevel) continue;
 
       // Check per-room cooldown
@@ -722,13 +722,21 @@ exports.hourlyStreakWarningBatch = onSchedule(
         if (hoursSinceNotified < COOLDOWN_HOURS) continue;
       }
 
-      // Add participants to the right bucket
-      (room.participants || []).forEach((uid) => {
-        if (riskLevel === "critical") criticalUserIds.add(uid);
-        else warningUserIds.add(uid);
+      const participants = room.participants || [];
+      if (participants.length < 2) continue;
+
+      // Queue per-user notifications for this room
+      participants.forEach((uid) => {
+        const otherUid = participants.find((id) => id !== uid);
+        roomNotifications.push({
+          userId: uid,
+          otherUserId: otherUid,
+          streakCount: room.streakCount || 0,
+          riskLevel,
+          roomId: roomDoc.id,
+        });
       });
 
-      // Mark as notified
       roomUpdates.push(
         roomDoc.ref.update({
           [`notifiedAt.streak_${riskLevel}`]: admin.firestore.FieldValue.serverTimestamp(),
@@ -736,50 +744,102 @@ exports.hourlyStreakWarningBatch = onSchedule(
       );
     }
 
-    // Batch-fetch tokens for all affected users in parallel
-    const allUserIds = [...new Set([...warningUserIds, ...criticalUserIds])];
-    const tokenMap = await getTokensForUsers(allUserIds);
-
-    const warningTokens = [...warningUserIds].flatMap((uid) => tokenMap[uid] || []);
-    const criticalTokens = [...criticalUserIds].flatMap((uid) => tokenMap[uid] || []);
-
-    const sends = [];
-
-    if (warningTokens.length > 0) {
-      sends.push(
-        sendMulticastBatch(warningTokens, {
-          notification: {
-            title: "⚠️ Streak at Risk!",
-            body: "One of your streaks needs attention. Send a message to keep the fire alive!",
-          },
-          data: { type: "streak_warning", screen: "home", riskLevel: "warning" },
-          android: { priority: "high" },
-          apns: { headers: { "apns-priority": "10" } },
-        })
-      );
+    if (roomNotifications.length === 0) {
+      console.log("hourlyStreakWarningBatch: no at-risk rooms found");
+      return;
     }
 
-    if (criticalTokens.length > 0) {
-      sends.push(
-        sendMulticastBatch(criticalTokens, {
-          notification: {
-            title: "🔥 Last Chance!",
-            body: "A streak is breaking in under 12 hours! Open GupShupGo now.",
-          },
-          data: { type: "streak_warning", screen: "home", riskLevel: "critical" },
-          android: { priority: "high" },
-          apns: { headers: { "apns-priority": "10" } },
-        })
-      );
-    }
+    // Fetch names and tokens for all involved users
+    const allUserIds = [...new Set(roomNotifications.flatMap((n) => [n.userId, n.otherUserId]))];
+    const [tokenMap, nameMap] = await Promise.all([
+      getTokensForUsers(allUserIds),
+      getUserNames(allUserIds),
+    ]);
+
+    // Send personalised per-room notifications
+    const sends = roomNotifications.map((n) => {
+      const tokens = tokenMap[n.userId] || [];
+      if (tokens.length === 0) return Promise.resolve();
+
+      const otherName = nameMap[n.otherUserId] || "your friend";
+      const isWarning = n.riskLevel === "warning";
+
+      return sendMulticastBatch(tokens, {
+        notification: {
+          title: isWarning ? "⚠️ Streak at Risk!" : "🔥 Last Chance!",
+          body: isWarning
+            ? `Your 🔥${n.streakCount} streak with ${otherName} needs a message today!`
+            : `Your 🔥${n.streakCount} streak with ${otherName} is about to break! Send a message NOW.`,
+        },
+        data: {
+          type: "streak_warning",
+          screen: "chat",
+          chatRoomId: n.roomId,
+          contactId: n.otherUserId,
+          riskLevel: n.riskLevel,
+        },
+        android: { priority: "high" },
+        apns: { headers: { "apns-priority": "10" } },
+      });
+    });
 
     await Promise.all([...sends, ...roomUpdates]);
 
     console.log(
-      `hourlyStreakWarningBatch done: ${warningTokens.length} warning, ` +
-      `${criticalTokens.length} critical tokens notified across ` +
-      `${chatRoomsSnap.size} streak rooms.`
+      `hourlyStreakWarningBatch done: ${roomNotifications.length} personalised ` +
+      `notifications across ${chatRoomsSnap.size} streak rooms.`
     );
+  }
+);
+
+// ─── Scheduled: Streak Expiry (Auto-Break) ────────────────────────────────────
+// Runs every 30 minutes. Finds chatRooms with active streaks where the last
+// mutual interaction date is 2+ calendar days ago, and atomically breaks them.
+// This ensures streaks break even if nobody sends a new message — the previous
+// code only broke streaks inside the sendMessage() flow on the client.
+// The write to streakBrokenAt triggers the existing `streakBrokenTrigger`
+// Firestore onUpdate function, which sends push notifications to both users.
+exports.streakExpiryJob = onSchedule(
+  { schedule: "every 30 minutes", region: "us-central1" },
+  async () => {
+    const now = new Date();
+    // 2 full calendar days ago (48 hours is a safe server-side threshold)
+    const expiryThreshold = new Date(now - 48 * 3600000);
+
+    const chatRoomsSnap = await db
+      .collection("chatRooms")
+      .where("streakCount", ">", 0)
+      .where("lastInteractionDate", "<", admin.firestore.Timestamp.fromDate(expiryThreshold))
+      .get();
+
+    if (chatRoomsSnap.empty) {
+      console.log("streakExpiryJob: no expired streaks found");
+      return;
+    }
+
+    const batch = db.batch();
+    let brokenCount = 0;
+
+    for (const roomDoc of chatRoomsSnap.docs) {
+      const room = roomDoc.data();
+      const streakCount = room.streakCount || 0;
+      if (streakCount <= 0) continue;
+
+      batch.update(roomDoc.ref, {
+        previousStreakCount: streakCount,
+        streakCount: 0,
+        streakBrokenAt: admin.firestore.FieldValue.serverTimestamp(),
+        // Clear per-user last-sent timestamps so the next mutual day starts fresh
+        lastSentAt: {},
+      });
+      brokenCount++;
+    }
+
+    if (brokenCount > 0) {
+      await batch.commit();
+    }
+
+    console.log(`streakExpiryJob: broke ${brokenCount} expired streaks out of ${chatRoomsSnap.size} candidates.`);
   }
 );
 

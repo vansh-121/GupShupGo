@@ -35,6 +35,15 @@ const _pointsChannel = AndroidNotificationChannel(
   playSound: true,
 );
 
+const _chatMessageChannel = AndroidNotificationChannel(
+  'chat_message_notifications',
+  'Chat Messages',
+  description: 'Notifications for incoming chat messages',
+  importance: Importance.high,
+  playSound: true,
+  enableVibration: true,
+);
+
 const _reminderChannel = AndroidNotificationChannel(
   'reminder_notifications',
   'Reminders',
@@ -65,6 +74,11 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+
+  /// The chatRoomId of the currently-open chat screen.
+  /// When set, foreground chat notifications for this room are suppressed
+  /// to avoid duplicate alerts while the user is already viewing the chat.
+  static String? activeChatRoomId;
 
   // ─── Initialise ─────────────────────────────────────────────────────────────
   Future<void> initialize() async {
@@ -98,6 +112,7 @@ class NotificationService {
               AndroidFlutterLocalNotificationsPlugin>();
       await androidPlugin?.createNotificationChannel(_streakChannel);
       await androidPlugin?.createNotificationChannel(_pointsChannel);
+      await androidPlugin?.createNotificationChannel(_chatMessageChannel);
       await androidPlugin?.createNotificationChannel(_reminderChannel);
       await androidPlugin?.createNotificationChannel(_digestChannel);
     }
@@ -149,6 +164,32 @@ class NotificationService {
       title: title,
       body: body,
       channelId: _channelForType(type),
+      payload: payload,
+    );
+  }
+
+  /// Shows a local notification for an incoming chat message.
+  /// Suppressed if the user is currently viewing the same chat.
+  Future<void> handleChatMessage(RemoteMessage message) async {
+    final chatRoomId = message.data['chatRoomId'] ?? '';
+
+    // Don't notify if the user is already viewing this chat
+    if (chatRoomId.isNotEmpty && chatRoomId == activeChatRoomId) return;
+
+    final senderName = message.data['senderName'] ?? 'Someone';
+    final body = message.notification?.body ??
+        message.data['message'] ?? 'Sent a message';
+    final payload = jsonEncode(message.data);
+
+    // Use a unique ID per sender so subsequent messages update the same notification
+    final senderId = message.data['senderId'] ?? '';
+    final notifId = senderId.hashCode.abs() % 100000 + 2000;
+
+    await showLocalNotification(
+      id: notifId,
+      title: senderName,
+      body: body,
+      channelId: 'chat_message_notifications',
       payload: payload,
     );
   }
@@ -226,6 +267,7 @@ class NotificationService {
       'streak_warning' || 'streak_broken' || 'streak_milestone' =>
         'streak_notifications',
       'gup_points_earned' => 'points_notifications',
+      'chat_message' => 'chat_message_notifications',
       'unread_reminder' => 'reminder_notifications',
       'daily_digest' => 'digest_notifications',
       _ => 'streak_notifications',
@@ -236,6 +278,7 @@ class NotificationService {
     return switch (channelId) {
       'streak_notifications' => 'Streak Notifications',
       'points_notifications' => 'Gup Points',
+      'chat_message_notifications' => 'Chat Messages',
       'reminder_notifications' => 'Reminders',
       'digest_notifications' => 'Daily Digest',
       _ => 'GupShupGo',
@@ -248,6 +291,7 @@ class NotificationService {
       'streak_broken' => 1002,
       'streak_milestone' => 1003,
       'gup_points_earned' => 1004,
+      'chat_message' => 1007,
       'unread_reminder' => 1005,
       'daily_digest' => 1006,
       _ => 1000,
@@ -260,6 +304,7 @@ class NotificationService {
       'streak_broken' => '💔 Streak Broken',
       'streak_milestone' => '🏆 Streak Milestone!',
       'gup_points_earned' => '⚡ Gup Points Earned!',
+      'chat_message' => '💬 New Message',
       'unread_reminder' => '💬 Unread Messages',
       'daily_digest' => '🌅 Good Morning!',
       _ => 'GupShupGo',
