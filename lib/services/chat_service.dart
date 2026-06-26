@@ -785,19 +785,23 @@ class ChatService {
         final data = chatRoomSnap.data() as Map<String, dynamic>;
         currentStreak = data['streakCount'] as int? ?? 0;
         final timestamp = data['lastInteractionDate'] as Timestamp?;
-        lastInteraction = timestamp?.toDate();
+        lastInteraction = timestamp?.toDate().toLocal();
         previousStreakCount = data['previousStreakCount'] as int? ?? 0;
         final brokenTs = data['streakBrokenAt'] as Timestamp?;
-        streakBrokenAt = brokenTs?.toDate();
+        streakBrokenAt = brokenTs?.toDate().toLocal();
 
         final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
         rawSent.forEach((key, value) {
-          if (value is Timestamp) lastSentAt[key] = value.toDate();
+          if (value is Timestamp) lastSentAt[key] = value.toDate().toLocal();
         });
       }
 
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
+
+      debugPrint('[STREAK] senderId=$senderId receiverId=$receiverId');
+      debugPrint('[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
+      debugPrint('[STREAK] lastSentAt=$lastSentAt');
 
       // Clean up expired restore windows (>24h after break)
       if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
@@ -820,18 +824,22 @@ class ChatService {
       int newStreak = currentStreak;
 
       // Check if BOTH participants have sent at least one message TODAY
-      final senderSentToday = true; // we just sent right now
-      final otherSentToday = otherLastSent != null &&
-          otherLastSent.year == today.year &&
-          otherLastSent.month == today.month &&
-          otherLastSent.day == today.day;
+      // Use .toLocal() explicitly to ensure timezone-consistent comparison.
+      final otherLocal = otherLastSent?.toLocal();
+      final otherSentToday = otherLocal != null &&
+          otherLocal.year == today.year &&
+          otherLocal.month == today.month &&
+          otherLocal.day == today.day;
+
+      debugPrint('[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
 
       // Only evaluate streak when today becomes a mutual day
-      if (senderSentToday && otherSentToday) {
+      if (otherSentToday) {
         if (lastInteraction == null) {
           // First-ever mutual day — start the streak
           newStreak = 1;
           roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+          debugPrint('[STREAK] First mutual day → streak=1');
         } else {
           // Compare the last mutual date with today (calendar-day diff)
           final lastMutualDay = DateTime(
@@ -841,12 +849,20 @@ class ChatService {
           );
           final daysDiff = today.difference(lastMutualDay).inDays;
 
+          debugPrint('[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
+
           if (daysDiff == 0) {
-            // Same day — already counted, no change
+            // Same day — streak count stays the same, but refresh the
+            // interaction timestamp so the streak badge timer resets.
+            // Without this, stale timestamps from the old logic keep
+            // the badge stuck in at-risk/critical state.
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
           } else if (daysDiff == 1) {
             // Yesterday → streak increments!
             newStreak = currentStreak + 1;
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Yesterday → streak incremented to $newStreak');
           } else {
             // 2+ days gap → streak broken
             if (currentStreak > 0) {
@@ -857,11 +873,22 @@ class ChatService {
             }
             newStreak = 1; // Fresh mutual day starts a new streak
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
           }
         }
+      } else {
+        // Only one person sent today. Still refresh lastInteractionDate
+        // if it's stale (>20h old) to prevent the badge timer from being
+        // stuck in at-risk/critical state when the user is actively messaging.
+        if (lastInteraction != null) {
+          final hoursSinceInteraction = now.difference(lastInteraction).inHours;
+          if (hoursSinceInteraction >= 20) {
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
+          }
+        }
+        debugPrint('[STREAK] Waiting for other user to send today — no streak change');
       }
-      // If only one person has sent today, no streak change — waiting for
-      // the other to reply within today for mutual credit.
 
       roomUpdates['streakCount'] = newStreak;
 
