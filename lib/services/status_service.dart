@@ -14,6 +14,7 @@ import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/image_compressor.dart';
 import 'package:video_chat_app/services/performance_service.dart';
+import 'package:video_chat_app/services/gamification_service.dart';
 
 /// Decrypted form of an encrypted status item, kept in the process-wide
 /// cache below so the viewer can render instantly when the user taps a
@@ -824,6 +825,11 @@ class StatusService {
         );
         await docRef.set(statusModel.toMap());
       }
+
+      // Award points and progress challenge
+      unawaited(GamificationService.instance.earnPoints(userId, 3));
+      unawaited(GamificationService.instance.incrementChallengeProgress(userId, 'status_posts', 1));
+
       print('Text status uploaded for user: $userId');
     } catch (e) {
       print('Error uploading text status: $e');
@@ -980,6 +986,10 @@ class StatusService {
       );
       await docRef.set(statusModel.toMap());
     }
+
+    // Award points and progress challenge
+    unawaited(GamificationService.instance.earnPoints(userId, 3));
+    unawaited(GamificationService.instance.incrementChallengeProgress(userId, 'status_posts', 1));
   }
 
   /// Get current user's own status.

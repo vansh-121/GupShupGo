@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum MessageType { text, image, audio, video }
+enum MessageType { text, image, audio, video, reaction }
 
 enum MessageStatus {
   // Local-only state. The message is in the outbox: the bubble is on
@@ -69,6 +69,13 @@ class MessageModel {
   /// True if the message hasn't been synced to Firestore yet.
   final bool syncPending;
 
+  // ─── Gamification & Reactions ───────────────────────────────────────
+  /// Map of `userId` -> `emoji` (e.g. `{'userId1': '👍', 'userId2': '😂'}`)
+  final Map<String, String>? reactions;
+
+  /// The ID of the message this reaction is targeting (only populated when type == MessageType.reaction)
+  final String? reactionTargetMessageId;
+
   MessageModel({
     required this.id,
     required this.senderId,
@@ -95,6 +102,8 @@ class MessageModel {
     this.schemaVersion = 1,
     this.senderDeviceId,
     this.envelopes,
+    this.reactions,
+    this.reactionTargetMessageId,
   });
 
   // Convenience getters for status
@@ -132,6 +141,8 @@ class MessageModel {
       'schemaVersion': schemaVersion,
       if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
       if (envelopes != null) 'envelopes': envelopes,
+      if (reactions != null) 'reactions': reactions,
+      if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
     };
   }
 
@@ -163,6 +174,8 @@ class MessageModel {
       'schemaVersion': schemaVersion,
       if (senderDeviceId != null) 'senderDeviceId': senderDeviceId,
       if (envelopes != null) 'envelopes': envelopes,
+      if (reactions != null) 'reactions': reactions,
+      if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
     };
   }
 
@@ -196,6 +209,8 @@ class MessageModel {
       schemaVersion: (map['schemaVersion'] as int?) ?? 1,
       senderDeviceId: map['senderDeviceId'] as int?,
       envelopes: _parseEnvelopes(map['envelopes']),
+      reactions: map['reactions'] != null ? Map<String, String>.from(map['reactions']) : null,
+      reactionTargetMessageId: map['reactionTargetMessageId'],
     );
   }
 
@@ -233,6 +248,8 @@ class MessageModel {
       schemaVersion: (map['schemaVersion'] as int?) ?? 1,
       senderDeviceId: map['senderDeviceId'] as int?,
       envelopes: _parseEnvelopes(map['envelopes']),
+      reactions: map['reactions'] != null ? Map<String, String>.from(map['reactions']) : null,
+      reactionTargetMessageId: map['reactionTargetMessageId'],
     );
   }
 
@@ -249,6 +266,8 @@ class MessageModel {
         return MessageType.audio;
       case 'video':
         return MessageType.video;
+      case 'reaction':
+        return MessageType.reaction;
       default:
         return MessageType.text;
     }
@@ -310,6 +329,8 @@ class MessageModel {
     int? schemaVersion,
     int? senderDeviceId,
     Map<String, Map<String, dynamic>>? envelopes,
+    Map<String, String>? reactions,
+    String? reactionTargetMessageId,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -339,6 +360,8 @@ class MessageModel {
       schemaVersion: schemaVersion ?? this.schemaVersion,
       senderDeviceId: senderDeviceId ?? this.senderDeviceId,
       envelopes: envelopes ?? this.envelopes,
+      reactions: reactions ?? this.reactions,
+      reactionTargetMessageId: reactionTargetMessageId ?? this.reactionTargetMessageId,
     );
   }
 }
@@ -352,6 +375,15 @@ class ChatRoom {
   final String? lastMessageSenderId;
   final MessageStatus? lastMessageStatus;
   final Map<String, int> unreadCount;
+  final int streakCount;
+  final DateTime? lastInteractionDate;
+  /// Per-participant last-send timestamps for mutual streak tracking.
+  final Map<String, DateTime> lastSentAt;
+  /// The streak count before it was broken — used for the restore flow.
+  final int previousStreakCount;
+  /// When the streak was broken. Non-null means the streak is in a
+  /// "broken but restorable" state (within a 24-hour restore window).
+  final DateTime? streakBrokenAt;
 
   ChatRoom({
     required this.id,
@@ -361,6 +393,11 @@ class ChatRoom {
     this.lastMessageSenderId,
     this.lastMessageStatus,
     this.unreadCount = const {},
+    this.streakCount = 0,
+    this.lastInteractionDate,
+    this.lastSentAt = const {},
+    this.previousStreakCount = 0,
+    this.streakBrokenAt,
   });
 
   Map<String, dynamic> toMap() {
@@ -373,10 +410,25 @@ class ChatRoom {
       'lastMessageSenderId': lastMessageSenderId,
       'lastMessageStatus': lastMessageStatus?.name,
       'unreadCount': unreadCount,
+      'streakCount': streakCount,
+      'lastInteractionDate':
+          lastInteractionDate != null ? Timestamp.fromDate(lastInteractionDate!) : null,
+      'lastSentAt': lastSentAt.map((k, v) => MapEntry(k, Timestamp.fromDate(v))),
+      'previousStreakCount': previousStreakCount,
+      'streakBrokenAt':
+          streakBrokenAt != null ? Timestamp.fromDate(streakBrokenAt!) : null,
     };
   }
 
   factory ChatRoom.fromMap(Map<String, dynamic> map, String documentId) {
+    // Parse lastSentAt map: each value can be a Timestamp or int (from cache).
+    final rawLastSent = map['lastSentAt'] as Map<String, dynamic>? ?? {};
+    final parsedLastSent = <String, DateTime>{};
+    rawLastSent.forEach((key, value) {
+      final dt = _parseDateTime(value);
+      if (dt != null) parsedLastSent[key] = dt;
+    });
+
     return ChatRoom(
       id: documentId,
       participants: List<String>.from(map['participants'] ?? []),
@@ -387,7 +439,26 @@ class ChatRoom {
       lastMessageSenderId: map['lastMessageSenderId'],
       lastMessageStatus: _parseMessageStatus(map['lastMessageStatus']),
       unreadCount: Map<String, int>.from(map['unreadCount'] ?? {}),
+      streakCount: map['streakCount'] ?? 0,
+      lastInteractionDate: map['lastInteractionDate'] != null
+          ? _parseDateTime(map['lastInteractionDate'])
+          : null,
+      lastSentAt: parsedLastSent,
+      previousStreakCount: map['previousStreakCount'] ?? 0,
+      streakBrokenAt: map['streakBrokenAt'] != null
+          ? _parseDateTime(map['streakBrokenAt'])
+          : null,
     );
+  }
+
+  static DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) {
+      return value.toDate();
+    } else if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    return null;
   }
 
   static MessageStatus? _parseMessageStatus(dynamic value) {

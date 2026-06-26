@@ -1,12 +1,16 @@
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -174,7 +178,141 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 8),
             Text('Tap to change photo',
                 style: TextStyle(color: c.textMid, fontSize: 12)),
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
+
+            // ── Gup Arcade Mini-Stats Card ─────────────────────────────────
+            StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(widget.currentUser.id)
+                  .snapshots(),
+              builder: (context, snap) {
+                final liveUser = snap.hasData && snap.data!.exists
+                    ? UserModel.fromFirestore(snap.data!)
+                    : widget.currentUser;
+                final level = liveUser.level;
+                final levelName = getLevelName(level);
+                final levelIcon = getLevelIcon(level);
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: c.isDark
+                          ? [const Color(0xFF1E1E2C), const Color(0xFF2A2040)]
+                          : [c.primary.withOpacity(0.06), c.primary.withOpacity(0.02)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: c.border.withOpacity(0.4), width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: c.primary.withOpacity(c.isDark ? 0.15 : 0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => GupArcadeScreen(
+                              currentUserId: widget.currentUser.id,
+                            ),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            // Header row
+                            Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [c.primary, c.primary.withOpacity(0.7)],
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      '$level',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(levelIcon, style: const TextStyle(fontSize: 14)),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              levelName,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w700,
+                                                color: c.textHigh,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Text(
+                                        'Gup Arcade',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: c.textMid,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: c.textMid,
+                                  size: 22,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            // Stats row
+                            Row(
+                              children: [
+                                _miniStat(c, '⚡', '${liveUser.gupPoints}', 'Points'),
+                                _miniStatDivider(c),
+                                _miniStat(c, '🏅', '${liveUser.badges.length}', 'Badges'),
+                                _miniStatDivider(c),
+                                _miniStat(c, '🔥', '${liveUser.longestStreak}', 'Best Streak'),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
 
             // ── Name ────────────────────────────────────────────────────
             _buildSectionLabel('YOUR NAME'),
@@ -279,6 +417,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.8)),
+    );
+  }
+
+  Widget _miniStat(AppThemeColors c, String emoji, String value, String label) {
+    return Expanded(
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 3),
+              Text(
+                value,
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: c.textHigh,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 10,
+              color: c.textLow,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStatDivider(AppThemeColors c) {
+    return Container(
+      width: 1,
+      height: 28,
+      color: c.border.withOpacity(0.4),
     );
   }
 }

@@ -22,6 +22,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+        // Required by flutter_local_notifications (and any lib using Java 8 time APIs)
+        coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
@@ -41,9 +43,10 @@ android {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 32
-        versionName = "1.0.7"
+        versionCode = 37
+        versionName = "1.0.9"
         minSdkVersion = 24
+        multiDexEnabled true
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
         resConfigs "en"
     }
@@ -131,6 +134,9 @@ dependencies {
 
     // Google Play Services Identity — for Phone Number Hint API (carrier-based verification)
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
+
+    // Core library desugaring — required by flutter_local_notifications on API < 26
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }
 
 flutter {

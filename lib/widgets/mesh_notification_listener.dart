@@ -159,6 +159,8 @@ class _MeshNotificationListenerState extends State<MeshNotificationListener> {
         return '🎬 Video';
       case MessageType.text:
         return msg.text;
+      case MessageType.reaction:
+        return 'Reacted: ${msg.text}';
     }
   }
 

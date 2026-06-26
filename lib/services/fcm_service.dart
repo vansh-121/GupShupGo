@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
 class FCMService {
@@ -63,10 +65,33 @@ class FCMService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // Step 1b: Android 13+ (API 33) runtime permission for POST_NOTIFICATIONS
+    // FirebaseMessaging.requestPermission() only handles iOS permission and
+    // FCM's internal state — it does NOT trigger the Android OS-level runtime
+    // permission dialog. Without this, notifications are silently blocked.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (Platform.isAndroid) {
+      try {
+        final notifStatus = await Permission.notification.status;
+        if (!notifStatus.isGranted) {
+          final result = await Permission.notification.request();
+          print(result.isGranted
+              ? 'Android POST_NOTIFICATIONS permission granted'
+              : 'Android POST_NOTIFICATIONS permission denied');
+        }
+      } catch (e) {
+        print('Android notification permission request error (non-fatal): $e');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Step 2: Register background + foreground listeners ONCE
     // ═══════════════════════════════════════════════════════════════════════
     if (!_listenersRegistered) {
       _listenersRegistered = true;
+
+      // Initialise local notification channels & tap routing
+      await NotificationService.instance.initialize();
 
       FirebaseMessaging.onBackgroundMessage(
           _firebaseMessagingBackgroundHandler);
@@ -109,8 +134,24 @@ class FCMService {
               _isIncomingCallScreenShowing = false;
             }
           }
+        } else if (messageType == 'streak_broken' ||
+            messageType == 'streak_warning' ||
+            messageType == 'streak_milestone' ||
+            messageType == 'gup_points_earned' ||
+            messageType == 'unread_reminder' ||
+            messageType == 'daily_digest') {
+          // Show as a local notification via NotificationService so the user
+          // sees it even when the app is in the foreground.
+          await NotificationService.instance.handleForegroundMessage(message);
+        } else if (messageType == 'chat_message') {
+          if (!await _isMessageForCurrentUser(message.data)) {
+            print('Ignoring chat notification for a different signed-in user');
+            return;
+          }
+          // Show a local notification for the chat message. Suppressed if the
+          // user is currently viewing the same chat (via activeChatRoomId).
+          await NotificationService.instance.handleChatMessage(message);
         }
-        // Chat messages are handled by StreamBuilder — no action needed here.
       });
     }
 

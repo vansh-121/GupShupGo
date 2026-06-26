@@ -96,10 +96,24 @@ class ChatCacheService {
       'lastMessageSenderId': room.lastMessageSenderId,
       'lastMessageStatus': room.lastMessageStatus?.name,
       'unreadCount': room.unreadCount,
+      'streakCount': room.streakCount,
+      'lastInteractionDate': room.lastInteractionDate?.millisecondsSinceEpoch,
+      'lastSentAt': room.lastSentAt.map((k, v) => MapEntry(k, v.millisecondsSinceEpoch)),
+      'previousStreakCount': room.previousStreakCount,
+      'streakBrokenAt': room.streakBrokenAt?.millisecondsSinceEpoch,
     };
   }
 
   ChatRoom _chatRoomFromJson(Map<String, dynamic> map) {
+    // Parse lastSentAt from cache (values are int milliseconds)
+    final rawSent = map['lastSentAt'] as Map<String, dynamic>? ?? {};
+    final parsedSent = <String, DateTime>{};
+    rawSent.forEach((key, value) {
+      if (value is int) {
+        parsedSent[key] = DateTime.fromMillisecondsSinceEpoch(value);
+      }
+    });
+
     return ChatRoom(
       id: map['id'] ?? '',
       participants: List<String>.from(map['participants'] ?? []),
@@ -110,6 +124,15 @@ class ChatCacheService {
       lastMessageSenderId: map['lastMessageSenderId'],
       lastMessageStatus: _parseStatus(map['lastMessageStatus']),
       unreadCount: Map<String, int>.from(map['unreadCount'] ?? {}),
+      streakCount: map['streakCount'] ?? 0,
+      lastInteractionDate: map['lastInteractionDate'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['lastInteractionDate'])
+          : null,
+      lastSentAt: parsedSent,
+      previousStreakCount: map['previousStreakCount'] ?? 0,
+      streakBrokenAt: map['streakBrokenAt'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['streakBrokenAt'])
+          : null,
     );
   }
 

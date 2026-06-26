@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -28,11 +29,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
   final SettingsService _settings = SettingsService();
   late UserModel _user;
+  Map<String, bool> _notifPrefs = {};
 
   @override
   void initState() {
     super.initState();
     _user = widget.currentUser;
+    _loadNotifPrefs();
+  }
+
+  Future<void> _loadNotifPrefs() async {
+    final prefs = await NotificationService.instance.getPreferences();
+    if (mounted) setState(() => _notifPrefs = prefs);
+  }
+
+  Future<void> _setNotifPref(String key, bool value) async {
+    await NotificationService.instance.setPreference(key, value);
+    setState(() => _notifPrefs[key] = value);
   }
 
   Future<void> _signOut() async {
@@ -521,6 +534,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _settings.callNotifications,
               onChanged: (v) => setState(() => _settings.callNotifications = v),
             ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.local_fire_department_outlined,
+              iconColor: Colors.deepOrange,
+              title: 'Streak warnings',
+              subtitle: 'Alert when a streak is at risk or broken',
+              value: _notifPrefs[NotifPrefs.streakWarnings] ?? true,
+              onChanged: (v) => _setNotifPref(NotifPrefs.streakWarnings, v),
+            ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.emoji_events_outlined,
+              iconColor: Colors.amber,
+              title: 'Streak milestones',
+              subtitle: 'Celebrate 7, 30, 100-day streak achievements',
+              value: _notifPrefs[NotifPrefs.streakMilestones] ?? true,
+              onChanged: (v) => _setNotifPref(NotifPrefs.streakMilestones, v),
+            ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.bolt_outlined,
+              iconColor: const Color(0xFF6C5CE7),
+              title: 'Gup Points rewards',
+              subtitle: 'Notify when you earn significant Gup Points',
+              value: _notifPrefs[NotifPrefs.gupPoints] ?? true,
+              onChanged: (v) => _setNotifPref(NotifPrefs.gupPoints, v),
+            ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.wb_sunny_outlined,
+              iconColor: Colors.teal,
+              title: 'Daily digest',
+              subtitle: 'Morning summary of your activity',
+              value: _notifPrefs[NotifPrefs.dailyDigest] ?? true,
+              onChanged: (v) => _setNotifPref(NotifPrefs.dailyDigest, v),
+            ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.mark_chat_unread_outlined,
+              iconColor: Colors.blue,
+              title: 'Unread reminders',
+              subtitle: 'Remind about unread messages after 2 hours',
+              value: _notifPrefs[NotifPrefs.unreadReminder] ?? true,
+              onChanged: (v) => _setNotifPref(NotifPrefs.unreadReminder, v),
+            ),
           ]),
           const SizedBox(height: 8),
 
@@ -567,7 +625,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.6',
+              subtitle: 'Version 1.0.9',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -1067,7 +1125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.0.6',
+      applicationVersion: '1.0.9',
       applicationLegalese: '© 2026 GupShupGo',
     );
   }

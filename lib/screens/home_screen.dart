@@ -4,10 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/status_model.dart';
+import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart';
@@ -19,6 +21,7 @@ import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
@@ -32,8 +35,10 @@ import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
+import 'package:video_chat_app/widgets/streak_badge.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -79,6 +84,10 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription<User?>? _authSub;
   bool _hasFirebaseSession = FirebaseAuth.instance.currentUser != null;
 
+  // ─── Gamification real-time listener ─────────────────────────────────
+  StreamSubscription<DocumentSnapshot>? _currentUserSubscription;
+  List<String>? _previousBadges;
+
   @override
   void initState() {
     super.initState();
@@ -97,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _authSub?.cancel();
     _recentContactsSub?.cancel();
+    _currentUserSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     if (_currentUserId != null) {
@@ -190,6 +200,42 @@ class _HomeScreenState extends State<HomeScreen>
         }
         if (!mounted) return;
         maybeShowWhatsNew(context);
+
+        // ── Consume pending deep links from notification taps ──────────
+        final pendingTab = NotificationService.consumePendingTabDeepLink();
+        if (pendingTab != null && mounted) {
+          _tabController.animateTo(pendingTab);
+        }
+
+        final pendingChatContactId = NotificationService.consumePendingChatDeepLink();
+        if (pendingChatContactId != null && pendingChatContactId.isNotEmpty && mounted) {
+          try {
+            final user = await _userService.getUserById(pendingChatContactId);
+            if (user != null && mounted) {
+              final contact = Contact(
+                id: user.id,
+                name: user.name,
+                lastMessage: '',
+                time: '',
+                avatarUrl: user.photoUrl ??
+                    'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=6C5CE7&color=fff&size=128',
+                isOnline: user.isOnline,
+              );
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    contact: contact,
+                    currentUserId: _currentUserId!,
+                    currentUserName: _currentUser?.name,
+                  ),
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[DeepLink] failed to open chat: $e');
+          }
+        }
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -223,6 +269,29 @@ class _HomeScreenState extends State<HomeScreen>
 
       // ── Check for app updates via Google Play native API ──
       _updateService.checkAndPromptUpdate();
+
+      // ── Listen to user document in real-time to detect badge unlocks ──
+      _currentUserSubscription = FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUserId)
+          .snapshots()
+          .listen((snap) {
+        if (snap.exists && mounted) {
+          final user = UserModel.fromFirestore(snap);
+          if (_previousBadges != null) {
+            final newBadges = user.badges.where((b) => !_previousBadges!.contains(b)).toList();
+            if (newBadges.isNotEmpty) {
+              for (final badgeId in newBadges) {
+                final navContext = navigatorKey.currentContext;
+                if (navContext != null) {
+                  _showBadgeUnlockDialog(navContext, badgeId);
+                }
+              }
+            }
+          }
+          _previousBadges = user.badges;
+        }
+      });
 
       // ── Refresh user profile from Firestore in background ──
       _authService.refreshUserFromFirestore().then((freshUser) {
@@ -900,16 +969,43 @@ class _HomeScreenState extends State<HomeScreen>
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          user.name,
-                          style: GoogleFonts.poppins(
-                            fontWeight: unreadCount > 0
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            fontSize: 15,
-                            color: c.textHigh,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                user.name,
+                                style: GoogleFonts.poppins(
+                                  fontWeight: unreadCount > 0
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  fontSize: 15,
+                                  color: c.textHigh,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (chatRoom.streakCount > 0) ...[
+                              const SizedBox(width: 6),
+                              StreakBadge(
+                                streakCount: chatRoom.streakCount,
+                                lastInteractionDate: chatRoom.lastInteractionDate,
+                                compact: true,
+                              ),
+                            ] else if (chatRoom.previousStreakCount > 0 &&
+                                chatRoom.streakBrokenAt != null &&
+                                DateTime.now().difference(chatRoom.streakBrokenAt!).inHours <= 24) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                                ),
+                                child: const Text('💔', style: TextStyle(fontSize: 10)),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                       Text(
@@ -1632,7 +1728,82 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-      floatingActionButton: _buildFAB(),
+      floatingActionButton: _buildFABRow(),
+    );
+  }
+
+  Widget _buildFABRow() {
+    final c = AppThemeColors.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // ── Gup Arcade mini-FAB (bottom-left) ──────────────────────
+        if (_currentUserId != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(_currentUserId)
+                  .snapshots(),
+              builder: (context, snap) {
+                int pts = _currentUser?.gupPoints ?? 0;
+                if (snap.hasData && snap.data!.exists) {
+                  final data = snap.data!.data() as Map<String, dynamic>?;
+                  pts = data?['gupPoints'] as int? ?? 0;
+                }
+                return GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GupArcadeScreen(
+                        currentUserId: _currentUserId!,
+                      ),
+                    ),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: c.isDark ? const Color(0xFF2A2040) : c.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: c.primary.withOpacity(0.25),
+                        width: 0.8,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: c.primary.withOpacity(0.12),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('⚡', style: TextStyle(fontSize: 12)),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$pts',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: c.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          )
+        else
+          const SizedBox.shrink(),
+
+        // ── Original FAB (bottom-right) ────────────────────────────
+        _buildFAB(),
+      ],
     );
   }
 
@@ -1691,6 +1862,164 @@ class _HomeScreenState extends State<HomeScreen>
             }
           },
           child: const Icon(Icons.message_rounded, color: Colors.white),
+        );
+      },
+    );
+  }
+
+  void _showBadgeUnlockDialog(BuildContext context, String badgeId) {
+    final badge = BadgeDefinition.fromId(badgeId);
+    final title = badge?.title ?? 'New Achievement';
+    final icon = badge?.icon ?? '🎉';
+    final colors = badge?.gradientColors ?? [Colors.blue, Colors.purple];
+    final desc = badge?.description ?? 'You unlocked a new badge!';
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.85),
+      builder: (BuildContext context) {
+        final c = AppThemeColors.of(context);
+        return Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: c.surface.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: colors[0].withOpacity(0.35),
+                  blurRadius: 25,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'CONGRATULATIONS!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.amber,
+                      letterSpacing: 2.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Badge Unlocked!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: c.textHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: colors,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withOpacity(0.5), width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: colors[0].withOpacity(0.5),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Text(
+                        icon,
+                        style: const TextStyle(fontSize: 54),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: c.textHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    desc,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: c.textMid,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: c.border),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: Text(
+                            'Awesome',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                              color: c.textHigh,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => GupArcadeScreen(
+                                  currentUserId: _currentUserId!,
+                                ),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: c.primary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 2,
+                          ),
+                          child: Text(
+                            'View Arcade',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );

@@ -15,6 +15,7 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/gamification_service.dart';
 
 class ChatService {
   static final ChatService instance = ChatService();
@@ -346,19 +347,39 @@ class ChatService {
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       _payloadMemo[msg.id] = payload;
-      // Fire-and-forget all persistence — the in-memory memo is already
-      // set so rendering is instant. SQLite and vault writes are only for
-      // crash recovery and cross-install history. Previously these two
-      // sequential awaits (save + saveRoomPreview) added 50-200ms to the
-      // render path for EVERY received message.
+      
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
+
+      // Handle reaction processing E2EE client-side
+      if (payload['type'] == 'reaction') {
+        final targetId = payload['reactionTargetMessageId'] as String?;
+        final emoji = payload['text'] as String?;
+        if (targetId != null && emoji != null) {
+          unawaited(store.addReaction(
+            targetMessageId: targetId,
+            chatRoomId: chatRoomId,
+            userId: msg.senderId,
+            emoji: emoji,
+          ));
+          // Earn points for the receiver of the reaction (the owner of target message)
+          unawaited(() async {
+            final list = await store.getMessagesByIds([targetId]);
+            if (list.isNotEmpty && list.first.senderId == selfUid) {
+              await GamificationService.instance.earnPoints(selfUid, 5);
+            }
+          }());
+        }
+      }
+
+      // Fire-and-forget all persistence
       unawaited(Future.wait([
         store.save(msg.id, payload),
-        store.saveRoomPreview(
-          chatRoomId: chatRoomId,
-          messageId: msg.id,
-          text: (payload['text'] as String?) ?? '',
-        ),
+        if (payload['type'] != 'reaction')
+          store.saveRoomPreview(
+            chatRoomId: chatRoomId,
+            messageId: msg.id,
+            text: (payload['text'] as String?) ?? '',
+          ),
       ]));
       unawaited(_saveToVault(selfUid, msg.id, payload));
       return _applyPayload(msg, payload);
@@ -412,6 +433,7 @@ class ChatService {
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
       audioDuration: payload['audioDuration'] as int?,
+      reactionTargetMessageId: payload['reactionTargetMessageId'] as String?,
       statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
       statusReplyItemId: payload['statusReplyItemId'] as String?,
       statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
@@ -481,6 +503,7 @@ class ChatService {
     String? statusReplyBackgroundColor,
     int? audioDuration,
     String? localFilePath,
+    String? reactionTargetMessageId,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -493,17 +516,6 @@ class ChatService {
         .doc();
 
     // ── Optimistic bubble: WhatsApp behaviour ───────────────────────────
-    // Drop a `status: sending` MessageModel into the outbox immediately so
-    // the chat stream emits it in the same frame as the tap. Once the
-    // Firestore commit lands, the canonical message arrives via the
-    // snapshot stream and we remove the outbox entry. On failure we flip
-    // it to status=failed so the bubble stays on screen with an error
-    // indicator the user can retry from.
-    // WhatsApp-parity perceived speed: show the single tick (sent) in the
-    // same frame as the tap. Firestore's offline persistence queues the
-    // batch commit locally and rarely fails when online, so the lie is
-    // tiny and self-correcting — on failure we flip to `failed` in the
-    // catch below, same as before.
     final optimistic = MessageModel(
       id: messageRef.id,
       senderId: senderId,
@@ -524,9 +536,22 @@ class ChatService {
       statusReplyCaption: statusReplyCaption,
       statusReplyBackgroundColor: statusReplyBackgroundColor,
       localFilePath: localFilePath,
+      reactionTargetMessageId: reactionTargetMessageId,
     );
     final ps = await PlaintextStore.instance();
-    await ps.saveMessage(optimistic, chatRoomId);
+
+    // If this is a reaction type message, do not save it as a new message bubble in outbox.
+    // Instead, update the target message's reactions directly in local SQLite!
+    if (type == MessageType.reaction && reactionTargetMessageId != null) {
+      await ps.addReaction(
+        targetMessageId: reactionTargetMessageId,
+        chatRoomId: chatRoomId,
+        userId: senderId,
+        emoji: text,
+      );
+    } else {
+      await ps.saveMessage(optimistic, chatRoomId);
+    }
 
     try {
       return await _commitMessage(
@@ -550,11 +575,14 @@ class ChatService {
         statusReplyCaption: statusReplyCaption,
         statusReplyBackgroundColor: statusReplyBackgroundColor,
         localFilePath: localFilePath,
+        reactionTargetMessageId: reactionTargetMessageId,
       );
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
       // see what didn't go through.
-      await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+      if (type != MessageType.reaction) {
+        await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+      }
       rethrow;
     }
   }
@@ -580,6 +608,7 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
     String? localFilePath,
+    String? reactionTargetMessageId,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -612,6 +641,7 @@ class ChatService {
         'text': text,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (audioDuration != null) 'audioDuration': audioDuration,
+        if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
         if (statusReplyOwnerId != null) ...{
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
@@ -641,6 +671,7 @@ class ChatService {
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
+          if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
           'statusReplyOwnerName': statusReplyOwnerName,
@@ -658,18 +689,17 @@ class ChatService {
 
         // Fire SQLite persistence in the background — the in-memory memo
         // is already set, so rendering is instant. SQLite is only needed
-        // for crash recovery / cold restart. Previously these two
-        // sequential awaits (saveRoomPreview + save) added 50-200ms to
-        // every send BEFORE the Firestore batch.commit() could even start.
+        // for crash recovery / cold restart.
         final ps = await PlaintextStore.instance();
         unawaited(Future.wait([
-          ps.saveRoomPreview(
-            chatRoomId: chatRoomId,
-            messageId: messageRef.id,
-            text: statusReplyOwnerId != null
-                ? 'Replied to status: $text'
-                : text,
-          ),
+          if (type != MessageType.reaction)
+            ps.saveRoomPreview(
+              chatRoomId: chatRoomId,
+              messageId: messageRef.id,
+              text: statusReplyOwnerId != null
+                  ? 'Replied to status: $text'
+                  : text,
+            ),
           ps.save(messageRef.id, outgoingPayload),
         ]));
         // Mirror to the cross-install vault so the sender's history
@@ -706,6 +736,7 @@ class ChatService {
       senderDeviceId: senderDeviceId,
       envelopes: envelopes,
       localFilePath: localFilePath,
+      reactionTargetMessageId: reactionTargetMessageId,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -717,41 +748,202 @@ class ChatService {
     // Add message
     batch.set(messageRef, message.toMap());
 
-    // Update chat room with last message info
+    // Update chat room details (only update preview fields if NOT a reaction)
+    final roomUpdates = <String, dynamic>{
+      'id': chatRoomId,
+      'participants': [senderId, receiverId]..sort(),
+    };
+
+    if (type != MessageType.reaction) {
+      roomUpdates['lastMessage'] = lastMessagePreview;
+      roomUpdates['lastMessageTime'] = Timestamp.fromDate(message.timestamp);
+      roomUpdates['lastMessageSenderId'] = senderId;
+      roomUpdates['lastMessageStatus'] = MessageStatus.sent.name;
+      roomUpdates['unreadCount.$senderId'] = FieldValue.increment(0);
+      roomUpdates['unreadCount.$receiverId'] = FieldValue.increment(1);
+    }
+
+    // ── Mutual streak logic (Snapchat-style, calendar-day based) ───────
+    // Both participants must send at least one message within the SAME
+    // local calendar day for it to count as a mutual day.  When the
+    // second person replies (completing the pair), we compare today's
+    // date with the last mutual date:
+    //   • same day    → no change (already counted today)
+    //   • yesterday   → streak increments
+    //   • 2+ days ago → streak broken (saved for restore)
+    //   • first time  → streak starts at 1
+    // Uses local time (DateTime.now()) — same as Snapchat.
+    try {
+      final chatRoomSnap = await chatRoomRef.get();
+      int currentStreak = 0;
+      DateTime? lastInteraction;
+      Map<String, DateTime> lastSentAt = {};
+      int previousStreakCount = 0;
+      DateTime? streakBrokenAt;
+
+      if (chatRoomSnap.exists) {
+        final data = chatRoomSnap.data() as Map<String, dynamic>;
+        currentStreak = data['streakCount'] as int? ?? 0;
+        final timestamp = data['lastInteractionDate'] as Timestamp?;
+        lastInteraction = timestamp?.toDate().toLocal();
+        previousStreakCount = data['previousStreakCount'] as int? ?? 0;
+        final brokenTs = data['streakBrokenAt'] as Timestamp?;
+        streakBrokenAt = brokenTs?.toDate().toLocal();
+
+        final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
+        rawSent.forEach((key, value) {
+          if (value is Timestamp) lastSentAt[key] = value.toDate().toLocal();
+        });
+      }
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      debugPrint('[STREAK] senderId=$senderId receiverId=$receiverId');
+      debugPrint('[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
+      debugPrint('[STREAK] lastSentAt=$lastSentAt');
+
+      // Clean up expired restore windows (>24h after break)
+      if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
+        previousStreakCount = 0;
+        streakBrokenAt = null;
+        roomUpdates['previousStreakCount'] = 0;
+        roomUpdates['streakBrokenAt'] = null;
+      }
+
+      // Record this sender's last-send time (in-memory for the logic below)
+      lastSentAt[senderId] = now;
+      // NOTE: We intentionally do NOT write lastSentAt via roomUpdates here.
+      // set(merge:true) treats dot-notation keys like 'lastSentAt.$uid' as
+      // literal top-level field names, not nested paths — so the nested
+      // lastSentAt map never gets populated.  Instead, we use update()
+      // after the batch commit (see below), which reliably supports
+      // dot-notation for nested fields.
+
+      // Determine the other participant
+      final otherUserId = senderId == receiverId
+          ? senderId
+          : receiverId;
+      final otherLastSent = lastSentAt[otherUserId];
+
+      int newStreak = currentStreak;
+
+      // Check if BOTH participants have sent at least one message TODAY
+      // Use .toLocal() explicitly to ensure timezone-consistent comparison.
+      final otherLocal = otherLastSent?.toLocal();
+      final otherSentToday = otherLocal != null &&
+          otherLocal.year == today.year &&
+          otherLocal.month == today.month &&
+          otherLocal.day == today.day;
+
+      debugPrint('[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
+
+      // Only evaluate streak when today becomes a mutual day
+      if (otherSentToday) {
+        if (lastInteraction == null) {
+          // First-ever mutual day — start the streak
+          newStreak = 1;
+          roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+          debugPrint('[STREAK] First mutual day → streak=1');
+        } else {
+          // Compare the last mutual date with today (calendar-day diff)
+          final lastMutualDay = DateTime(
+            lastInteraction.year,
+            lastInteraction.month,
+            lastInteraction.day,
+          );
+          final daysDiff = today.difference(lastMutualDay).inDays;
+
+          debugPrint('[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
+
+          if (daysDiff == 0) {
+            // Same day — streak count stays the same, but refresh the
+            // interaction timestamp so the streak badge timer resets.
+            // Without this, stale timestamps from the old logic keep
+            // the badge stuck in at-risk/critical state.
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
+          } else if (daysDiff == 1) {
+            // Yesterday → streak increments!
+            newStreak = currentStreak + 1;
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Yesterday → streak incremented to $newStreak');
+          } else {
+            // 2+ days gap → streak broken
+            if (currentStreak > 0) {
+              previousStreakCount = currentStreak;
+              streakBrokenAt = now;
+              roomUpdates['previousStreakCount'] = currentStreak;
+              roomUpdates['streakBrokenAt'] = Timestamp.fromDate(now);
+            }
+            newStreak = 1; // Fresh mutual day starts a new streak
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
+          }
+        }
+      } else {
+        // Only one person sent today. Still refresh lastInteractionDate
+        // if it's stale (>20h old) to prevent the badge timer from being
+        // stuck in at-risk/critical state when the user is actively messaging.
+        if (lastInteraction != null) {
+          final hoursSinceInteraction = now.difference(lastInteraction).inHours;
+          if (hoursSinceInteraction >= 20) {
+            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
+            debugPrint('[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
+          }
+        }
+        debugPrint('[STREAK] Waiting for other user to send today — no streak change');
+      }
+
+      roomUpdates['streakCount'] = newStreak;
+
+      // Fire streak milestone rewards in the background
+      if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
+        unawaited(GamificationService.instance.handleStreakMilestone(senderId, newStreak));
+      }
+    } catch (e, st) {
+      debugPrint('[STREAK] Error computing streak: $e\n$st');
+    }
+
     batch.set(
       chatRoomRef,
-      {
-        'id': chatRoomId,
-        'participants': [senderId, receiverId]..sort(),
-        'lastMessage': lastMessagePreview,
-        'lastMessageTime': Timestamp.fromDate(message.timestamp),
-        'lastMessageSenderId': senderId,
-        'lastMessageStatus': MessageStatus.sent.name,
-        'unreadCount.$senderId': FieldValue.increment(0),
-        'unreadCount.$receiverId': FieldValue.increment(1),
-      },
+      roomUpdates,
       SetOptions(merge: true),
     );
 
     if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
     if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
-    // Outbox cleanup happens in the merge layer the moment the Firestore
-    // snapshot stream actually delivers the canonical message. Removing
-    // here, between commit-ack and Firestore-observe, would cause a brief
-    // 1-frame flicker where the bubble disappears and then reappears.
 
-    // Fire-and-forget the FCM push. Awaiting it added 200ms–1s to every
-    // send while the HTTP call to the notifications endpoint ran. The
-    // message is already committed to Firestore by this point, so the
-    // receiver will get it via the chat stream regardless — the FCM ping
-    // is only there to wake a backgrounded app.
-    //
-    // E2EE: NEVER include the plaintext in the FCM payload. The FCM
-    // backend can read whatever we put in here; the receiver's device
-    // renders the real text after decryption.
+    // Write lastSentAt using update(), which reliably interprets dot-notation
+    // as nested field paths (e.g. 'lastSentAt.uid' → lastSentAt/{uid}).
+    // This MUST happen after batch.commit() so the document already exists.
+    unawaited(chatRoomRef.update({
+      'lastSentAt.$senderId': Timestamp.fromDate(DateTime.now()),
+    }).catchError((e) {
+      debugPrint('[STREAK] Failed to update lastSentAt: $e');
+    }));
+
+    // Award points, progress challenges, and unlock badges in a single
+    // Firestore transaction — avoids the race condition where multiple
+    // sequential transactions on the same user doc cause stale reads.
     unawaited(() async {
       try {
+        await GamificationService.instance.handleMessageSent(
+          userId: senderId,
+          messageType: type.name, // 'text', 'audio', 'image', 'video', 'reaction'
+        );
+      } catch (e) {
+        debugPrint('Error awarding gamification on commit: $e');
+      }
+    }());
+
+    // Fire-and-forget the FCM push.
+    unawaited(() async {
+      try {
+        // Skip notification for reaction message types
+        if (type == MessageType.reaction) return;
+
         final displayName = senderName ?? 'Someone';
         final previewText = schemaVersion == 2 ? 'New message' : text;
         await _fcmService.sendMessageNotification(
@@ -1119,6 +1311,11 @@ class ChatService {
             lastMessageSenderId: chatRoom.lastMessageSenderId,
             lastMessageStatus: chatRoom.lastMessageStatus,
             unreadCount: chatRoom.unreadCount,
+            streakCount: chatRoom.streakCount,
+            lastInteractionDate: chatRoom.lastInteractionDate,
+            lastSentAt: chatRoom.lastSentAt,
+            previousStreakCount: chatRoom.previousStreakCount,
+            streakBrokenAt: chatRoom.streakBrokenAt,
           );
         } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
             localPreview != null) {
@@ -1174,6 +1371,11 @@ class ChatService {
               lastMessageSenderId: room.lastMessageSenderId,
               lastMessageStatus: room.lastMessageStatus,
               unreadCount: room.unreadCount,
+              streakCount: room.streakCount,
+              lastInteractionDate: room.lastInteractionDate,
+              lastSentAt: room.lastSentAt,
+              previousStreakCount: room.previousStreakCount,
+              streakBrokenAt: room.streakBrokenAt,
             );
           } catch (_) {
             // Leave the placeholder in place; next snapshot will retry.

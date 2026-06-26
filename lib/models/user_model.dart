@@ -12,6 +12,15 @@ class UserModel {
   final DateTime? lastSeen;
   final DateTime? createdAt;
 
+  // Gamification fields
+  final int gupPoints;
+  final List<String> badges;
+  final Map<String, int> challengeProgress;
+  final List<String> completedChallenges;
+  final int reactionsGiven;
+  final int nightMessages;
+  final int longestStreak;
+
   UserModel({
     required this.id,
     required this.name,
@@ -23,7 +32,18 @@ class UserModel {
     this.isOnline = false,
     this.lastSeen,
     this.createdAt,
+    this.gupPoints = 0,
+    this.badges = const [],
+    this.challengeProgress = const {},
+    this.completedChallenges = const [],
+    this.reactionsGiven = 0,
+    this.nightMessages = 0,
+    this.longestStreak = 0,
   });
+
+  // Level computation: e.g. 100 points per level
+  int get level => (gupPoints / 100).floor() + 1;
+  double get levelProgress => (gupPoints % 100) / 100.0;
 
   // Convert UserModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -38,6 +58,13 @@ class UserModel {
       'isOnline': isOnline,
       'lastSeen': lastSeen?.millisecondsSinceEpoch,
       'createdAt': createdAt?.millisecondsSinceEpoch,
+      'gupPoints': gupPoints,
+      'badges': badges,
+      'challengeProgress': challengeProgress,
+      'completedChallenges': completedChallenges,
+      'reactionsGiven': reactionsGiven,
+      'nightMessages': nightMessages,
+      'longestStreak': longestStreak,
     };
   }
 
@@ -58,6 +85,13 @@ class UserModel {
       createdAt: map['createdAt'] != null
           ? _parseDateTime(map['createdAt'])
           : null,
+      gupPoints: map['gupPoints'] ?? 0,
+      badges: List<String>.from(map['badges'] ?? []),
+      challengeProgress: Map<String, int>.from(map['challengeProgress'] ?? {}),
+      completedChallenges: List<String>.from(map['completedChallenges'] ?? []),
+      reactionsGiven: map['reactionsGiven'] ?? 0,
+      nightMessages: map['nightMessages'] ?? 0,
+      longestStreak: map['longestStreak'] ?? 0,
     );
   }
 
@@ -88,6 +122,13 @@ class UserModel {
     bool? isOnline,
     DateTime? lastSeen,
     DateTime? createdAt,
+    int? gupPoints,
+    List<String>? badges,
+    Map<String, int>? challengeProgress,
+    List<String>? completedChallenges,
+    int? reactionsGiven,
+    int? nightMessages,
+    int? longestStreak,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -100,6 +141,13 @@ class UserModel {
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       createdAt: createdAt ?? this.createdAt,
+      gupPoints: gupPoints ?? this.gupPoints,
+      badges: badges ?? this.badges,
+      challengeProgress: challengeProgress ?? this.challengeProgress,
+      completedChallenges: completedChallenges ?? this.completedChallenges,
+      reactionsGiven: reactionsGiven ?? this.reactionsGiven,
+      nightMessages: nightMessages ?? this.nightMessages,
+      longestStreak: longestStreak ?? this.longestStreak,
     );
   }
 }

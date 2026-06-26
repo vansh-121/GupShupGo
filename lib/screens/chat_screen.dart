@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -26,7 +27,10 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
+import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
+import 'package:video_chat_app/services/notification_service.dart';
 
 class Contact {
   final String id;
@@ -94,9 +98,19 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isBlocked = false;      // current user blocked the contact
   bool _isBlockedByContact = false; // contact blocked the current user
 
+  // ─── Cached user profile futures (avoids re-fetching on rebuild) ───
+  final Map<String, Future<DocumentSnapshot>> _userProfileFutures = {};
+
   // ─── Online status state (real-time from Firestore) ───────────────
   late bool _isContactOnline;
   StreamSubscription? _onlineStatusSubscription;
+
+  // ─── Streaks state ──────────────────────────────────────────────────
+  int _streakCount = 0;
+  int _previousStreakCount = 0;
+  DateTime? _streakBrokenAt;
+  DateTime? _streakLastInteractionDate;
+  StreamSubscription? _chatRoomSubscription;
 
   // ─── Typing indicator state ───────────────────────────────────────
   Timer? _typingTimer;
@@ -138,8 +152,42 @@ class _ChatScreenState extends State<ChatScreen> {
     // Suppress global mesh banners for this conversation while it's open.
     _meshService = Provider.of<MeshNetworkService>(context, listen: false);
     _meshService.setActiveConversation(widget.contact.id);
+    // Suppress foreground chat notifications for this conversation.
+    NotificationService.activeChatRoomId = chatRoomId;
     _initializeChat();
     _messageController.addListener(_onTextChanged);
+
+    _chatRoomSubscription = FirebaseFirestore.instance
+        .collection('chatRooms')
+        .doc(chatRoomId)
+        .snapshots()
+        .listen((snap) {
+      if (mounted && snap.exists) {
+        final data = snap.data();
+        final streak = data?['streakCount'] as int? ?? 0;
+        final prevStreak = data?['previousStreakCount'] as int? ?? 0;
+        final brokenTs = data?['streakBrokenAt'] as Timestamp?;
+        final brokenAt = brokenTs?.toDate();
+        final interactionTs = data?['lastInteractionDate'] as Timestamp?;
+        final interactionDate = interactionTs?.toDate();
+
+        // Clean up expired restore windows locally
+        final isExpired = brokenAt != null &&
+            DateTime.now().difference(brokenAt).inHours > 24;
+
+        if (streak != _streakCount ||
+            prevStreak != _previousStreakCount ||
+            brokenAt != _streakBrokenAt ||
+            interactionDate != _streakLastInteractionDate) {
+          setState(() {
+            _streakCount = streak;
+            _previousStreakCount = isExpired ? 0 : prevStreak;
+            _streakBrokenAt = isExpired ? null : brokenAt;
+            _streakLastInteractionDate = interactionDate;
+          });
+        }
+      }
+    });
 
     // Pre-establish the Signal session for this peer in the background
     // the moment the chat screen opens. By the time the user finishes
@@ -175,6 +223,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _searchQuery = '';
     // Re-enable global mesh banners when leaving this conversation.
     _meshService.setActiveConversation(null);
+    // Re-enable foreground chat notifications.
+    NotificationService.activeChatRoomId = null;
+    _chatRoomSubscription?.cancel();
     super.dispose();
   }
 
@@ -186,6 +237,33 @@ class _ChatScreenState extends State<ChatScreen> {
     if (currentScroll >= maxScroll - 200) {
       _loadOlderMessages();
     }
+  }
+
+  /// Shows the streak-restore dialog when the user taps the broken-streak badge.
+  Future<void> _showStreakRestoreDialog() async {
+    if (_previousStreakCount <= 0 || _streakBrokenAt == null) return;
+    final chatRoomId = _chatService.getChatRoomId(
+        widget.currentUserId, widget.contact.id);
+    // Fetch current user's Gup Points
+    int gupPoints = 0;
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.currentUserId)
+          .get();
+      gupPoints = (userDoc.data()?['gupPoints'] as int?) ?? 0;
+    } catch (_) {}
+
+    if (!mounted) return;
+    await StreakRestoreDialog.show(
+      context,
+      previousStreakCount: _previousStreakCount,
+      streakBrokenAt: _streakBrokenAt!,
+      userGupPoints: gupPoints,
+      contactName: widget.contact.name,
+      userId: widget.currentUserId,
+      chatRoomId: chatRoomId,
+    );
   }
 
   Future<void> _loadOlderMessages() async {
@@ -777,119 +855,171 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessage(MessageModel message) {
     final c = AppThemeColors.of(context);
     final isMe = message.senderId == widget.currentUserId;
+    final hasReactions = message.reactions != null && message.reactions!.isNotEmpty;
+
+    Widget bubble = Container(
+      margin: EdgeInsets.only(
+        top: 2,
+        bottom: hasReactions ? 12 : 2,
+        left: isMe ? 64 : 16,
+        right: isMe ? 16 : 64,
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+      decoration: BoxDecoration(
+        color: isMe ? c.sent : c.received,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(18),
+          topRight: const Radius.circular(18),
+          bottomLeft:
+              isMe ? const Radius.circular(18) : const Radius.circular(4),
+          bottomRight:
+              isMe ? const Radius.circular(4) : const Radius.circular(18),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (message.hasStatusReply)
+            _buildStatusReplyPreview(message, isMe),
+          // ── Audio / voice message ─────────────────────────────
+          if (message.type == MessageType.audio) ...[
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 200),
+              child: VoiceMessageBubble(
+                message: message,
+                isMe: isMe,
+              ),
+            ),
+          ]
+          // ── Image message ─────────────────────────────────────
+          else if (message.type == MessageType.image &&
+              (message.mediaUrl != null ||
+                  message.localFilePath != null)) ...[
+            GestureDetector(
+              onTap: () => _showFullScreenImage(
+                  message.mediaUrl, message.localFilePath, message.text),
+              child: Container(
+                constraints: const BoxConstraints(
+                  maxWidth: 220,
+                  maxHeight: 280,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                clipBehavior: Clip.hardEdge,
+                child: _buildImageWidget(message, c),
+              ),
+            ),
+            const SizedBox(height: 4),
+          ] else
+            Text(
+              message.text,
+              style: GoogleFonts.poppins(
+                color: isMe ? Colors.white : c.textHigh,
+                fontSize: 14.5,
+              ),
+            ),
+          const SizedBox(height: 3),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatTime(message.timestamp),
+                style: GoogleFonts.poppins(
+                  color: isMe
+                      ? Colors.white.withOpacity(0.75)
+                      : c.textLow,
+                  fontSize: 10,
+                ),
+              ),
+              if (message.isOfflineMesh) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.cell_tower_rounded,
+                  size: 11,
+                  color: isMe
+                      ? Colors.white.withOpacity(0.7)
+                      : c.textLow,
+                ),
+              ],
+              if (isMe) ...[
+                const SizedBox(width: 4),
+                _buildMessageStatusIcon(message),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (hasReactions) {
+      final reactionList = message.reactions!.values.toSet().toList();
+      final reactionString = reactionList.take(3).join(' ');
+
+      bubble = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          bubble,
+          Positioned(
+            bottom: 2,
+            right: isMe ? 24 : null,
+            left: !isMe ? 24 : null,
+            child: GestureDetector(
+              onTap: () => _showReactionsDetailDialog(message),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: c.border.withOpacity(0.5), width: 0.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      reactionString,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    if (message.reactions!.length > 1) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '${message.reactions!.length}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: c.textMid,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Align(
-      // Stable key tied to the message id. Without this, when the outbox
-      // bubble (status=sending) is swapped for the Firestore-backed copy
-      // (status=sent) — which has the exact same id and timestamp now —
-      // Flutter would still rebuild the bubble's Element from scratch via
-      // positional reconciliation. With the key, the Element is reused
-      // in place: only the status icon transitions, no layout reflow.
       key: ValueKey('msg-${message.id}'),
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          top: 2,
-          bottom: 2,
-          left: isMe ? 64 : 16,
-          right: isMe ? 16 : 64,
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-        decoration: BoxDecoration(
-          color: isMe ? c.sent : c.received,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft:
-                isMe ? const Radius.circular(18) : const Radius.circular(4),
-            bottomRight:
-                isMe ? const Radius.circular(4) : const Radius.circular(18),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message.hasStatusReply)
-              _buildStatusReplyPreview(message, isMe),
-            // ── Audio / voice message ─────────────────────────────
-            if (message.type == MessageType.audio) ...[
-              ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 200),
-                child: VoiceMessageBubble(
-                  message: message,
-                  isMe: isMe,
-                ),
-              ),
-            ]
-            // ── Image message ─────────────────────────────────────
-            // GPU-friendly: use Container with BoxDecoration.borderRadius
-            // instead of ClipRRect to avoid creating an offscreen compositing
-            // layer per image bubble on low-end GPUs.
-            else if (message.type == MessageType.image &&
-                (message.mediaUrl != null ||
-                    message.localFilePath != null)) ...[
-              GestureDetector(
-                onTap: () => _showFullScreenImage(
-                    message.mediaUrl, message.localFilePath, message.text),
-                child: Container(
-                  constraints: const BoxConstraints(
-                    maxWidth: 220,
-                    maxHeight: 280,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  clipBehavior: Clip.hardEdge,
-                  child: _buildImageWidget(message, c),
-                ),
-              ),
-              const SizedBox(height: 4),
-            ] else
-              Text(
-                message.text,
-                style: GoogleFonts.poppins(
-                  color: isMe ? Colors.white : c.textHigh,
-                  fontSize: 14.5,
-                ),
-              ),
-            const SizedBox(height: 3),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(message.timestamp),
-                  style: GoogleFonts.poppins(
-                    color: isMe
-                        ? Colors.white.withOpacity(0.75)
-                        : c.textLow,
-                    fontSize: 10,
-                  ),
-                ),
-                if (message.isOfflineMesh) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.cell_tower_rounded,
-                    size: 11,
-                    color: isMe
-                        ? Colors.white.withOpacity(0.7)
-                        : c.textLow,
-                  ),
-                ],
-                if (isMe) ...[
-                  const SizedBox(width: 4),
-                  _buildMessageStatusIcon(message),
-                ],
-              ],
-            ),
-          ],
-        ),
+      child: GestureDetector(
+        onLongPress: () => _showReactionOverlay(message),
+        child: bubble,
       ),
     );
   }
@@ -1448,25 +1578,72 @@ class _ChatScreenState extends State<ChatScreen> {
                       fontWeight: FontWeight.w700,
                       color: c.textHigh,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (_isOtherUserTyping)
-                    Text(
-                      'typing...',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: c.primary,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_isContactOnline)
-                    Text(
-                      'Online',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: c.online,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                  // Subtitle row: typing / online / streak
+                  Row(
+                    children: [
+                      if (_isOtherUserTyping)
+                        Text(
+                          'typing...',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: c.primary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      else if (_isContactOnline)
+                        Text(
+                          'Online',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: c.online,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      // Active streak badge
+                      if (_streakCount > 0) ...[
+                        if (_isOtherUserTyping || _isContactOnline)
+                          const SizedBox(width: 8),
+                        StreakBadge(
+                          streakCount: _streakCount,
+                          lastInteractionDate: _streakLastInteractionDate,
+                          compact: _isOtherUserTyping || _isContactOnline,
+                        ),
+                      ]
+                      // Broken streak badge (tappable → restore dialog)
+                      else if (_previousStreakCount > 0 && _streakBrokenAt != null) ...[
+                        if (_isOtherUserTyping || _isContactOnline)
+                          const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => _showStreakRestoreDialog(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('💔', style: TextStyle(fontSize: 10)),
+                                const SizedBox(width: 2),
+                                Text(
+                                  'Streak lost!',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.red[400],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1699,7 +1876,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       ]..sort(
                           (a, b) => a.timestamp.compareTo(b.timestamp));
 
-                      final hasUnreadMessages = messages.any((m) =>
+                      final nonReactionMessages = messages.where((m) => m.type != MessageType.reaction).toList();
+
+                      final hasUnreadMessages = nonReactionMessages.any((m) =>
                           m.receiverId == widget.currentUserId &&
                           m.status != MessageStatus.read);
                       if (hasUnreadMessages) {
@@ -1709,13 +1888,13 @@ class _ChatScreenState extends State<ChatScreen> {
                       // Only auto-scroll when genuinely new messages arrive,
                       // not on status updates (sent→delivered→read).
                       WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (messages.length > _lastMessageCount) {
+                        if (nonReactionMessages.length > _lastMessageCount) {
                           _scrollToBottom();
                         }
-                        _lastMessageCount = messages.length;
+                        _lastMessageCount = nonReactionMessages.length;
                       });
 
-                      return _buildMessagesList(messages);
+                      return _buildMessagesList(nonReactionMessages);
                     },
                   ),
                 ),
@@ -2393,6 +2572,157 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+
+  void _showReactionOverlay(MessageModel message) {
+    final c = AppThemeColors.of(context);
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.4),
+      builder: (BuildContext context) {
+        return Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            decoration: BoxDecoration(
+              color: c.surface.withOpacity(0.92),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: c.border.withOpacity(0.3), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
+                  return InkWell(
+                    onTap: () {
+                      Navigator.pop(context);
+                      _sendReaction(message, emoji);
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Text(
+                        emoji,
+                        style: const TextStyle(fontSize: 28),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _sendReaction(MessageModel message, String emoji) async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send reactions to this contact')),
+      );
+      return;
+    }
+    try {
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        text: emoji,
+        senderName: widget.currentUserName,
+        type: MessageType.reaction,
+        reactionTargetMessageId: message.id,
+      );
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error sending reaction: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to add reaction')),
+        );
+      }
+    }
+  }
+
+  void _showReactionsDetailDialog(MessageModel message) {
+    if (message.reactions == null || message.reactions!.isEmpty) return;
+    final c = AppThemeColors.of(context);
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: c.surface,
+          title: Text(
+            'Reactions',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: c.textHigh,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: message.reactions!.length,
+              itemBuilder: (context, index) {
+                final userId = message.reactions!.keys.elementAt(index);
+                final emoji = message.reactions!.values.elementAt(index);
+                final isSelf = userId == widget.currentUserId;
+                
+                return FutureBuilder<DocumentSnapshot>(
+                  future: _userProfileFutures.putIfAbsent(
+                    userId,
+                    () => FirebaseFirestore.instance.collection('users').doc(userId).get(),
+                  ),
+                  builder: (context, snapshot) {
+                    final name = isSelf 
+                        ? 'You' 
+                        : (snapshot.data?.data() as Map<String, dynamic>?)?['name'] as String? ?? 'Someone';
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: c.primaryLt,
+                        backgroundImage: (snapshot.data?.data() as Map<String, dynamic>?)?['avatarUrl'] != null
+                            ? NetworkImage((snapshot.data!.data() as Map<String, dynamic>)['avatarUrl'])
+                            : null,
+                        child: (snapshot.data?.data() as Map<String, dynamic>?)?['avatarUrl'] == null
+                            ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: TextStyle(color: c.primary, fontWeight: FontWeight.bold))
+                            : null,
+                      ),
+                      title: Text(
+                        name,
+                        style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
+                      ),
+                      trailing: Text(
+                        emoji,
+                        style: const TextStyle(fontSize: 20),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close', style: GoogleFonts.poppins(color: c.primary, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
 }
 
