@@ -45,6 +45,39 @@ class AuthService {
     }
   }
 
+  /// Runs all post-sign-in background tasks concurrently. These are not
+  /// needed for the user to see the home screen — they set up device
+  /// sessions, E2EE keys, push notifications, presence, and analytics.
+  /// Fire-and-forget: failures are logged but never block navigation.
+  void _runPostSignInTasks({
+    required String userId,
+    required String displayName,
+    String? phone,
+  }) {
+    unawaited(Future.wait(<Future>[
+      _deviceSession.issueAndPersist().catchError((e) {
+        print('Device session issue failed (non-blocking): $e');
+        return false;
+      }),
+      _ensureE2EERegistered(userId),
+      _fcmService.setupFCM(userId: userId).catchError((e) {
+        print('FCM setup failed (non-blocking): $e');
+      }),
+      _userService.setupPresence(userId),
+      SyncService.instance.init(userId),
+      CrashlyticsService.setUser(
+        uid: userId,
+        displayName: displayName,
+        phone: phone,
+      ).catchError((e) {
+        print('Crashlytics setUser failed (non-blocking): $e');
+      }),
+    ]).catchError((e) {
+      print('Post-sign-in background tasks error: $e');
+      return <dynamic>[];
+    }));
+  }
+
   /// Public entry point so screens (HomeScreen on cold start, etc.) can
   /// trigger E2EE registration without going through a sign-in path.
   /// Needed for the upgrade case where the user was already signed in
@@ -82,30 +115,15 @@ class AuthService {
       );
 
       print('Creating user in Firestore...');
-      await _userService.createOrUpdateUser(user);
+      await Future.wait([
+        _userService.createOrUpdateUser(user),
+        _saveUserIdLocally(userId),
+        _saveUserLocally(user),
+      ]);
 
-      print('Saving user ID locally...');
-      await _saveUserIdLocally(userId);
-      await _saveUserLocally(user);
-      // Issue a "remember this device" token now that we hold a fresh
-      // Firebase ID token. On future cold starts where Firebase Auth's
-      // own session has been wiped (Redmi/MIUI force-stop), this token
-      // is exchanged for a Firebase custom token in attemptSilentReauth().
-      await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-
-      print('Setting up FCM...');
-      try {
-        await _fcmService.setupFCM(userId: userId);
-      } catch (e) {
-        print('FCM setup failed (non-critical): $e');
-      }
-
-      print('Setting up presence...');
-      await _userService.setupPresence(userId);
-
-      // Tag user in Crashlytics so crash reports show who was affected.
-      await CrashlyticsService.setUser(uid: userId, displayName: user.name);
+      // Run device session, E2EE, FCM, presence, and Crashlytics
+      // concurrently in the background — not needed to show HomeScreen.
+      _runPostSignInTasks(userId: userId, displayName: user.name);
 
       print('Anonymous sign in complete!');
       return user;
@@ -205,22 +223,15 @@ class AuthService {
             );
           }
 
-          await _userService.createOrUpdateUser(user);
-          await _saveUserIdLocally(userId);
-          await _saveUserLocally(user);
-          // Issue a "remember this device" token now that we hold a fresh
-          // Firebase ID token. On future cold starts where Firebase Auth's
-          // own session has been wiped (Redmi/MIUI force-stop), this token
-          // is exchanged for a Firebase custom token in attemptSilentReauth().
-          await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-          await _fcmService.setupFCM(userId: userId);
-          await _userService.setupPresence(userId);
-          SyncService.instance.init(userId);
+          await Future.wait([
+            _userService.createOrUpdateUser(user),
+            _saveUserIdLocally(userId),
+            _saveUserLocally(user),
+          ]);
 
-          // Tag user in Crashlytics.
-          await CrashlyticsService.setUser(
-            uid: userId,
+          // Run remaining setup concurrently in the background.
+          _runPostSignInTasks(
+            userId: userId,
             displayName: user.name,
             phone: user.phoneNumber,
           );
@@ -300,20 +311,15 @@ class AuthService {
               );
             }
 
-            await _userService.createOrUpdateUser(user);
-            await _saveUserIdLocally(userId);
-            await _saveUserLocally(user);
-            // See note in other sign-in paths — issue device session token
-            // so this user stays signed in across MIUI force-stops, etc.
-            await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-            await _fcmService.setupFCM(userId: userId);
-            await _userService.setupPresence(userId);
-            SyncService.instance.init(userId);
+            await Future.wait([
+              _userService.createOrUpdateUser(user),
+              _saveUserIdLocally(userId),
+              _saveUserLocally(user),
+            ]);
 
-            // Tag user in Crashlytics.
-            await CrashlyticsService.setUser(
-              uid: userId,
+            // Run remaining setup concurrently in the background.
+            _runPostSignInTasks(
+              userId: userId,
               displayName: user.name,
               phone: verifiedPhoneNumber,
             );
@@ -403,25 +409,14 @@ class AuthService {
             );
           }
 
-          await _userService.createOrUpdateUser(user);
-          await _saveUserIdLocally(userId);
-          await _saveUserLocally(user);
-          // Issue a "remember this device" token now that we hold a fresh
-          // Firebase ID token. On future cold starts where Firebase Auth's
-          // own session has been wiped (Redmi/MIUI force-stop), this token
-          // is exchanged for a Firebase custom token in attemptSilentReauth().
-          await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-          try {
-            await _fcmService.setupFCM(userId: userId);
-          } catch (e) {
-            print('FCM setup failed (non-critical): $e');
-          }
-          await _userService.setupPresence(userId);
-          SyncService.instance.init(userId);
+          await Future.wait([
+            _userService.createOrUpdateUser(user),
+            _saveUserIdLocally(userId),
+            _saveUserLocally(user),
+          ]);
 
-          // Tag user in Crashlytics.
-          await CrashlyticsService.setUser(uid: userId, displayName: user.name);
+          // Run remaining setup concurrently in the background.
+          _runPostSignInTasks(userId: userId, displayName: user.name);
 
           return user;
         } catch (e) {
@@ -488,31 +483,14 @@ class AuthService {
       );
 
       print('Creating user in Firestore...');
-      await _userService.createOrUpdateUser(user);
+      await Future.wait([
+        _userService.createOrUpdateUser(user),
+        _saveUserIdLocally(userId),
+        _saveUserLocally(user),
+      ]);
 
-      print('Saving user ID locally...');
-      await _saveUserIdLocally(userId);
-      await _saveUserLocally(user);
-      // Issue a "remember this device" token now that we hold a fresh
-      // Firebase ID token. On future cold starts where Firebase Auth's
-      // own session has been wiped (Redmi/MIUI force-stop), this token
-      // is exchanged for a Firebase custom token in attemptSilentReauth().
-      await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-
-      print('Setting up FCM...');
-      try {
-        await _fcmService.setupFCM(userId: userId);
-      } catch (e) {
-        print('FCM setup failed (non-critical): $e');
-      }
-
-      print('Setting up presence...');
-      await _userService.setupPresence(userId);
-      SyncService.instance.init(userId);
-
-      // Tag user in Crashlytics.
-      await CrashlyticsService.setUser(uid: userId, displayName: user.name);
+      // Run remaining setup concurrently in the background.
+      _runPostSignInTasks(userId: userId, displayName: user.name);
 
       print('Email sign up complete!');
       return user;
@@ -592,31 +570,14 @@ class AuthService {
             );
           }
 
-          await _userService.createOrUpdateUser(user);
+          await Future.wait([
+            _userService.createOrUpdateUser(user),
+            _saveUserIdLocally(userId),
+            _saveUserLocally(user),
+          ]);
 
-          print('Saving user ID locally...');
-          await _saveUserIdLocally(userId);
-          await _saveUserLocally(user);
-          // Issue a "remember this device" token now that we hold a fresh
-          // Firebase ID token. On future cold starts where Firebase Auth's
-          // own session has been wiped (Redmi/MIUI force-stop), this token
-          // is exchanged for a Firebase custom token in attemptSilentReauth().
-          await _deviceSession.issueAndPersist();
-      await _ensureE2EERegistered(userId);
-
-          print('Setting up FCM...');
-          try {
-            await _fcmService.setupFCM(userId: userId);
-          } catch (e) {
-            print('FCM setup failed (non-critical): $e');
-          }
-
-          print('Setting up presence...');
-          await _userService.setupPresence(userId);
-          SyncService.instance.init(userId);
-
-          // Tag user in Crashlytics.
-          await CrashlyticsService.setUser(uid: userId, displayName: user.name);
+          // Run remaining setup concurrently in the background.
+          _runPostSignInTasks(userId: userId, displayName: user.name);
 
           print('Email sign in complete!');
           return user;
