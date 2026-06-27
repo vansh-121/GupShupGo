@@ -16,6 +16,7 @@ import 'package:video_chat_app/services/device_session_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 
 class AuthService {
@@ -734,7 +735,10 @@ class AuthService {
     try {
       String? userId = await _getSavedUserId();
       if (userId != null) {
-        await _userService.updateOnlineStatus(userId, false);
+        // Use PresenceService to cleanly tear down RTDB presence
+        // (cancels onDisconnect, writes offline, mirrors to Firestore).
+        await PresenceService.instance.goOffline(userId);
+        await PresenceService.instance.dispose();
         await _fcmService.unregisterCurrentDevice(userId: userId);
       }
       // Revoke the server-side device session token BEFORE signing out of

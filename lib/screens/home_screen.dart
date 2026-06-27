@@ -24,6 +24,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
@@ -109,8 +110,13 @@ class _HomeScreenState extends State<HomeScreen>
     _currentUserSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
+    // No manual updateOnlineStatus(false) needed here — the RTDB
+    // onDisconnect handler will fire server-side when the connection
+    // drops, ensuring the user is marked offline even on force-kill.
     if (_currentUserId != null) {
-      _userService.updateOnlineStatus(_currentUserId!, false);
+      // Best-effort explicit offline write; non-critical if it fails.
+      PresenceService.instance.onAppPaused(_currentUserId!).catchError(
+          (e) => debugPrint('Presence dispose cleanup error: $e'));
     }
     super.dispose();
   }
@@ -121,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (_currentUserId != null) {
       switch (state) {
         case AppLifecycleState.resumed:
-          _userService.updateOnlineStatus(_currentUserId!, true);
+          PresenceService.instance.onAppResumed(_currentUserId!);
           // Mark all messages as delivered when app comes to foreground
           _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
           // Keep this device's FCM token fresh after reinstall, data clear,
@@ -131,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
         case AppLifecycleState.paused:
         case AppLifecycleState.inactive:
         case AppLifecycleState.detached:
-          _userService.updateOnlineStatus(_currentUserId!, false);
+          PresenceService.instance.onAppPaused(_currentUserId!);
           break;
         case AppLifecycleState.hidden:
           break;

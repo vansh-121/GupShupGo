@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 
 class UserService {
@@ -120,6 +121,11 @@ class UserService {
 
   /// Returns a real-time stream of a single user's profile (including
   /// online status). Use this to keep UI in sync without manual refreshes.
+  ///
+  /// Includes stale-detection: if `isOnline` is true but `lastSeen` is
+  /// older than [PresenceService.staleThreshold], the user is treated as
+  /// offline. This guards against edge cases where the RTDB onDisconnect
+  /// handler is delayed.
   Stream<UserModel?> getUserStream(String userId) {
     return _firestore
         .collection(_usersCollection)
@@ -127,7 +133,13 @@ class UserService {
         .snapshots()
         .map((doc) {
       if (doc.exists) {
-        return UserModel.fromFirestore(doc);
+        final user = UserModel.fromFirestore(doc);
+        // Stale-detection: override isOnline if lastSeen is too old.
+        if (user.isOnline &&
+            !PresenceService.isRecentlyActive(user.lastSeen)) {
+          return user.copyWith(isOnline: false);
+        }
+        return user;
       }
       return null;
     });
@@ -152,11 +164,12 @@ class UserService {
     }
   }
 
-  // Setup presence system (call when app opens)
+  // Setup presence system (call when app opens).
+  // Delegates to PresenceService which uses RTDB onDisconnect for reliable
+  // server-side offline detection.
   Future<void> setupPresence(String userId) async {
     try {
-      // Set user as online (single write — no duplicate)
-      await updateOnlineStatus(userId, true);
+      await PresenceService.instance.setupPresence(userId);
     } catch (e) {
       print('Error setting up presence: $e');
     }
