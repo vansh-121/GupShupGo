@@ -174,7 +174,7 @@ const List<_Feature> _features = [
   _Feature(
     Icons.star_rounded,
     'Chat Header Layout Fix',
-    'Fixed an overflow issue in the chat header when a user with an active streak is online or typing.',
+    'Fixed an overflow issue in the chat header when a user with an active bond is online or typing.',
   ),
   _Feature(
     Icons.emoji_emotions_rounded,

@@ -1269,7 +1269,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.statusReplyOwnerName ?? 'Status',
+                    message.statusReplyOwnerName ?? 'Moment',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
@@ -1630,7 +1630,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 const Text('💔', style: TextStyle(fontSize: 10)),
                                 const SizedBox(width: 2),
                                 Text(
-                                  'Streak lost!',
+                                  'Bond lost!',
                                   style: GoogleFonts.poppins(
                                     fontSize: 9,
                                     fontWeight: FontWeight.w600,
@@ -2416,7 +2416,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   user.isOnline ? 'Online' : 'Offline',
                   style: GoogleFonts.poppins(fontSize: 14),
                 ),
-                subtitle: Text('Status',
+                subtitle: Text('Moment',
                     style: GoogleFonts.poppins(
                         fontSize: 11, color: c.textMid)),
               ),

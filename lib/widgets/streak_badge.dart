@@ -4,15 +4,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// The risk level of a streak based on how long ago the last mutual message was.
+/// The risk level of a bond based on how long ago the last mutual message was.
 enum StreakRiskLevel {
-  /// 0–19 hours: Streak is healthy. Show 🔥 with normal orange glow.
+  /// 0–19 hours: Bond is healthy. Show 🔥 with normal orange glow.
   normal,
 
-  /// 20–35 hours: Streak is at risk. Show ⚠️ with amber pulse.
+  /// 20–35 hours: Bond is at risk. Show ⚠️ with amber pulse.
   atRisk,
 
-  /// 36–47 hours: Streak is critical. Show ⏳ with aggressive red pulse.
+  /// 36–47 hours: Bond is critical. Show ⏳ with aggressive red pulse.
   critical,
 }
 
@@ -25,8 +25,8 @@ StreakRiskLevel computeStreakRisk(DateTime? lastInteractionDate) {
   return StreakRiskLevel.normal;
 }
 
-/// Computes the remaining time until the streak expires (48h from last interaction).
-/// Returns null if the streak is healthy or the date is null.
+/// Computes the remaining time until the bond expires (48h from last interaction).
+/// Returns null if the bond is healthy or the date is null.
 Duration? computeTimeRemaining(DateTime? lastInteractionDate) {
   if (lastInteractionDate == null) return null;
   final expiry = lastInteractionDate.add(const Duration(hours: 48));
@@ -49,13 +49,13 @@ String formatTimeRemaining(Duration d) {
   return '${d.inMinutes}m';
 }
 
-/// A self-animating streak badge that displays:
-///  - 🔥 N  for normal streaks
-///  - ⚠️ N · Xh left  for at-risk streaks (amber pulsing border)
-///  - ⏳ N · X:MM  for critical streaks (red aggressive pulsing glow)
+/// A self-animating bond badge that displays:
+///  - 🔥 N  for normal bonds
+///  - ⚠️ N · Xh left  for at-risk bonds (amber pulsing border)
+///  - ⏳ N · X:MM  for critical bonds (red aggressive pulsing glow)
 ///
 /// Includes a live countdown timer that updates every minute when
-/// the streak is at risk or critical (like Snapchat's hourglass).
+/// the bond is at risk or critical (like Snapchat's hourglass).
 ///
 /// Usage:
 /// ```dart
@@ -65,7 +65,7 @@ class StreakBadge extends StatefulWidget {
   final int streakCount;
   final DateTime? lastInteractionDate;
 
-  /// Whether to show the full "N day streak" label or just the count.
+  /// Whether to show the full "N day bond" label or just the count.
   final bool compact;
 
   const StreakBadge({
@@ -193,7 +193,7 @@ class _StreakBadgeState extends State<StreakBadge>
     if (risk == StreakRiskLevel.normal) {
       label = widget.compact
           ? '${widget.streakCount}'
-          : '${widget.streakCount} day streak';
+          : '${widget.streakCount} day bond';
     } else {
       final remaining = computeTimeRemaining(widget.lastInteractionDate);
       if (remaining != null && remaining > Duration.zero) {
@@ -238,10 +238,10 @@ class _StreakBadgeState extends State<StreakBadge>
   }
 }
 
-// ─── Arcade Card Variant ─────────────────────────────────────────────────────
-// Larger badge used in the Gup Arcade streak cards (overlaid on avatar)
+// ─── Arcade Card Variant ─────────────────────────────────────────────────────────────
+// Larger badge used in the Gup Arcade bond cards (overlaid on avatar)
 
-/// A larger arc-style badge overlay for the Gup Arcade streak cards.
+/// A larger arc-style badge overlay for the Gup Arcade bond cards.
 class StreakArcadeBadge extends StatefulWidget {
   final int streakCount;
   final DateTime? lastInteractionDate;

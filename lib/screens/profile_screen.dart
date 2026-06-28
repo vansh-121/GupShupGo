@@ -302,7 +302,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 _miniStatDivider(c),
                                 _miniStat(c, '🏅', '${liveUser.badges.length}', 'Badges'),
                                 _miniStatDivider(c),
-                                _miniStat(c, '🔥', '${liveUser.longestStreak}', 'Best Streak'),
+                                _miniStat(c, '🔥', '${liveUser.longestStreak}', 'Best Bond'),
                               ],
                             ),
                           ],

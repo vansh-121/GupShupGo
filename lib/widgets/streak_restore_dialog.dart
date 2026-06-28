@@ -5,9 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
-/// A premium dialog for restoring a broken streak.
+/// A premium dialog for restoring a broken bond.
 ///
-/// Shows the broken streak count, cost in Gup Points, a countdown timer
+/// Shows the broken bond count, cost in Gup Points, a countdown timer
 /// for the 24-hour restore window, and Restore / Dismiss actions.
 class StreakRestoreDialog extends StatefulWidget {
   final int previousStreakCount;
@@ -122,7 +122,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '🔥 Streak restored to ${widget.previousStreakCount} days!',
+              '🤝 Bond restored to ${widget.previousStreakCount} days!',
               style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
             ),
             backgroundColor: Colors.orange[700],
@@ -134,7 +134,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Could not restore streak. Please try again.',
+              'Could not restore bond. Please try again.',
               style: GoogleFonts.poppins(),
             ),
             backgroundColor: Colors.red[700],
@@ -206,7 +206,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
 
               // Title
               Text(
-                'Streak Broken!',
+                'Bond Broken!',
                 style: GoogleFonts.poppins(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -233,7 +233,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                         color: Colors.orange[400],
                       ),
                     ),
-                    TextSpan(text: ' streak with ${widget.contactName} was broken.\n'),
+                    TextSpan(text: ' bond with ${widget.contactName} was broken.\n'),
                     const TextSpan(text: 'Restore it before time runs out!'),
                   ],
                 ),

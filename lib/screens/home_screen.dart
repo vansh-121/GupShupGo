@@ -69,9 +69,9 @@ class _HomeScreenState extends State<HomeScreen>
   List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
 
   // Cached chat-list stream. Created lazily on the first build of the
-  // Chats tab and reused for the rest of the screen's lifetime. Without
+  // Gup tab and reused for the rest of the screen's lifetime. Without
   // this, getChatRooms() was being re-invoked on every rebuild (e.g.
-  // when the user switched to Status/Calls and back), producing a fresh
+  // when the user switched to Moments/Calls and back), producing a fresh
   // single-subscription StreamController each time — and the
   // StreamBuilder occasionally tried to re-listen on the same instance
   // during the rebuild handoff, throwing "Stream has already been
@@ -1130,7 +1130,7 @@ class _HomeScreenState extends State<HomeScreen>
 
         return ListView(
           children: [
-            // My Status section
+            // My Moments section
             _buildMyStatusTile(myStatus, hasMyStatus),
 
             // Divider
@@ -1182,7 +1182,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera icon to share a status',
+                        'Tap the camera icon to post a moment',
                         style: GoogleFonts.poppins(
                           fontSize: 13,
                           color: AppColors.textMid,
@@ -1240,14 +1240,14 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       title: Text(
-        'My Status',
+        'My Moments',
         style: GoogleFonts.poppins(
             fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
       ),
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to add a status update',
+            : 'Tap to post a moment',
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -1713,8 +1713,8 @@ class _HomeScreenState extends State<HomeScreen>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(text: 'Chats'),
-            Tab(text: 'Status'),
+            Tab(text: 'Gup'),
+            Tab(text: 'Moments'),
             Tab(text: 'Calls'),
           ],
         ),
@@ -1820,7 +1820,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context, child) {
         final index = _tabController.index;
         if (index == 1) {
-          // Status tab - show add status FABs
+          // Moments tab - show add moment FABs
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1850,7 +1850,7 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           );
         }
-        // Chats & Calls tabs - show message FAB
+        // Gup & Calls tabs - show message FAB
         return FloatingActionButton(
           heroTag: 'chatFab',
           backgroundColor: c.primary,

@@ -282,7 +282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 20),
                 _buildFAQItem(
                   'How do I start a new chat?',
-                  'Tap the message icon (💬) at the bottom-right of the Chats tab, '
+                  'Tap the message icon (💬) at the bottom-right of the Gup tab, '
                       'or use the search icon in the top bar to find contacts.',
                 ),
                 _buildFAQItem(
@@ -292,9 +292,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'camera icon (📹) for a video call in the top bar.',
                 ),
                 _buildFAQItem(
-                  'How do I share a status update?',
-                  'Go to the Status tab and tap the pencil icon for a text status '
-                      'or the camera icon for a photo/video status.',
+                  'How do I share a moment?',
+                  'Go to the Moments tab and tap the pencil icon for a text moment '
+                      'or the camera icon for a photo/video moment.',
                 ),
                 _buildFAQItem(
                   'How do I edit my profile?',
@@ -397,7 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           E2EEBanner.card(
             context,
             body:
-                'Messages, status updates, and calls are secured with the '
+                'Messages, moments, and calls are secured with the '
                 'Signal Protocol. Only you and the people you chat with can '
                 'read what is sent, listen to what is said, or see your '
                 'status. Not even GupShupGo.',
@@ -538,8 +538,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSwitchTile(
               icon: Icons.local_fire_department_outlined,
               iconColor: Colors.deepOrange,
-              title: 'Streak warnings',
-              subtitle: 'Alert when a streak is at risk or broken',
+              title: 'Bond warnings',
+              subtitle: 'Alert when a bond is at risk or broken',
               value: _notifPrefs[NotifPrefs.streakWarnings] ?? true,
               onChanged: (v) => _setNotifPref(NotifPrefs.streakWarnings, v),
             ),
@@ -547,8 +547,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSwitchTile(
               icon: Icons.emoji_events_outlined,
               iconColor: Colors.amber,
-              title: 'Streak milestones',
-              subtitle: 'Celebrate 7, 30, 100-day streak achievements',
+              title: 'Bond milestones',
+              subtitle: 'Celebrate 7, 30, 100-day bond achievements',
               value: _notifPrefs[NotifPrefs.streakMilestones] ?? true,
               onChanged: (v) => _setNotifPref(NotifPrefs.streakMilestones, v),
             ),
@@ -582,13 +582,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
           const SizedBox(height: 8),
 
-          // ── Chats ─────────────────────────────────────────────────────
-          _buildSectionHeader('CHATS'),
+          // ── Gup ───────────────────────────────────────────────────────
+          _buildSectionHeader('GUP'),
           _buildCard(children: [
             _buildTile(
               icon: Icons.delete_sweep_outlined,
               iconColor: Colors.red,
-              title: 'Clear all chats',
+              title: 'Clear all gup',
               subtitle: 'Delete all message history',
               onTap: _clearAllChats,
             ),
