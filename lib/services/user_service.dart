@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/presence_service.dart';
-import 'package:video_chat_app/services/settings_service.dart';
 
 class UserService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -78,14 +77,13 @@ class UserService {
   // Update user online status
   Future<void> updateOnlineStatus(String userId, bool isOnline) async {
     try {
-      final updates = <String, dynamic>{
+      // Always write lastSeen so that stale-detection works for all users.
+      // Privacy (whether to *display* the timestamp to others) is enforced
+      // at the UI layer, not here.
+      await _firestore.collection(_usersCollection).doc(userId).update({
         'isOnline': isOnline,
-      };
-      // Only write lastSeen if the user has "show last seen" enabled
-      if (SettingsService().showLastSeen) {
-        updates['lastSeen'] = DateTime.now().millisecondsSinceEpoch;
-      }
-      await _firestore.collection(_usersCollection).doc(userId).update(updates);
+        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+      });
       print('Online status updated for $userId: $isOnline');
     } catch (e) {
       print('Error updating online status: $e');

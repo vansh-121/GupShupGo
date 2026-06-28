@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
-import 'package:video_chat_app/services/settings_service.dart';
 
 /// WhatsApp-style presence service that uses Firebase Realtime Database's
 /// `onDisconnect()` handler to reliably detect when a user goes offline —
@@ -135,26 +134,10 @@ class PresenceService {
   /// Call when the app lifecycle transitions to resumed.
   /// Re-establishes presence after the app was in background.
   Future<void> onAppResumed(String userId) async {
-    if (!_isSetUp || _userId != userId) {
-      await setupPresence(userId);
-      return;
-    }
-    final presenceRef = _rtdb.ref('presence/$userId');
-    try {
-      // Re-register onDisconnect (may have been fired while in background).
-      await presenceRef.onDisconnect().set({
-        'online': false,
-        'lastSeen': ServerValue.timestamp,
-      });
-      await presenceRef.set({
-        'online': true,
-        'lastSeen': ServerValue.timestamp,
-      });
-      await _mirrorToFirestore(userId, true);
-      _startHeartbeat(userId, presenceRef);
-    } catch (e) {
-      debugPrint('PresenceService.onAppResumed error: $e');
-    }
+    // Tear down and re-setup cleanly to avoid duplicate writes
+    // and overlapping heartbeat timers.
+    if (_isSetUp) await dispose();
+    await setupPresence(userId);
   }
 
   /// Call when the app lifecycle transitions to paused/inactive/detached.
@@ -162,6 +145,12 @@ class PresenceService {
   /// but keeps the onDisconnect handler alive as a fallback.
   Future<void> onAppPaused(String userId) async {
     _stopHeartbeat();
+    // Cancel the .info/connected listener so that transient reconnects
+    // while backgrounded don't re-mark the user online.
+    await _connectedSub?.cancel();
+    _connectedSub = null;
+    _isSetUp = false;
+    _userId = null;
     try {
       await _rtdb.ref('presence/$userId').set({
         'online': false,
@@ -192,14 +181,13 @@ class PresenceService {
   /// so that all existing Firestore-based queries and UI keep working.
   Future<void> _mirrorToFirestore(String userId, bool isOnline) async {
     try {
-      final updates = <String, dynamic>{
+      // Always write lastSeen so that stale-detection works for all users,
+      // even those with "show last seen" disabled. Privacy (whether to
+      // *display* the timestamp to others) is enforced at the UI layer.
+      await _firestore.collection('users').doc(userId).update({
         'isOnline': isOnline,
-      };
-      // Only write lastSeen if the user has "show last seen" enabled.
-      if (SettingsService().showLastSeen) {
-        updates['lastSeen'] = DateTime.now().millisecondsSinceEpoch;
-      }
-      await _firestore.collection('users').doc(userId).update(updates);
+        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+      });
     } catch (e) {
       debugPrint('PresenceService._mirrorToFirestore error: $e');
     }
@@ -216,12 +204,10 @@ class PresenceService {
         await presenceRef.update({
           'lastSeen': ServerValue.timestamp,
         });
-        // Touch Firestore lastSeen.
-        if (SettingsService().showLastSeen) {
-          await _firestore.collection('users').doc(userId).update({
-            'lastSeen': DateTime.now().millisecondsSinceEpoch,
-          });
-        }
+        // Always touch Firestore lastSeen (privacy is enforced at display).
+        await _firestore.collection('users').doc(userId).update({
+          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        });
       } catch (e) {
         debugPrint('PresenceService heartbeat error: $e');
       }
