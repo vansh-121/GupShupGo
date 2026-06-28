@@ -82,7 +82,7 @@ class UserService {
       // at the UI layer, not here.
       await _firestore.collection(_usersCollection).doc(userId).update({
         'isOnline': isOnline,
-        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        'lastSeen': FieldValue.serverTimestamp(),
       });
       print('Online status updated for $userId: $isOnline');
     } catch (e) {

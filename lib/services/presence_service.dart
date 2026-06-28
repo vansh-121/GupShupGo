@@ -16,7 +16,7 @@ import 'package:flutter/foundation.dart';
 /// │                                                        │
 /// │ Firestore /users/{uid}  ← mirrored for existing queries│
 /// │   • isOnline: true/false                               │
-/// │   • lastSeen: epoch millis                             │
+/// │   • lastSeen: server timestamp                         │
 /// └────────────────────────────────────────────────────────┘
 ///
 /// On connect:
@@ -186,7 +186,7 @@ class PresenceService {
       // *display* the timestamp to others) is enforced at the UI layer.
       await _firestore.collection('users').doc(userId).update({
         'isOnline': isOnline,
-        'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        'lastSeen': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       debugPrint('PresenceService._mirrorToFirestore error: $e');
@@ -206,7 +206,7 @@ class PresenceService {
         });
         // Always touch Firestore lastSeen (privacy is enforced at display).
         await _firestore.collection('users').doc(userId).update({
-          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+          'lastSeen': FieldValue.serverTimestamp(),
         });
       } catch (e) {
         debugPrint('PresenceService heartbeat error: $e');
