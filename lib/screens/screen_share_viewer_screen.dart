@@ -34,11 +34,20 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
 
   StreamSubscription<CallSignalStatus?>? _signalingSubscription;
 
+  /// Cached so it can be safely used in dispose().
+  CallStateNotifier? _callState;
+
   @override
   void initState() {
     super.initState();
     _initViewer();
     _listenForEnd();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _callState = Provider.of<CallStateNotifier>(context, listen: false);
   }
 
   Future<void> _initViewer() async {
@@ -129,6 +138,9 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
   @override
   void dispose() {
     _signalingSubscription?.cancel();
+    // Always reset the global call state so exiting via the system back
+    // gesture (which bypasses _leave) can't leave it stuck and block calls.
+    _callState?.updateState(CallState.Ended);
     AgoraService.releaseEngine(_engine);
     super.dispose();
   }

@@ -36,10 +36,20 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   Timer? _timer;
   int _elapsedSeconds = 0;
 
+  /// Cached so it can be safely used in dispose() (where looking up an
+  /// InheritedWidget via context is unsafe).
+  CallStateNotifier? _callState;
+
   @override
   void initState() {
     super.initState();
     _initShare();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _callState = Provider.of<CallStateNotifier>(context, listen: false);
   }
 
   Future<void> _initShare() async {
@@ -139,6 +149,10 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     if (!_isEnding) {
       CallSignalingService.endCall(widget.channelId);
     }
+    // Always reset the global call state so exiting via the system back
+    // gesture (which bypasses _endShare) can't leave it stuck in
+    // Connected/Calling and block future calls.
+    _callState?.updateState(CallState.Ended);
     AgoraService.releaseEngine(_engine);
     super.dispose();
   }

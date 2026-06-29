@@ -913,6 +913,10 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       print('Error initiating screen share: $e');
       if (!mounted) return;
+      // Reset the call state so a failed screen-share attempt doesn't leave
+      // the global state machine stuck in Calling and block future calls.
+      Provider.of<CallStateNotifier>(context, listen: false)
+          .updateState(CallState.Ended);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start screen sharing: $e')),
       );
