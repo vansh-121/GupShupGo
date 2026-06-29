@@ -13,6 +13,7 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/screens/screen_share_screen.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
@@ -860,6 +861,58 @@ class _ChatScreenState extends State<ChatScreen> {
       print('Error initiating audio call: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start audio call: $e')),
+      );
+    }
+  }
+
+  Future<void> _initiateScreenShare() async {
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot share screen with this contact')),
+      );
+      return;
+    }
+    if (widget.currentUserId == widget.contact.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot share screen with yourself')),
+      );
+      return;
+    }
+
+    try {
+      final channelId = CallSignalingService.generateChannelId();
+      final callState = Provider.of<CallStateNotifier>(context, listen: false);
+      callState.updateState(CallState.Calling);
+
+      print(
+          'Initiating screen share to ${widget.contact.name} on channel $channelId');
+
+      // Create the Firestore signaling document BEFORE notifying the viewer,
+      // so the viewer can listen for the "ended" signal.
+      await CallSignalingService.createCallDocument(
+        channelId: channelId,
+        callerId: widget.currentUserId,
+        calleeId: widget.contact.id,
+      );
+
+      // Notify the other user — they auto-join as a viewer.
+      await FCMService().sendScreenShareNotification(
+          widget.contact.id, widget.currentUserId, channelId);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ScreenShareScreen(
+            channelId: channelId,
+            viewerName: widget.contact.name,
+          ),
+        ),
+      );
+    } catch (e) {
+      print('Error initiating screen share: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to start screen sharing: $e')),
       );
     }
   }
@@ -2160,7 +2213,14 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
+        // ── Screen share button ────────────────────────────────
+        IconButton(
+          icon: Icon(Icons.screen_share_rounded, color: c.textMid, size: 22),
+          tooltip: 'Share screen',
+          onPressed: _initiateScreenShare,
+        ),
+        const SizedBox(width: 4),
         // ── Send or Mic button ─────────────────────────────────
         if (_hasText || _isSending)
           GestureDetector(

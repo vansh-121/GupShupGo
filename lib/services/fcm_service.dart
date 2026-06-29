@@ -18,6 +18,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
+import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -26,6 +27,8 @@ class FCMService {
   // ── Cloud Function endpoints (no service account key needed) ────────────
   static const _callFunctionUrl =
       'https://sendcallnotification-luh3g2lkma-uc.a.run.app';
+  static const _screenShareFunctionUrl =
+      'https://sendscreensharenotification-luh3g2lkma-uc.a.run.app';
   static const _messageFunctionUrl =
       'https://sendmessagenotification-luh3g2lkma-uc.a.run.app';
 
@@ -133,6 +136,26 @@ class FCMService {
             } else {
               _isIncomingCallScreenShowing = false;
             }
+          }
+        } else if (messageType == 'screen_share') {
+          if (!await _isMessageForCurrentUser(message.data)) {
+            print('Ignoring screen share notification for a different signed-in user');
+            return;
+          }
+
+          // Auto-open the viewer so the shared screen appears without an
+          // explicit accept step (one-way screen share).
+          final nav = navigatorKey.currentState;
+          if (nav != null) {
+            final data = message.data;
+            nav.push(
+              MaterialPageRoute(
+                builder: (_) => ScreenShareViewerScreen(
+                  channelId: data['channelId'] ?? '',
+                  sharerName: data['sharerName'] ?? 'Someone',
+                ),
+              ),
+            );
           }
         } else if (messageType == 'streak_broken' ||
             messageType == 'streak_warning' ||
@@ -331,7 +354,8 @@ class FCMService {
 
   static Future<bool> _isMessageForCurrentUser(
       Map<String, dynamic> data) async {
-    final expectedUserId = data['calleeId'] ?? data['receiverId'];
+    final expectedUserId =
+        data['calleeId'] ?? data['receiverId'] ?? data['viewerId'];
     if (expectedUserId == null || expectedUserId.toString().isEmpty) {
       return true;
     }
@@ -389,6 +413,46 @@ class FCMService {
       try { await metric.stop(); } catch (_) {}
       print('Error sending call notification: $e');
       CrashlyticsService.logError(e, stack, reason: 'FCM.sendCallNotification failed for callee $calleeId');
+    }
+  }
+
+  /// Send screen share notification via Cloud Function. Notifies [viewerId]
+  /// that [sharerId] has started sharing their screen on [channelId].
+  Future<void> sendScreenShareNotification(
+      String viewerId, String sharerId, String channelId) async {
+    final metric = PerformanceService.newHttpMetric(
+        _screenShareFunctionUrl, HttpMethod.Post);
+    try {
+      print('Sending screen share notification to $viewerId via Cloud Function');
+      await metric.start();
+
+      final idToken = await _getIdToken();
+      final response = await http.post(
+        Uri.parse(_screenShareFunctionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          if (idToken != null) 'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'viewerId': viewerId,
+          'sharerId': sharerId,
+          'channelId': channelId,
+        }),
+      );
+
+      metric.httpResponseCode = response.statusCode;
+      metric.responsePayloadSize = response.contentLength;
+      await metric.stop();
+
+      print('Screen share notification response: ${response.statusCode}');
+      if (response.statusCode != 200) {
+        print('Failed to send screen share notification: ${response.body}');
+      }
+    } catch (e, stack) {
+      try { await metric.stop(); } catch (_) {}
+      print('Error sending screen share notification: $e');
+      CrashlyticsService.logError(e, stack,
+          reason: 'FCM.sendScreenShareNotification failed for viewer $viewerId');
     }
   }
 

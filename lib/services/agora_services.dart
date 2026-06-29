@@ -119,6 +119,87 @@ class AgoraService {
     return null;
   }
 
+  /// Initialise the engine for screen sharing.
+  ///
+  /// Unlike a normal video call this does NOT enable the camera or start a
+  /// camera preview — the published video track is the device screen, captured
+  /// via [startScreenShare]. Audio is left disabled for a one-way, video-only
+  /// screen share (lighter on the device and avoids echo).
+  static Future<RtcEngine> initAgoraForScreenShare() async {
+    if (_isReleasing) {
+      print('Waiting for previous engine to release...');
+      await Future.delayed(Duration(milliseconds: 500));
+    }
+
+    RtcEngine engine = createAgoraRtcEngine();
+
+    await engine.initialize(const RtcEngineContext(
+      appId: '49a88df036b446d892ed933756e9fe6f',
+      channelProfile: ChannelProfileType.channelProfileCommunication,
+    ));
+
+    await engine.enableVideo();
+
+    return engine;
+  }
+
+  /// Request the permissions needed to view a shared screen (the viewer side).
+  ///
+  /// The viewer only renders a remote video track, so no camera/mic capture
+  /// permission is strictly required. We still initialise the engine for video.
+  static Future<RtcEngine> initAgoraForScreenShareViewer() async {
+    if (_isReleasing) {
+      await Future.delayed(Duration(milliseconds: 500));
+    }
+
+    RtcEngine engine = createAgoraRtcEngine();
+
+    await engine.initialize(const RtcEngineContext(
+      appId: '49a88df036b446d892ed933756e9fe6f',
+      channelProfile: ChannelProfileType.channelProfileCommunication,
+    ));
+
+    await engine.enableVideo();
+
+    return engine;
+  }
+
+  /// Start capturing the device screen.
+  ///
+  /// On Android this triggers the system MediaProjection consent dialog. This
+  /// must be called BEFORE [RtcEngine.joinChannel]; the channel's media options
+  /// (publishScreenCaptureVideo: true) are what actually publish the captured
+  /// screen to the remote viewer. Do NOT call updateChannelMediaOptions before
+  /// joining — it fails with error -8 (invalid state).
+  static Future<void> startScreenShare(RtcEngine engine) async {
+    await engine.startScreenCapture(
+      const ScreenCaptureParameters2(
+        captureAudio: false,
+        captureVideo: true,
+        videoParams: ScreenVideoParameters(
+          dimensions: VideoDimensions(width: 1280, height: 720),
+          frameRate: 15,
+          bitrate: 0, // 0 = let the SDK pick a standard bitrate for the size
+        ),
+      ),
+    );
+  }
+
+  /// Stop screen capture and stop publishing the screen track.
+  static Future<void> stopScreenShare(RtcEngine engine) async {
+    try {
+      await engine.updateChannelMediaOptions(
+        const ChannelMediaOptions(
+          publishScreenCaptureVideo: false,
+          publishScreenCaptureAudio: false,
+        ),
+      );
+      await engine.stopScreenCapture();
+    } catch (e) {
+      print('Error stopping screen share: $e');
+    }
+  }
+
   static Future<void> releaseEngine(RtcEngine? engine) async {
     if (engine == null) return;
 
