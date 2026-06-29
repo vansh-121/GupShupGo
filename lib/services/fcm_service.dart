@@ -119,7 +119,8 @@ class FCMService {
             final nav = navigatorKey.currentState;
             if (nav != null) {
               final data = message.data;
-              nav.push(
+              nav
+                  .push(
                 MaterialPageRoute(
                   builder: (_) => IncomingCallScreen(
                     channelId: data['channelId'] ?? '',
@@ -129,7 +130,8 @@ class FCMService {
                     isAudioOnly: data['isAudioOnly'] == 'true',
                   ),
                 ),
-              ).then((_) {
+              )
+                  .then((_) {
                 // Reset flag when IncomingCallScreen is popped/replaced
                 _isIncomingCallScreenShowing = false;
               });
@@ -139,7 +141,8 @@ class FCMService {
           }
         } else if (messageType == 'screen_share') {
           if (!await _isMessageForCurrentUser(message.data)) {
-            print('Ignoring screen share notification for a different signed-in user');
+            print(
+                'Ignoring screen share notification for a different signed-in user');
             return;
           }
 
@@ -236,7 +239,8 @@ class FCMService {
       final deviceId = await _getOrCreateDeviceId();
       await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
       final deviceInfo = await _getDeviceInfo();
-      final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+      final userRef =
+          FirebaseFirestore.instance.collection('users').doc(userId);
 
       await userRef.collection('devices').doc(deviceId).set(
         {
@@ -268,7 +272,8 @@ class FCMService {
       print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e, stack) {
       print('Error storing FCM token: $e');
-      CrashlyticsService.logError(e, stack, reason: 'FCM._storeToken failed for user $userId');
+      CrashlyticsService.logError(e, stack,
+          reason: 'FCM._storeToken failed for user $userId');
     }
   }
 
@@ -378,8 +383,8 @@ class FCMService {
   Future<void> sendCallNotification(
       String calleeId, String callerId, String channelId,
       {bool isAudioOnly = false}) async {
-    final metric = PerformanceService.newHttpMetric(
-        _callFunctionUrl, HttpMethod.Post);
+    final metric =
+        PerformanceService.newHttpMetric(_callFunctionUrl, HttpMethod.Post);
     try {
       print('Sending call notification to $calleeId via Cloud Function');
       await metric.start();
@@ -410,9 +415,12 @@ class FCMService {
       }
     } catch (e, stack) {
       // Best-effort: stop the metric even on error so it doesn't leak.
-      try { await metric.stop(); } catch (_) {}
+      try {
+        await metric.stop();
+      } catch (_) {}
       print('Error sending call notification: $e');
-      CrashlyticsService.logError(e, stack, reason: 'FCM.sendCallNotification failed for callee $calleeId');
+      CrashlyticsService.logError(e, stack,
+          reason: 'FCM.sendCallNotification failed for callee $calleeId');
     }
   }
 
@@ -423,7 +431,8 @@ class FCMService {
     final metric = PerformanceService.newHttpMetric(
         _screenShareFunctionUrl, HttpMethod.Post);
     try {
-      print('Sending screen share notification to $viewerId via Cloud Function');
+      print(
+          'Sending screen share notification to $viewerId via Cloud Function');
       await metric.start();
 
       final idToken = await _getIdToken();
@@ -449,10 +458,13 @@ class FCMService {
         print('Failed to send screen share notification: ${response.body}');
       }
     } catch (e, stack) {
-      try { await metric.stop(); } catch (_) {}
+      try {
+        await metric.stop();
+      } catch (_) {}
       print('Error sending screen share notification: $e');
       CrashlyticsService.logError(e, stack,
-          reason: 'FCM.sendScreenShareNotification failed for viewer $viewerId');
+          reason:
+              'FCM.sendScreenShareNotification failed for viewer $viewerId');
     }
   }
 
@@ -464,8 +476,8 @@ class FCMService {
     required String message,
     required String chatRoomId,
   }) async {
-    final metric = PerformanceService.newHttpMetric(
-        _messageFunctionUrl, HttpMethod.Post);
+    final metric =
+        PerformanceService.newHttpMetric(_messageFunctionUrl, HttpMethod.Post);
     try {
       await metric.start();
 
@@ -491,7 +503,9 @@ class FCMService {
 
       print('Message notification sent: ${response.statusCode}');
     } catch (e) {
-      try { await metric.stop(); } catch (_) {}
+      try {
+        await metric.stop();
+      } catch (_) {}
       print('Error sending message notification: $e');
     }
   }
@@ -546,8 +560,7 @@ class FCMService {
             );
 
             await batch.commit();
-            print(
-                'Messages and chatRoom marked as delivered for: $chatRoomId');
+            print('Messages and chatRoom marked as delivered for: $chatRoomId');
           }
         } catch (e) {
           print('Error marking messages as delivered: $e');

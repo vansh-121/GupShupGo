@@ -171,8 +171,8 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 color: Colors.black.withOpacity(0.4),
                 child: Row(
                   children: [

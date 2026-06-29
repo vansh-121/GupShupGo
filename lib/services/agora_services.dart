@@ -57,8 +57,7 @@ class AgoraService {
               minBitrate: 600,
               orientationMode: OrientationMode.orientationModeAdaptive,
               // Smooth motion first: reduce resolution before dropping FPS
-              degradationPreference:
-                  DegradationPreference.maintainFramerate,
+              degradationPreference: DegradationPreference.maintainFramerate,
               mirrorMode: VideoMirrorModeType.videoMirrorModeDisabled,
             ),
           );
@@ -106,7 +105,8 @@ class AgoraService {
       enabled: true,
       config: EncryptionConfig(
         encryptionMode: EncryptionMode.aes256Gcm2,
-        encryptionKey: k.key.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
+        encryptionKey:
+            k.key.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
         encryptionKdfSalt: k.salt,
       ),
     );
@@ -217,7 +217,8 @@ class AgoraService {
     } catch (e, stack) {
       print('Error releasing engine: $e');
       CrashlyticsService.logError(
-        e, stack,
+        e,
+        stack,
         reason: 'Agora engine release failed',
       );
     } finally {

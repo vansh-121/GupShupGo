@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -96,7 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _hasText = false; // tracks if text field has content for mic/send toggle
 
   // ─── Block state ──────────────────────────────────────────────────
-  bool _isBlocked = false;      // current user blocked the contact
+  bool _isBlocked = false; // current user blocked the contact
   bool _isBlockedByContact = false; // contact blocked the current user
 
   // ─── Cached user profile futures (avoids re-fetching on rebuild) ───
@@ -148,8 +147,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _isContactOnline = widget.contact.isOnline; // seed from passed-in value
-    final chatRoomId = _chatService.getChatRoomId(
-        widget.currentUserId, widget.contact.id);
+    final chatRoomId =
+        _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     _isMuted = _settingsService.isChatMuted(chatRoomId);
     _messagesStream = _chatService
         .getMessages(widget.currentUserId, widget.contact.id)
@@ -210,7 +209,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // stale-while-revalidate window.
     SignalService.refreshDeviceCache(widget.contact.id);
     // ignore: discarded_futures
-    SignalService.instance.prewarmSessions([widget.currentUserId, widget.contact.id]);
+    SignalService.instance
+        .prewarmSessions([widget.currentUserId, widget.contact.id]);
     _scrollController.addListener(_onScroll);
   }
 
@@ -250,8 +250,8 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Shows the streak-restore dialog when the user taps the broken-streak badge.
   Future<void> _showStreakRestoreDialog() async {
     if (_previousStreakCount <= 0 || _streakBrokenAt == null) return;
-    final chatRoomId = _chatService.getChatRoomId(
-        widget.currentUserId, widget.contact.id);
+    final chatRoomId =
+        _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     // Fetch current user's Gup Points
     int gupPoints = 0;
     try {
@@ -278,7 +278,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_isLoadingOlder || !_hasMoreOlder) return;
 
     // Filter out mesh messages to get the oldest actual message from SQLite
-    final dbMessages = _currentMessages.where((m) => !m.id.startsWith('mesh_')).toList();
+    final dbMessages =
+        _currentMessages.where((m) => !m.id.startsWith('mesh_')).toList();
     if (dbMessages.isEmpty) return;
 
     if (mounted) {
@@ -290,7 +291,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final oldestMsg = dbMessages.first; // sorted ASC, so first is oldest
       final count = await _chatService.fetchOlderMessages(
-        chatRoomId: _chatService.getChatRoomId(widget.currentUserId, widget.contact.id),
+        chatRoomId:
+            _chatService.getChatRoomId(widget.currentUserId, widget.contact.id),
         beforeTimestamp: oldestMsg.timestamp,
         currentUserId: widget.currentUserId,
         limit: 50,
@@ -392,11 +394,10 @@ class _ChatScreenState extends State<ChatScreen> {
             .doc(widget.contact.id)
             .get(),
       ]);
-      final myDoc    = results[0];
+      final myDoc = results[0];
       final theirDoc = results[1];
 
-      final myBlocked =
-          List<String>.from(myDoc.data()?['blockedUsers'] ?? []);
+      final myBlocked = List<String>.from(myDoc.data()?['blockedUsers'] ?? []);
       final theirBlocked =
           List<String>.from(theirDoc.data()?['blockedUsers'] ?? []);
 
@@ -420,9 +421,8 @@ class _ChatScreenState extends State<ChatScreen> {
   // ─── Online status listener ────────────────────────────────────────
 
   void _listenToOnlineStatus() {
-    _onlineStatusSubscription = _userService
-        .getUserStream(widget.contact.id)
-        .listen((user) {
+    _onlineStatusSubscription =
+        _userService.getUserStream(widget.contact.id).listen((user) {
       if (mounted && user != null) {
         final effectiveOnline =
             (_isBlocked || _isBlockedByContact) ? false : user.isOnline;
@@ -444,14 +444,16 @@ class _ChatScreenState extends State<ChatScreen> {
   void _updateSubtitleTimer(bool isOnline) {
     _subtitleToggleTimer?.cancel();
     _subtitleToggleTimer = null;
-    if (!isOnline && (_streakCount > 0 ||
-        (_previousStreakCount > 0 && _streakBrokenAt != null))) {
+    if (!isOnline &&
+        (_streakCount > 0 ||
+            (_previousStreakCount > 0 && _streakBrokenAt != null))) {
       // Show last seen first, then after 2 s animate to bond badge, repeat
       _showBondInSubtitle = false;
       _subtitleToggleTimer = Timer.periodic(
         const Duration(milliseconds: 5200),
         (_) {
-          if (mounted) setState(() => _showBondInSubtitle = !_showBondInSubtitle);
+          if (mounted)
+            setState(() => _showBondInSubtitle = !_showBondInSubtitle);
         },
       );
     } else {
@@ -509,8 +511,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   bool get _hasBondBadge =>
-      _streakCount > 0 ||
-      (_previousStreakCount > 0 && _streakBrokenAt != null);
+      _streakCount > 0 || (_previousStreakCount > 0 && _streakBrokenAt != null);
 
   Widget _buildSubtitleRow(AppThemeColors c) {
     // ── Typing ──────────────────────────────────────────────────────
@@ -961,8 +962,8 @@ class _ChatScreenState extends State<ChatScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'No internet & mesh unavailable. Message not sent.')),
+              content:
+                  Text('No internet & mesh unavailable. Message not sent.')),
         );
         _messageController.text = text;
       }
@@ -1083,7 +1084,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessage(MessageModel message) {
     final c = AppThemeColors.of(context);
     final isMe = message.senderId == widget.currentUserId;
-    final hasReactions = message.reactions != null && message.reactions!.isNotEmpty;
+    final hasReactions =
+        message.reactions != null && message.reactions!.isNotEmpty;
 
     Widget bubble = Container(
       margin: EdgeInsets.only(
@@ -1114,8 +1116,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (message.hasStatusReply)
-            _buildStatusReplyPreview(message, isMe),
+          if (message.hasStatusReply) _buildStatusReplyPreview(message, isMe),
           // ── Audio / voice message ─────────────────────────────
           if (message.type == MessageType.audio) ...[
             ConstrainedBox(
@@ -1128,8 +1129,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ]
           // ── Image message ─────────────────────────────────────
           else if (message.type == MessageType.image &&
-              (message.mediaUrl != null ||
-                  message.localFilePath != null)) ...[
+              (message.mediaUrl != null || message.localFilePath != null)) ...[
             GestureDetector(
               onTap: () => _showFullScreenImage(
                   message.mediaUrl, message.localFilePath, message.text),
@@ -1161,9 +1161,7 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(
                 _formatTime(message.timestamp),
                 style: GoogleFonts.poppins(
-                  color: isMe
-                      ? Colors.white.withOpacity(0.75)
-                      : c.textLow,
+                  color: isMe ? Colors.white.withOpacity(0.75) : c.textLow,
                   fontSize: 10,
                 ),
               ),
@@ -1172,9 +1170,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Icon(
                   Icons.cell_tower_rounded,
                   size: 11,
-                  color: isMe
-                      ? Colors.white.withOpacity(0.7)
-                      : c.textLow,
+                  color: isMe ? Colors.white.withOpacity(0.7) : c.textLow,
                 ),
               ],
               if (isMe) ...[
@@ -1206,7 +1202,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   color: c.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: c.border.withOpacity(0.5), width: 0.5),
+                  border:
+                      Border.all(color: c.border.withOpacity(0.5), width: 0.5),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.1),
@@ -1293,8 +1290,8 @@ class _ChatScreenState extends State<ChatScreen> {
             height: 150,
             color: c.surfaceAlt,
             child: Center(
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: c.primary),
+              child:
+                  CircularProgressIndicator(strokeWidth: 2, color: c.primary),
             ),
           );
         },
@@ -1516,9 +1513,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ? Icons.image_rounded
                                 : Icons.format_quote_rounded,
                         size: 13,
-                        color: isMe
-                            ? Colors.white.withOpacity(0.78)
-                            : c.textMid,
+                        color:
+                            isMe ? Colors.white.withOpacity(0.78) : c.textMid,
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -1542,8 +1538,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
-                      color:
-                          isMe ? Colors.white.withOpacity(0.9) : c.textHigh,
+                      color: isMe ? Colors.white.withOpacity(0.9) : c.textHigh,
                       fontSize: 11.5,
                     ),
                   ),
@@ -1639,13 +1634,11 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded,
-                size: 48, color: c.textLow),
+            Icon(Icons.search_off_rounded, size: 48, color: c.textLow),
             const SizedBox(height: 12),
             Text(
               'No messages found',
-              style: GoogleFonts.poppins(
-                  color: c.textMid, fontSize: 14),
+              style: GoogleFonts.poppins(color: c.textMid, fontSize: 14),
             ),
           ],
         ),
@@ -1685,7 +1678,8 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       final isNew = _seenMessageIds.add(message.id);
-      displayItems.add(_DisplayItem.message(message, animate: isNew && !isInitial));
+      displayItems
+          .add(_DisplayItem.message(message, animate: isNew && !isInitial));
     }
 
     // Append typing bubble as the last item — with reverse:true below this
@@ -1832,8 +1826,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   autofocus: true,
                   decoration: InputDecoration(
                     hintText: 'Search messages...',
-                    hintStyle: GoogleFonts.poppins(
-                        color: c.textLow, fontSize: 14),
+                    hintStyle:
+                        GoogleFonts.poppins(color: c.textLow, fontSize: 14),
                     border: InputBorder.none,
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.close_rounded, size: 20),
@@ -1846,8 +1840,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                     ),
                   ),
-                  style: GoogleFonts.poppins(
-                      fontSize: 14, color: c.textHigh),
+                  style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
                   onChanged: (query) {
                     setState(() => _searchQuery = query.trim().toLowerCase());
                   },
@@ -1887,8 +1880,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   PopupMenuItem(
                       value: 'block contact',
                       child: Text('Block contact',
-                          style:
-                              GoogleFonts.poppins(color: c.error))),
+                          style: GoogleFonts.poppins(color: c.error))),
                 ];
               },
             ),
@@ -1896,8 +1888,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(color: c.primary))
+          ? Center(child: CircularProgressIndicator(color: c.primary))
           : Column(
               children: [
                 // ── Smart banner: E2EE (online) / No-internet (offline) ──
@@ -1939,7 +1930,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                   size: 14,
                                   color: c2.isDark
                                       ? const Color(0xFF4ADE80).withOpacity(0.7)
-                                      : const Color(0xFF2E7D32).withOpacity(0.6)),
+                                      : const Color(0xFF2E7D32)
+                                          .withOpacity(0.6)),
                             ],
                           ),
                         ),
@@ -2009,8 +2001,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
                         return Center(
-                            child: CircularProgressIndicator(
-                                color: c.primary));
+                            child: CircularProgressIndicator(color: c.primary));
                       }
 
                       if (snapshot.hasError) {
@@ -2022,8 +2013,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   size: 48, color: c.error),
                               const SizedBox(height: 16),
                               Text('Error loading messages',
-                                  style: GoogleFonts.poppins(
-                                      color: c.textMid)),
+                                  style: GoogleFonts.poppins(color: c.textMid)),
                               TextButton(
                                 onPressed: () => setState(() {}),
                                 child: const Text('Try again'),
@@ -2045,10 +2035,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       final messages = [
                         ...firestoreMessages,
                         ...uniqueMesh,
-                      ]..sort(
-                          (a, b) => a.timestamp.compareTo(b.timestamp));
+                      ]..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-                      final nonReactionMessages = messages.where((m) => m.type != MessageType.reaction).toList();
+                      final nonReactionMessages = messages
+                          .where((m) => m.type != MessageType.reaction)
+                          .toList();
 
                       final hasUnreadMessages = nonReactionMessages.any((m) =>
                           m.receiverId == widget.currentUserId &&
@@ -2078,16 +2069,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     decoration: BoxDecoration(
                       color: c.surfaceAlt,
                       border: Border(
-                        top: BorderSide(
-                            color: c.divider, width: 1),
+                        top: BorderSide(color: c.divider, width: 1),
                       ),
                     ),
                     child: SafeArea(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.block_rounded,
-                              color: c.textLow, size: 18),
+                          Icon(Icons.block_rounded, color: c.textLow, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             _isBlocked
@@ -2134,7 +2123,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   )
                 else
-                _buildMessageInputBar(c),
+                  _buildMessageInputBar(c),
               ],
             ),
     );
@@ -2145,8 +2134,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final isRecording = _voiceRecorder.isRecording;
 
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: c.surface,
         border: Border(
@@ -2154,9 +2142,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       child: SafeArea(
-        child: isRecording
-            ? _buildRecordingBar(c)
-            : _buildNormalInputBar(c),
+        child: isRecording ? _buildRecordingBar(c) : _buildNormalInputBar(c),
       ),
     );
   }
@@ -2173,13 +2159,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: c.primary),
+                      strokeWidth: 2, color: c.primary),
                 ),
               )
             : IconButton(
-                icon: Icon(Icons.attach_file_rounded,
-                    color: c.textMid, size: 22),
+                icon:
+                    Icon(Icons.attach_file_rounded, color: c.textMid, size: 22),
                 onPressed: _pickAndSendImage,
               ),
         Expanded(
@@ -2187,25 +2172,22 @@ class _ChatScreenState extends State<ChatScreen> {
             decoration: BoxDecoration(
               color: c.surfaceAlt,
               borderRadius: BorderRadius.circular(24),
-              border:
-                  Border.all(color: c.border, width: 1),
+              border: Border.all(color: c.border, width: 1),
             ),
             child: TextField(
               controller: _messageController,
               decoration: InputDecoration(
                 hintText: 'Message...',
-                hintStyle: GoogleFonts.poppins(
-                    color: c.textLow, fontSize: 14),
+                hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 14),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
                 fillColor: Colors.transparent,
                 filled: false,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
-              style: GoogleFonts.poppins(
-                  fontSize: 14, color: c.textHigh),
+              style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
               maxLines: 5,
               minLines: 1,
               textCapitalization: TextCapitalization.sentences,
@@ -2230,9 +2212,7 @@ class _ChatScreenState extends State<ChatScreen> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: _isSending
-                    ? c.textLow
-                    : c.primary,
+                color: _isSending ? c.textLow : c.primary,
                 shape: BoxShape.circle,
               ),
               child: _isSending
@@ -2321,8 +2301,7 @@ class _ChatScreenState extends State<ChatScreen> {
               color: c.error.withOpacity(0.12),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.delete_outline_rounded,
-                color: c.error, size: 18),
+            child: Icon(Icons.delete_outline_rounded, color: c.error, size: 18),
           ),
         ),
         const SizedBox(width: 8),
@@ -2429,10 +2408,9 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       } else {
         // ── Online: upload to Firebase Storage ──────────────────────
-        final chatRoomId = _chatService.getChatRoomId(
-            widget.currentUserId, widget.contact.id);
-        final fileName =
-            '${DateTime.now().millisecondsSinceEpoch}_voice.m4a';
+        final chatRoomId =
+            _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}_voice.m4a';
         final ref = FirebaseStorage.instance
             .ref()
             .child('chat_audio/$chatRoomId/$fileName');
@@ -2534,75 +2512,73 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  color: c.textLow,
-                  borderRadius: BorderRadius.circular(2),
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: c.textLow,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              CircleAvatar(
-                radius: 48,
-                backgroundImage: NetworkImage(avatarUrl),
-                backgroundColor: c.primaryLt,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                user.name,
-                style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: c.textHigh),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                user.about ?? 'Hey there! I am using GupShupGo.',
-                style: GoogleFonts.poppins(
-                    fontSize: 13, color: c.textMid),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              const Divider(),
-              if (user.phoneNumber != null)
+                CircleAvatar(
+                  radius: 48,
+                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundColor: c.primaryLt,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  user.name,
+                  style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: c.textHigh),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  user.about ?? 'Hey there! I am using GupShupGo.',
+                  style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                if (user.phoneNumber != null)
+                  ListTile(
+                    leading: Icon(Icons.phone_outlined, color: c.primary),
+                    title: Text(user.phoneNumber!,
+                        style: GoogleFonts.poppins(fontSize: 14)),
+                    subtitle: Text('Phone',
+                        style: GoogleFonts.poppins(
+                            fontSize: 11, color: c.textMid)),
+                  ),
+                if (user.email != null)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.email_outlined, color: Colors.orange),
+                    title: Text(user.email!,
+                        style: GoogleFonts.poppins(fontSize: 14)),
+                    subtitle: Text('Email',
+                        style: GoogleFonts.poppins(
+                            fontSize: 11, color: c.textMid)),
+                  ),
                 ListTile(
-                  leading: Icon(Icons.phone_outlined,
-                      color: c.primary),
-                  title: Text(user.phoneNumber!,
-                      style: GoogleFonts.poppins(fontSize: 14)),
-                  subtitle: Text('Phone',
-                      style: GoogleFonts.poppins(
-                          fontSize: 11, color: c.textMid)),
+                  leading: Icon(
+                    user.isOnline ? Icons.circle : Icons.circle_outlined,
+                    color: user.isOnline ? c.online : c.textLow,
+                    size: 16,
+                  ),
+                  title: Text(
+                    user.isOnline ? 'Online' : 'Offline',
+                    style: GoogleFonts.poppins(fontSize: 14),
+                  ),
+                  subtitle: Text('Moment',
+                      style:
+                          GoogleFonts.poppins(fontSize: 11, color: c.textMid)),
                 ),
-              if (user.email != null)
-                ListTile(
-                  leading: const Icon(Icons.email_outlined,
-                      color: Colors.orange),
-                  title: Text(user.email!,
-                      style: GoogleFonts.poppins(fontSize: 14)),
-                  subtitle: Text('Email',
-                      style: GoogleFonts.poppins(
-                          fontSize: 11, color: c.textMid)),
-                ),
-              ListTile(
-                leading: Icon(
-                  user.isOnline ? Icons.circle : Icons.circle_outlined,
-                  color: user.isOnline ? c.online : c.textLow,
-                  size: 16,
-                ),
-                title: Text(
-                  user.isOnline ? 'Online' : 'Offline',
-                  style: GoogleFonts.poppins(fontSize: 14),
-                ),
-                subtitle: Text('Moment',
-                    style: GoogleFonts.poppins(
-                        fontSize: 11, color: c.textMid)),
-              ),
-              const SizedBox(height: 16),
-            ],
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
-        ),
         ),
       );
     });
@@ -2610,14 +2586,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Mute / Unmute ─────────────────────────────────────────────────
   void _toggleMute() {
-    final chatRoomId = _chatService.getChatRoomId(
-        widget.currentUserId, widget.contact.id);
+    final chatRoomId =
+        _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     _settingsService.toggleMuteChat(chatRoomId);
     setState(() => _isMuted = !_isMuted);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-            _isMuted ? 'Notifications muted' : 'Notifications unmuted'),
+        content:
+            Text(_isMuted ? 'Notifications muted' : 'Notifications unmuted'),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -2639,8 +2615,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child:
-                  const Text('Block', style: TextStyle(color: Colors.red))),
+              child: const Text('Block', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -2706,15 +2681,15 @@ class _ChatScreenState extends State<ChatScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                  content: Text(
-                      'No internet & mesh unavailable. Image not sent.')),
+                  content:
+                      Text('No internet & mesh unavailable. Image not sent.')),
             );
           }
         }
       } else {
         // ── Online: upload to Firebase Storage ──────────────────────
-        final chatRoomId = _chatService.getChatRoomId(
-            widget.currentUserId, widget.contact.id);
+        final chatRoomId =
+            _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
         final fileName =
             '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
         final ref = FirebaseStorage.instance
@@ -2751,7 +2726,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-
   void _showReactionOverlay(MessageModel message) {
     final c = AppThemeColors.of(context);
     showDialog(
@@ -2786,7 +2760,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                     borderRadius: BorderRadius.circular(20),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       child: Text(
                         emoji,
                         style: const TextStyle(fontSize: 28),
@@ -2856,31 +2831,46 @@ class _ChatScreenState extends State<ChatScreen> {
                 final userId = message.reactions!.keys.elementAt(index);
                 final emoji = message.reactions!.values.elementAt(index);
                 final isSelf = userId == widget.currentUserId;
-                
+
                 return FutureBuilder<DocumentSnapshot>(
                   future: _userProfileFutures.putIfAbsent(
                     userId,
-                    () => FirebaseFirestore.instance.collection('users').doc(userId).get(),
+                    () => FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(userId)
+                        .get(),
                   ),
                   builder: (context, snapshot) {
-                    final name = isSelf 
-                        ? 'You' 
-                        : (snapshot.data?.data() as Map<String, dynamic>?)?['name'] as String? ?? 'Someone';
+                    final name = isSelf
+                        ? 'You'
+                        : (snapshot.data?.data()
+                                as Map<String, dynamic>?)?['name'] as String? ??
+                            'Someone';
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: CircleAvatar(
                         radius: 16,
                         backgroundColor: c.primaryLt,
-                        backgroundImage: (snapshot.data?.data() as Map<String, dynamic>?)?['avatarUrl'] != null
-                            ? NetworkImage((snapshot.data!.data() as Map<String, dynamic>)['avatarUrl'])
+                        backgroundImage: (snapshot.data?.data()
+                                    as Map<String, dynamic>?)?['avatarUrl'] !=
+                                null
+                            ? NetworkImage((snapshot.data!.data()
+                                as Map<String, dynamic>)['avatarUrl'])
                             : null,
-                        child: (snapshot.data?.data() as Map<String, dynamic>?)?['avatarUrl'] == null
-                            ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: TextStyle(color: c.primary, fontWeight: FontWeight.bold))
+                        child: (snapshot.data?.data()
+                                    as Map<String, dynamic>?)?['avatarUrl'] ==
+                                null
+                            ? Text(
+                                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                style: TextStyle(
+                                    color: c.primary,
+                                    fontWeight: FontWeight.bold))
                             : null,
                       ),
                       title: Text(
                         name,
-                        style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
+                        style: GoogleFonts.poppins(
+                            fontSize: 14, color: c.textHigh),
                       ),
                       trailing: Text(
                         emoji,
@@ -2895,14 +2885,15 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Close', style: GoogleFonts.poppins(color: c.primary, fontWeight: FontWeight.w600)),
+              child: Text('Close',
+                  style: GoogleFonts.poppins(
+                      color: c.primary, fontWeight: FontWeight.w600)),
             ),
           ],
         );
       },
     );
   }
-
 }
 
 // ─── Animated typing dots (the 3 bouncing dots) ──────────────────────────
@@ -3007,7 +2998,8 @@ class _DisplayItem {
 
   const _DisplayItem.typing() : this._(type: _DisplayItemType.typing);
 
-  const _DisplayItem.loadingOlder() : this._(type: _DisplayItemType.loadingOlder);
+  const _DisplayItem.loadingOlder()
+      : this._(type: _DisplayItemType.loadingOlder);
 
   _DisplayItem.dateDivider(String label)
       : this._(type: _DisplayItemType.dateDivider, dateLabel: label);
