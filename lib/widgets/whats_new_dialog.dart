@@ -35,35 +35,37 @@ class _WhatsNewDialog extends StatelessWidget {
       backgroundColor: colors.cardBg,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _Header(colors: colors),
-            const SizedBox(height: 20),
-            ..._features.map((f) => _FeatureRow(feature: f, colors: colors)),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: colors.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _Header(colors: colors),
+              const SizedBox(height: 20),
+              ..._features.map((f) => _FeatureRow(feature: f, colors: colors)),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text(
-                  'Got it!',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    'Got it!',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -172,7 +174,7 @@ const List<_Feature> _features = [
   _Feature(
     Icons.star_rounded,
     'Chat Header Layout Fix',
-    'Fixed an overflow issue in the chat header when a user with an active streak is online or typing.',
+    'Fixed an overflow issue in the chat header when a user with an active bond is online or typing.',
   ),
   _Feature(
     Icons.emoji_emotions_rounded,

@@ -447,7 +447,7 @@ class _OverviewTab extends StatelessWidget {
         _buildQuickStats(c),
         const SizedBox(height: 20),
 
-        // Active Streaks
+        // Active Bonds
         _buildStreaksSection(c),
         const SizedBox(height: 20),
 
@@ -479,7 +479,7 @@ class _OverviewTab extends StatelessWidget {
         color: const Color(0xFF667eea),
       ),
       _QuickStat(
-        label: 'Best Streak',
+        label: 'Best Bond',
         value: '${user.longestStreak}',
         icon: '🔥',
         color: const Color(0xFFFF8008),
@@ -551,18 +551,18 @@ class _OverviewTab extends StatelessWidget {
         if (roomsWithStreaks.isEmpty && brokenStreaks.isEmpty) {
           return _buildEmptySection(
             c,
-            title: 'Active Streaks',
+            title: 'Active Bonds 🤝',
             emoji: '🔥',
-            message: 'Chat daily with friends to start streaks!',
+            message: 'Chat daily with friends to build bonds!',
           );
         }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Active Streaks ─────────────────────────────────────────
+            // ── Active Bonds ─────────────────────────────────────────
             if (roomsWithStreaks.isNotEmpty) ...[
-              _sectionHeader('Active Streaks', '🔥', c),
+              _sectionHeader('Active Bonds 🤝', '🔥', c),
               const SizedBox(height: 10),
               SizedBox(
                 height: 120,
@@ -577,10 +577,10 @@ class _OverviewTab extends StatelessWidget {
               ),
             ],
 
-            // ── Broken Streaks ─────────────────────────────────────────
+            // ── Broken Bonds ─────────────────────────────────────────
             if (brokenStreaks.isNotEmpty) ...[
               if (roomsWithStreaks.isNotEmpty) const SizedBox(height: 20),
-              _sectionHeader('Broken Streaks', '💔', c),
+              _sectionHeader('Broken Bonds 💔', '💔', c),
               const SizedBox(height: 10),
               SizedBox(
                 height: 130,

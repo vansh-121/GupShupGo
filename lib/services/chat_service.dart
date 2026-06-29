@@ -397,9 +397,11 @@ class ChatService {
           errStr.contains('InvalidKeyId') ||
           errStr.contains('UntrustedIdentity')) {
         try {
-          await SignalService.instance.stores.sessionStore.deleteSession(
-            SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1),
-          );
+          final addr = SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
+          await SignalService.instance.stores.sessionStore.deleteSession(addr);
+          if (errStr.contains('UntrustedIdentity')) {
+            SignalService.instance.stores.identityStore.trustedKeys.remove(addr);
+          }
           SignalService.instance.stores.markDirty();
         } catch (_) {}
       }

@@ -110,8 +110,8 @@ class BadgeDefinition {
     ),
     BadgeDefinition(
       id: 'streak_warrior',
-      title: 'Streak Warrior',
-      description: 'Maintained a 7-day chat streak with a friend.',
+      title: 'Bond Warrior',
+      description: 'Maintained a 7-day bond with a friend.',
       icon: '⚔️',
       gradientColors: [Color(0xFFFF8008), Color(0xFFFFC837)],
       rarity: BadgeRarity.rare,
@@ -201,8 +201,8 @@ class ChallengeDefinition {
     ),
     ChallengeDefinition(
       key: 'status_posts',
-      title: 'Status Superstar',
-      description: 'Post 5 status updates.',
+      title: 'Moments Superstar',
+      description: 'Post 5 moments.',
       target: 5,
       icon: '🌟',
       rewardPoints: 50,
@@ -238,8 +238,8 @@ class ChallengeDefinition {
     ),
     ChallengeDefinition(
       key: 'weekly_streak_keeper',
-      title: 'Streak Keeper',
-      description: 'Maintain all your active streaks for 7 days.',
+      title: 'Bond Keeper',
+      description: 'Maintain all your active bonds for 7 days.',
       target: 7,
       icon: '🔥',
       rewardPoints: 100,

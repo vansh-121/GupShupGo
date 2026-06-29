@@ -62,8 +62,8 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION%+*}" >> $GITHUB_OUTPUT
 
-      - name: Build Release APK
-        run: flutter build apk --release
+      - name: Build Release APKs (split per ABI)
+        run: flutter build apk --release --split-per-abi
 
       - name: Build Release AAB
         run: flutter build appbundle --release
@@ -79,10 +79,18 @@ jobs:
             Automatically generated from commit: ${{ github.sha }}
 
             ### Downloads
-            - **APK** — Direct install on Android devices
-            - **AAB** — For Google Play Store upload
+            | File | Architecture | Devices |
+            |------|--------------|---------|
+            | `app-arm64-v8a-release.apk` | arm64-v8a | All modern Android phones (2017+) |
+            | `app-armeabi-v7a-release.apk` | armeabi-v7a | Older 32-bit ARM devices |
+            | `app-x86_64-release.apk` | x86_64 | Emulators / Intel Chromebooks |
+            | `app-release.aab` | — | Google Play Store upload |
+
+            > **Not sure which APK?** Pick `arm64-v8a` — works on virtually all phones made after 2017.
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
             build/app/outputs/bundle/release/app-release.aab
           draft: false
           prerelease: false

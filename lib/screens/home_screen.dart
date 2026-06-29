@@ -24,6 +24,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
@@ -68,9 +69,9 @@ class _HomeScreenState extends State<HomeScreen>
   List<ChatRoom>? _lastCachedRooms; // guard against redundant cache writes
 
   // Cached chat-list stream. Created lazily on the first build of the
-  // Chats tab and reused for the rest of the screen's lifetime. Without
+  // Gup tab and reused for the rest of the screen's lifetime. Without
   // this, getChatRooms() was being re-invoked on every rebuild (e.g.
-  // when the user switched to Status/Calls and back), producing a fresh
+  // when the user switched to Moments/Calls and back), producing a fresh
   // single-subscription StreamController each time — and the
   // StreamBuilder occasionally tried to re-listen on the same instance
   // during the rebuild handoff, throwing "Stream has already been
@@ -109,8 +110,13 @@ class _HomeScreenState extends State<HomeScreen>
     _currentUserSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
+    // No manual updateOnlineStatus(false) needed here — the RTDB
+    // onDisconnect handler will fire server-side when the connection
+    // drops, ensuring the user is marked offline even on force-kill.
     if (_currentUserId != null) {
-      _userService.updateOnlineStatus(_currentUserId!, false);
+      // Best-effort explicit offline write; non-critical if it fails.
+      PresenceService.instance.onAppPaused(_currentUserId!).catchError(
+          (e) => debugPrint('Presence dispose cleanup error: $e'));
     }
     super.dispose();
   }
@@ -121,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (_currentUserId != null) {
       switch (state) {
         case AppLifecycleState.resumed:
-          _userService.updateOnlineStatus(_currentUserId!, true);
+          PresenceService.instance.onAppResumed(_currentUserId!);
           // Mark all messages as delivered when app comes to foreground
           _chatService.markAllMessagesAsDeliveredOnAppOpen(_currentUserId!);
           // Keep this device's FCM token fresh after reinstall, data clear,
@@ -131,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
         case AppLifecycleState.paused:
         case AppLifecycleState.inactive:
         case AppLifecycleState.detached:
-          _userService.updateOnlineStatus(_currentUserId!, false);
+          PresenceService.instance.onAppPaused(_currentUserId!);
           break;
         case AppLifecycleState.hidden:
           break;
@@ -1124,7 +1130,7 @@ class _HomeScreenState extends State<HomeScreen>
 
         return ListView(
           children: [
-            // My Status section
+            // My Moments section
             _buildMyStatusTile(myStatus, hasMyStatus),
 
             // Divider
@@ -1176,7 +1182,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera icon to share a status',
+                        'Tap the camera icon to post a moment',
                         style: GoogleFonts.poppins(
                           fontSize: 13,
                           color: AppColors.textMid,
@@ -1234,14 +1240,14 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
       title: Text(
-        'My Status',
+        'My Moments',
         style: GoogleFonts.poppins(
             fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
       ),
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to add a status update',
+            : 'Tap to post a moment',
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -1707,8 +1713,8 @@ class _HomeScreenState extends State<HomeScreen>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(text: 'Chats'),
-            Tab(text: 'Status'),
+            Tab(text: 'Gup'),
+            Tab(text: 'Moments'),
             Tab(text: 'Calls'),
           ],
         ),
@@ -1814,7 +1820,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context, child) {
         final index = _tabController.index;
         if (index == 1) {
-          // Status tab - show add status FABs
+          // Moments tab - show add moment FABs
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1844,7 +1850,7 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           );
         }
-        // Chats & Calls tabs - show message FAB
+        // Gup & Calls tabs - show message FAB
         return FloatingActionButton(
           heroTag: 'chatFab',
           backgroundColor: c.primary,

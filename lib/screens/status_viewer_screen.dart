@@ -678,7 +678,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                             children: [
                               Text(
                                 widget.isMyStatus
-                                    ? 'My Status'
+                                    ? 'My Moments'
                                     : widget.statusModel.userName,
                                 style: TextStyle(
                                   color: Colors.white,

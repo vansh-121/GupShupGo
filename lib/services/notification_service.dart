@@ -19,7 +19,7 @@ class NotifPrefs {
 // ─── Android Notification Channels ────────────────────────────────────────────
 const _streakChannel = AndroidNotificationChannel(
   'streak_notifications',
-  'Streak Notifications',
+  'Bond Notifications',
   description: 'Alerts about your streaks — warnings, breaks, and milestones',
   importance: Importance.high,
   playSound: true,
@@ -276,7 +276,7 @@ class NotificationService {
 
   String _channelNameFor(String channelId) {
     return switch (channelId) {
-      'streak_notifications' => 'Streak Notifications',
+      'streak_notifications' => 'Bond Notifications',
       'points_notifications' => 'Gup Points',
       'chat_message_notifications' => 'Chat Messages',
       'reminder_notifications' => 'Reminders',
@@ -300,9 +300,9 @@ class NotificationService {
 
   String _defaultTitle(String type) {
     return switch (type) {
-      'streak_warning' => '⚠️ Streak at Risk!',
-      'streak_broken' => '💔 Streak Broken',
-      'streak_milestone' => '🏆 Streak Milestone!',
+      'streak_warning' => '⚠️ Bond at Risk!',
+      'streak_broken' => '💔 Bond Broken',
+      'streak_milestone' => '🏆 Bond Milestone!',
       'gup_points_earned' => '⚡ Gup Points Earned!',
       'chat_message' => '💬 New Message',
       'unread_reminder' => '💬 Unread Messages',

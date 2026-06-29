@@ -103,7 +103,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Online status state (real-time from Firestore) ───────────────
   late bool _isContactOnline;
+  DateTime? _contactLastSeen;
   StreamSubscription? _onlineStatusSubscription;
+  // Alternates subtitle between "Last seen" and bond badge when offline
+  bool _showBondInSubtitle = false;
+  Timer? _subtitleToggleTimer;
 
   // ─── Streaks state ──────────────────────────────────────────────────
   int _streakCount = 0;
@@ -185,6 +189,8 @@ class _ChatScreenState extends State<ChatScreen> {
             _streakBrokenAt = isExpired ? null : brokenAt;
             _streakLastInteractionDate = interactionDate;
           });
+          // Re-evaluate alternating timer now that bond state changed
+          _updateSubtitleTimer(_isContactOnline);
         }
       }
     });
@@ -226,6 +232,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Re-enable foreground chat notifications.
     NotificationService.activeChatRoomId = null;
     _chatRoomSubscription?.cancel();
+    _subtitleToggleTimer?.cancel();
     super.dispose();
   }
 
@@ -418,13 +425,181 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted && user != null) {
         final effectiveOnline =
             (_isBlocked || _isBlockedByContact) ? false : user.isOnline;
-        if (_isContactOnline != effectiveOnline) {
+        final newLastSeen = user.lastSeen;
+        final statusChanged = _isContactOnline != effectiveOnline;
+        final lastSeenChanged = _contactLastSeen != newLastSeen;
+        if (statusChanged || lastSeenChanged) {
           setState(() {
             _isContactOnline = effectiveOnline;
+            _contactLastSeen = newLastSeen;
           });
+          // Start alternating timer when offline and there's a bond badge
+          _updateSubtitleTimer(effectiveOnline);
         }
       }
     });
+  }
+
+  void _updateSubtitleTimer(bool isOnline) {
+    _subtitleToggleTimer?.cancel();
+    _subtitleToggleTimer = null;
+    if (!isOnline && (_streakCount > 0 ||
+        (_previousStreakCount > 0 && _streakBrokenAt != null))) {
+      // Show last seen first, then after 2 s animate to bond badge, repeat
+      _showBondInSubtitle = false;
+      _subtitleToggleTimer = Timer.periodic(
+        const Duration(milliseconds: 5200),
+        (_) {
+          if (mounted) setState(() => _showBondInSubtitle = !_showBondInSubtitle);
+        },
+      );
+    } else {
+      if (mounted) setState(() => _showBondInSubtitle = false);
+    }
+  }
+
+  String _formatLastSeen(DateTime lastSeen) {
+    final now = DateTime.now();
+    final diff = now.difference(lastSeen);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${lastSeen.day}/${lastSeen.month}/${lastSeen.year}';
+  }
+
+  Widget _buildBondBadge(AppThemeColors c) {
+    if (_streakCount > 0) {
+      return StreakBadge(
+        streakCount: _streakCount,
+        lastInteractionDate: _streakLastInteractionDate,
+        compact: false,
+      );
+    }
+    if (_previousStreakCount > 0 && _streakBrokenAt != null) {
+      return GestureDetector(
+        onTap: () => _showStreakRestoreDialog(),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('💔', style: TextStyle(fontSize: 10)),
+              const SizedBox(width: 2),
+              Text(
+                'Bond lost!',
+                style: GoogleFonts.poppins(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red[400],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  bool get _hasBondBadge =>
+      _streakCount > 0 ||
+      (_previousStreakCount > 0 && _streakBrokenAt != null);
+
+  Widget _buildSubtitleRow(AppThemeColors c) {
+    // ── Typing ──────────────────────────────────────────────────────
+    if (_isOtherUserTyping) {
+      return Row(children: [
+        Text(
+          'typing...',
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: c.primary,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+        if (_hasBondBadge) ...[
+          const SizedBox(width: 8),
+          _buildBondBadge(c),
+        ],
+      ]);
+    }
+
+    // ── Online ───────────────────────────────────────────────────────
+    if (_isContactOnline) {
+      return Row(children: [
+        Text(
+          'Online',
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: c.online,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        if (_hasBondBadge) ...[
+          const SizedBox(width: 8),
+          _buildBondBadge(c),
+        ],
+      ]);
+    }
+
+    // ── Offline ──────────────────────────────────────────────────────
+    // If there's a bond badge, alternate between "Last seen" and the badge
+    // with a smooth cross-fade. Two AnimatedOpacity widgets in a fixed-height
+    // Stack avoids the layout jank that AnimatedSwitcher causes when the
+    // entering and exiting children collide during the transition.
+    if (_hasBondBadge) {
+      final lastSeenText = _contactLastSeen != null
+          ? 'Last seen ${_formatLastSeen(_contactLastSeen!)}'
+          : 'Offline';
+      return SizedBox(
+        height: 16,
+        child: Stack(
+          alignment: Alignment.centerLeft,
+          children: [
+            IgnorePointer(
+              ignoring: _showBondInSubtitle,
+              child: AnimatedOpacity(
+                opacity: _showBondInSubtitle ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeInOut,
+                child: Text(
+                  lastSeenText,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: c.textMid,
+                  ),
+                ),
+              ),
+            ),
+            IgnorePointer(
+              ignoring: !_showBondInSubtitle,
+              child: AnimatedOpacity(
+                opacity: _showBondInSubtitle ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeInOut,
+                child: _buildBondBadge(c),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // No bond badge — just show last seen
+    if (_contactLastSeen != null) {
+      return Text(
+        'Last seen ${_formatLastSeen(_contactLastSeen!)}',
+        style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   // ─── Typing indicator helpers ──────────────────────────────────────
@@ -1269,7 +1444,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.statusReplyOwnerName ?? 'Status',
+                    message.statusReplyOwnerName ?? 'Moment',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
@@ -1523,7 +1698,11 @@ class _ChatScreenState extends State<ChatScreen> {
         elevation: 0,
         shadowColor: c.border,
         scrolledUnderElevation: 0.8,
+        titleSpacing: 0,
+        // Collapse the default leading slot so the back button sits flush
+        leadingWidth: 44,
         leading: IconButton(
+          padding: EdgeInsets.zero,
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
@@ -1532,7 +1711,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Stack(
               children: [
                 CircleAvatar(
-                  radius: 20,
+                  radius: 19,
                   backgroundImage: widget.contact.avatarUrl.isNotEmpty
                       ? NetworkImage(widget.contact.avatarUrl)
                       : null,
@@ -1543,7 +1722,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               ? widget.contact.name[0].toUpperCase()
                               : '?',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 15,
                             color: c.primary,
                             fontWeight: FontWeight.w700,
                           ),
@@ -1566,84 +1745,24 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
               ],
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     widget.contact.name,
                     style: GoogleFonts.poppins(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: c.textHigh,
                     ),
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
-                  // Subtitle row: typing / online / streak
-                  Row(
-                    children: [
-                      if (_isOtherUserTyping)
-                        Text(
-                          'typing...',
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            color: c.primary,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        )
-                      else if (_isContactOnline)
-                        Text(
-                          'Online',
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            color: c.online,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      // Active streak badge
-                      if (_streakCount > 0) ...[
-                        if (_isOtherUserTyping || _isContactOnline)
-                          const SizedBox(width: 8),
-                        StreakBadge(
-                          streakCount: _streakCount,
-                          lastInteractionDate: _streakLastInteractionDate,
-                          compact: _isOtherUserTyping || _isContactOnline,
-                        ),
-                      ]
-                      // Broken streak badge (tappable → restore dialog)
-                      else if (_previousStreakCount > 0 && _streakBrokenAt != null) ...[
-                        if (_isOtherUserTyping || _isContactOnline)
-                          const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => _showStreakRestoreDialog(),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('💔', style: TextStyle(fontSize: 10)),
-                                const SizedBox(width: 2),
-                                Text(
-                                  'Streak lost!',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.red[400],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                  // Subtitle row: typing / online / last seen / streak
+                  _buildSubtitleRow(c),
                 ],
               ),
             ),
@@ -2416,7 +2535,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   user.isOnline ? 'Online' : 'Offline',
                   style: GoogleFonts.poppins(fontSize: 14),
                 ),
-                subtitle: Text('Status',
+                subtitle: Text('Moment',
                     style: GoogleFonts.poppins(
                         fontSize: 11, color: c.textMid)),
               ),
