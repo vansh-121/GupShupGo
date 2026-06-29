@@ -133,24 +133,64 @@ class DeviceIdentityService {
     if (already == userId) {
       final id = await getDeviceId();
       if (id != null) {
-        // One-time retroactive prune for existing users. New installs get
-        // cleaned during registration (below); this catches users who
-        // already have 40+ stale device docs from prior reinstalls.
-        final pruned = await _ss.read(key: _prunedFlagKey);
-        if (pruned != userId) {
-          unawaited(() async {
-            try {
-              await _pruneStaleDevices(userId, id);
-              await _ss.write(key: _prunedFlagKey, value: userId);
-            } catch (_) {}
-          }());
+        // Self-heal: the local "registered" flag says we're done, but the
+        // public keyBundle may be missing in Firestore (the initial write
+        // failed, was pruned, or a migration removed it). Without a published
+        // bundle, peers compute canEncrypt=false and silently fall back to
+        // PLAINTEXT — and the safety-number dialog shows "hasn't published an
+        // encryption key bundle yet". Verify the bundle exists; if not, fall
+        // through to re-publish below (reusing this same deviceId).
+        final bundlePublished = await _hasPublishedBundle(userId, id);
+        if (bundlePublished) {
+          // One-time retroactive prune for existing users. New installs get
+          // cleaned during registration (below); this catches users who
+          // already have 40+ stale device docs from prior reinstalls.
+          final pruned = await _ss.read(key: _prunedFlagKey);
+          if (pruned != userId) {
+            unawaited(() async {
+              try {
+                await _pruneStaleDevices(userId, id);
+                await _ss.write(key: _prunedFlagKey, value: userId);
+              } catch (_) {}
+            }());
+          }
+          return id;
         }
-        return id;
+        // Bundle missing — re-publish using the existing deviceId rather than
+        // allocating a new one (which would orphan the old device entry and
+        // lose in-flight messages addressed to it).
+        // ignore: avoid_print
+        print('[E2EE] keyBundle missing for $userId:$id — re-publishing');
+        return _publishBundle(userId, id);
       }
     }
 
-    final svc = await SignalService.init();
     final deviceId = await _allocateDeviceId(userId);
+    return _publishBundle(userId, deviceId);
+  }
+
+  /// Returns true if a public `keyBundle` (with an `identityPub`) is already
+  /// published for [userId]'s device [deviceId] in Firestore.
+  Future<bool> _hasPublishedBundle(String userId, int deviceId) async {
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('devices')
+          .doc('$deviceId')
+          .get();
+      final bundle = snap.data()?['keyBundle'] as Map<String, dynamic>?;
+      return bundle != null && bundle['identityPub'] != null;
+    } catch (_) {
+      // On a transient read error, assume present so we don't churn keys.
+      return true;
+    }
+  }
+
+  /// Generates fresh Signal prekeys and publishes the public PreKeyBundle to
+  /// `users/{userId}/devices/{deviceId}/keyBundle`. Returns [deviceId].
+  Future<int> _publishBundle(String userId, int deviceId) async {
+    final svc = await SignalService.init();
 
     final signedPreKey =
         generateSignedPreKey(svc.stores.identityKeyPair, _signedPreKeyId());
