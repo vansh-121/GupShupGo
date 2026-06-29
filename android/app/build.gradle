@@ -43,8 +43,8 @@ android {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 38
-        versionName = "1.0.9"
+        versionCode = 39
+        versionName = "1.1.0"
         minSdkVersion = 24
         multiDexEnabled true
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
@@ -86,8 +86,10 @@ android {
         exclude 'lib/*/libagora_video_av1_encoder_extension.so'
         exclude 'lib/*/libagora_video_av1_decoder_extension.so'
 
-        // Screen capture — no screen-share feature in app
-        exclude 'lib/*/libagora_screen_capture_extension.so'
+        // NOTE: libagora_screen_capture_extension.so is intentionally NOT
+        // excluded — it is required by the in-chat screen sharing feature
+        // (AgoraService.startScreenShare). Excluding it makes
+        // startScreenCapture fail with error -157 (ERR_MODULE_NOT_PRESENT).
     }
 
     buildTypes {

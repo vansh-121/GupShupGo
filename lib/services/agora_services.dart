@@ -57,8 +57,7 @@ class AgoraService {
               minBitrate: 600,
               orientationMode: OrientationMode.orientationModeAdaptive,
               // Smooth motion first: reduce resolution before dropping FPS
-              degradationPreference:
-                  DegradationPreference.maintainFramerate,
+              degradationPreference: DegradationPreference.maintainFramerate,
               mirrorMode: VideoMirrorModeType.videoMirrorModeDisabled,
             ),
           );
@@ -106,7 +105,8 @@ class AgoraService {
       enabled: true,
       config: EncryptionConfig(
         encryptionMode: EncryptionMode.aes256Gcm2,
-        encryptionKey: k.key.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
+        encryptionKey:
+            k.key.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
         encryptionKdfSalt: k.salt,
       ),
     );
@@ -117,6 +117,106 @@ class AgoraService {
     // TODO: Implement server-side token generation
     // For now, return null to use no-token mode (testing only)
     return null;
+  }
+
+  /// Initialise the engine for screen sharing.
+  ///
+  /// Unlike a normal video call this does NOT enable the camera or start a
+  /// camera preview — the published video track is the device screen, captured
+  /// via [startScreenShare]. Audio is enabled so the device's system audio
+  /// (e.g. a voice note or video playing on the sharer's screen) can be
+  /// captured and sent to the viewer along with the screen video.
+  static Future<RtcEngine> initAgoraForScreenShare() async {
+    if (_isReleasing) {
+      print('Waiting for previous engine to release...');
+      await Future.delayed(Duration(milliseconds: 500));
+    }
+
+    RtcEngine engine = createAgoraRtcEngine();
+
+    await engine.initialize(const RtcEngineContext(
+      appId: '49a88df036b446d892ed933756e9fe6f',
+      channelProfile: ChannelProfileType.channelProfileCommunication,
+    ));
+
+    await engine.enableVideo();
+    await engine.enableAudio();
+
+    // Agora recommends the game-streaming scenario to improve the success
+    // rate of capturing system audio during screen sharing (Android 10+).
+    await engine.setAudioScenario(
+      AudioScenarioType.audioScenarioGameStreaming,
+    );
+
+    return engine;
+  }
+
+  /// Request the permissions needed to view a shared screen (the viewer side).
+  ///
+  /// The viewer renders the remote screen video and plays the remote system
+  /// audio (so it can hear sounds playing on the sharer's device). No local
+  /// camera/mic capture is required.
+  static Future<RtcEngine> initAgoraForScreenShareViewer() async {
+    if (_isReleasing) {
+      await Future.delayed(Duration(milliseconds: 500));
+    }
+
+    RtcEngine engine = createAgoraRtcEngine();
+
+    await engine.initialize(const RtcEngineContext(
+      appId: '49a88df036b446d892ed933756e9fe6f',
+      channelProfile: ChannelProfileType.channelProfileCommunication,
+    ));
+
+    await engine.enableVideo();
+    await engine.enableAudio();
+
+    return engine;
+  }
+
+  /// Start capturing the device screen.
+  ///
+  /// On Android this triggers the system MediaProjection consent dialog. This
+  /// must be called BEFORE [RtcEngine.joinChannel]; the channel's media options
+  /// (publishScreenCaptureVideo: true) are what actually publish the captured
+  /// screen to the remote viewer. Do NOT call updateChannelMediaOptions before
+  /// joining — it fails with error -8 (invalid state).
+  static Future<void> startScreenShare(RtcEngine engine) async {
+    await engine.startScreenCapture(
+      const ScreenCaptureParameters2(
+        // Capture the device's system audio so the viewer can hear sounds
+        // (voice notes, videos, etc.) playing on the sharer's screen.
+        // System-audio capture requires Android 10 (API 29) or later; on
+        // older versions the SDK simply ignores it and shares video only.
+        captureAudio: true,
+        audioParams: ScreenAudioParameters(
+          sampleRate: 16000,
+          channels: 2,
+          captureSignalVolume: 100,
+        ),
+        captureVideo: true,
+        videoParams: ScreenVideoParameters(
+          dimensions: VideoDimensions(width: 1280, height: 720),
+          frameRate: 15,
+          bitrate: 0, // 0 = let the SDK pick a standard bitrate for the size
+        ),
+      ),
+    );
+  }
+
+  /// Stop screen capture and stop publishing the screen track.
+  static Future<void> stopScreenShare(RtcEngine engine) async {
+    try {
+      await engine.updateChannelMediaOptions(
+        const ChannelMediaOptions(
+          publishScreenCaptureVideo: false,
+          publishScreenCaptureAudio: false,
+        ),
+      );
+      await engine.stopScreenCapture();
+    } catch (e) {
+      print('Error stopping screen share: $e');
+    }
   }
 
   static Future<void> releaseEngine(RtcEngine? engine) async {
@@ -136,7 +236,8 @@ class AgoraService {
     } catch (e, stack) {
       print('Error releasing engine: $e');
       CrashlyticsService.logError(
-        e, stack,
+        e,
+        stack,
         reason: 'Agora engine release failed',
       );
     } finally {

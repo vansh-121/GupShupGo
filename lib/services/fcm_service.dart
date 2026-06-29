@@ -18,6 +18,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
+import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
+import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -26,6 +28,8 @@ class FCMService {
   // ── Cloud Function endpoints (no service account key needed) ────────────
   static const _callFunctionUrl =
       'https://sendcallnotification-luh3g2lkma-uc.a.run.app';
+  static const _screenShareFunctionUrl =
+      'https://sendscreensharenotification-luh3g2lkma-uc.a.run.app';
   static const _messageFunctionUrl =
       'https://sendmessagenotification-luh3g2lkma-uc.a.run.app';
 
@@ -35,6 +39,11 @@ class FCMService {
 
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
+
+  /// Prevents stacking multiple ScreenShareViewerScreens — opening a second
+  /// viewer would spin up a second Agora engine for the same channel and
+  /// cause resource conflicts. Reset when the viewer is popped.
+  static bool _isScreenShareViewerShowing = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static const _deviceIdKey = 'gsg_fcm_device_id_v1';
   static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
@@ -43,6 +52,38 @@ class FCMService {
   /// Public getter so the global CallKit listener in main.dart can check
   /// whether IncomingCallScreen is already handling the accept flow.
   static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
+
+  /// Starts the viewer-side screen-share session (owns the Agora engine so it
+  /// survives navigation) and opens the full-screen viewer. Used by both the
+  /// foreground FCM handler and the notification-tap router. Safe to call
+  /// repeatedly — no-ops if a session is already active.
+  static Future<void> openScreenShareViewer({
+    required String channelId,
+    required String sharerName,
+  }) async {
+    if (channelId.isEmpty) return;
+    if (ScreenShareSession.instance.active || _isScreenShareViewerShowing) {
+      return;
+    }
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+
+    _isScreenShareViewerShowing = true;
+    try {
+      await ScreenShareSession.instance.startAsViewer(
+        channelId: channelId,
+        sharerName: sharerName,
+      );
+      nav
+          .push(MaterialPageRoute(
+              builder: (_) => const ScreenShareViewerScreen()))
+          .then((_) => _isScreenShareViewerShowing = false);
+    } catch (e) {
+      print('Error opening screen share viewer: $e');
+      await ScreenShareSession.instance.end();
+      _isScreenShareViewerShowing = false;
+    }
+  }
 
   Future<void> setupFCM({required String userId}) async {
     print('Setting up FCM for user: $userId');
@@ -116,7 +157,8 @@ class FCMService {
             final nav = navigatorKey.currentState;
             if (nav != null) {
               final data = message.data;
-              nav.push(
+              nav
+                  .push(
                 MaterialPageRoute(
                   builder: (_) => IncomingCallScreen(
                     channelId: data['channelId'] ?? '',
@@ -126,13 +168,30 @@ class FCMService {
                     isAudioOnly: data['isAudioOnly'] == 'true',
                   ),
                 ),
-              ).then((_) {
+              )
+                  .then((_) {
                 // Reset flag when IncomingCallScreen is popped/replaced
                 _isIncomingCallScreenShowing = false;
               });
             } else {
               _isIncomingCallScreenShowing = false;
             }
+          }
+        } else if (messageType == 'screen_share') {
+          if (!await _isMessageForCurrentUser(message.data)) {
+            print(
+                'Ignoring screen share notification for a different signed-in user');
+            return;
+          }
+
+          // Auto-open the viewer so the shared screen appears without an
+          // explicit accept step (one-way screen share). Skip if a call is
+          // already ringing or a share session is already active.
+          if (!_isIncomingCallScreenShowing) {
+            await openScreenShareViewer(
+              channelId: message.data['channelId'] ?? '',
+              sharerName: message.data['sharerName'] ?? 'Someone',
+            );
           }
         } else if (messageType == 'streak_broken' ||
             messageType == 'streak_warning' ||
@@ -213,7 +272,8 @@ class FCMService {
       final deviceId = await _getOrCreateDeviceId();
       await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
       final deviceInfo = await _getDeviceInfo();
-      final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+      final userRef =
+          FirebaseFirestore.instance.collection('users').doc(userId);
 
       await userRef.collection('devices').doc(deviceId).set(
         {
@@ -245,7 +305,8 @@ class FCMService {
       print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e, stack) {
       print('Error storing FCM token: $e');
-      CrashlyticsService.logError(e, stack, reason: 'FCM._storeToken failed for user $userId');
+      CrashlyticsService.logError(e, stack,
+          reason: 'FCM._storeToken failed for user $userId');
     }
   }
 
@@ -331,7 +392,8 @@ class FCMService {
 
   static Future<bool> _isMessageForCurrentUser(
       Map<String, dynamic> data) async {
-    final expectedUserId = data['calleeId'] ?? data['receiverId'];
+    final expectedUserId =
+        data['calleeId'] ?? data['receiverId'] ?? data['viewerId'];
     if (expectedUserId == null || expectedUserId.toString().isEmpty) {
       return true;
     }
@@ -354,8 +416,8 @@ class FCMService {
   Future<void> sendCallNotification(
       String calleeId, String callerId, String channelId,
       {bool isAudioOnly = false}) async {
-    final metric = PerformanceService.newHttpMetric(
-        _callFunctionUrl, HttpMethod.Post);
+    final metric =
+        PerformanceService.newHttpMetric(_callFunctionUrl, HttpMethod.Post);
     try {
       print('Sending call notification to $calleeId via Cloud Function');
       await metric.start();
@@ -386,9 +448,56 @@ class FCMService {
       }
     } catch (e, stack) {
       // Best-effort: stop the metric even on error so it doesn't leak.
-      try { await metric.stop(); } catch (_) {}
+      try {
+        await metric.stop();
+      } catch (_) {}
       print('Error sending call notification: $e');
-      CrashlyticsService.logError(e, stack, reason: 'FCM.sendCallNotification failed for callee $calleeId');
+      CrashlyticsService.logError(e, stack,
+          reason: 'FCM.sendCallNotification failed for callee $calleeId');
+    }
+  }
+
+  /// Send screen share notification via Cloud Function. Notifies [viewerId]
+  /// that [sharerId] has started sharing their screen on [channelId].
+  Future<void> sendScreenShareNotification(
+      String viewerId, String sharerId, String channelId) async {
+    final metric = PerformanceService.newHttpMetric(
+        _screenShareFunctionUrl, HttpMethod.Post);
+    try {
+      print(
+          'Sending screen share notification to $viewerId via Cloud Function');
+      await metric.start();
+
+      final idToken = await _getIdToken();
+      final response = await http.post(
+        Uri.parse(_screenShareFunctionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          if (idToken != null) 'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'viewerId': viewerId,
+          'sharerId': sharerId,
+          'channelId': channelId,
+        }),
+      );
+
+      metric.httpResponseCode = response.statusCode;
+      metric.responsePayloadSize = response.contentLength;
+      await metric.stop();
+
+      print('Screen share notification response: ${response.statusCode}');
+      if (response.statusCode != 200) {
+        print('Failed to send screen share notification: ${response.body}');
+      }
+    } catch (e, stack) {
+      try {
+        await metric.stop();
+      } catch (_) {}
+      print('Error sending screen share notification: $e');
+      CrashlyticsService.logError(e, stack,
+          reason:
+              'FCM.sendScreenShareNotification failed for viewer $viewerId');
     }
   }
 
@@ -400,8 +509,8 @@ class FCMService {
     required String message,
     required String chatRoomId,
   }) async {
-    final metric = PerformanceService.newHttpMetric(
-        _messageFunctionUrl, HttpMethod.Post);
+    final metric =
+        PerformanceService.newHttpMetric(_messageFunctionUrl, HttpMethod.Post);
     try {
       await metric.start();
 
@@ -427,7 +536,9 @@ class FCMService {
 
       print('Message notification sent: ${response.statusCode}');
     } catch (e) {
-      try { await metric.stop(); } catch (_) {}
+      try {
+        await metric.stop();
+      } catch (_) {}
       print('Error sending message notification: $e');
     }
   }
@@ -482,8 +593,7 @@ class FCMService {
             );
 
             await batch.commit();
-            print(
-                'Messages and chatRoom marked as delivered for: $chatRoomId');
+            print('Messages and chatRoom marked as delivered for: $chatRoomId');
           }
         } catch (e) {
           print('Error marking messages as delivered: $e');

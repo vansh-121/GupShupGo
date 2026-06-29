@@ -256,101 +256,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
         minChildSize: 0.4,
         builder: (context, scrollController) {
           return SafeArea(
-           child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: ListView(
-              controller: scrollController,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppThemeColors.of(context).textLow,
-                      borderRadius: BorderRadius.circular(2),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: AppThemeColors.of(context).textLow,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  'Help Center',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: AppThemeColors.of(context).textHigh),
-                ),
-                const SizedBox(height: 20),
-                _buildFAQItem(
-                  'How do I start a new chat?',
-                  'Tap the message icon (💬) at the bottom-right of the Gup tab, '
-                      'or use the search icon in the top bar to find contacts.',
-                ),
-                _buildFAQItem(
-                  'How do I make a voice or video call?',
-                  'Open a chat with the person you want to call. '
-                      'Tap the phone icon (🔊) for an audio call or the '
-                      'camera icon (📹) for a video call in the top bar.',
-                ),
-                _buildFAQItem(
-                  'How do I share a moment?',
-                  'Go to the Moments tab and tap the pencil icon for a text moment '
-                      'or the camera icon for a photo/video moment.',
-                ),
-                _buildFAQItem(
-                  'How do I edit my profile?',
-                  'Tap your profile picture in the top-right menu, then '
-                      'tap your avatar to change your photo, or edit your '
-                      'name and about section.',
-                ),
-                _buildFAQItem(
-                  'How do I block someone?',
-                  'Open a chat with the person, tap the ⋮ menu in the top-right, '
-                      'and select "Block contact".',
-                ),
-                _buildFAQItem(
-                  'Why am I not receiving notifications?',
-                  'Check that notifications are enabled in Settings → Notifications. '
-                      'Also ensure your phone\'s system notification settings '
-                      'allow GupShupGo to send alerts.',
-                ),
-                _buildFAQItem(
-                  'How do I mute a chat?',
-                  'Open the chat, tap the ⋮ menu, and select "Mute notifications". '
-                      'You\'ll still receive messages but won\'t get push notifications.',
-                ),
-                _buildFAQItem(
-                  'How do I log out?',
-                  'Go to Settings (gear icon in menu) and scroll to the bottom. '
-                      'Tap "Log Out".',
-                ),
-                const SizedBox(height: 16),
-                const Divider(),
-                const SizedBox(height: 8),
-                Text(
-                  'Still need help?',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                      color: AppThemeColors.of(context).textHigh),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _reportProblem();
-                  },
-                  icon: const Icon(Icons.email_outlined),
-                  label: const Text('Contact Support'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: BorderSide(color: AppThemeColors.of(context).primary),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                  Text(
+                    'Help Center',
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppThemeColors.of(context).textHigh),
                   ),
-                ),
-              ],
-           ),
-          ),
+                  const SizedBox(height: 20),
+                  _buildFAQItem(
+                    'How do I start a new chat?',
+                    'Tap the message icon (💬) at the bottom-right of the Gup tab, '
+                        'or use the search icon in the top bar to find contacts.',
+                  ),
+                  _buildFAQItem(
+                    'How do I make a voice or video call?',
+                    'Open a chat with the person you want to call. '
+                        'Tap the phone icon (🔊) for an audio call or the '
+                        'camera icon (📹) for a video call in the top bar.',
+                  ),
+                  _buildFAQItem(
+                    'How do I share a moment?',
+                    'Go to the Moments tab and tap the pencil icon for a text moment '
+                        'or the camera icon for a photo/video moment.',
+                  ),
+                  _buildFAQItem(
+                    'How do I edit my profile?',
+                    'Tap your profile picture in the top-right menu, then '
+                        'tap your avatar to change your photo, or edit your '
+                        'name and about section.',
+                  ),
+                  _buildFAQItem(
+                    'How do I block someone?',
+                    'Open a chat with the person, tap the ⋮ menu in the top-right, '
+                        'and select "Block contact".',
+                  ),
+                  _buildFAQItem(
+                    'Why am I not receiving notifications?',
+                    'Check that notifications are enabled in Settings → Notifications. '
+                        'Also ensure your phone\'s system notification settings '
+                        'allow GupShupGo to send alerts.',
+                  ),
+                  _buildFAQItem(
+                    'How do I mute a chat?',
+                    'Open the chat, tap the ⋮ menu, and select "Mute notifications". '
+                        'You\'ll still receive messages but won\'t get push notifications.',
+                  ),
+                  _buildFAQItem(
+                    'How do I log out?',
+                    'Go to Settings (gear icon in menu) and scroll to the bottom. '
+                        'Tap "Log Out".',
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Still need help?',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                        color: AppThemeColors.of(context).textHigh),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _reportProblem();
+                    },
+                    icon: const Icon(Icons.email_outlined),
+                    label: const Text('Contact Support'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side:
+                          BorderSide(color: AppThemeColors.of(context).primary),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           );
         },
       ),
@@ -396,8 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // any other setting — same place WhatsApp puts theirs.
           E2EEBanner.card(
             context,
-            body:
-                'Messages, moments, and calls are secured with the '
+            body: 'Messages, moments, and calls are secured with the '
                 'Signal Protocol. Only you and the people you chat with can '
                 'read what is sent, listen to what is said, or see your '
                 'status. Not even GupShupGo.',
@@ -625,7 +625,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.info_outline,
               iconColor: Colors.grey,
               title: 'App info',
-              subtitle: 'Version 1.0.9',
+              subtitle: 'Version 1.1.0',
               onTap: () => _showAboutDialog(),
             ),
           ]),
@@ -652,7 +652,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
 
   void _openVaultSettings() {
     Navigator.push(
@@ -806,61 +805,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       builder: (_) => SafeArea(
         child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: c.textLow,
-                  borderRadius: BorderRadius.circular(2),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: c.textLow,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            Text('Blocked Contacts',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: c.textHigh)),
-            const SizedBox(height: 12),
-            if (blockedUsers.isEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Text('No blocked contacts',
-                      style: TextStyle(color: c.textMid)),
-                ),
-              )
-            else
-              ...blockedUsers.map((user) => ListTile(
-                    leading: CircleAvatar(
-                      backgroundImage: NetworkImage(user.photoUrl ??
-                          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
-                      backgroundColor: c.surfaceAlt,
-                    ),
-                    title: Text(user.name),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await _unblockUser(user.id);
-                        Navigator.pop(context);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('${user.name} unblocked')),
-                          );
-                        }
-                      },
-                      child:
-                          Text('Unblock', style: TextStyle(color: c.primary)),
-                    ),
-                  )),
-            const SizedBox(height: 12),
-          ],
-        ),
+              Text('Blocked Contacts',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: c.textHigh)),
+              const SizedBox(height: 12),
+              if (blockedUsers.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text('No blocked contacts',
+                        style: TextStyle(color: c.textMid)),
+                  ),
+                )
+              else
+                ...blockedUsers.map((user) => ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage: NetworkImage(user.photoUrl ??
+                            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
+                        backgroundColor: c.surfaceAlt,
+                      ),
+                      title: Text(user.name),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          await _unblockUser(user.id);
+                          Navigator.pop(context);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('${user.name} unblocked')),
+                            );
+                          }
+                        },
+                        child:
+                            Text('Unblock', style: TextStyle(color: c.primary)),
+                      ),
+                    )),
+              const SizedBox(height: 12),
+            ],
+          ),
         ),
       ),
     );
@@ -1125,7 +1124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.0.9',
+      applicationVersion: '1.1.0',
       applicationLegalese: '© 2026 GupShupGo',
     );
   }
@@ -1191,7 +1190,8 @@ class _SafetyNumberContactPickerState
       }
 
       // Sort alphabetically.
-      users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      users
+          .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
       if (mounted) {
         setState(() {
@@ -1210,9 +1210,7 @@ class _SafetyNumberContactPickerState
     setState(() {
       _filtered = q.isEmpty
           ? _contacts
-          : _contacts
-              .where((u) => u.name.toLowerCase().contains(q))
-              .toList();
+          : _contacts.where((u) => u.name.toLowerCase().contains(q)).toList();
     });
   }
 
@@ -1327,11 +1325,12 @@ class _SafetyNumberContactPickerState
                                 ),
                               ),
                               subtitle: Text(
-                                user.about ?? 'Hey there! I am using GupShupGo.',
+                                user.about ??
+                                    'Hey there! I am using GupShupGo.',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 12, color: c.textMid),
+                                style:
+                                    TextStyle(fontSize: 12, color: c.textMid),
                               ),
                               trailing: Icon(Icons.chevron_right,
                                   color: c.textLow, size: 20),

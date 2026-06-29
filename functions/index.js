@@ -268,6 +268,98 @@ exports.sendCallNotification = onRequest(
   }
 );
 
+// ─── Send Screen Share Notification ──────────────────────────────────────────
+exports.sendScreenShareNotification = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+      const { viewerId, sharerId, channelId } = req.body;
+
+      if (!viewerId || !sharerId || !channelId) {
+        res.status(400).json({ error: "Missing required fields" });
+        return;
+      }
+
+      if (decodedToken.uid !== sharerId) {
+        res.status(403).json({ error: "Forbidden: sharer identity mismatch" });
+        return;
+      }
+
+      let sharerName = sharerId;
+      let sharerPhotoUrl = "";
+      try {
+        const sharerDoc = await db.collection("users").doc(sharerId).get();
+        if (sharerDoc.exists) {
+          const sharerData = sharerDoc.data();
+          if (sharerData.name) sharerName = sharerData.name;
+          if (sharerData.photoUrl) sharerPhotoUrl = sharerData.photoUrl;
+        }
+      } catch (_) { }
+
+      const result = await sendToUserDevices(viewerId, (fcmToken) => ({
+        token: fcmToken,
+        // A visible notification so that when the app is backgrounded or
+        // terminated, Android shows it in the tray; tapping it opens the
+        // viewer (handled by NotificationService via the `screen` field).
+        // When the app is foregrounded, onMessage fires instead and the
+        // viewer auto-opens — Android does not show the tray notification.
+        notification: {
+          title: `${sharerName} is sharing their screen`,
+          body: "Tap to view the shared screen",
+        },
+        data: {
+          viewerId: viewerId,
+          sharerId: sharerId,
+          sharerName: sharerName,
+          sharerPhotoUrl: sharerPhotoUrl,
+          channelId: channelId,
+          type: "screen_share",
+          // Used by NotificationService._navigateFromData for tap routing.
+          screen: "screen_share",
+        },
+        android: {
+          priority: "high",
+          ttl: 60000,
+          notification: {
+            channelId: "chat_message_notifications",
+          },
+        },
+        apns: {
+          headers: {
+            "apns-priority": "10",
+            "apns-push-type": "alert",
+          },
+          payload: {
+            aps: {
+              "content-available": 1,
+            },
+          },
+        },
+      }));
+
+      res.status(result.status).json(result.body);
+    } catch (error) {
+      if (error.code && error.code.startsWith("auth/")) {
+        res.status(401).json({ error: "Invalid or expired token" });
+      } else {
+        console.error("Error sending screen share notification:", error);
+        res.status(500).json({ error: error.message });
+      }
+    }
+  }
+);
+
 // ─── Send Message Notification ──────────────────────────────────────────────
 exports.sendMessageNotification = onRequest(
   { cors: true, invoker: "public", minInstances: 0 },
