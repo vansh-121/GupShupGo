@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/main.dart';
-import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
+import 'package:video_chat_app/services/fcm_service.dart';
 
 // ─── Notification Preference Keys ─────────────────────────────────────────────
 class NotifPrefs {
@@ -357,16 +357,10 @@ class NotificationService {
       case 'screen_share':
         final channelId = data['channelId'] as String? ?? '';
         final sharerName = data['sharerName'] as String? ?? 'Someone';
-        if (channelId.isNotEmpty) {
-          nav.push(
-            MaterialPageRoute(
-              builder: (_) => ScreenShareViewerScreen(
-                channelId: channelId,
-                sharerName: sharerName,
-              ),
-            ),
-          );
-        }
+        FCMService.openScreenShareViewer(
+          channelId: channelId,
+          sharerName: sharerName,
+        );
         break;
 
       case 'home':

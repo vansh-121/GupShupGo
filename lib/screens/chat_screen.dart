@@ -13,6 +13,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/screen_share_screen.dart';
+import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
@@ -880,10 +881,15 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    if (ScreenShareSession.instance.active) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A screen share is already in progress')),
+      );
+      return;
+    }
+
     try {
       final channelId = CallSignalingService.generateChannelId();
-      final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      callState.updateState(CallState.Calling);
 
       print(
           'Initiating screen share to ${widget.contact.name} on channel $channelId');
@@ -900,23 +906,25 @@ class _ChatScreenState extends State<ChatScreen> {
       await FCMService().sendScreenShareNotification(
           widget.contact.id, widget.currentUserId, channelId);
 
+      // Start the long-lived session (owns the Agora engine so it survives
+      // navigation). This triggers the Android screen-capture consent dialog.
+      await ScreenShareSession.instance.startAsSharer(
+        channelId: channelId,
+        viewerName: widget.contact.name,
+      );
+
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ScreenShareScreen(
-            channelId: channelId,
-            viewerName: widget.contact.name,
-          ),
+          builder: (_) => const ScreenShareScreen(),
         ),
       );
     } catch (e) {
       print('Error initiating screen share: $e');
+      // Tear down a half-started session so nothing is left dangling.
+      await ScreenShareSession.instance.end();
       if (!mounted) return;
-      // Reset the call state so a failed screen-share attempt doesn't leave
-      // the global state machine stuck in Calling and block future calls.
-      Provider.of<CallStateNotifier>(context, listen: false)
-          .updateState(CallState.Ended);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start screen sharing: $e')),
       );

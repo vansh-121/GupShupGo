@@ -1,152 +1,129 @@
-import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
-import 'package:video_chat_app/provider/call_state_provider.dart';
-import 'package:video_chat_app/services/agora_services.dart';
-import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/screen_share_session.dart';
 
-/// The viewer side of a one-way screen share.
-///
-/// Joins the same Agora channel as the sharer and renders the remote screen
-/// track full-screen. The viewer publishes nothing.
-class ScreenShareViewerScreen extends StatefulWidget {
-  final String channelId;
-  final String sharerName;
-
-  const ScreenShareViewerScreen({
-    super.key,
-    required this.channelId,
-    required this.sharerName,
-  });
+/// The full-screen viewer view. A thin observer of [ScreenShareSession] — the
+/// Agora engine lives in the session, so navigating back MINIMISES (the
+/// session keeps running) rather than ending it. Tapping the floating bubble
+/// re-opens this view.
+class ScreenShareViewerScreen extends StatelessWidget {
+  const ScreenShareViewerScreen({super.key});
 
   @override
-  State<ScreenShareViewerScreen> createState() =>
-      _ScreenShareViewerScreenState();
-}
+  Widget build(BuildContext context) {
+    final session = ScreenShareSession.instance;
 
-class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
-  RtcEngine? _engine;
-  int? _remoteUid;
-  bool _isInitialized = false;
-  bool _isEnding = false;
-
-  StreamSubscription<CallSignalStatus?>? _signalingSubscription;
-
-  /// Cached so it can be safely used in dispose().
-  CallStateNotifier? _callState;
-
-  @override
-  void initState() {
-    super.initState();
-    _initViewer();
-    _listenForEnd();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _callState = Provider.of<CallStateNotifier>(context, listen: false);
-  }
-
-  Future<void> _initViewer() async {
-    try {
-      _engine = await AgoraService.initAgoraForScreenShareViewer();
-
-      _engine!.registerEventHandler(
-        RtcEngineEventHandler(
-          onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            if (!mounted) return;
-            setState(() => _isInitialized = true);
-            // Route the shared audio to the loudspeaker once the engine is
-            // ready. Best-effort: failures here must never abort the viewer.
-            _engine?.setEnableSpeakerphone(true).catchError((e) {
-              print('setEnableSpeakerphone failed (non-fatal): $e');
-            });
-          },
-          onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-            if (!mounted) return;
-            setState(() => _remoteUid = remoteUid);
-            Provider.of<CallStateNotifier>(context, listen: false)
-                .updateState(CallState.Connected);
-          },
-          onUserOffline: (RtcConnection connection, int remoteUid,
-              UserOfflineReasonType reason) {
-            // Sharer stopped — close the viewer.
-            if (!_isEnding) {
-              _leave(reason: 'Screen sharing ended');
-            }
-          },
-          onError: (ErrorCodeType err, String msg) {
-            print('Agora viewer error: $err - $msg');
-          },
-        ),
-      );
-
-      await _engine!.joinChannel(
-        token: '',
-        channelId: widget.channelId,
-        uid: 0,
-        options: const ChannelMediaOptions(
-          clientRoleType: ClientRoleType.clientRoleBroadcaster,
-          channelProfile: ChannelProfileType.channelProfileCommunication,
-          publishCameraTrack: false,
-          publishMicrophoneTrack: false,
-          publishScreenCaptureVideo: false,
-          publishScreenCaptureAudio: false,
-          autoSubscribeVideo: true,
-          // Subscribe to the sharer's audio so the viewer can hear sounds
-          // (voice notes, videos) playing on the shared screen.
-          autoSubscribeAudio: true,
-        ),
-      );
-    } catch (e) {
-      print('Error joining screen share: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to view shared screen: $e')),
-        );
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        session.minimize();
         Navigator.of(context).pop();
-      }
-    }
-  }
-
-  void _listenForEnd() {
-    _signalingSubscription =
-        CallSignalingService.listenToCallStatus(widget.channelId).listen(
-      (status) {
-        if (status == CallSignalStatus.ended ||
-            status == CallSignalStatus.declined) {
-          _leave(reason: 'Screen sharing ended');
-        }
       },
+      child: AnimatedBuilder(
+        animation: session,
+        builder: (context, _) {
+          if (!session.active) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+            });
+          }
+
+          return Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(
+              child: Stack(
+                children: [
+                  Positioned.fill(child: _buildRemoteScreen(session)),
+                  // Header with minimise + title
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 8),
+                      color: Colors.black.withOpacity(0.4),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                                color: Colors.white, size: 28),
+                            tooltip: 'Minimise',
+                            onPressed: () {
+                              session.minimize();
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                          const Icon(Icons.screen_share_rounded,
+                              color: Colors.white, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '${session.peerName.isEmpty ? 'Someone' : session.peerName} is sharing their screen',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Leave button
+                  Positioned(
+                    bottom: 28,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () => session.end(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 28, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD32F2F),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.close_rounded,
+                                  color: Colors.white, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Leave',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Future<void> _leave({String? reason}) async {
-    if (_isEnding) return;
-    _isEnding = true;
+  Widget _buildRemoteScreen(ScreenShareSession session) {
+    final engine = session.engine;
+    final remoteUid = session.remoteUid;
+    final channelId = session.channelId;
 
-    if (mounted) {
-      Provider.of<CallStateNotifier>(context, listen: false)
-          .updateState(CallState.Ended);
-      Navigator.of(context).pop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _signalingSubscription?.cancel();
-    // Always reset the global call state so exiting via the system back
-    // gesture (which bypasses _leave) can't leave it stuck and block calls.
-    _callState?.updateState(CallState.Ended);
-    AgoraService.releaseEngine(_engine);
-    super.dispose();
-  }
-
-  Widget _buildRemoteScreen() {
-    if (_remoteUid == null) {
+    if (engine == null || remoteUid == null || channelId == null) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -154,8 +131,8 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
             const CircularProgressIndicator(color: Colors.white),
             const SizedBox(height: 20),
             Text(
-              _isInitialized
-                  ? 'Waiting for ${widget.sharerName} to share...'
+              session.connected
+                  ? 'Waiting for ${session.peerName.isEmpty ? 'the other person' : session.peerName} to share...'
                   : 'Connecting...',
               style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15),
             ),
@@ -166,90 +143,12 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
 
     return AgoraVideoView(
       controller: VideoViewController.remote(
-        rtcEngine: _engine!,
+        rtcEngine: engine,
         canvas: VideoCanvas(
-          uid: _remoteUid,
+          uid: remoteUid,
           renderMode: RenderModeType.renderModeFit,
         ),
-        connection: RtcConnection(channelId: widget.channelId),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(child: _buildRemoteScreen()),
-            // Header
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                color: Colors.black.withOpacity(0.4),
-                child: Row(
-                  children: [
-                    const Icon(Icons.screen_share_rounded,
-                        color: Colors.white, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${widget.sharerName} is sharing their screen',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Leave button
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () => _leave(),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 28, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD32F2F),
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.close_rounded,
-                            color: Colors.white, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Leave',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+        connection: RtcConnection(channelId: channelId),
       ),
     );
   }

@@ -31,6 +31,7 @@ import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
+import 'package:video_chat_app/widgets/screen_share_overlay.dart';
 
 import 'screens/home_screen.dart';
 
@@ -418,8 +419,10 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
-      builder: (context, child) =>
-          MeshNotificationListener(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => ScreenShareOverlayHost(
+        child: MeshNotificationListener(
+            child: child ?? const SizedBox.shrink()),
+      ),
       home: _AuthGate(authService: _authService),
       debugShowCheckedModeBanner: false,
     );

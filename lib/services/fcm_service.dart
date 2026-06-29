@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
+import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -51,6 +52,38 @@ class FCMService {
   /// Public getter so the global CallKit listener in main.dart can check
   /// whether IncomingCallScreen is already handling the accept flow.
   static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
+
+  /// Starts the viewer-side screen-share session (owns the Agora engine so it
+  /// survives navigation) and opens the full-screen viewer. Used by both the
+  /// foreground FCM handler and the notification-tap router. Safe to call
+  /// repeatedly — no-ops if a session is already active.
+  static Future<void> openScreenShareViewer({
+    required String channelId,
+    required String sharerName,
+  }) async {
+    if (channelId.isEmpty) return;
+    if (ScreenShareSession.instance.active || _isScreenShareViewerShowing) {
+      return;
+    }
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+
+    _isScreenShareViewerShowing = true;
+    try {
+      await ScreenShareSession.instance.startAsViewer(
+        channelId: channelId,
+        sharerName: sharerName,
+      );
+      nav
+          .push(MaterialPageRoute(
+              builder: (_) => const ScreenShareViewerScreen()))
+          .then((_) => _isScreenShareViewerShowing = false);
+    } catch (e) {
+      print('Error opening screen share viewer: $e');
+      await ScreenShareSession.instance.end();
+      _isScreenShareViewerShowing = false;
+    }
+  }
 
   Future<void> setupFCM({required String userId}) async {
     print('Setting up FCM for user: $userId');
@@ -153,26 +186,12 @@ class FCMService {
 
           // Auto-open the viewer so the shared screen appears without an
           // explicit accept step (one-way screen share). Skip if a call is
-          // already ringing or a viewer is already open — stacking would spin
-          // up a second Agora engine for the same channel and conflict.
-          final nav = navigatorKey.currentState;
-          if (nav != null &&
-              !_isIncomingCallScreenShowing &&
-              !_isScreenShareViewerShowing) {
-            _isScreenShareViewerShowing = true;
-            final data = message.data;
-            nav
-                .push(
-              MaterialPageRoute(
-                builder: (_) => ScreenShareViewerScreen(
-                  channelId: data['channelId'] ?? '',
-                  sharerName: data['sharerName'] ?? 'Someone',
-                ),
-              ),
-            )
-                .then((_) {
-              _isScreenShareViewerShowing = false;
-            });
+          // already ringing or a share session is already active.
+          if (!_isIncomingCallScreenShowing) {
+            await openScreenShareViewer(
+              channelId: message.data['channelId'] ?? '',
+              sharerName: message.data['sharerName'] ?? 'Someone',
+            );
           }
         } else if (messageType == 'streak_broken' ||
             messageType == 'streak_warning' ||
