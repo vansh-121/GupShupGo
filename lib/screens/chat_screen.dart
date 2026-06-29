@@ -912,6 +912,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } catch (e) {
       print('Error initiating screen share: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start screen sharing: $e')),
       );

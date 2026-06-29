@@ -38,6 +38,11 @@ class FCMService {
 
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
+
+  /// Prevents stacking multiple ScreenShareViewerScreens — opening a second
+  /// viewer would spin up a second Agora engine for the same channel and
+  /// cause resource conflicts. Reset when the viewer is popped.
+  static bool _isScreenShareViewerShowing = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static const _deviceIdKey = 'gsg_fcm_device_id_v1';
   static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
@@ -147,18 +152,27 @@ class FCMService {
           }
 
           // Auto-open the viewer so the shared screen appears without an
-          // explicit accept step (one-way screen share).
+          // explicit accept step (one-way screen share). Skip if a call is
+          // already ringing or a viewer is already open — stacking would spin
+          // up a second Agora engine for the same channel and conflict.
           final nav = navigatorKey.currentState;
-          if (nav != null) {
+          if (nav != null &&
+              !_isIncomingCallScreenShowing &&
+              !_isScreenShareViewerShowing) {
+            _isScreenShareViewerShowing = true;
             final data = message.data;
-            nav.push(
+            nav
+                .push(
               MaterialPageRoute(
                 builder: (_) => ScreenShareViewerScreen(
                   channelId: data['channelId'] ?? '',
                   sharerName: data['sharerName'] ?? 'Someone',
                 ),
               ),
-            );
+            )
+                .then((_) {
+              _isScreenShareViewerShowing = false;
+            });
           }
         } else if (messageType == 'streak_broken' ||
             messageType == 'streak_warning' ||
