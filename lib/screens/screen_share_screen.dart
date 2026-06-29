@@ -84,7 +84,9 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
           clientRoleType: ClientRoleType.clientRoleBroadcaster,
           channelProfile: ChannelProfileType.channelProfileCommunication,
           publishScreenCaptureVideo: true,
-          publishScreenCaptureAudio: false,
+          // Publish the captured system audio so the viewer can hear sounds
+          // playing on this device's screen.
+          publishScreenCaptureAudio: true,
           publishCameraTrack: false,
           publishMicrophoneTrack: false,
           autoSubscribeVideo: false,

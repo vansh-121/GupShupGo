@@ -123,8 +123,9 @@ class AgoraService {
   ///
   /// Unlike a normal video call this does NOT enable the camera or start a
   /// camera preview — the published video track is the device screen, captured
-  /// via [startScreenShare]. Audio is left disabled for a one-way, video-only
-  /// screen share (lighter on the device and avoids echo).
+  /// via [startScreenShare]. Audio is enabled so the device's system audio
+  /// (e.g. a voice note or video playing on the sharer's screen) can be
+  /// captured and sent to the viewer along with the screen video.
   static Future<RtcEngine> initAgoraForScreenShare() async {
     if (_isReleasing) {
       print('Waiting for previous engine to release...');
@@ -139,14 +140,22 @@ class AgoraService {
     ));
 
     await engine.enableVideo();
+    await engine.enableAudio();
+
+    // Agora recommends the game-streaming scenario to improve the success
+    // rate of capturing system audio during screen sharing (Android 10+).
+    await engine.setAudioScenario(
+      AudioScenarioType.audioScenarioGameStreaming,
+    );
 
     return engine;
   }
 
   /// Request the permissions needed to view a shared screen (the viewer side).
   ///
-  /// The viewer only renders a remote video track, so no camera/mic capture
-  /// permission is strictly required. We still initialise the engine for video.
+  /// The viewer renders the remote screen video and plays the remote system
+  /// audio (so it can hear sounds playing on the sharer's device). No local
+  /// camera/mic capture is required.
   static Future<RtcEngine> initAgoraForScreenShareViewer() async {
     if (_isReleasing) {
       await Future.delayed(Duration(milliseconds: 500));
@@ -160,6 +169,7 @@ class AgoraService {
     ));
 
     await engine.enableVideo();
+    await engine.enableAudio();
 
     return engine;
   }
@@ -174,7 +184,16 @@ class AgoraService {
   static Future<void> startScreenShare(RtcEngine engine) async {
     await engine.startScreenCapture(
       const ScreenCaptureParameters2(
-        captureAudio: false,
+        // Capture the device's system audio so the viewer can hear sounds
+        // (voice notes, videos, etc.) playing on the sharer's screen.
+        // System-audio capture requires Android 10 (API 29) or later; on
+        // older versions the SDK simply ignores it and shares video only.
+        captureAudio: true,
+        audioParams: ScreenAudioParameters(
+          sampleRate: 16000,
+          channels: 2,
+          captureSignalVolume: 100,
+        ),
         captureVideo: true,
         videoParams: ScreenVideoParameters(
           dimensions: VideoDimensions(width: 1280, height: 720),

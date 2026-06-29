@@ -50,6 +50,11 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
             if (!mounted) return;
             setState(() => _isInitialized = true);
+            // Route the shared audio to the loudspeaker once the engine is
+            // ready. Best-effort: failures here must never abort the viewer.
+            _engine?.setEnableSpeakerphone(true).catchError((e) {
+              print('setEnableSpeakerphone failed (non-fatal): $e');
+            });
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
             if (!mounted) return;
@@ -82,7 +87,9 @@ class _ScreenShareViewerScreenState extends State<ScreenShareViewerScreen> {
           publishScreenCaptureVideo: false,
           publishScreenCaptureAudio: false,
           autoSubscribeVideo: true,
-          autoSubscribeAudio: false,
+          // Subscribe to the sharer's audio so the viewer can hear sounds
+          // (voice notes, videos) playing on the shared screen.
+          autoSubscribeAudio: true,
         ),
       );
     } catch (e) {
