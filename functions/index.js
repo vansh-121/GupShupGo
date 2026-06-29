@@ -309,6 +309,15 @@ exports.sendScreenShareNotification = onRequest(
 
       const result = await sendToUserDevices(viewerId, (fcmToken) => ({
         token: fcmToken,
+        // A visible notification so that when the app is backgrounded or
+        // terminated, Android shows it in the tray; tapping it opens the
+        // viewer (handled by NotificationService via the `screen` field).
+        // When the app is foregrounded, onMessage fires instead and the
+        // viewer auto-opens — Android does not show the tray notification.
+        notification: {
+          title: `${sharerName} is sharing their screen`,
+          body: "Tap to view the shared screen",
+        },
         data: {
           viewerId: viewerId,
           sharerId: sharerId,
@@ -316,15 +325,20 @@ exports.sendScreenShareNotification = onRequest(
           sharerPhotoUrl: sharerPhotoUrl,
           channelId: channelId,
           type: "screen_share",
+          // Used by NotificationService._navigateFromData for tap routing.
+          screen: "screen_share",
         },
         android: {
           priority: "high",
           ttl: 60000,
+          notification: {
+            channelId: "chat_message_notifications",
+          },
         },
         apns: {
           headers: {
             "apns-priority": "10",
-            "apns-push-type": "voip",
+            "apns-push-type": "alert",
           },
           payload: {
             aps: {
