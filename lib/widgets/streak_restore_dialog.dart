@@ -274,7 +274,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                     ),
                     Text(
                       _formatDuration(_timeRemaining),
-                      style: GoogleFonts.jetBrainsMono(
+                      style: GoogleFonts.poppins(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color: _timeRemaining.inHours < 2
