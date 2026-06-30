@@ -43,7 +43,7 @@ android {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 39
+        versionCode = 40
         versionName = "1.1.0"
         minSdkVersion = 24
         multiDexEnabled true
