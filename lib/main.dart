@@ -27,8 +27,7 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
-import 'package:video_chat_app/services/sync_service.dart';
-import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 import 'package:video_chat_app/widgets/screen_share_overlay.dart';
@@ -448,6 +447,10 @@ class _AuthGateState extends State<_AuthGate> {
     _connectivitySub = Connectivity()
         .onConnectivityChanged
         .listen(_onConnectivityChanged);
+
+    // Check for Play Store update on EVERY launch — auth screen or home,
+    // logged in or not. This fires before any user-visible screen is shown.
+    UpdateService().checkAndPromptUpdate();
   }
 
   @override

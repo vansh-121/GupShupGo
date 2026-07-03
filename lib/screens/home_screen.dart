@@ -32,7 +32,6 @@ import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
-import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -62,7 +61,6 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
-  final UpdateService _updateService = UpdateService();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -287,9 +285,6 @@ class _HomeScreenState extends State<HomeScreen>
       // tenth. Fire-and-forget; never blocks the UI.
       // ignore: discarded_futures
       _prewarmEncryption(_currentUserId!);
-
-      // ── Check for app updates via Google Play native API ──
-      _updateService.checkAndPromptUpdate();
 
       // ── Listen to user document in real-time to detect badge unlocks ──
       _currentUserSubscription = FirebaseFirestore.instance
