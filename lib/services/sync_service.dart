@@ -130,12 +130,15 @@ class SyncService {
         int decryptIndex = 0;
 
         for (final doc in snapshot.docs) {
-          // Yield to the UI thread every 5 messages so the Flutter engine
-          // can render frames during burst message syncs. Without this, a
-          // snapshot with 50 incoming messages decrypts them all sequentially
-          // on the main thread — 500ms–1.5s of UI freeze on low-end devices.
-          if (++decryptIndex % 5 == 0) {
-            await Future.delayed(Duration.zero);
+          // Yield to the UI thread every 3 messages with a 4ms delay.
+          // Each Signal decrypt takes 10-30ms; 3×30ms = 90ms of CPU before
+          // yielding a half-frame (4ms) to the UI. This keeps the 60fps
+          // budget happy even during a 50-message burst, while minimizing
+          // total sync time compared to yielding after every message.
+          // Previously yielded every 5 with Duration.zero which didn't
+          // reliably give the UI thread enough time on low-end devices.
+          if (++decryptIndex % 3 == 0) {
+            await Future.delayed(const Duration(milliseconds: 4));
           }
 
           final serverMsg = MessageModel.fromFirestore(doc);
@@ -273,11 +276,17 @@ class SyncService {
         final docs = lastSavedTimestamp != null
             ? querySnap.docs
             : querySnap.docs.reversed;
+
+        // Chunked processing: decrypt 3 messages, then yield 4ms to the UI.
+        // On cold start with 5 rooms × 50 messages = 250 decrypts at
+        // ~20ms each, the old per-message Duration.zero yield meant the UI
+        // still froze for seconds. Chunking with a real delay gives the
+        // engine a reliable half-frame to render between batches.
+        int chunkIdx = 0;
         for (final doc in docs) {
-          // Yield to the UI thread for each message so decrypting
-          // doesn't block the main thread — especially important on
-          // cold start or reinstall when many rooms sync simultaneously.
-          await Future.delayed(Duration.zero);
+          if (++chunkIdx % 3 == 0) {
+            await Future.delayed(const Duration(milliseconds: 4));
+          }
           final serverMsg = MessageModel.fromFirestore(doc);
           final decrypted = await ChatService.instance
               .decryptForRendering(serverMsg, currentUserId);

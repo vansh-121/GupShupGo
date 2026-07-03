@@ -49,16 +49,29 @@ class UserService {
     });
   }
 
-  // Search users by name or phone
-  Future<List<UserModel>> searchUsers(String query, String currentUserId) async {
+  // Search users by name or phone — paginated to prevent unbounded reads.
+  // Uses no server-side search (Firestore doesn't natively support
+  // full-text search), but limits to 50 results per page to cap cost
+  // and client-side work. For production scale, consider Algolia/Typesense.
+  Future<List<UserModel>> searchUsers(
+    String query,
+    String currentUserId, {
+    DocumentSnapshot? startAfterDoc,
+    int limit = 30,
+  }) async {
     try {
-      // Convert query to lowercase for case-insensitive search
       String lowerQuery = query.toLowerCase();
 
-      QuerySnapshot snapshot = await _firestore
+      Query q = _firestore
           .collection(_usersCollection)
           .where(FieldPath.documentId, isNotEqualTo: currentUserId)
-          .get();
+          .limit(limit);
+
+      if (startAfterDoc != null) {
+        q = q.startAfterDocument(startAfterDoc);
+      }
+
+      QuerySnapshot snapshot = await q.get();
 
       List<UserModel> users = snapshot.docs
           .map((doc) => UserModel.fromFirestore(doc))

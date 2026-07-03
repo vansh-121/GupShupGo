@@ -85,15 +85,17 @@ class AppDatabase extends _$AppDatabase {
     _instance = null;
   }
 
-  /// Schema version MUST match the old sqflite version (3) so that Drift
-  /// recognises the existing file and doesn't try to re-create tables.
+  /// Schema version. Bumped to 4 to add performance indexes on
+  /// local_messages(chatRoomId, timestamp) and message_plaintext(savedAt).
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           await m.createAll();
+          // New installs get indexes from the start.
+          await _createIndexes();
         },
         onUpgrade: (Migrator m, int from, int to) async {
           if (from < 2) {
@@ -102,8 +104,30 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             await m.createTable(localMessages);
           }
+          if (from < 4) {
+            await _createIndexes();
+          }
         },
       );
+
+  /// Creates performance-critical indexes that prevent full table scans
+  /// on the core chat queries (filter by chatRoomId, order by timestamp).
+  /// Uses raw SQL via customStatement since Drift's Migrator doesn't
+  /// expose CREATE INDEX natively.
+  ///
+  /// NOTE: Column names must use Drift's SQL convention (snake_case):
+  ///   chatRoomId → chat_room_id, savedAt → saved_at
+  Future<void> _createIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_local_messages_room_time '
+      'ON local_messages(chat_room_id, "timestamp")');
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_message_plaintext_saved '
+      'ON message_plaintext(saved_at)');
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_chat_room_preview_updated '
+      'ON chat_room_preview(updated_at)');
+  }
 }
 
 // ─── Connection factory ─────────────────────────────────────────────────────

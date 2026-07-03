@@ -422,14 +422,12 @@ class StatusService {
   // or remove the wrappedKey doc — the blob never changes.
 
   /// Wraps the content key for every viewer's every device. The owner is
-  /// always included in the fan-out so they can decrypt their own status
-  /// (otherwise "My Status" stays on the "Decrypting…" placeholder forever).
-  ///
-  /// All viewers run in parallel. Sequential fan-out was the dominant cost
-  /// of an upload — each viewer pays one consumeOneTimePreKey HTTP round-trip
-  /// per device, and 10 viewers × ~2s adds up to the 40-50s upload the user
-  /// was seeing. Different viewers' sessions don't touch the same session
-  /// store entry, so concurrent encrypts are safe.
+  /// All viewers run in parallel, but concurrency is capped so we don't
+  /// fire 50+ simultaneous `encryptForUser` calls — each of which does
+  /// sequential multi-device Signal encrypts. Capping at 5 keeps CPU
+  /// usage bounded without meaningfully slowing down the fan-out.
+  static const int _maxConcurrentEncrypts = 5;
+
   Future<void> _publishWrappedKeys({
     required String ownerUid,
     required int ownerDeviceId,
@@ -438,7 +436,12 @@ class StatusService {
     required List<String> viewerUids,
   }) async {
     final fanout = <String>{...viewerUids, ownerUid}.toList();
-    await Future.wait(fanout.map((viewerUid) async {
+
+    // Simple fixed-concurrency executor — runs at most [_maxConcurrentEncrypts]
+    // viewers in parallel, starts the next as soon as one finishes.
+    final semaphore = _Semaphore(_maxConcurrentEncrypts);
+
+    await Future.wait(fanout.map((viewerUid) => semaphore.run(() async {
       final encs = await SignalService.instance.encryptForUser(
         senderUid: ownerUid,
         senderDeviceId: ownerDeviceId,
@@ -460,7 +463,7 @@ class StatusService {
         );
       });
       await batch.commit();
-    }));
+    })));
   }
 
   /// Fetches and decrypts the content key for a status item this device is
@@ -1186,5 +1189,33 @@ class StatusService {
       statusOwnerId: statusOwnerId,
       statusItemId: statusItemId,
     ).snapshots().map((snapshot) => snapshot.size);
+  }
+}
+
+/// Lightweight fixed-concurrency gate. Allows up to [maxConcurrent]
+/// async operations to run in parallel; the rest wait until a slot frees up.
+/// Used by `_publishWrappedKeys` to cap Signal encrypt fan-out and by
+/// `preDecryptStatuses` to cap media downloads.
+class _Semaphore {
+  _Semaphore(this._maxConcurrent);
+  final int _maxConcurrent;
+  int _active = 0;
+  final List<Completer<void>> _queue = [];
+
+  Future<void> run(Future<void> Function() fn) async {
+    while (_active >= _maxConcurrent) {
+      final c = Completer<void>();
+      _queue.add(c);
+      await c.future;
+    }
+    _active++;
+    try {
+      await fn();
+    } finally {
+      _active--;
+      if (_queue.isNotEmpty) {
+        _queue.removeAt(0).complete();
+      }
+    }
   }
 }

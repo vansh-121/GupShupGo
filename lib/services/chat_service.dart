@@ -66,6 +66,23 @@ class ChatService {
   // transport, the local DB is the source of truth for rendering — the
   // same architecture WhatsApp uses.
 
+  // ─── In-memory streak state cache ───────────────────────────────────────
+  // Eliminates the per-message Firestore chatRoomRef.get() in _commitMessage.
+  // Streak state is small (a few ints + timestamps) and changes at most once
+  // per calendar day per room, so the cache has a long TTL.
+  static final Map<String, _StreakCacheEntry> _streakCache = {};
+  static const _streakCacheTtl = Duration(minutes: 30);
+
+  // ─── Per-room send lock ───────────────────────────────────────────────
+  // Prevents race conditions when the user taps Send rapidly. Only one
+  // _commitMessage can be in-flight per room at a time; subsequent sends
+  // queue up and execute sequentially. Without this, two concurrent sends
+  // could both read stale streak state or produce duplicate message IDs.
+  final Map<String, Future<void>> _sendLocks = {};
+  // Max time a send can wait for the lock + commit before timing out
+  // (marks the message as failed so the user can retry).
+  static const _sendTimeout = Duration(seconds: 30);
+
   /// Returns true iff the peer has at least one device with a published
   /// key bundle (i.e. they've upgraded to an E2EE-capable build).
   ///
@@ -574,29 +591,52 @@ class ChatService {
     }
 
     try {
-      return await _commitMessage(
-        chatRoomId: chatRoomId,
-        chatRoomRef: chatRoomRef,
-        messageRef: messageRef,
-        senderId: senderId,
-        receiverId: receiverId,
-        text: text,
-        senderName: senderName,
-        type: type,
-        mediaUrl: mediaUrl,
-        audioDuration: audioDuration,
-        statusReplyOwnerId: statusReplyOwnerId,
-        statusReplyItemId: statusReplyItemId,
-        statusReplyOwnerName: statusReplyOwnerName,
-        statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
-        statusReplyType: statusReplyType,
-        statusReplyText: statusReplyText,
-        statusReplyMediaUrl: statusReplyMediaUrl,
-        statusReplyCaption: statusReplyCaption,
-        statusReplyBackgroundColor: statusReplyBackgroundColor,
-        localFilePath: localFilePath,
-        reactionTargetMessageId: reactionTargetMessageId,
-      );
+      // ── Per-room send lock: prevent races when user taps Send rapidly ──
+      // Only one _commitMessage can be in-flight per room. Subsequent sends
+      // wait for the previous one to finish, ensuring streak state, batch
+      // ordering, and Firestore writes are serialized.
+      final prevLock = _sendLocks[chatRoomId];
+      final thisLock = Completer<void>();
+      _sendLocks[chatRoomId] = thisLock.future;
+
+      try {
+        if (prevLock != null) await prevLock;
+
+        final msg = await _commitMessage(
+          chatRoomId: chatRoomId,
+          chatRoomRef: chatRoomRef,
+          messageRef: messageRef,
+          senderId: senderId,
+          receiverId: receiverId,
+          text: text,
+          senderName: senderName,
+          type: type,
+          mediaUrl: mediaUrl,
+          audioDuration: audioDuration,
+          statusReplyOwnerId: statusReplyOwnerId,
+          statusReplyItemId: statusReplyItemId,
+          statusReplyOwnerName: statusReplyOwnerName,
+          statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+          statusReplyType: statusReplyType,
+          statusReplyText: statusReplyText,
+          statusReplyMediaUrl: statusReplyMediaUrl,
+          statusReplyCaption: statusReplyCaption,
+          statusReplyBackgroundColor: statusReplyBackgroundColor,
+          localFilePath: localFilePath,
+          reactionTargetMessageId: reactionTargetMessageId,
+        ).timeout(_sendTimeout, onTimeout: () {
+          throw TimeoutException(
+              'Send timed out after ${_sendTimeout.inSeconds}s');
+        });
+
+        return msg;
+      } finally {
+        thisLock.complete();
+        // Clean up if this is still the current lock
+        if (_sendLocks[chatRoomId] == thisLock.future) {
+          _sendLocks.remove(chatRoomId);
+        }
+      }
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
       // see what didn't go through.
@@ -800,26 +840,40 @@ class ChatService {
     //   • first time  → streak starts at 1
     // Uses local time (DateTime.now()) — same as Snapchat.
     try {
-      final chatRoomSnap = await chatRoomRef.get();
-      int currentStreak = 0;
+      // ── Try in-memory streak cache first (hot path) ──────────────────
+      _StreakCacheEntry? cached = _streakCache[chatRoomId];
+      bool cacheHit = cached != null;
+      int currentStreak;
       DateTime? lastInteraction;
-      Map<String, DateTime> lastSentAt = {};
-      int previousStreakCount = 0;
+      Map<String, DateTime> lastSentAt;
+      int previousStreakCount;
       DateTime? streakBrokenAt;
 
-      if (chatRoomSnap.exists) {
-        final data = chatRoomSnap.data() as Map<String, dynamic>;
-        currentStreak = data['streakCount'] as int? ?? 0;
-        final timestamp = data['lastInteractionDate'] as Timestamp?;
-        lastInteraction = timestamp?.toDate().toLocal();
-        previousStreakCount = data['previousStreakCount'] as int? ?? 0;
-        final brokenTs = data['streakBrokenAt'] as Timestamp?;
-        streakBrokenAt = brokenTs?.toDate().toLocal();
+      if (cacheHit) {
+        currentStreak = cached!.streakCount;
+        lastInteraction = cached.lastInteraction;
+        lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
+        previousStreakCount = cached.previousStreakCount;
+        streakBrokenAt = cached.streakBrokenAt;
+      } else {
+        // Cache miss — do the Firestore read (cold start or room not yet cached).
+        final chatRoomSnap = await chatRoomRef.get();
+        currentStreak = 0;
+        lastInteraction = null;
+        lastSentAt = {};
+        previousStreakCount = 0;
+        streakBrokenAt = null;
 
-        final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
-        rawSent.forEach((key, value) {
-          if (value is Timestamp) lastSentAt[key] = value.toDate().toLocal();
-        });
+        if (chatRoomSnap.exists) {
+          final data = chatRoomSnap.data() as Map<String, dynamic>;
+          cached = _StreakCacheEntry.fromFirestore(data);
+          currentStreak = cached.streakCount;
+          lastInteraction = cached.lastInteraction;
+          lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
+          previousStreakCount = cached.previousStreakCount;
+          streakBrokenAt = cached.streakBrokenAt;
+          _streakCache[chatRoomId] = cached;
+        }
       }
 
       final now = DateTime.now();
@@ -928,6 +982,16 @@ class ChatService {
       }
 
       roomUpdates['streakCount'] = newStreak;
+
+      // ── Update in-memory cache so the next send to this room skips
+      //     the Firestore read entirely (hot path).
+      _streakCache[chatRoomId] = _StreakCacheEntry(
+        streakCount: newStreak,
+        lastInteraction: now,
+        lastSentAt: lastSentAt,
+        previousStreakCount: previousStreakCount,
+        streakBrokenAt: streakBrokenAt,
+      );
 
       // Fire streak milestone rewards in the background
       if (newStreak > currentStreak &&
@@ -1161,13 +1225,17 @@ class ChatService {
       String currentUserId, String otherUserId) async {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
-    // Get unread messages sent by the other user
+    // Get unread messages sent by the other user (capped at 200 to avoid
+    // unbounded reads on rooms with thousands of unread messages — the batch
+    // limit is 500 ops, so 200 leaves headroom for the chatRoom update).
     QuerySnapshot unreadMessages = await _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .where('receiverId', isEqualTo: currentUserId)
-        .where('status', whereIn: ['sent', 'delivered']).get();
+        .where('status', whereIn: ['sent', 'delivered'])
+        .limit(200)
+        .get();
 
     if (unreadMessages.docs.isEmpty) return;
 
@@ -1201,13 +1269,15 @@ class ChatService {
       String currentUserId, String otherUserId) async {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
-    // Get sent messages (not yet delivered) sent by the other user
+    // Get sent messages (not yet delivered) sent by the other user.
+    // Capped at 200 to avoid unbounded reads — the batch limit is 500 ops.
     QuerySnapshot sentMessages = await _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .where('receiverId', isEqualTo: currentUserId)
         .where('status', isEqualTo: 'sent')
+        .limit(200)
         .get();
 
     if (sentMessages.docs.isEmpty) return;
@@ -1242,6 +1312,7 @@ class ChatService {
           .collectionGroup(_messagesCollection)
           .where('receiverId', isEqualTo: currentUserId)
           .where('status', isEqualTo: 'sent')
+          .limit(500)
           .get();
 
       if (sentSnap.docs.isEmpty) return;
@@ -1621,5 +1692,67 @@ class ChatService {
       if (kDebugMode) debugPrint('[ChatService] Error downloading media: $e');
       return null;
     }
+  }
+
+  /// Wipes all in-memory caches. Call on sign-out to free memory and
+  /// prevent stale data from leaking across user sessions.
+  static void clearCaches() {
+    _payloadMemo.clear();
+    _loggedDecryptSkips.clear();
+    _peerBundleCache.clear();
+    _peerBundleRefreshInFlight.clear();
+    _streakCache.clear();
+    _preWarmVaultCache.clear();
+  }
+}
+
+/// In-memory snapshot of chat-room streak state. Eliminates the per-message
+/// Firestore `chatRoomRef.get()` in `_commitMessage`. Populated on first send
+/// to a room after cold-start and updated optimistically thereafter.
+class _StreakCacheEntry {
+  _StreakCacheEntry({
+    required this.streakCount,
+    required this.lastInteraction,
+    this.lastSentAt = const {},
+    this.previousStreakCount = 0,
+    this.streakBrokenAt,
+  });
+
+  final int streakCount;
+  final DateTime? lastInteraction;
+  final Map<String, DateTime> lastSentAt;
+  final int previousStreakCount;
+  final DateTime? streakBrokenAt;
+
+  _StreakCacheEntry copyWith({
+    int? streakCount,
+    DateTime? lastInteraction,
+    Map<String, DateTime>? lastSentAt,
+    int? previousStreakCount,
+    DateTime? streakBrokenAt,
+  }) =>
+      _StreakCacheEntry(
+        streakCount: streakCount ?? this.streakCount,
+        lastInteraction: lastInteraction ?? this.lastInteraction,
+        lastSentAt: lastSentAt ?? this.lastSentAt,
+        previousStreakCount: previousStreakCount ?? this.previousStreakCount,
+        streakBrokenAt: streakBrokenAt ?? this.streakBrokenAt,
+      );
+
+  factory _StreakCacheEntry.fromFirestore(Map<String, dynamic> data) {
+    final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
+    final sent = <String, DateTime>{};
+    rawSent.forEach((k, v) {
+      if (v is Timestamp) sent[k] = v.toDate().toLocal();
+    });
+    final brokenTs = data['streakBrokenAt'] as Timestamp?;
+    final interactionTs = data['lastInteractionDate'] as Timestamp?;
+    return _StreakCacheEntry(
+      streakCount: data['streakCount'] as int? ?? 0,
+      lastInteraction: interactionTs?.toDate().toLocal(),
+      lastSentAt: sent,
+      previousStreakCount: data['previousStreakCount'] as int? ?? 0,
+      streakBrokenAt: brokenTs?.toDate().toLocal(),
+    );
   }
 }

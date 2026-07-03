@@ -26,18 +26,26 @@ class StatusProvider extends ChangeNotifier {
   String? _pendingUserPhotoUrl;
   String? _pendingUserPhoneNumber;
 
+  /// Cached result of _mergeMyStatusWithPending — recomputed only when
+  /// _myStatus or _pendingMyItems change. Prevents creating a new
+  /// StatusModel with DateTime.now() on every getter call, which would
+  /// defeat Flutter's == comparison and trigger unnecessary rebuilds.
+  StatusModel? _cachedMergedStatus;
+
   /// Whether the user has at least one upload still in flight. Lets the UI
   /// show a subtle "uploading" hint instead of nothing.
   bool get hasPendingUpload => _pendingMyItems.isNotEmpty;
 
-  StatusModel? get myStatus => _mergeMyStatusWithPending();
+  StatusModel? get myStatus => _cachedMergedStatus;
   List<StatusModel> get otherStatuses => _otherStatuses;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
   /// Whether the current user has an active status.
   bool get hasMyStatus {
-    final merged = _mergeMyStatusWithPending();
+    // Recompute on access — this is called infrequently (tile visibility).
+    _mergeMyStatusWithPending();
+    final merged = _cachedMergedStatus;
     return merged != null && merged.hasActiveStatus;
   }
 
@@ -54,19 +62,25 @@ class StatusProvider extends ChangeNotifier {
   }
 
   StatusModel? _mergeMyStatusWithPending() {
-    if (_pendingMyItems.isEmpty) return _myStatus;
+    if (_pendingMyItems.isEmpty) {
+      _cachedMergedStatus = _myStatus;
+      return _myStatus;
+    }
     final real = _myStatus;
     final realIds = <String>{
       if (real != null) ...real.statusItems.map((s) => s.id),
     };
     final pending =
         _pendingMyItems.where((p) => !realIds.contains(p.id)).toList();
-    if (pending.isEmpty) return real;
+    if (pending.isEmpty) {
+      _cachedMergedStatus = real;
+      return real;
+    }
     final items = <StatusItem>[
       if (real != null) ...real.statusItems,
       ...pending,
     ];
-    return StatusModel(
+    _cachedMergedStatus = StatusModel(
       id: _pendingUserId ?? real?.id ?? '',
       userId: _pendingUserId ?? real?.userId ?? '',
       userName: _pendingUserName ?? real?.userName ?? '',
@@ -75,6 +89,7 @@ class StatusProvider extends ChangeNotifier {
       statusItems: items,
       lastUpdated: DateTime.now(),
     );
+    return _cachedMergedStatus;
   }
 
   void _listenToMyStatus(String userId) {

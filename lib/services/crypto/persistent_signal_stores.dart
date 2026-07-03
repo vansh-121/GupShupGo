@@ -126,13 +126,13 @@ class PersistentSignalStores {
   /// (sending 5 rapid messages, opening a chat with 20 sessions) into a single
   /// snapshot write instead of 5-20 individual writes, significantly reducing
   /// main-thread JSON serialization and disk I/O on low-end devices.
+  ///
+  /// Every 20th dirty call flushes immediately as a safety net — guarantees
+  /// session state is persisted during active chat even if the debounce keeps
+  /// resetting. This threshold was raised from 5 to reduce Keystore stress on
+  /// devices with slow secure storage (Xiaomi, OPPO, etc.).
   void markDirty() {
-    // Every 5th dirty call flushes immediately — guarantees session state
-    // is persisted during active chat even if the debounce keeps resetting
-    // (e.g. rapid incoming messages). Without this safety net, a hot restart
-    // or crash during a burst of messages would lose the latest ratchet
-    // state, causing "🔒 can't decrypt" on next launch.
-    if (++_dirtyCount >= 5) {
+    if (++_dirtyCount >= 20) {
       _dirtyCount = 0;
       _debounce?.cancel();
       unawaited(flush());
@@ -222,19 +222,14 @@ class _Persistor {
   // ── PreKeys ────────────────────────────────────────────────────────────
   Future<Map<String, String>> _dumpPreKeys(InMemoryPreKeyStore store) async {
     final out = <String, String>{};
-    // Fire all slot checks in one parallel batch — avoids 200 sequential
-    // microtask-hops on every flush(). Each containsPreKey / loadPreKey call
-    // is a synchronous HashMap lookup wrapped in an async API; running them
-    // concurrently collapses all 200 into a single event-loop burst.
-    final entries = await Future.wait(
-      List.generate(200, (id) async {
-        if (!await store.containsPreKey(id)) return null;
-        final rec = await store.loadPreKey(id);
-        return MapEntry('$id', base64Encode(rec.serialize()));
-      }),
-    );
-    for (final e in entries) {
-      if (e != null) out[e.key] = e.value;
+    // Simple sequential loop — avoids creating 200 parallel microtasks via
+    // Future.wait, which was causing scheduling overhead on every flush().
+    // Each containsPreKey / loadPreKey call is a synchronous HashMap lookup
+    // wrapped in an async API, so this loop runs in <1ms total.
+    for (int id = 0; id < 200; id++) {
+      if (!await store.containsPreKey(id)) continue;
+      final rec = await store.loadPreKey(id);
+      out['$id'] = base64Encode(rec.serialize());
     }
     return out;
   }

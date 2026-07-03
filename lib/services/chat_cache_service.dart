@@ -30,10 +30,16 @@ class ChatCacheService {
     _persistUserCache();
   }
 
-  // ─── Chat list cache ───────────────────────────────────────────────
+  // ─── Chat list cache (in-memory + immediate disk write) ─────────────
 
-  /// Save chat rooms as a JSON list to SharedPreferences.
+  /// In-memory chat room list — serves reads instantly without SharedPrefs I/O.
+  /// Written to disk immediately so it survives app kill.
+  List<ChatRoom> _cachedRooms = [];
+
+  /// Save chat rooms. Updates in-memory cache and SharedPreferences
+  /// immediately — the Firestore stream already debounces naturally.
   void cacheChatRooms(List<ChatRoom> rooms) {
+    _cachedRooms = rooms;
     try {
       final list = rooms.map((r) => _chatRoomToJson(r)).toList();
       sharedPrefs.setString(_chatListKey, jsonEncode(list));
@@ -42,13 +48,16 @@ class ChatCacheService {
     }
   }
 
-  /// Load cached chat rooms synchronously. Returns empty list if none.
+  /// Load cached chat rooms. Returns in-memory cache if available,
+  /// otherwise loads from disk and caches in memory for next call.
   List<ChatRoom> getCachedChatRooms() {
+    if (_cachedRooms.isNotEmpty) return _cachedRooms;
     try {
       final json = sharedPrefs.getString(_chatListKey);
       if (json == null) return [];
       final list = jsonDecode(json) as List;
-      return list.map((e) => _chatRoomFromJson(e)).toList();
+      _cachedRooms = list.map((e) => _chatRoomFromJson(e)).toList();
+      return _cachedRooms;
     } catch (e) {
       print('Error reading cached chat rooms: $e');
       return [];
@@ -57,7 +66,7 @@ class ChatCacheService {
 
   // ─── User cache persistence ────────────────────────────────────────
 
-  /// Persist the in-memory user map to SharedPreferences.
+  /// Persist the in-memory user map to SharedPreferences immediately.
   void _persistUserCache() {
     try {
       final map = <String, dynamic>{};

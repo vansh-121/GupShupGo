@@ -117,8 +117,9 @@ class _HomeScreenState extends State<HomeScreen>
     // drops, ensuring the user is marked offline even on force-kill.
     if (_currentUserId != null) {
       // Best-effort explicit offline write; non-critical if it fails.
-      PresenceService.instance.onAppPaused(_currentUserId!).catchError(
-          (e) => debugPrint('Presence dispose cleanup error: $e'));
+      PresenceService.instance
+          .onAppPaused(_currentUserId!)
+          .catchError((e) => debugPrint('Presence dispose cleanup error: $e'));
     }
     super.dispose();
   }
@@ -224,8 +225,11 @@ class _HomeScreenState extends State<HomeScreen>
           _tabController.animateTo(pendingTab);
         }
 
-        final pendingChatContactId = NotificationService.consumePendingChatDeepLink();
-        if (pendingChatContactId != null && pendingChatContactId.isNotEmpty && mounted) {
+        final pendingChatContactId =
+            NotificationService.consumePendingChatDeepLink();
+        if (pendingChatContactId != null &&
+            pendingChatContactId.isNotEmpty &&
+            mounted) {
           try {
             final user = await _userService.getUserById(pendingChatContactId);
             if (user != null && mounted) {
@@ -296,7 +300,9 @@ class _HomeScreenState extends State<HomeScreen>
         if (snap.exists && mounted) {
           final user = UserModel.fromFirestore(snap);
           if (_previousBadges != null) {
-            final newBadges = user.badges.where((b) => !_previousBadges!.contains(b)).toList();
+            final newBadges = user.badges
+                .where((b) => !_previousBadges!.contains(b))
+                .toList();
             if (newBadges.isNotEmpty) {
               for (final badgeId in newBadges) {
                 final navContext = navigatorKey.currentContext;
@@ -347,16 +353,17 @@ class _HomeScreenState extends State<HomeScreen>
       // Sort chat rooms in memory by lastMessageTime descending
       final docs = snap.docs.toList()
         ..sort((a, b) {
-          final aTime = (a.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
-          final bTime = (b.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
+          final aTime = (a.data()['lastMessageTime'] as Timestamp?)?.toDate() ??
+              DateTime(0);
+          final bTime = (b.data()['lastMessageTime'] as Timestamp?)?.toDate() ??
+              DateTime(0);
           return bTime.compareTo(aTime);
         });
 
       final peers = <String>{};
       // Only prewarm the top 5 most recent chats to prevent startup saturation
       for (final d in docs.take(5)) {
-        final parts =
-            List<String>.from(d.data()['participants'] ?? const []);
+        final parts = List<String>.from(d.data()['participants'] ?? const []);
         for (final p in parts) {
           if (p != userId) peers.add(p);
         }
@@ -464,30 +471,31 @@ class _HomeScreenState extends State<HomeScreen>
         final store = await PlaintextStore.instance();
         // Limit backfill check to the 20 most recent messages on regular startup,
         // or check all messages on manual PIN setup/unlock.
-        final local = await store.getAllMessagePayloads(limit: full ? null : 20);
+        final local =
+            await store.getAllMessagePayloads(limit: full ? null : 20);
         if (local.isEmpty) return;
         final col = FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
             .collection('msgVault');
-        
+
         final ids = local.keys.toList();
         final present = <String>{};
 
         // Chunk Firestore documentId queries (whereIn limit is 30 items)
         for (var i = 0; i < ids.length; i += 30) {
-          final chunk = ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
-          final snap = await col.where(FieldPath.documentId, whereIn: chunk).get();
+          final chunk =
+              ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
+          final snap =
+              await col.where(FieldPath.documentId, whereIn: chunk).get();
           present.addAll(snap.docs.map((d) => d.id));
         }
 
-        final missing = local.entries
-            .where((e) => !present.contains(e.key))
-            .toList();
+        final missing =
+            local.entries.where((e) => !present.contains(e.key)).toList();
 
         for (final entry in missing) {
-          final enc =
-              await VaultCipher.instance.encryptPayload(entry.value);
+          final enc = await VaultCipher.instance.encryptPayload(entry.value);
           if (enc == null) return;
           try {
             await col.doc(entry.key).set(enc);
@@ -525,8 +533,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: InkWell(
         onTap: _signOut,
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
               Icon(Icons.sync_problem_rounded, color: c.primary, size: 20),
@@ -1031,21 +1038,29 @@ class _HomeScreenState extends State<HomeScreen>
                               const SizedBox(width: 6),
                               StreakBadge(
                                 streakCount: chatRoom.streakCount,
-                                lastInteractionDate: chatRoom.lastInteractionDate,
+                                lastInteractionDate:
+                                    chatRoom.lastInteractionDate,
                                 compact: true,
                               ),
                             ] else if (chatRoom.previousStreakCount > 0 &&
                                 chatRoom.streakBrokenAt != null &&
-                                DateTime.now().difference(chatRoom.streakBrokenAt!).inHours <= 24) ...[
+                                DateTime.now()
+                                        .difference(chatRoom.streakBrokenAt!)
+                                        .inHours <=
+                                    24) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
                                 decoration: BoxDecoration(
                                   color: Colors.red.withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                                  border: Border.all(
+                                      color: Colors.red.withOpacity(0.25),
+                                      width: 0.5),
                                 ),
-                                child: const Text('💔', style: TextStyle(fontSize: 10)),
+                                child: const Text('💔',
+                                    style: TextStyle(fontSize: 10)),
                               ),
                             ],
                           ],
@@ -1656,8 +1671,7 @@ class _HomeScreenState extends State<HomeScreen>
             tooltip: 'Offline Chat — talk to people nearby',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(
-                  builder: (_) => const NearbyPeersScreen()),
+              MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
             ),
           ),
           IconButton(
@@ -1736,8 +1750,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'logout',
                   child: Row(
                     children: [
-                      Icon(Icons.logout_rounded,
-                          color: c.error, size: 20),
+                      Icon(Icons.logout_rounded, color: c.error, size: 20),
                       const SizedBox(width: 12),
                       Text('Log out', style: TextStyle(color: c.error)),
                     ],
@@ -1805,7 +1818,8 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: c.isDark ? const Color(0xFF2A2040) : c.surface,
                       borderRadius: BorderRadius.circular(16),
@@ -1929,7 +1943,8 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: BoxDecoration(
               color: c.surface.withOpacity(0.95),
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
+              border:
+                  Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
               boxShadow: [
                 BoxShadow(
                   color: colors[0].withOpacity(0.35),
@@ -1973,7 +1988,8 @@ class _HomeScreenState extends State<HomeScreen>
                         end: Alignment.bottomRight,
                       ),
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withOpacity(0.5), width: 3),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.5), width: 3),
                       boxShadow: [
                         BoxShadow(
                           color: colors[0].withOpacity(0.5),
@@ -2016,7 +2032,8 @@ class _HomeScreenState extends State<HomeScreen>
                           onPressed: () => Navigator.pop(context),
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: c.border),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: Text(
@@ -2044,7 +2061,8 @@ class _HomeScreenState extends State<HomeScreen>
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: c.primary,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             elevation: 2,
                           ),
