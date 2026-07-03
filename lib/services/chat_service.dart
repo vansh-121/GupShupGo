@@ -1295,156 +1295,88 @@ class ChatService {
     StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? roomsSub;
     StreamSubscription<void>? vaultReadySub;
 
-    Future<List<ChatRoom>> process(
-        QuerySnapshot<Map<String, dynamic>> snapshot) async {
-      final ps = await PlaintextStore.instance();
-      final previews = await ps.getAllRoomPreviewsWithMeta();
-
-      // First pass: build the room list with cached previews applied, and
-      // collect any rooms whose cached preview is missing or stale so we can
-      // decrypt their last message in parallel below.
-      final chatRooms = <ChatRoom>[];
-      final needsPreview = <int>[]; // indexes into chatRooms
-
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        var chatRoom = ChatRoom.fromMap(data, doc.id);
-
-        final clearedAtMap = data['clearedAt'] as Map<String, dynamic>?;
-        if (clearedAtMap != null && clearedAtMap[userId] != null) {
-          final clearedAt = (clearedAtMap[userId] as Timestamp).toDate();
-          if (chatRoom.lastMessageTime == null ||
-              !chatRoom.lastMessageTime!.isAfter(clearedAt)) {
-            continue;
-          }
-        }
-
-        final localPreview = previews[chatRoom.id];
-        // The cached preview is fresh only when it's at least as new as the
-        // room's lastMessageTime. Otherwise a new message landed (typically
-        // an incoming reply after we sent something) and the cache still
-        // points at our own outgoing text — drop it and eager-decrypt.
-        final roomMs = chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
-        final isFresh = localPreview != null &&
-            localPreview.updatedAt + 1000 >= roomMs;
-        if (isFresh) {
-          chatRoom = ChatRoom(
-            id: chatRoom.id,
-            participants: chatRoom.participants,
-            lastMessage: localPreview.text,
-            lastMessageTime: chatRoom.lastMessageTime,
-            lastMessageSenderId: chatRoom.lastMessageSenderId,
-            lastMessageStatus: chatRoom.lastMessageStatus,
-            unreadCount: chatRoom.unreadCount,
-            streakCount: chatRoom.streakCount,
-            lastInteractionDate: chatRoom.lastInteractionDate,
-            lastSentAt: chatRoom.lastSentAt,
-            previousStreakCount: chatRoom.previousStreakCount,
-            streakBrokenAt: chatRoom.streakBrokenAt,
-          );
-        } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
-            localPreview != null) {
-          // Either the server text is the encrypted placeholder, or we have
-          // a stale local preview — eager-decrypt the latest message.
-          needsPreview.add(chatRooms.length);
-        }
-
-        chatRooms.add(chatRoom);
-      }
-
-      // Batched preview decrypts with capped concurrency.
-      //
-      // The original code ran ALL decrypts in parallel via Future.wait — fast
-      // but blocked the main thread with N simultaneous encrypt/decrypt
-      // operations, causing ANR on low-end devices.
-      //
-      // The fire-and-forget approach fixed ANR but broke the UX: the chat list
-      // showed stale placeholders instead of real previews.
-      //
-      // This hybrid: process rooms in batches of 3 with a frame yield between
-      // batches. This caps main-thread CPU work while ensuring ALL previews
-      // are decrypted by the time the list appears — same fast behavior as
-      // before, no ANR.
-      if (needsPreview.isNotEmpty) {
-        const batchSize = 3;
-        for (int start = 0; start < needsPreview.length; start += batchSize) {
-          final end = (start + batchSize).clamp(0, needsPreview.length);
-          final batch = needsPreview.sublist(start, end);
-          await Future.wait(batch.map((i) async {
-            final room = chatRooms[i];
-            try {
-              final latest = await _firestore
-                  .collection(_chatRoomsCollection)
-                  .doc(room.id)
-                  .collection(_messagesCollection)
-                  .orderBy('timestamp', descending: true)
-                  .limit(1)
-                  .get();
-              if (latest.docs.isEmpty) return;
-              final msg = MessageModel.fromFirestore(latest.docs.first);
-              final decrypted = await decryptForRendering(msg, userId);
-              // Post-reinstall recovery: when the latest message can't be
-              // decrypted, replace the generic "🔒 Encrypted message"
-              // placeholder with the explicit "can't decrypt — ask sender
-              // to resend" indicator so the user understands why their
-              // chat looks empty inside.
-              final text = decrypted == null
-                  ? _undecryptablePlaceholderText
-                  : (decrypted.text.isNotEmpty
-                      ? decrypted.text
-                      : (decrypted.mediaUrl != null ? 'Media' : ''));
-              if (text.isEmpty) return;
-              await ps.saveRoomPreview(
-                chatRoomId: room.id,
-                messageId: msg.id,
-                text: text,
-              );
-              // Update the entry in-place so the returned list has the
-              // real preview text (same as original code)
-              chatRooms[i] = ChatRoom(
-                id: room.id,
-                participants: room.participants,
-                lastMessage: text,
-                lastMessageTime: room.lastMessageTime,
-                lastMessageSenderId: room.lastMessageSenderId,
-                lastMessageStatus: room.lastMessageStatus,
-                unreadCount: room.unreadCount,
-                streakCount: room.streakCount,
-                lastInteractionDate: room.lastInteractionDate,
-                lastSentAt: room.lastSentAt,
-                previousStreakCount: room.previousStreakCount,
-                streakBrokenAt: room.streakBrokenAt,
-              );
-            } catch (_) {
-              // Leave the placeholder in place; next snapshot will retry.
-            }
-          }));
-          // Yield to the UI thread between batches so Flutter can render
-          // frames during preview decryption — prevents ANR on low-end
-          // devices with many chat rooms.
-          if (start + batchSize < needsPreview.length) {
-            await Future.delayed(Duration.zero);
-          }
-        }
-      }
-
-      // Sort locally to handle null lastMessageTime
-      chatRooms.sort((a, b) {
-        if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
-        if (a.lastMessageTime == null) return 1;
-        if (b.lastMessageTime == null) return -1;
-        return b.lastMessageTime!.compareTo(a.lastMessageTime!);
-      });
-
-      return chatRooms;
-    }
-
     Future<void> emitFromCachedSnap() async {
       final snap = latestSnap;
       if (snap == null) return;
       try {
-        final rooms = await process(snap);
-        if (!controller.isClosed) controller.add(rooms);
+        final ps = await PlaintextStore.instance();
+        final previews = await ps.getAllRoomPreviewsWithMeta();
+
+        // ── Phase 1: Build room list — emit immediately ──────────────
+        // WhatsApp's chat list never blocks. Read from local SQLite cache
+        // first, emit instantly, then decrypt stale previews in background.
+        final chatRooms = <ChatRoom>[];
+        final needsPreview = <int>[]; // indexes into chatRooms
+
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          var chatRoom = ChatRoom.fromMap(data, doc.id);
+
+          final clearedAtMap = data['clearedAt'] as Map<String, dynamic>?;
+          if (clearedAtMap != null && clearedAtMap[userId] != null) {
+            final clearedAt = (clearedAtMap[userId] as Timestamp).toDate();
+            if (chatRoom.lastMessageTime == null ||
+                !chatRoom.lastMessageTime!.isAfter(clearedAt)) {
+              continue;
+            }
+          }
+
+          final localPreview = previews[chatRoom.id];
+          final roomMs =
+              chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
+          final isFresh = localPreview != null &&
+              localPreview.updatedAt + 1000 >= roomMs;
+
+          if (isFresh) {
+            chatRoom = ChatRoom(
+              id: chatRoom.id,
+              participants: chatRoom.participants,
+              lastMessage: localPreview.text,
+              lastMessageTime: chatRoom.lastMessageTime,
+              lastMessageSenderId: chatRoom.lastMessageSenderId,
+              lastMessageStatus: chatRoom.lastMessageStatus,
+              unreadCount: chatRoom.unreadCount,
+              streakCount: chatRoom.streakCount,
+              lastInteractionDate: chatRoom.lastInteractionDate,
+              lastSentAt: chatRoom.lastSentAt,
+              previousStreakCount: chatRoom.previousStreakCount,
+              streakBrokenAt: chatRoom.streakBrokenAt,
+            );
+          } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
+              localPreview != null) {
+            needsPreview.add(chatRooms.length);
+          }
+
+          chatRooms.add(chatRoom);
+        }
+
+        // Sort locally to handle null lastMessageTime
+        chatRooms.sort((a, b) {
+          if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
+          if (a.lastMessageTime == null) return 1;
+          if (b.lastMessageTime == null) return -1;
+          return b.lastMessageTime!.compareTo(a.lastMessageTime!);
+        });
+
+        // ── Phase 1 emit: instant, no blocking ──
+        // User sees the chat list RIGHT AWAY. Rooms with stale/placeholder
+        // previews show "🔒 Encrypted message" or the cached text. This is
+        // exactly how WhatsApp works — local data first, network later.
+        if (!controller.isClosed) controller.add(chatRooms);
+
+        // ── Phase 2: Background decrypt for stale previews ──────────
+        // WhatsApp decrypts incoming messages in the background and updates
+        // the local DB. Same here: decrypt in capped batches, then re-emit
+        // ONCE with all real previews.
+        if (needsPreview.isNotEmpty) {
+          _decryptRoomPreviews(
+            chatRooms: chatRooms,
+            needsPreview: needsPreview,
+            userId: userId,
+            ps: ps,
+            controller: controller,
+          );
+        }
       } catch (e, st) {
         if (!controller.isClosed) controller.addError(e, st);
       }
@@ -1476,6 +1408,80 @@ class ChatService {
       await vaultReadySub?.cancel();
     };
     return controller.stream;
+  }
+
+  /// WhatsApp-style background preview decryption.
+  ///
+  /// Decrypts stale previews in batches of 3 with frame yields between
+  /// batches — the same pattern as SyncService — then re-emits the room
+  /// list ONCE with all real previews filled in.
+  void _decryptRoomPreviews({
+    required List<ChatRoom> chatRooms,
+    required List<int> needsPreview,
+    required String userId,
+    required PlaintextStore ps,
+    required StreamController<List<ChatRoom>> controller,
+  }) {
+    unawaited(() async {
+      const batchSize = 3;
+      for (int start = 0; start < needsPreview.length; start += batchSize) {
+        final end = (start + batchSize).clamp(0, needsPreview.length);
+        final batch = needsPreview.sublist(start, end);
+        await Future.wait(batch.map((i) async {
+          final room = chatRooms[i];
+          try {
+            final latest = await _firestore
+                .collection(_chatRoomsCollection)
+                .doc(room.id)
+                .collection(_messagesCollection)
+                .orderBy('timestamp', descending: true)
+                .limit(1)
+                .get();
+            if (latest.docs.isEmpty) return;
+            final msg = MessageModel.fromFirestore(latest.docs.first);
+            final decrypted = await decryptForRendering(msg, userId);
+            final text = decrypted == null
+                ? _undecryptablePlaceholderText
+                : (decrypted.text.isNotEmpty
+                    ? decrypted.text
+                    : (decrypted.mediaUrl != null ? 'Media' : ''));
+            if (text.isEmpty) return;
+            await ps.saveRoomPreview(
+              chatRoomId: room.id,
+              messageId: msg.id,
+              text: text,
+            );
+            chatRooms[i] = ChatRoom(
+              id: room.id,
+              participants: room.participants,
+              lastMessage: text,
+              lastMessageTime: room.lastMessageTime,
+              lastMessageSenderId: room.lastMessageSenderId,
+              lastMessageStatus: room.lastMessageStatus,
+              unreadCount: room.unreadCount,
+              streakCount: room.streakCount,
+              lastInteractionDate: room.lastInteractionDate,
+              lastSentAt: room.lastSentAt,
+              previousStreakCount: room.previousStreakCount,
+              streakBrokenAt: room.streakBrokenAt,
+            );
+          } catch (_) {}
+        }));
+        if (start + batchSize < needsPreview.length) {
+          await Future.delayed(Duration.zero);
+        }
+      }
+      // Single re-emit after ALL previews decrypt — no per-room flickering
+      if (!controller.isClosed) {
+        chatRooms.sort((a, b) {
+          if (a.lastMessageTime == null && b.lastMessageTime == null) return 0;
+          if (a.lastMessageTime == null) return 1;
+          if (b.lastMessageTime == null) return -1;
+          return b.lastMessageTime!.compareTo(a.lastMessageTime!);
+        });
+        controller.add(chatRooms);
+      }
+    }());
   }
 
   // Delete a message

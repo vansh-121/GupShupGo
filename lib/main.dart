@@ -48,19 +48,17 @@ void main() async {
   // ── Disable runtime font fetching — we bundle Poppins locally ──
   GoogleFonts.config.allowRuntimeFetching = false;
 
-  // ── Run ONLY Firebase init and SharedPreferences before runApp() ──
-  // Everything else (crypto, sync, performance) is deferred to a post-frame
-  // callback so the UI appears within 200ms instead of blocking for 1-3s
-  // on low-end devices waiting for Signal key hydration and cache warm-up.
+  // ── Run Firebase init and SharedPreferences init in parallel ──
   await Future.wait([
     Firebase.initializeApp(),
     SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
   ]);
 
-  // ── Firebase Crashlytics — fire-and-forget (don't block startup) ──────
+  // ── Firebase Crashlytics — capture all unhandled errors ────────────────
   // Enable collection on non-debug builds; disable in debug so local errors
   // are easier to iterate on (they still appear in the Crashlytics console
   // but are tagged as debug events).
+  // Fire-and-forget — don't block startup on Crashlytics init.
   unawaited(FirebaseCrashlytics.instance
       .setCrashlyticsCollectionEnabled(!kDebugMode)
       .catchError((_) {}));
@@ -86,21 +84,42 @@ void main() async {
   // ── Firebase Performance Monitoring — fire-and-forget ─────────────────
   unawaited(PerformanceService.init().catchError((_) {}));
 
+  // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
+  //         any screen tries to encrypt or decrypt, the service is ready.
+  //         This is critical — without it, the home screen (loaded right
+  //         after auth) would attempt decryption before the crypto layer
+  //         is initialized, causing errors + rebuild storms.
+  await SignalService.init().catchError((e) {
+    debugPrint('SignalService.init failed at startup (non-fatal): $e');
+  });
+
+  // ── Warm caches in background (fire-and-forget) ────────────────────────
+  // ignore: discarded_futures
+  CryptoWorker.instance.init().catchError((e) {
+    debugPrint('CryptoWorker warm-up failed (non-fatal): $e');
+  });
+  // ignore: discarded_futures
+  PlaintextStore.instance().catchError((e) {
+    debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
+  });
+
+  final cachedUid = FirebaseAuth.instance.currentUser?.uid;
+  if (cachedUid != null) {
+    SyncService.instance.init(cachedUid);
+    SignalService.instance
+        .listDeviceIdsCached(cachedUid)
+        .catchError((_) => const <int>[]);
+  }
+
   // ── Register CallKit event listener BEFORE runApp() ──────────────────
-  // This catches accept/decline/timeout events even when the app is cold-
-  // started from a notification tap (the user tapped "Accept" on the lock
-  // screen, which launched the app).
   _setupCallKitListener();
 
   final connectivityProvider = ConnectivityProvider();
 
-  // ── Stable per-install ID + display name for mesh, used both pre-auth
-  //    (guest mesh chat from the login screen) and as the default before
-  //    the real userId is wired in via updateUserId() on home screen entry.
+  // ── Stable per-install ID + display name for mesh ──────────────────────
   final meshIdentity = _ensureMeshGuestIdentity();
 
-  // 3️⃣  Wrap runApp in a guarded zone — catches synchronous throws that
-  //     escape both FlutterError.onError and PlatformDispatcher.onError.
+  // ── Wrap runApp in a guarded zone ─────────────────────────────────────
   runZonedGuarded(
     () {
       runApp(
@@ -125,8 +144,6 @@ void main() async {
     },
     (Object error, StackTrace stack) {
       if (kDebugMode) {
-        // Single-line summary — the full stack trace was flooding the
-        // terminal for every decrypt / Signal error that escaped a catch.
         debugPrint('⚠ Zone error (${error.runtimeType}): $error');
       } else {
         FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
@@ -134,44 +151,10 @@ void main() async {
     },
   );
 
-  // ── Defer heavy crypto & sync init to post-first-frame ──────────────
-  // The auth gate shows a spinner/wallpaper while initialization completes,
-  // so the user sees a responsive UI immediately. Heavy operations like
-  // Signal key hydration (100-500ms on low-end), SQLite open (30-80ms),
-  // and Firestore listener setup happen after the first frame renders.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    // E2EE: hydrate Signal stores. The auth gate is already showing, so
-    // even if this takes 500ms on a low-end device the ANR timer does not
-    // start until the user interacts.
-    unawaited(() async {
-      try {
-        await SignalService.init();
-      } catch (e) {
-        debugPrint('SignalService.init failed (non-fatal): $e');
-      }
-
-      // Warm caches and start background sync after Signal is ready
-      unawaited(CryptoWorker.instance.init().catchError((_) {}));
-      unawaited(PlaintextStore.instance().catchError((_) {}));
-
-      final cachedUid = FirebaseAuth.instance.currentUser?.uid;
-      if (cachedUid != null) {
-        SyncService.instance.init(cachedUid);
-        unawaited(SignalService.instance
-            .listDeviceIdsCached(cachedUid)
-            .catchError((_) => const <int>[]));
-      }
-    }());
-  });
-
   // ── App Check: fire-and-forget (don't block startup) ──
   _initAppCheck();
 
   // ── Cold-start: check for calls accepted while the app was dead ────────
-  // When the user taps "Accept" on the native CallKit notification and the
-  // app was killed, the actionCallAccept event fires BEFORE our listener is
-  // registered. We catch that case here by querying active calls after the
-  // navigator is mounted.
   _checkPendingAcceptedCalls();
 }
 
