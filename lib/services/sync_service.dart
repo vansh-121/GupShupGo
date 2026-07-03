@@ -32,8 +32,13 @@ class SyncService {
   StreamSubscription? _roomsSub;
   String? _currentUserId;
   final _inFlightDownloads = <String>{};
-  final _processingRooms = <String>{};
   int _syncToken = 0;
+
+  /// Per-room sequential Future chain. Instead of discarding snapshots when a
+  /// room is already processing, we queue them: each new snapshot's processing
+  /// Future is chained after the previous one, ensuring they execute in order
+  /// without interleaving or dropping updates.
+  final _roomSyncQueues = <String, Future<void>>{};
 
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
@@ -110,115 +115,16 @@ class SyncService {
         .orderBy('timestamp', descending: true)
         .limit(50)
         .snapshots()
-        .listen((snapshot) async {
-      // Guard: skip if this room is already processing a previous snapshot.
-      // Firestore can emit a new snapshot before the previous async callback
-      // finishes, causing two executions to interleave — both try to decrypt
-      // the same messages and write to SQLite concurrently.
-      if (!_processingRooms.add(roomId)) return;
-
-      try {
-        final store = await PlaintextStore.instance();
-        
-        // Fetch only recent local messages corresponding to document IDs in snapshot
-        final messageIds = snapshot.docs.map((doc) => doc.id).toList();
-        final localMessages = await store.getMessagesByIds(messageIds);
-        final localMap = {for (final m in localMessages) m.id: m};
-
-        final toSave = <MessageModel>[];
-        bool hasChanges = false;
-        int decryptIndex = 0;
-
-        for (final doc in snapshot.docs) {
-          // Yield to the UI thread every 3 messages with a 4ms delay.
-          // Each Signal decrypt takes 10-30ms; 3×30ms = 90ms of CPU before
-          // yielding a half-frame (4ms) to the UI. This keeps the 60fps
-          // budget happy even during a 50-message burst, while minimizing
-          // total sync time compared to yielding after every message.
-          // Previously yielded every 5 with Duration.zero which didn't
-          // reliably give the UI thread enough time on low-end devices.
-          if (++decryptIndex % 3 == 0) {
-            await Future.delayed(const Duration(milliseconds: 4));
-          }
-
-          final serverMsg = MessageModel.fromFirestore(doc);
-          final localMsg = localMap[serverMsg.id];
-
-          final isLockedPlaceholder = localMsg != null && localMsg.text.startsWith('🔒');
-          if (localMsg == null || isLockedPlaceholder) {
-            final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
-            if (decrypted != null) {
-              final isStillPlaceholder = isLockedPlaceholder && decrypted.text.startsWith('🔒');
-              if (!isStillPlaceholder) {
-                toSave.add(decrypted);
-                hasChanges = true;
-                if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
-                  _triggerMediaDownload(decrypted, roomId);
-                }
-              }
-            } else if (localMsg == null && VaultCipher.instance.isReady) {
-              toSave.add(_lockedPlaceholder(serverMsg));
-              hasChanges = true;
-            }
-          } else {
-            // Check if status, sync status, or media changed
-            if (localMsg.status != serverMsg.status ||
-                localMsg.syncPending != serverMsg.syncPending ||
-                localMsg.mediaUrl != serverMsg.mediaUrl) {
-              final updated = localMsg.copyWith(
-                status: serverMsg.status,
-                syncPending: serverMsg.syncPending,
-                mediaUrl: serverMsg.mediaUrl,
-              );
-              toSave.add(updated);
-              hasChanges = true;
-              if (updated.mediaUrl != null && updated.localFilePath == null) {
-                _triggerMediaDownload(updated, roomId);
-              }
-            } else {
-              // Trigger media download if the local message hasn't cached it yet
-              if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
-                _triggerMediaDownload(localMsg, roomId);
-              }
-            }
-          }
-        }
-
-        if (hasChanges && toSave.isNotEmpty) {
-          await store.saveMessagesBatch(toSave, roomId);
-
-          // Update chat room preview locally using the decrypted form of the last message
-          final latestDoc = snapshot.docs.isNotEmpty ? snapshot.docs.first : null;
-          if (latestDoc != null) {
-            final latestMsgId = latestDoc.id;
-            MessageModel? decryptedLatest;
-            for (final msg in toSave) {
-              if (msg.id == latestMsgId) {
-                decryptedLatest = msg;
-                break;
-              }
-            }
-            decryptedLatest ??= localMap[latestMsgId];
-
-            if (decryptedLatest != null) {
-              final previewText = decryptedLatest.text.isNotEmpty
-                  ? decryptedLatest.text
-                  : (decryptedLatest.mediaUrl != null ? 'Media' : '');
-              if (previewText.isNotEmpty) {
-                await store.saveRoomPreview(
-                  chatRoomId: roomId,
-                  messageId: decryptedLatest.id,
-                  text: previewText,
-                );
-              }
-            }
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
-      } finally {
-        _processingRooms.remove(roomId);
-      }
+        .listen((snapshot) {
+      // Sequential queue per room — chain this snapshot's processing after
+      // any previous one. Never discard snapshots; otherwise a message that
+      // arrives during decrypt would be silently lost forever.
+      final prev = _roomSyncQueues[roomId] ?? Future.value();
+      _roomSyncQueues[roomId] = prev.then((_) => _processRoomSnapshot(
+            roomId,
+            snapshot,
+            currentUserId,
+          ));
     }, onError: (e) {
       if (kDebugMode) debugPrint('[SyncService] Messages stream error in room $roomId: $e');
     });
@@ -309,6 +215,113 @@ class SyncService {
         }
       }
     }());
+  }
+
+  /// Processes a single Firestore snapshot for [roomId]: decrypts new
+  /// messages, updates previews, triggers media downloads. Runs via the
+  /// per-room sequential queue so snapshots are never dropped.
+  Future<void> _processRoomSnapshot(
+    String roomId,
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+    String currentUserId,
+  ) async {
+    try {
+      final store = await PlaintextStore.instance();
+
+      // Fetch only recent local messages corresponding to document IDs in snapshot
+      final messageIds = snapshot.docs.map((doc) => doc.id).toList();
+      final localMessages = await store.getMessagesByIds(messageIds);
+      final localMap = {for (final m in localMessages) m.id: m};
+
+      final toSave = <MessageModel>[];
+      bool hasChanges = false;
+      int decryptIndex = 0;
+
+      for (final doc in snapshot.docs) {
+        if (++decryptIndex % 3 == 0) {
+          await Future.delayed(const Duration(milliseconds: 4));
+        }
+
+        final serverMsg = MessageModel.fromFirestore(doc);
+        final localMsg = localMap[serverMsg.id];
+
+        final isLockedPlaceholder =
+            localMsg != null && localMsg.text.startsWith('🔒');
+        if (localMsg == null || isLockedPlaceholder) {
+          final decrypted = await ChatService.instance
+              .decryptForRendering(serverMsg, currentUserId);
+          if (decrypted != null) {
+            final isStillPlaceholder =
+                isLockedPlaceholder && decrypted.text.startsWith('🔒');
+            if (!isStillPlaceholder) {
+              toSave.add(decrypted);
+              hasChanges = true;
+              if (decrypted.mediaUrl != null &&
+                  decrypted.localFilePath == null) {
+                _triggerMediaDownload(decrypted, roomId);
+              }
+            }
+          } else if (localMsg == null && VaultCipher.instance.isReady) {
+            toSave.add(_lockedPlaceholder(serverMsg));
+            hasChanges = true;
+          }
+        } else {
+          if (localMsg.status != serverMsg.status ||
+              localMsg.syncPending != serverMsg.syncPending ||
+              localMsg.mediaUrl != serverMsg.mediaUrl) {
+            final updated = localMsg.copyWith(
+              status: serverMsg.status,
+              syncPending: serverMsg.syncPending,
+              mediaUrl: serverMsg.mediaUrl,
+            );
+            toSave.add(updated);
+            hasChanges = true;
+            if (updated.mediaUrl != null && updated.localFilePath == null) {
+              _triggerMediaDownload(updated, roomId);
+            }
+          } else {
+            if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
+              _triggerMediaDownload(localMsg, roomId);
+            }
+          }
+        }
+      }
+
+      if (hasChanges && toSave.isNotEmpty) {
+        await store.saveMessagesBatch(toSave, roomId);
+
+        final latestDoc =
+            snapshot.docs.isNotEmpty ? snapshot.docs.first : null;
+        if (latestDoc != null) {
+          final latestMsgId = latestDoc.id;
+          MessageModel? decryptedLatest;
+          for (final msg in toSave) {
+            if (msg.id == latestMsgId) {
+              decryptedLatest = msg;
+              break;
+            }
+          }
+          decryptedLatest ??= localMap[latestMsgId];
+
+          if (decryptedLatest != null) {
+            final previewText = decryptedLatest.text.isNotEmpty
+                ? decryptedLatest.text
+                : (decryptedLatest.mediaUrl != null ? 'Media' : '');
+            if (previewText.isNotEmpty) {
+              await store.saveRoomPreview(
+                chatRoomId: roomId,
+                messageId: decryptedLatest.id,
+                text: previewText,
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
+      }
+    }
   }
 
   void _triggerMediaDownload(MessageModel message, String chatRoomId) {

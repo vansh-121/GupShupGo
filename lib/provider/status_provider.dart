@@ -36,7 +36,15 @@ class StatusProvider extends ChangeNotifier {
   /// show a subtle "uploading" hint instead of nothing.
   bool get hasPendingUpload => _pendingMyItems.isNotEmpty;
 
-  StatusModel? get myStatus => _cachedMergedStatus;
+  StatusModel? get myStatus {
+    // Lazy init: ensure the cache is populated from _myStatus before returning.
+    // Without this, _cachedMergedStatus stays null on the first access even
+    // when _myStatus has data, causing the UI to show "no status" briefly.
+    if (_cachedMergedStatus == null && _myStatus != null) {
+      _mergeMyStatusWithPending();
+    }
+    return _cachedMergedStatus;
+  }
   List<StatusModel> get otherStatuses => _otherStatuses;
   bool get isLoading => _isLoading;
   String? get error => _error;
