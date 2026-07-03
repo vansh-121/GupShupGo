@@ -29,6 +29,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
@@ -120,18 +121,46 @@ class PersistentSignalStores {
   }
 
   /// Schedules a debounced flush. Call after every mutating store operation.
+  ///
+  /// The 3000ms debounce window coalesces bursts of encrypt/decrypt activity
+  /// (sending 5 rapid messages, opening a chat with 20 sessions) into a single
+  /// snapshot write instead of 5-20 individual writes, significantly reducing
+  /// main-thread JSON serialization and disk I/O on low-end devices.
   void markDirty() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 1500), flush);
+    _debounce = Timer(const Duration(milliseconds: 3000), flush);
   }
 
   /// Forces an immediate snapshot of all stores to secure storage. Call on
   /// app pause/detach.
+  ///
+  /// The CPU-heavy JSON serialization is moved to a background isolate via
+  /// [compute] so the main thread stays responsive during active messaging.
   Future<void> flush() async {
     _debounce?.cancel();
-    final snapshot = await _persistor.snapshot(this);
-    await _ss.write(key: _storesKey, value: snapshot);
+
+    // Collect serialized store data (in-memory ops, fast — map copies + base64)
+    final preKeys = await _persistor._dumpPreKeys(preKeyStore);
+    final signedPreKeys = await _persistor._dumpSignedPreKeys(signedPreKeyStore);
+    final sessions = await _persistor._dumpSessions(sessionStore);
+    final trusted = await _persistor._dumpTrustedIdentities(identityStore);
+
+    // JSON encode on a background isolate so the main thread isn't blocked
+    // by CPU-intensive serialization of potentially hundreds of sessions.
+    final json = await compute(_encodeSnapshot, <String, Map<String, String>>{
+      'preKeys': preKeys,
+      'signedPreKeys': signedPreKeys,
+      'sessions': sessions,
+      'trustedIdentities': trusted,
+    });
+
+    await _ss.write(key: _storesKey, value: json);
   }
+
+  /// JSON-serializes the stores snapshot on a background isolate.
+  /// This is a top-level function so it can be invoked via [compute].
+  static String _encodeSnapshot(Map<String, Map<String, String>> data) =>
+      jsonEncode(data);
 
   /// Wipes all key material. Use on signOut + on "Reset encryption" UI action.
   static Future<void> wipe() async {

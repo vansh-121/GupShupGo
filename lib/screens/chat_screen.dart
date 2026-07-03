@@ -1724,7 +1724,14 @@ class _ChatScreenState extends State<ChatScreen> {
             return _buildLoadingOlderIndicator();
           case _DisplayItemType.message:
             final bubble = _buildMessage(item.message!);
-            return item.animate ? _animatedBubble(bubble) : bubble;
+            // RepaintBoundary isolates each message bubble into its own
+            // compositing layer so that scrolling / setState rebuilds on the
+            // parent chat screen don't repaint every bubble — only the ones
+            // whose content actually changed. Critical for smooth scrolling
+            // in chats with hundreds of messages on low-end devices.
+            return RepaintBoundary(
+              child: item.animate ? _animatedBubble(bubble) : bubble,
+            );
         }
       },
     );

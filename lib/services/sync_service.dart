@@ -60,12 +60,20 @@ class SyncService {
         .collection('chatRooms')
         .where('participants', arrayContains: currentUserId)
         .snapshots()
-        .listen((roomsSnap) {
+        .listen((roomsSnap) async {
       final activeRoomIds = <String>{};
+      // Stagger room sync starts to avoid overwhelming the main thread
+      // with N simultaneous decrypt operations at startup. Only 3 rooms
+      // sync concurrently; each batch is separated by 100ms so the
+      // Flutter engine can render frames between batches.
+      int roomIndex = 0;
       for (final doc in roomsSnap.docs) {
         final roomId = doc.id;
         activeRoomIds.add(roomId);
         _startSyncingRoom(roomId, currentUserId);
+        if (++roomIndex % 3 == 0) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
       }
 
       // Clean up subscriptions for rooms that are no longer active/visible
@@ -120,8 +128,17 @@ class SyncService {
 
         final toSave = <MessageModel>[];
         bool hasChanges = false;
+        int decryptIndex = 0;
 
         for (final doc in snapshot.docs) {
+          // Yield to the UI thread every 5 messages so the Flutter engine
+          // can render frames during burst message syncs. Without this, a
+          // snapshot with 50 incoming messages decrypts them all sequentially
+          // on the main thread — 500ms–1.5s of UI freeze on low-end devices.
+          if (++decryptIndex % 5 == 0) {
+            await Future.delayed(Duration.zero);
+          }
+
           final serverMsg = MessageModel.fromFirestore(doc);
           final localMsg = localMap[serverMsg.id];
 
@@ -227,6 +244,11 @@ class SyncService {
             }
             final toSave = <MessageModel>[];
             for (final doc in querySnap.docs) {
+              // Yield to the UI thread for each message in the delta sync
+              // so decrypting historical messages doesn't block the main
+              // thread — especially important on cold start or reinstall
+              // when many rooms sync simultaneously.
+              await Future.delayed(Duration.zero);
               final serverMsg = MessageModel.fromFirestore(doc);
               final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
               if (decrypted != null) {

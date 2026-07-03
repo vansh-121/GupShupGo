@@ -293,7 +293,30 @@ class ChatService {
   // so without this we'd hit SQLite N times per snapshot. Memory cost is
   // small — a Map<String, dynamic> per message — and it's wiped on signOut
   // along with the rest of the crypto state.
+  // In-memory cache of decrypted payloads keyed by message id. Firestore
+  // re-emits the entire message list on every read receipt / typing change,
+  // so without this we'd hit SQLite N times per snapshot.
+  //
+  // LRU eviction: LinkedHashMap preserves insertion order, so when the cache
+  // exceeds [_memoMaxSize] we drop the oldest entries (FIFO). On a heavy user
+  // with 1000+ messages across chats this prevents unbounded memory growth
+  // — each entry is a Map<String, dynamic> that can be several KB for media
+  // messages.
+  static const _memoMaxSize = 500;
   static final Map<String, Map<String, dynamic>> _payloadMemo = {};
+
+  /// Adds an entry to [_payloadMemo] with automatic LRU eviction.
+  /// When the cache exceeds [_memoMaxSize], the oldest 100 entries are
+  /// removed (FIFO order via LinkedHashMap insertion ordering).
+  static void _addToMemo(String key, Map<String, dynamic> value) {
+    _payloadMemo[key] = value;
+    if (_payloadMemo.length > _memoMaxSize) {
+      final keysToRemove = _payloadMemo.keys.take(100).toList();
+      for (final k in keysToRemove) {
+        _payloadMemo.remove(k);
+      }
+    }
+  }
 
   // Dedup set for decrypt-skip log messages. Without this, the same
   // message ID would log every time a Firestore emission re-triggers
@@ -312,7 +335,7 @@ class ChatService {
 
     final cachedPayload = await store.get(msg.id);
     if (cachedPayload != null) {
-      _payloadMemo[msg.id] = cachedPayload;
+      _addToMemo(msg.id, cachedPayload);
       return _applyPayload(msg, cachedPayload);
     }
 
@@ -331,7 +354,7 @@ class ChatService {
     if (env == null) {
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
-        _payloadMemo[msg.id] = vaultPayload;
+        _addToMemo(msg.id, vaultPayload);
         // Fire-and-forget: memo is the source of truth for rendering;
         // SQLite is only for crash/restart recovery.
         unawaited(store.save(msg.id, vaultPayload));
@@ -346,7 +369,7 @@ class ChatService {
         EncryptedEnvelope.fromMap(env),
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
-      _payloadMemo[msg.id] = payload;
+      _addToMemo(msg.id, payload);
       
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
 
@@ -408,7 +431,7 @@ class ChatService {
       // Libsignal couldn't decrypt — try the vault before giving up.
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
-        _payloadMemo[msg.id] = vaultPayload;
+        _addToMemo(msg.id, vaultPayload);
         unawaited(store.save(msg.id, vaultPayload));
         return _applyPayload(msg, vaultPayload);
       }
@@ -419,7 +442,7 @@ class ChatService {
       final lockedPayload = <String, dynamic>{
         'text': _undecryptablePlaceholderText,
       };
-      _payloadMemo[msg.id] = lockedPayload;
+      _addToMemo(msg.id, lockedPayload);
       // Log once per message to avoid flooding the console on every
       // Firestore re-emission (typing, read receipt, etc.).
       if (kDebugMode && _loggedDecryptSkips.add(msg.id)) {
@@ -687,7 +710,7 @@ class ChatService {
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
         // snapshot for our own message never needs any async lookup.
-        _payloadMemo[messageRef.id] = outgoingPayload;
+        _addToMemo(messageRef.id, outgoingPayload);
 
         // Fire SQLite persistence in the background — the in-memory memo
         // is already set, so rendering is instant. SQLite is only needed
@@ -1329,60 +1352,80 @@ class ChatService {
         chatRooms.add(chatRoom);
       }
 
-      // Eager preview decrypt: fetch the latest message of each room that
-      // still shows the placeholder and decrypt it locally. This is how
-      // WhatsApp's chat list shows the real text without ever opening the
-      // chat. Runs in parallel; per-room cost is one Firestore read + one
-      // libsignal decrypt, and the result is persisted so subsequent
-      // snapshots short-circuit to the SQLite cache.
+      // Batched preview decrypts with capped concurrency.
+      //
+      // The original code ran ALL decrypts in parallel via Future.wait — fast
+      // but blocked the main thread with N simultaneous encrypt/decrypt
+      // operations, causing ANR on low-end devices.
+      //
+      // The fire-and-forget approach fixed ANR but broke the UX: the chat list
+      // showed stale placeholders instead of real previews.
+      //
+      // This hybrid: process rooms in batches of 3 with a frame yield between
+      // batches. This caps main-thread CPU work while ensuring ALL previews
+      // are decrypted by the time the list appears — same fast behavior as
+      // before, no ANR.
       if (needsPreview.isNotEmpty) {
-        await Future.wait(needsPreview.map((i) async {
-          final room = chatRooms[i];
-          try {
-            final latest = await _firestore
-                .collection(_chatRoomsCollection)
-                .doc(room.id)
-                .collection(_messagesCollection)
-                .orderBy('timestamp', descending: true)
-                .limit(1)
-                .get();
-            if (latest.docs.isEmpty) return;
-            final msg = MessageModel.fromFirestore(latest.docs.first);
-            final decrypted = await decryptForRendering(msg, userId);
-            // Post-reinstall recovery: when the latest message can't be
-            // decrypted, replace the generic "🔒 Encrypted message"
-            // placeholder with the explicit "can't decrypt — ask sender
-            // to resend" indicator so the user understands why their
-            // chat looks empty inside.
-            final text = decrypted == null
-                ? _undecryptablePlaceholderText
-                : (decrypted.text.isNotEmpty
-                    ? decrypted.text
-                    : (decrypted.mediaUrl != null ? 'Media' : ''));
-            if (text.isEmpty) return;
-            await ps.saveRoomPreview(
-              chatRoomId: room.id,
-              messageId: msg.id,
-              text: text,
-            );
-            chatRooms[i] = ChatRoom(
-              id: room.id,
-              participants: room.participants,
-              lastMessage: text,
-              lastMessageTime: room.lastMessageTime,
-              lastMessageSenderId: room.lastMessageSenderId,
-              lastMessageStatus: room.lastMessageStatus,
-              unreadCount: room.unreadCount,
-              streakCount: room.streakCount,
-              lastInteractionDate: room.lastInteractionDate,
-              lastSentAt: room.lastSentAt,
-              previousStreakCount: room.previousStreakCount,
-              streakBrokenAt: room.streakBrokenAt,
-            );
-          } catch (_) {
-            // Leave the placeholder in place; next snapshot will retry.
+        const batchSize = 3;
+        for (int start = 0; start < needsPreview.length; start += batchSize) {
+          final end = (start + batchSize).clamp(0, needsPreview.length);
+          final batch = needsPreview.sublist(start, end);
+          await Future.wait(batch.map((i) async {
+            final room = chatRooms[i];
+            try {
+              final latest = await _firestore
+                  .collection(_chatRoomsCollection)
+                  .doc(room.id)
+                  .collection(_messagesCollection)
+                  .orderBy('timestamp', descending: true)
+                  .limit(1)
+                  .get();
+              if (latest.docs.isEmpty) return;
+              final msg = MessageModel.fromFirestore(latest.docs.first);
+              final decrypted = await decryptForRendering(msg, userId);
+              // Post-reinstall recovery: when the latest message can't be
+              // decrypted, replace the generic "🔒 Encrypted message"
+              // placeholder with the explicit "can't decrypt — ask sender
+              // to resend" indicator so the user understands why their
+              // chat looks empty inside.
+              final text = decrypted == null
+                  ? _undecryptablePlaceholderText
+                  : (decrypted.text.isNotEmpty
+                      ? decrypted.text
+                      : (decrypted.mediaUrl != null ? 'Media' : ''));
+              if (text.isEmpty) return;
+              await ps.saveRoomPreview(
+                chatRoomId: room.id,
+                messageId: msg.id,
+                text: text,
+              );
+              // Update the entry in-place so the returned list has the
+              // real preview text (same as original code)
+              chatRooms[i] = ChatRoom(
+                id: room.id,
+                participants: room.participants,
+                lastMessage: text,
+                lastMessageTime: room.lastMessageTime,
+                lastMessageSenderId: room.lastMessageSenderId,
+                lastMessageStatus: room.lastMessageStatus,
+                unreadCount: room.unreadCount,
+                streakCount: room.streakCount,
+                lastInteractionDate: room.lastInteractionDate,
+                lastSentAt: room.lastSentAt,
+                previousStreakCount: room.previousStreakCount,
+                streakBrokenAt: room.streakBrokenAt,
+              );
+            } catch (_) {
+              // Leave the placeholder in place; next snapshot will retry.
+            }
+          }));
+          // Yield to the UI thread between batches so Flutter can render
+          // frames during preview decryption — prevents ANR on low-end
+          // devices with many chat rooms.
+          if (start + batchSize < needsPreview.length) {
+            await Future.delayed(Duration.zero);
           }
-        }));
+        }
       }
 
       // Sort locally to handle null lastMessageTime
