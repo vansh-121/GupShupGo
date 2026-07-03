@@ -32,6 +32,7 @@ class SyncService {
   StreamSubscription? _roomsSub;
   String? _currentUserId;
   final _inFlightDownloads = <String>{};
+  final _processingRooms = <String>{};
   int _syncToken = 0;
 
   /// Starts listening to the user's active chat rooms and synchronizes
@@ -110,6 +111,12 @@ class SyncService {
         .limit(50)
         .snapshots()
         .listen((snapshot) async {
+      // Guard: skip if this room is already processing a previous snapshot.
+      // Firestore can emit a new snapshot before the previous async callback
+      // finishes, causing two executions to interleave — both try to decrypt
+      // the same messages and write to SQLite concurrently.
+      if (!_processingRooms.add(roomId)) return;
+
       try {
         final store = await PlaintextStore.instance();
         
@@ -206,6 +213,8 @@ class SyncService {
         }
       } catch (e) {
         if (kDebugMode) debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
+      } finally {
+        _processingRooms.remove(roomId);
       }
     }, onError: (e) {
       if (kDebugMode) debugPrint('[SyncService] Messages stream error in room $roomId: $e');

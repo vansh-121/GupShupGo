@@ -76,8 +76,7 @@ class SignalService {
 
   PersistentSignalStores get stores => _stores;
 
-  IdentityKey get publicIdentityKey =>
-      _stores.identityKeyPair.getPublicKey();
+  IdentityKey get publicIdentityKey => _stores.identityKeyPair.getPublicKey();
 
   // ── Sessions ────────────────────────────────────────────────────────────
 
@@ -145,10 +144,8 @@ class SignalService {
     final registrationId = bundle['registrationId'] as int;
     final identityPub = base64Decode(bundle['identityPub'] as String);
     final signedPreKeyId = bundle['signedPreKeyId'] as int;
-    final signedPreKeyPub =
-        base64Decode(bundle['signedPreKeyPub'] as String);
-    final signedPreKeySig =
-        base64Decode(bundle['signedPreKeySig'] as String);
+    final signedPreKeyPub = base64Decode(bundle['signedPreKeyPub'] as String);
+    final signedPreKeySig = base64Decode(bundle['signedPreKeySig'] as String);
 
     // Since we are establishing the session without using a one-time prekey (OPK),
     // we do not consume it on the server. This preserves the peer's OPK pool
@@ -167,8 +164,7 @@ class SignalService {
 
   Future<Map<String, dynamic>?> _consumeOneTimePreKey(
       String peerUid, int deviceId) async {
-    final idToken =
-        await FirebaseAuth.instance.currentUser?.getIdToken();
+    final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (idToken == null) return null;
     final response = await http.post(
       Uri.parse(
@@ -279,8 +275,9 @@ class SignalService {
     // smallest unused, so the latest install always has the highest ID.
     if (recipientDevices.length > _maxDevicesPerUser) {
       if (kDebugMode) {
-        debugPrint('[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
-          'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
+        debugPrint(
+            '[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
+            'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
       }
       recipientDevices.sort();
       recipientDevices = recipientDevices
@@ -288,8 +285,9 @@ class SignalService {
     }
     if (senderOtherDevices.length > _maxDevicesPerUser) {
       if (kDebugMode) {
-        debugPrint('[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
-          'capping other-device fan-out to $_maxDevicesPerUser');
+        debugPrint(
+            '[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
+            'capping other-device fan-out to $_maxDevicesPerUser');
       }
       senderOtherDevices.sort();
       senderOtherDevices.removeRange(
@@ -298,7 +296,7 @@ class SignalService {
 
     if (kDebugMode) {
       debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
-        '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
+          '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
     }
 
     // Sequential fan-out across devices with event loop yielding.
@@ -318,7 +316,8 @@ class SignalService {
       final env = await encrypt(senderUid, d, plaintext);
       out['$senderUid:$d'] = env;
     }
-    if (kDebugMode) debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode)
+      debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
     return out;
   }
 
@@ -355,10 +354,8 @@ class SignalService {
     _deviceIdRefreshInFlight.add(uid);
     () async {
       try {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
+        final userDoc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
         final data = userDoc.data();
         if (data != null) {
           final ts = data['deviceUpdatedAt'];
@@ -442,7 +439,8 @@ class SignalService {
                 final newPubBytes = base64Decode(identityPubStr);
                 if (!listEquals(currentPubBytes, newPubBytes)) {
                   // ignore: avoid_print
-                  print('[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
+                  print(
+                      '[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
                   await _stores.sessionStore.deleteSession(addr);
                   _stores.identityStore.trustedKeys.remove(addr);
                   _stores.markDirty();
@@ -465,7 +463,8 @@ class SignalService {
           final removed = prevSet.difference(currSet);
           if (removed.isNotEmpty) {
             // ignore: avoid_print
-            print('[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
+            print(
+                '[Signal] device change for $uid: removed=$removed, added=${currSet.difference(prevSet)}');
             // Parallel cleanup — the previous sequential await-in-loop created
             // 27+ microtask hops that interleaved with GC pauses.
             await Future.wait(removed.map((d) async {
@@ -515,8 +514,7 @@ class SignalService {
   /// Invalidate the device-id cache for a user. Call from
   /// DeviceIdentityService after a fresh registration so subsequent sends
   /// see the new device immediately.
-  static void invalidateDeviceCache(String uid) =>
-      _deviceIdCache.remove(uid);
+  static void invalidateDeviceCache(String uid) => _deviceIdCache.remove(uid);
 
   /// Trigger a non-blocking background refresh of the device-id cache for
   /// [uid]. Unlike [invalidateDeviceCache] (which wipes the cache and forces
@@ -586,7 +584,8 @@ class SignalService {
           await ensureSession(uid, d);
         } catch (_) {}
       }
-    } catch (_) {} finally {
+    } catch (_) {
+    } finally {
       _prewarmFutures.remove(uid);
     }
   }
@@ -606,8 +605,7 @@ class SignalService {
   /// failure.
   static Future<void> warmConsumeOneTimePreKey() async {
     try {
-      final idToken =
-          await FirebaseAuth.instance.currentUser?.getIdToken();
+      final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
       if (idToken == null) return;
       // POST with an empty body triggers the container start. The function
       // returns 400 (missing fields) almost instantly once warm; we don't

@@ -116,7 +116,6 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _streakBrokenAt;
   DateTime? _streakLastInteractionDate;
   StreamSubscription? _chatRoomSubscription;
-  int _lastStreakCheckMs = 0;
 
   // ─── Typing indicator state ───────────────────────────────────────
   Timer? _typingTimer;
@@ -168,13 +167,6 @@ class _ChatScreenState extends State<ChatScreen> {
         .doc(chatRoomId)
         .snapshots()
         .listen((snap) {
-      // Throttle: skip rapid Firestore emissions (typing indicators, read
-      // receipts, etc.) that don't affect streak display. The streak data
-      // rarely changes more than once per second, so 500ms is a safe window.
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      if (nowMs - _lastStreakCheckMs < 500) return;
-      _lastStreakCheckMs = nowMs;
-
       if (mounted && snap.exists) {
         final data = snap.data();
         final streak = data?['streakCount'] as int? ?? 0;

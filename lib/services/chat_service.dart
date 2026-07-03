@@ -61,8 +61,6 @@ class ChatService {
   // message with status=sent), on failure the entry is updated to
   // status=failed so the user sees an error indicator and can retry.
 
-
-
   // All decrypted message bodies (both incoming and outgoing) live in a
   // local sqflite DB via PlaintextStore. The Firestore stream is the
   // transport, the local DB is the source of truth for rendering — the
@@ -97,8 +95,7 @@ class ChatService {
     // path populates this cache at app open, so on a warm path this
     // resolves synchronously from memory.
     try {
-      final devices =
-          await SignalService.instance.listDeviceIdsCached(peerUid);
+      final devices = await SignalService.instance.listDeviceIdsCached(peerUid);
       final has = devices.isNotEmpty;
       _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
       return has;
@@ -219,8 +216,7 @@ class ChatService {
         }
       }
       if (pending.isNotEmpty) {
-        final results =
-            await VaultCipher.instance.decryptDocsBatch(pending);
+        final results = await VaultCipher.instance.decryptDocsBatch(pending);
         _payloadMemo.addAll(results);
       }
     } catch (_) {}
@@ -370,7 +366,7 @@ class ChatService {
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
       _addToMemo(msg.id, payload);
-      
+
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
 
       // Handle reaction processing E2EE client-side
@@ -420,10 +416,12 @@ class ChatService {
           errStr.contains('InvalidKeyId') ||
           errStr.contains('UntrustedIdentity')) {
         try {
-          final addr = SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
+          final addr =
+              SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
           await SignalService.instance.stores.sessionStore.deleteSession(addr);
           if (errStr.contains('UntrustedIdentity')) {
-            SignalService.instance.stores.identityStore.trustedKeys.remove(addr);
+            SignalService.instance.stores.identityStore.trustedKeys
+                .remove(addr);
           }
           SignalService.instance.stores.markDirty();
         } catch (_) {}
@@ -452,8 +450,7 @@ class ChatService {
     }
   }
 
-  MessageModel _applyPayload(
-      MessageModel msg, Map<String, dynamic> payload) {
+  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) {
     return msg.copyWith(
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
@@ -462,8 +459,7 @@ class ChatService {
       statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
       statusReplyItemId: payload['statusReplyItemId'] as String?,
       statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
-      statusReplyOwnerPhotoUrl:
-          payload['statusReplyOwnerPhotoUrl'] as String?,
+      statusReplyOwnerPhotoUrl: payload['statusReplyOwnerPhotoUrl'] as String?,
       statusReplyType: payload['statusReplyType'] as String?,
       statusReplyText: payload['statusReplyText'] as String?,
       statusReplyMediaUrl: payload['statusReplyMediaUrl'] as String?,
@@ -536,9 +532,8 @@ class ChatService {
 
     // Firestore generates the doc id synchronously client-side, so we have a
     // stable id to publish into the outbox before any async work begins.
-    DocumentReference messageRef = chatRoomRef
-        .collection(_messagesCollection)
-        .doc();
+    DocumentReference messageRef =
+        chatRoomRef.collection(_messagesCollection).doc();
 
     // ── Optimistic bubble: WhatsApp behaviour ───────────────────────────
     final optimistic = MessageModel(
@@ -606,7 +601,8 @@ class ChatService {
       // Keep the bubble visible with a failed indicator so the user can
       // see what didn't go through.
       if (type != MessageType.reaction) {
-        await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+        await ps.saveMessage(
+            optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
       }
       rethrow;
     }
@@ -649,9 +645,10 @@ class ChatService {
       SignalService.instance.awaitPrewarm(receiverId),
     ]);
     final senderDeviceId = setupResults[0] as int?;
-    final canEncrypt =
-        senderDeviceId != null && (setupResults[1] as bool);
-    if (kDebugMode) debugPrint('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
+    final canEncrypt = senderDeviceId != null && (setupResults[1] as bool);
+    if (kDebugMode)
+      debugPrint(
+          '[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;
     String storedText = text;
@@ -666,7 +663,8 @@ class ChatService {
         'text': text,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (audioDuration != null) 'audioDuration': audioDuration,
-        if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+        if (reactionTargetMessageId != null)
+          'reactionTargetMessageId': reactionTargetMessageId,
         if (statusReplyOwnerId != null) ...{
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
@@ -687,7 +685,8 @@ class ChatService {
           recipientUid: receiverId,
           plaintext: Uint8List.fromList(utf8.encode(payload)),
         );
-        if (kDebugMode) debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
+        if (kDebugMode)
+          debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
@@ -696,7 +695,8 @@ class ChatService {
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
-          if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+          if (reactionTargetMessageId != null)
+            'reactionTargetMessageId': reactionTargetMessageId,
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
           'statusReplyOwnerName': statusReplyOwnerName,
@@ -732,7 +732,8 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        if (kDebugMode) debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
+        if (kDebugMode)
+          debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
       }
     }
 
@@ -825,11 +826,13 @@ class ChatService {
       final today = DateTime(now.year, now.month, now.day);
 
       debugPrint('[STREAK] senderId=$senderId receiverId=$receiverId');
-      debugPrint('[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
+      debugPrint(
+          '[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
       debugPrint('[STREAK] lastSentAt=$lastSentAt');
 
       // Clean up expired restore windows (>24h after break)
-      if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
+      if (streakBrokenAt != null &&
+          now.difference(streakBrokenAt).inHours > 24) {
         previousStreakCount = 0;
         streakBrokenAt = null;
         roomUpdates['previousStreakCount'] = 0;
@@ -846,9 +849,7 @@ class ChatService {
       // dot-notation for nested fields.
 
       // Determine the other participant
-      final otherUserId = senderId == receiverId
-          ? senderId
-          : receiverId;
+      final otherUserId = senderId == receiverId ? senderId : receiverId;
       final otherLastSent = lastSentAt[otherUserId];
 
       int newStreak = currentStreak;
@@ -861,7 +862,8 @@ class ChatService {
           otherLocal.month == today.month &&
           otherLocal.day == today.day;
 
-      debugPrint('[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
+      debugPrint(
+          '[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
 
       // Only evaluate streak when today becomes a mutual day
       if (otherSentToday) {
@@ -879,7 +881,8 @@ class ChatService {
           );
           final daysDiff = today.difference(lastMutualDay).inDays;
 
-          debugPrint('[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
+          debugPrint(
+              '[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
 
           if (daysDiff == 0) {
             // Same day — streak count stays the same, but refresh the
@@ -887,7 +890,8 @@ class ChatService {
             // Without this, stale timestamps from the old logic keep
             // the badge stuck in at-risk/critical state.
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
+            debugPrint(
+                '[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
           } else if (daysDiff == 1) {
             // Yesterday → streak increments!
             newStreak = currentStreak + 1;
@@ -903,7 +907,8 @@ class ChatService {
             }
             newStreak = 1; // Fresh mutual day starts a new streak
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
+            debugPrint(
+                '[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
           }
         }
       } else {
@@ -914,17 +919,21 @@ class ChatService {
           final hoursSinceInteraction = now.difference(lastInteraction).inHours;
           if (hoursSinceInteraction >= 20) {
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
+            debugPrint(
+                '[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
           }
         }
-        debugPrint('[STREAK] Waiting for other user to send today — no streak change');
+        debugPrint(
+            '[STREAK] Waiting for other user to send today — no streak change');
       }
 
       roomUpdates['streakCount'] = newStreak;
 
       // Fire streak milestone rewards in the background
-      if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
-        unawaited(GamificationService.instance.handleStreakMilestone(senderId, newStreak));
+      if (newStreak > currentStreak &&
+          (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
+        unawaited(GamificationService.instance
+            .handleStreakMilestone(senderId, newStreak));
       }
     } catch (e, st) {
       debugPrint('[STREAK] Error computing streak: $e\n$st');
@@ -936,9 +945,12 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode)
+      debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
-    if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
+    if (kDebugMode)
+      debugPrint(
+          '[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
 
     // Write lastSentAt using update(), which reliably interprets dot-notation
     // as nested field paths (e.g. 'lastSentAt.uid' → lastSentAt/{uid}).
@@ -956,7 +968,8 @@ class ChatService {
       try {
         await GamificationService.instance.handleMessageSent(
           userId: senderId,
-          messageType: type.name, // 'text', 'audio', 'image', 'video', 'reaction'
+          messageType:
+              type.name, // 'text', 'audio', 'image', 'video', 'reaction'
         );
       } catch (e) {
         debugPrint('Error awarding gamification on commit: $e');
@@ -1006,10 +1019,10 @@ class ChatService {
       String currentUserId, String otherUserId) {
     final chatRoomId = getChatRoomId(currentUserId, otherUserId);
     final controller = StreamController<List<MessageModel>>();
-    
+
     StreamSubscription<List<MessageModel>>? dbSub;
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? chatRoomSub;
-    
+
     DateTime? clearedAt;
     List<MessageModel> latestMessages = const [];
 
@@ -1071,7 +1084,6 @@ class ChatService {
 
     return controller.stream;
   }
-
 
   // Get paginated messages (for loading older messages)
   Future<List<MessageModel>> getMessagesPaginated({
@@ -1172,8 +1184,7 @@ class ChatService {
         await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).get();
     final chatData = chatRoomDoc.data();
     final updateMap = <String, dynamic>{'unreadCount.$currentUserId': 0};
-    if (chatData != null &&
-        chatData['lastMessageSenderId'] != currentUserId) {
+    if (chatData != null && chatData['lastMessageSenderId'] != currentUserId) {
       updateMap['lastMessageStatus'] = MessageStatus.read.name;
     }
     batch.update(
@@ -1236,8 +1247,8 @@ class ChatService {
       if (sentSnap.docs.isEmpty) return;
 
       // Group docs by chatRoomId so we can update lastMessageStatus per room.
-      final byRoom = <String,
-          List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+      final byRoom =
+          <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
       for (final doc in sentSnap.docs) {
         final chatRoomId = doc.reference.parent.parent?.id;
         if (chatRoomId == null) continue;
@@ -1319,10 +1330,9 @@ class ChatService {
         }
 
         final localPreview = previews[chatRoom.id];
-        final roomMs =
-            chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
-        final isFresh = localPreview != null &&
-            localPreview.updatedAt + 1000 >= roomMs;
+        final roomMs = chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
+        final isFresh =
+            localPreview != null && localPreview.updatedAt + 1000 >= roomMs;
 
         if (isFresh) {
           chatRoom = ChatRoom(
@@ -1602,7 +1612,9 @@ class ChatService {
         await localFile.writeAsBytes(response.bodyBytes);
         return localPath;
       } else {
-        if (kDebugMode) debugPrint('[ChatService] Failed to download media: ${response.statusCode}');
+        if (kDebugMode)
+          debugPrint(
+              '[ChatService] Failed to download media: ${response.statusCode}');
         return null;
       }
     } catch (e) {
@@ -1611,4 +1623,3 @@ class ChatService {
     }
   }
 }
-
