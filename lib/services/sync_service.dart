@@ -60,20 +60,12 @@ class SyncService {
         .collection('chatRooms')
         .where('participants', arrayContains: currentUserId)
         .snapshots()
-        .listen((roomsSnap) async {
+        .listen((roomsSnap) {
       final activeRoomIds = <String>{};
-      // Stagger room sync starts to avoid overwhelming the main thread
-      // with N simultaneous decrypt operations at startup. Only 3 rooms
-      // sync concurrently; each batch is separated by 100ms so the
-      // Flutter engine can render frames between batches.
-      int roomIndex = 0;
       for (final doc in roomsSnap.docs) {
         final roomId = doc.id;
         activeRoomIds.add(roomId);
         _startSyncingRoom(roomId, currentUserId);
-        if (++roomIndex % 3 == 0) {
-          await Future.delayed(const Duration(milliseconds: 100));
-        }
       }
 
       // Clean up subscriptions for rooms that are no longer active/visible
