@@ -11,7 +11,7 @@ class ContactsScreen extends StatefulWidget {
   final String currentUserId;
   final String? currentUserName;
 
-  ContactsScreen({required this.currentUserId, this.currentUserName});
+  const ContactsScreen({super.key, required this.currentUserId, this.currentUserName});
 
   @override
   _ContactsScreenState createState() => _ContactsScreenState();
@@ -113,7 +113,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Widget _buildUserTile(UserModel user) {
     final c = AppThemeColors.of(context);
     return ListTile(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: Stack(
         children: [
           CircleAvatar(
@@ -142,7 +142,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
       title: Text(
         user.name,
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
       ),
       subtitle: Text(
         user.isOnline
@@ -196,7 +196,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       appBar: AppBar(
         title: const Text('Contacts'),
         bottom: PreferredSize(
-          preferredSize: Size.fromHeight(60),
+          preferredSize: const Size.fromHeight(60),
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -204,7 +204,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               onChanged: _searchUsers,
               decoration: InputDecoration(
                 hintText: 'Search by name or phone...',
-                prefixIcon: Icon(Icons.search),
+                prefixIcon: const Icon(Icons.search),
                 filled: true,
                 fillColor: c.surfaceAlt,
                 border: OutlineInputBorder(
@@ -212,7 +212,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   borderSide: BorderSide.none,
                 ),
                 contentPadding:
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
             ),
           ),

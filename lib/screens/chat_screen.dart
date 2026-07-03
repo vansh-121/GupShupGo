@@ -56,7 +56,7 @@ class ChatScreen extends StatefulWidget {
   final String currentUserId;
   final String? currentUserName;
 
-  ChatScreen({
+  const ChatScreen({super.key, 
     required this.contact,
     required this.currentUserId,
     this.currentUserName,
@@ -74,7 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final UserService _userService = UserService();
 
   bool _isLoading = true;
-  bool _isSending = false;
+  final bool _isSending = false;
   int _lastMessageCount = 0;
 
   // ─── Search state ─────────────────────────────────────────────────
@@ -116,6 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _streakBrokenAt;
   DateTime? _streakLastInteractionDate;
   StreamSubscription? _chatRoomSubscription;
+  int _lastStreakCheckMs = 0;
 
   // ─── Typing indicator state ───────────────────────────────────────
   Timer? _typingTimer;
@@ -167,6 +168,13 @@ class _ChatScreenState extends State<ChatScreen> {
         .doc(chatRoomId)
         .snapshots()
         .listen((snap) {
+      // Throttle: skip rapid Firestore emissions (typing indicators, read
+      // receipts, etc.) that don't affect streak display. The streak data
+      // rarely changes more than once per second, so 500ms is a safe window.
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      if (nowMs - _lastStreakCheckMs < 500) return;
+      _lastStreakCheckMs = nowMs;
+
       if (mounted && snap.exists) {
         final data = snap.data();
         final streak = data?['streakCount'] as int? ?? 0;
@@ -453,8 +461,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _subtitleToggleTimer = Timer.periodic(
         const Duration(milliseconds: 5200),
         (_) {
-          if (mounted)
+          if (mounted) {
             setState(() => _showBondInSubtitle = !_showBondInSubtitle);
+          }
         },
       );
     } else {
@@ -772,7 +781,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cannot call yourself')),
+        const SnackBar(content: Text('Cannot call yourself')),
       );
       return;
     }
@@ -823,7 +832,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cannot call yourself')),
+        const SnackBar(content: Text('Cannot call yourself')),
       );
       return;
     }
@@ -1026,7 +1035,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (messageDate == today) {
       return 'Today';
-    } else if (messageDate == today.subtract(Duration(days: 1))) {
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
       return 'Yesterday';
     } else {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
@@ -2625,7 +2634,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Block ${widget.contact.name}?'),
-        content: Text(
+        content: const Text(
           'Blocked contacts cannot send you messages or call you. '
           'You can unblock them from Settings → Privacy → Blocked contacts.',
         ),
@@ -2700,7 +2709,7 @@ class _ChatScreenState extends State<ChatScreen> {
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
+              const SnackBar(
                   content:
                       Text('No internet & mesh unavailable. Image not sent.')),
             );

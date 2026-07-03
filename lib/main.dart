@@ -89,9 +89,11 @@ void main() async {
   //         This is critical — without it, the home screen (loaded right
   //         after auth) would attempt decryption before the crypto layer
   //         is initialized, causing errors + rebuild storms.
-  await SignalService.init().catchError((e) {
+  try {
+    await SignalService.init();
+  } catch (e) {
     debugPrint('SignalService.init failed at startup (non-fatal): $e');
-  });
+  }
 
   // ── Warm caches in background (fire-and-forget) ────────────────────────
   // ignore: discarded_futures
@@ -101,6 +103,7 @@ void main() async {
   // ignore: discarded_futures
   PlaintextStore.instance().catchError((e) {
     debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
+    return Future<PlaintextStore>.error(e);
   });
 
   final cachedUid = FirebaseAuth.instance.currentUser?.uid;
@@ -388,6 +391,8 @@ void _initAppCheck() async {
 class MyApp extends StatelessWidget {
   final AuthService _authService = AuthService();
 
+  MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
@@ -527,6 +532,6 @@ class _AuthGateState extends State<_AuthGate> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    return _resolvedLoggedIn! ? HomeScreen() : LoginScreen();
+    return _resolvedLoggedIn! ? const HomeScreen() : const LoginScreen();
   }
 }

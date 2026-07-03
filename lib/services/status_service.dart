@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
@@ -1018,7 +1017,7 @@ class StatusService {
   /// Get all statuses from other users (contacts' statuses).
   Stream<List<StatusModel>> getAllStatuses(String currentUserId) {
     // Get statuses updated in the last 24 hours
-    final cutoff = DateTime.now().subtract(Duration(hours: 24));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
 
     return _firestore
         .collection(_statusCollection)

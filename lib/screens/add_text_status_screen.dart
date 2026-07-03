@@ -11,12 +11,12 @@ class AddTextStatusScreen extends StatefulWidget {
   final String? userPhoneNumber;
 
   const AddTextStatusScreen({
-    Key? key,
+    super.key,
     required this.userId,
     required this.userName,
     this.userPhotoUrl,
     this.userPhoneNumber,
-  }) : super(key: key);
+  });
 
   @override
   State<AddTextStatusScreen> createState() => _AddTextStatusScreenState();
@@ -64,7 +64,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please enter some text')),
+        const SnackBar(content: Text('Please enter some text')),
       );
       return;
     }

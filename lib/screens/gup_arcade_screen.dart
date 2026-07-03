@@ -16,7 +16,7 @@ import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 class GupArcadeScreen extends StatefulWidget {
   final String currentUserId;
 
-  const GupArcadeScreen({Key? key, required this.currentUserId}) : super(key: key);
+  const GupArcadeScreen({super.key, required this.currentUserId});
 
   @override
   _GupArcadeScreenState createState() => _GupArcadeScreenState();
@@ -821,7 +821,7 @@ class _OverviewTab extends StatelessWidget {
   }
 
   Widget _buildBadgesLocker(AppThemeColors c) {
-    final allBadges = BadgeDefinition.allBadges;
+    const allBadges = BadgeDefinition.allBadges;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1121,7 +1121,7 @@ class _ChallengesTabState extends State<_ChallengesTab> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
-    final allChallenges = ChallengeDefinition.allChallenges;
+    const allChallenges = ChallengeDefinition.allChallenges;
 
     List<ChallengeDefinition> filtered;
     switch (_filter) {
@@ -1538,7 +1538,7 @@ class _LeaderboardTab extends StatelessWidget {
 
         return Expanded(
           child: Container(
-            margin: EdgeInsets.symmetric(horizontal: 4),
+            margin: const EdgeInsets.symmetric(horizontal: 4),
             padding: EdgeInsets.symmetric(
               vertical: isFirst ? 20 : 14,
               horizontal: 6,

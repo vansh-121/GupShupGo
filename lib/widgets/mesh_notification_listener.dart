@@ -15,8 +15,7 @@ import 'package:video_chat_app/services/mesh_network_service.dart';
 /// Mounted via [MaterialApp.builder] so the banner sits above every route.
 class MeshNotificationListener extends StatefulWidget {
   final Widget child;
-  const MeshNotificationListener({Key? key, required this.child})
-      : super(key: key);
+  const MeshNotificationListener({super.key, required this.child});
 
   @override
   State<MeshNotificationListener> createState() =>
@@ -208,13 +207,13 @@ class _MeshBanner extends StatefulWidget {
   final VoidCallback onDismiss;
 
   const _MeshBanner({
-    Key? key,
+    super.key,
     required this.message,
     required this.senderName,
     required this.preview,
     required this.onTap,
     required this.onDismiss,
-  }) : super(key: key);
+  });
 
   @override
   State<_MeshBanner> createState() => _MeshBannerState();

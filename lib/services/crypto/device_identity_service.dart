@@ -310,7 +310,7 @@ class DeviceIdentityService {
   /// SignedPreKey per week, identified by the week-since-epoch number).
   int _signedPreKeyId() {
     final weeks = DateTime.now().millisecondsSinceEpoch ~/
-        Duration(days: 7).inMilliseconds;
+        const Duration(days: 7).inMilliseconds;
     return weeks & 0xFFFFFF;
   }
 

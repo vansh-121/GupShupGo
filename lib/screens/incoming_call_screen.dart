@@ -17,13 +17,13 @@ class IncomingCallScreen extends StatefulWidget {
   final bool isAudioOnly;
 
   const IncomingCallScreen({
-    Key? key,
+    super.key,
     required this.channelId,
     required this.callerId,
     required this.callerName,
     this.callerPhotoUrl,
     this.isAudioOnly = false,
-  }) : super(key: key);
+  });
 
   @override
   State<IncomingCallScreen> createState() => _IncomingCallScreenState();

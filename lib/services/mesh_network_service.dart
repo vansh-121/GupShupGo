@@ -424,7 +424,7 @@ class MeshNetworkService extends ChangeNotifier {
       if (existing != null) {
         _peers[endpointId] = existing.copyWith(isConnected: true);
       }
-      debugPrint('[Mesh] Connected to $endpointId (${connectedPeers} peers)');
+      debugPrint('[Mesh] Connected to $endpointId ($connectedPeers peers)');
     } else {
       _connectedEndpoints.remove(endpointId);
       _peers.remove(endpointId);
@@ -436,7 +436,7 @@ class MeshNetworkService extends ChangeNotifier {
   void _onDisconnected(String endpointId) {
     _connectedEndpoints.remove(endpointId);
     _peers.remove(endpointId);
-    debugPrint('[Mesh] Disconnected from $endpointId (${connectedPeers} peers)');
+    debugPrint('[Mesh] Disconnected from $endpointId ($connectedPeers peers)');
     _publishPeers();
 
     // The Nearby SDK does NOT re-fire onEndpointFound when a connection drops

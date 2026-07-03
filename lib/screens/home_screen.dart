@@ -42,6 +42,8 @@ import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 
 class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
@@ -542,7 +544,7 @@ class _HomeScreenState extends State<HomeScreen>
     await _authService.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => LoginScreen()),
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
     }
   }
@@ -645,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildChatsTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     _chatRoomsStream ??=
@@ -661,7 +663,7 @@ class _HomeScreenState extends State<HomeScreen>
           chatRooms = _chatCacheService.getCachedChatRooms();
           if (chatRooms.isEmpty) {
             // No cache yet — show a brief loading indicator
-            return Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
         } else {
           chatRooms = chatSnapshot.data ?? [];
@@ -684,6 +686,11 @@ class _HomeScreenState extends State<HomeScreen>
             _chatCacheService.cacheChatRooms(chatRooms);
             // ── Refresh user profiles (online status) in background ──
             _refreshChatUsersInBackground(chatRooms);
+            // ── Pre-cache profile images for smoother scrolling ─────
+            // Warms the Flutter image cache with contact avatars so they
+            // render instantly when the user scrolls through the chat list
+            // — no loading flicker, no layout shift.
+            _precacheChatAvatars(chatRooms, context);
           }
         }
 
@@ -765,7 +772,7 @@ class _HomeScreenState extends State<HomeScreen>
               final otherUserId = chatRoom.participants
                   .firstWhere((id) => id != _currentUserId, orElse: () => '');
 
-              if (otherUserId.isEmpty) return SizedBox.shrink();
+              if (otherUserId.isEmpty) return const SizedBox.shrink();
 
               // ── Try cached user first (instant, no Firestore) ──
               final cachedUser = _chatCacheService.getCachedUser(otherUserId);
@@ -869,6 +876,27 @@ class _HomeScreenState extends State<HomeScreen>
       print('Background user refresh error: $e');
       _isRefreshingUsers = false;
     });
+  }
+
+  /// Warms the Flutter image cache with contact avatars so profile pictures
+  /// render instantly when scrolling through the chat list.
+  void _precacheChatAvatars(List<ChatRoom> chatRooms, BuildContext context) {
+    final userIds = <String>{};
+    for (final room in chatRooms) {
+      for (final id in room.participants) {
+        if (id != _currentUserId) userIds.add(id);
+      }
+    }
+    for (final uid in userIds) {
+      final cached = _chatCacheService.getCachedUser(uid);
+      if (cached?.photoUrl != null && cached!.photoUrl!.isNotEmpty) {
+        unawaited(precacheImage(
+          NetworkImage(cached.photoUrl!),
+          context,
+          onError: (_, __) {}, // Silently ignore broken URLs
+        ));
+      }
+    }
   }
 
   /// Minimal placeholder while a single user profile is being fetched.
@@ -1106,7 +1134,7 @@ class _HomeScreenState extends State<HomeScreen>
       String minute = dateTime.minute.toString().padLeft(2, '0');
       String period = dateTime.hour >= 12 ? 'PM' : 'AM';
       return '$hour:$minute $period';
-    } else if (messageDate == today.subtract(Duration(days: 1))) {
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
       return 'Yesterday';
     } else if (now.difference(dateTime).inDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1118,7 +1146,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildStatusTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     return Consumer<StatusProvider>(
@@ -1373,7 +1401,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildCallsTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     return StreamBuilder<List<CallLogModel>>(
@@ -1381,7 +1409,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context, snapshot) {
         final c = AppThemeColors.of(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+          return const Center(child: CircularProgressIndicator());
         }
 
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
@@ -1845,7 +1873,7 @@ class _HomeScreenState extends State<HomeScreen>
                     _navigateToAddMediaStatus();
                   }
                 },
-                child: Icon(Icons.camera_alt, color: Colors.white),
+                child: const Icon(Icons.camera_alt, color: Colors.white),
               ),
             ],
           );
@@ -2038,11 +2066,11 @@ class AnimatedBuilder2 extends AnimatedWidget {
   final Widget? child;
 
   const AnimatedBuilder2({
-    Key? key,
+    super.key,
     required Animation<double> animation,
     required this.builder,
     this.child,
-  }) : super(key: key, listenable: animation);
+  }) : super(listenable: animation);
 
   @override
   Widget build(BuildContext context) {

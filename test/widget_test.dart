@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 // Simple test app that doesn't require Firebase
 class TestApp extends StatelessWidget {
-  const TestApp({Key? key}) : super(key: key);
+  const TestApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +24,7 @@ class TestApp extends StatelessWidget {
 }
 
 class TestHome extends StatefulWidget {
-  const TestHome({Key? key}) : super(key: key);
+  const TestHome({super.key});
 
   @override
   State<TestHome> createState() => _TestHomeState();

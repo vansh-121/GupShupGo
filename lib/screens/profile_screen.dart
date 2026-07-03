@@ -16,7 +16,7 @@ import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 class ProfileScreen extends StatefulWidget {
   final UserModel currentUser;
 
-  const ProfileScreen({Key? key, required this.currentUser}) : super(key: key);
+  const ProfileScreen({super.key, required this.currentUser});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();

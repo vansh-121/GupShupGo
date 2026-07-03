@@ -19,14 +19,14 @@ class AddMediaStatusScreen extends StatefulWidget {
   final bool isVideo;
 
   const AddMediaStatusScreen({
-    Key? key,
+    super.key,
     required this.userId,
     required this.userName,
     this.userPhotoUrl,
     this.userPhoneNumber,
     this.preSelectedFile,
     this.isVideo = false,
-  }) : super(key: key);
+  });
 
   @override
   State<AddMediaStatusScreen> createState() => _AddMediaStatusScreenState();
@@ -79,12 +79,12 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   void _showMediaSourcePicker() {
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => SafeArea(
         child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 20),
+          padding: const EdgeInsets.symmetric(vertical: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -96,7 +96,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              SizedBox(height: 20),
+              const SizedBox(height: 20),
               Text(
                 'Add Status',
                 style: GoogleFonts.poppins(
@@ -104,20 +104,20 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               ListTile(
                 leading: Container(
-                  padding: EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: Colors.blue.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child:
-                      Icon(Icons.camera_alt_rounded, color: AppColors.primary),
+                      const Icon(Icons.camera_alt_rounded, color: AppColors.primary),
                 ),
-                title: Text('Camera',
+                title: const Text('Camera',
                     style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: Text('Take a photo'),
+                subtitle: const Text('Take a photo'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.camera);
@@ -125,17 +125,17 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               ),
               ListTile(
                 leading: Container(
-                  padding: EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: AppColors.online.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.photo_library_rounded,
+                  child: const Icon(Icons.photo_library_rounded,
                       color: AppColors.online),
                 ),
-                title: Text('Gallery Photo',
+                title: const Text('Gallery Photo',
                     style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: Text('Choose an image from gallery'),
+                subtitle: const Text('Choose an image from gallery'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.gallery);
@@ -143,16 +143,16 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               ),
               ListTile(
                 leading: Container(
-                  padding: EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: Colors.orange.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.videocam_rounded, color: Colors.orange),
+                  child: const Icon(Icons.videocam_rounded, color: Colors.orange),
                 ),
-                title: Text('Record Video',
+                title: const Text('Record Video',
                     style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: Text('Record a short video'),
+                subtitle: const Text('Record a short video'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickVideo(ImageSource.camera);
@@ -160,17 +160,17 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               ),
               ListTile(
                 leading: Container(
-                  padding: EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: AppColors.primaryLt,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.video_library_rounded,
+                  child: const Icon(Icons.video_library_rounded,
                       color: AppColors.primary),
                 ),
-                title: Text('Gallery Video',
+                title: const Text('Gallery Video',
                     style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: Text('Choose a video from gallery'),
+                subtitle: const Text('Choose a video from gallery'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickVideo(ImageSource.gallery);
@@ -224,7 +224,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     try {
       final XFile? video = await _imagePicker.pickVideo(
         source: source,
-        maxDuration: Duration(seconds: 30),
+        maxDuration: const Duration(seconds: 30),
       );
 
       _isPicking = false;
@@ -342,18 +342,18 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(
+        title: const Row(
           children: [
             Icon(Icons.error_outline, color: Colors.red),
             SizedBox(width: 8),
             Text('Upload Error'),
           ],
         ),
-        content: Text(message, style: TextStyle(fontSize: 14)),
+        content: Text(message, style: const TextStyle(fontSize: 14)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('OK'),
+            child: const Text('OK'),
           ),
         ],
       ),
@@ -370,7 +370,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   @override
   Widget build(BuildContext context) {
     if (_selectedFile == null) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
           child: CircularProgressIndicator(color: Colors.white),
@@ -412,22 +412,22 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(Icons.close, color: Colors.white, size: 28),
+                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
                     onPressed: () => Navigator.pop(context),
                   ),
-                  Spacer(),
+                  const Spacer(),
                   // Crop / edit icons (decorative for now)
                   IconButton(
-                    icon: Icon(Icons.crop_rotate, color: Colors.white),
+                    icon: const Icon(Icons.crop_rotate, color: Colors.white),
                     onPressed: () {},
                   ),
                   IconButton(
-                    icon: Icon(Icons.emoji_emotions_outlined,
+                    icon: const Icon(Icons.emoji_emotions_outlined,
                         color: Colors.white),
                     onPressed: () {},
                   ),
                   IconButton(
-                    icon: Icon(Icons.text_fields, color: Colors.white),
+                    icon: const Icon(Icons.text_fields, color: Colors.white),
                     onPressed: () {},
                   ),
                 ],
@@ -484,7 +484,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     children: [
                       // Re-pick media button
                       IconButton(
-                        icon: Icon(Icons.add_photo_alternate, color: Colors.white),
+                        icon: const Icon(Icons.add_photo_alternate, color: Colors.white),
                         onPressed: _isUploading ? null : _showMediaSourcePicker,
                       ),
                   // Caption input — no box, just plain text on gradient
@@ -492,14 +492,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     child: TextField(
                       controller: _captionController,
                       style: const TextStyle(color: Colors.white, fontSize: 15),
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         filled: false,
                         hintText: 'Add a caption...',
-                        hintStyle: const TextStyle(color: Colors.white60),
+                        hintStyle: TextStyle(color: Colors.white60),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
+                        contentPadding: EdgeInsets.symmetric(
                             vertical: 12, horizontal: 4),
                       ),
                       textCapitalization: TextCapitalization.sentences,
@@ -545,7 +545,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 60,
                         height: 60,
                         child: CircularProgressIndicator(
@@ -553,10 +553,10 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                           strokeWidth: 3,
                         ),
                       ),
-                      SizedBox(height: 16),
+                      const SizedBox(height: 16),
                       Text(
                         'Uploading ${_isVideo ? "video" : "image"}...',
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
@@ -583,7 +583,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
 
   Widget _buildVideoPreview() {
     if (_videoController == null || !_videoController!.value.isInitialized) {
-      return Center(
+      return const Center(
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
@@ -608,14 +608,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               },
               child: AnimatedOpacity(
                 opacity: _videoController!.value.isPlaying ? 0.0 : 1.0,
-                duration: Duration(milliseconds: 200),
+                duration: const Duration(milliseconds: 200),
                 child: Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(
                     color: Colors.black45,
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.play_arrow,
                     color: Colors.white,
                     size: 48,
@@ -628,14 +628,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               bottom: 8,
               right: 8,
               child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   _formatDuration(_videoController!.value.duration),
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
             ),

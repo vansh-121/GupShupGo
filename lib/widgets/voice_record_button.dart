@@ -151,7 +151,7 @@ class _VoiceRecordButtonState extends State<VoiceRecordButton>
                       ]
                     : null,
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.mic_rounded,
                 color: Colors.white,
                 size: 22,

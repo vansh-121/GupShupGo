@@ -27,7 +27,6 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -279,22 +278,28 @@ class SignalService {
     // huge. Highest IDs are kept because _allocateDeviceId picks the
     // smallest unused, so the latest install always has the highest ID.
     if (recipientDevices.length > _maxDevicesPerUser) {
-      if (kDebugMode) debugPrint('[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
+      if (kDebugMode) {
+        debugPrint('[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
           'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
+      }
       recipientDevices.sort();
       recipientDevices = recipientDevices
           .sublist(recipientDevices.length - _maxDevicesPerUser);
     }
     if (senderOtherDevices.length > _maxDevicesPerUser) {
-      if (kDebugMode) debugPrint('[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
+      if (kDebugMode) {
+        debugPrint('[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
           'capping other-device fan-out to $_maxDevicesPerUser');
+      }
       senderOtherDevices.sort();
       senderOtherDevices.removeRange(
           0, senderOtherDevices.length - _maxDevicesPerUser);
     }
 
-    if (kDebugMode) debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
+    if (kDebugMode) {
+      debugPrint('[E2EE] device lookup: ${sw.elapsedMilliseconds}ms '
         '(recipient=${recipientDevices.length}, sender_other=${senderOtherDevices.length})');
+    }
 
     // Sequential fan-out across devices with event loop yielding.
     // Since Dart is single-threaded on the main isolate, parallelizing CPU-bound
@@ -332,6 +337,7 @@ class SignalService {
   // re-fetch when DeviceIdentityService registers a new device locally.
   static final Map<String, ({DateTime at, List<int> ids})> _deviceIdCache = {};
   static const _deviceIdFreshWindow = Duration(minutes: 5);
+  static const _deviceIdCacheMaxSize = 200;
   static final Set<String> _deviceIdRefreshInFlight = <String>{};
   static final Map<String, Future<List<int>>> _deviceIdsQueries = {};
 
@@ -481,6 +487,14 @@ class SignalService {
         }
 
         _deviceIdCache[uid] = (at: now, ids: ids);
+        // LRU eviction: cap cache size to prevent unbounded growth
+        // for users who message hundreds of unique peers.
+        if (_deviceIdCache.length > _deviceIdCacheMaxSize) {
+          final keysToRemove = _deviceIdCache.keys.take(50).toList();
+          for (final k in keysToRemove) {
+            _deviceIdCache.remove(k);
+          }
+        }
         return ids;
       } finally {
         _deviceIdsQueries.remove(uid);

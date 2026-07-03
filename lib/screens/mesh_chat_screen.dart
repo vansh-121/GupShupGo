@@ -21,7 +21,7 @@ import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 class MeshChatScreen extends StatefulWidget {
   final MeshPeer peer;
 
-  const MeshChatScreen({Key? key, required this.peer}) : super(key: key);
+  const MeshChatScreen({super.key, required this.peer});
 
   @override
   State<MeshChatScreen> createState() => _MeshChatScreenState();

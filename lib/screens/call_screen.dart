@@ -21,7 +21,7 @@ class CallScreen extends StatefulWidget {
   final String? calleeName;
   final bool isAudioOnly;
 
-  CallScreen({
+  const CallScreen({super.key, 
     required this.channelId,
     required this.isCaller,
     this.calleeId,
@@ -346,7 +346,7 @@ class _CallScreenState extends State<CallScreen> {
             print("Agora Error: $err - $msg");
             if (err == ErrorCodeType.errInvalidToken) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
+                const SnackBar(
                   content: Text(
                       'Token expired or invalid. Please restart the call.'),
                   backgroundColor: Colors.red,
@@ -358,7 +358,7 @@ class _CallScreenState extends State<CallScreen> {
       );
 
       // Small delay to ensure engine is fully initialized
-      await Future.delayed(Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       // ── E2EE: enable Agora media encryption with a per-call key ──────
       // The key is exchanged out-of-band via a Signal-encrypted envelope.
@@ -571,7 +571,7 @@ class _CallScreenState extends State<CallScreen> {
 
   Widget _buildAudioCallUI() {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -589,11 +589,11 @@ class _CallScreenState extends State<CallScreen> {
           children: [
             const SizedBox(height: 16),
             // Encrypted label
-            Row(
+            const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(Icons.lock, color: Colors.white60, size: 12),
-                const SizedBox(width: 4),
+                SizedBox(width: 4),
                 Text(
                   'End-to-end encrypted',
                   style: TextStyle(
@@ -631,7 +631,7 @@ class _CallScreenState extends State<CallScreen> {
                   ? NetworkImage(_calleePhotoUrl!)
                   : null,
               child: _calleePhotoUrl == null
-                  ? Icon(Icons.person, size: 75, color: Colors.white70)
+                  ? const Icon(Icons.person, size: 75, color: Colors.white70)
                   : null,
             ),
             const Spacer(flex: 2),
@@ -744,14 +744,14 @@ class _CallScreenState extends State<CallScreen> {
             ),
             child: Icon(
               icon,
-              color: isActive ? Color(0xFF005C4B) : Colors.white,
+              color: isActive ? const Color(0xFF005C4B) : Colors.white,
               size: 26,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.white70,
               fontSize: 12,
             ),
@@ -766,7 +766,7 @@ class _CallScreenState extends State<CallScreen> {
     // For audio calls, use the dedicated WhatsApp-style audio UI
     if (widget.isAudioOnly) {
       return Scaffold(
-        backgroundColor: Color(0xFF111B21),
+        backgroundColor: const Color(0xFF111B21),
         body: _buildAudioCallUI(),
       );
     }

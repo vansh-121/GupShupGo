@@ -144,7 +144,7 @@ class EncryptedMediaService {
       throw StateError('media integrity check failed');
     }
 
-    final tagLen = 16;
+    const tagLen = 16;
     final ct = wire.sublist(0, wire.length - tagLen);
     final tag = wire.sublist(wire.length - tagLen);
 
