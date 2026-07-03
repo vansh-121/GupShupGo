@@ -305,18 +305,16 @@ class SignalService {
     // Since Dart is single-threaded on the main isolate, parallelizing CPU-bound
     // encryption tasks doesn't yield actual concurrency. Instead, we run them
     // sequentially and yield control to the event loop before each task using
-    // a 1ms delay. Duration.zero only yields to microtasks (same event-loop
-    // cycle) whereas 1ms is enough for the Flutter engine to schedule and
-    // render a full frame between CPU-bound encrypts, preventing a cascade of
-    // encrypt calls from starving the renderer — critical on low-end devices
-    // where each encrypt can take 30-50ms.
+    // Future.delayed(Duration.zero). This allows Flutter's engine to process
+    // pending microtasks (stream subscriptions, frame callbacks) between
+    // CPU-bound encrypts, keeping the UI responsive.
     for (final d in recipientDevices) {
-      await Future.delayed(const Duration(milliseconds: 1));
+      await Future.delayed(Duration.zero);
       final env = await encrypt(recipientUid, d, plaintext);
       out['$recipientUid:$d'] = env;
     }
     for (final d in senderOtherDevices) {
-      await Future.delayed(const Duration(milliseconds: 1));
+      await Future.delayed(Duration.zero);
       final env = await encrypt(senderUid, d, plaintext);
       out['$senderUid:$d'] = env;
     }

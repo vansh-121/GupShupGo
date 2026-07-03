@@ -1347,14 +1347,13 @@ class ChatService {
         chatRooms.add(chatRoom);
       }
 
-      // Decrypt stale previews in batches of 5 with frame yields between
-      // batches. Originally ALL ran in parallel via Future.wait — fast but
-      // ANR-prone on low-end devices. Batching caps concurrency and yielding
-      // between batches lets Flutter render frames, preventing the main-thread
-      // buildup that triggers ANR. 5 is a sweet spot: fast enough that most
-      // users see the list in ~1-2 batches, small enough to not spike CPU.
+      // Decrypt stale previews with frame yields between batches.
+      // Batch size is high (20) so most users see a single batch — identical
+      // to the original parallel behavior. The frame yield only fires for
+      // exceptional cases (20+ stale rooms after reinstall), where it
+      // prevents the main-thread buildup that triggers ANR.
       if (needsPreview.isNotEmpty) {
-        const batchSize = 5;
+        const batchSize = 20;
         for (int start = 0; start < needsPreview.length; start += batchSize) {
           final end = (start + batchSize).clamp(0, needsPreview.length);
           final batch = needsPreview.sublist(start, end);
