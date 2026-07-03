@@ -140,6 +140,15 @@ class _HomeScreenState extends State<HomeScreen>
         case AppLifecycleState.inactive:
         case AppLifecycleState.detached:
           PresenceService.instance.onAppPaused(_currentUserId!);
+          // Force-flush Signal Protocol state to secure storage when the
+          // app goes to background. The debounced flush (3000ms) may not
+          // have fired yet, and without this the latest session ratchet
+          // state (updated during message decrypt) would be lost if the
+          // app is killed. Lost session state = "🔒 can't decrypt" on
+          // the next incoming message from that peer.
+          try {
+            SignalService.instance.stores.flush();
+          } catch (_) {}
           break;
         case AppLifecycleState.hidden:
           break;

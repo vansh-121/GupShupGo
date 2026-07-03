@@ -57,6 +57,7 @@ class PersistentSignalStores {
   final _Persistor _persistor;
 
   Timer? _debounce;
+  int _dirtyCount = 0;
 
   static const _identityKey = 'gsg_e2ee_identity_v1';
   static const _registrationIdKey = 'gsg_e2ee_registration_id_v1';
@@ -126,6 +127,17 @@ class PersistentSignalStores {
   /// snapshot write instead of 5-20 individual writes, significantly reducing
   /// main-thread JSON serialization and disk I/O on low-end devices.
   void markDirty() {
+    // Every 5th dirty call flushes immediately — guarantees session state
+    // is persisted during active chat even if the debounce keeps resetting
+    // (e.g. rapid incoming messages). Without this safety net, a hot restart
+    // or crash during a burst of messages would lose the latest ratchet
+    // state, causing "🔒 can't decrypt" on next launch.
+    if (++_dirtyCount >= 5) {
+      _dirtyCount = 0;
+      _debounce?.cancel();
+      unawaited(flush());
+      return;
+    }
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 3000), flush);
   }
@@ -144,14 +156,28 @@ class PersistentSignalStores {
     final sessions = await _persistor._dumpSessions(sessionStore);
     final trusted = await _persistor._dumpTrustedIdentities(identityStore);
 
-    // JSON encode on a background isolate so the main thread isn't blocked
-    // by CPU-intensive serialization of potentially hundreds of sessions.
-    final json = await compute(_encodeSnapshot, <String, Map<String, String>>{
-      'preKeys': preKeys,
-      'signedPreKeys': signedPreKeys,
-      'sessions': sessions,
-      'trustedIdentities': trusted,
-    });
+    // JSON encode on a background isolate (fast path).
+    // Falls back to main-thread encoding if the isolate can't spawn
+    // (e.g. on low-end devices with tight isolate limits).
+    String json;
+    try {
+      json = await compute(_encodeSnapshot, <String, Map<String, String>>{
+        'preKeys': preKeys,
+        'signedPreKeys': signedPreKeys,
+        'sessions': sessions,
+        'trustedIdentities': trusted,
+      });
+    } catch (_) {
+      // Fallback: encode on the main thread. Slightly slower but
+      // guaranteed to work — critical for the lifecycle flush that
+      // prevents session state loss on app background.
+      json = jsonEncode(<String, Map<String, String>>{
+        'preKeys': preKeys,
+        'signedPreKeys': signedPreKeys,
+        'sessions': sessions,
+        'trustedIdentities': trusted,
+      });
+    }
 
     await _ss.write(key: _storesKey, value: json);
   }

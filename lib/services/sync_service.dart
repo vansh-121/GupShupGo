@@ -213,53 +213,81 @@ class SyncService {
 
     _messageSubs[roomId] = sub;
 
-    // 2. Perform background delta sync for historical messages since lastSavedTimestamp
+    // 2. Perform background sync for messages — delta (if we have local
+    //    data) or initial bulk fetch (first install).
+    //
+    // On first install, `lastSavedTimestamp` is null and the delta query
+    // is skipped. That leaves only the real-time snapshot listener to
+    // populate the local DB — but that listener can be slow on some devices
+    // (Firestore SDK transport negotiation, cold cache). The one-time
+    // query below acts as a backup: it fetches the latest 50 messages
+    // immediately, ensuring the user sees messages ASAP regardless of
+    // listener latency.
     unawaited(() async {
       try {
         final store = await PlaintextStore.instance();
         final lastSavedTimestamp = await store.getLatestMessageTimestamp(roomId);
+
+        Query query;
         if (lastSavedTimestamp != null) {
-          if (kDebugMode) {
-            debugPrint('[SyncService] Delta query for room $roomId from timestamp $lastSavedTimestamp');
-          }
-          final querySnap = await _firestore
+          // Delta: fetch messages newer than what we have locally
+          query = _firestore
               .collection('chatRooms')
               .doc(roomId)
               .collection('messages')
-              .where('timestamp', isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(lastSavedTimestamp))
-              .orderBy('timestamp')
-              .get();
+              .where('timestamp',
+                  isGreaterThan:
+                      Timestamp.fromMillisecondsSinceEpoch(lastSavedTimestamp))
+              .orderBy('timestamp');
+        } else {
+          // First install / no local data: fetch latest 50 as a one-shot
+          // backup alongside the real-time listener. Whichever finishes
+          // first populates the DB.
+          query = _firestore
+              .collection('chatRooms')
+              .doc(roomId)
+              .collection('messages')
+              .orderBy('timestamp', descending: true)
+              .limit(50);
+        }
 
-          if (querySnap.docs.isNotEmpty) {
-            if (kDebugMode) {
-              debugPrint('[SyncService] Found ${querySnap.docs.length} messages in delta query for room $roomId');
+        final querySnap = await query.get();
+        if (querySnap.docs.isEmpty) return;
+
+        if (kDebugMode) {
+          debugPrint(
+              '[SyncService] Found ${querySnap.docs.length} messages in background query for room $roomId');
+        }
+        final toSave = <MessageModel>[];
+        // Process in reverse chronological so the oldest messages come
+        // first (matches the listener's order for dedup).
+        final docs = lastSavedTimestamp != null
+            ? querySnap.docs
+            : querySnap.docs.reversed;
+        for (final doc in docs) {
+          // Yield to the UI thread for each message so decrypting
+          // doesn't block the main thread — especially important on
+          // cold start or reinstall when many rooms sync simultaneously.
+          await Future.delayed(Duration.zero);
+          final serverMsg = MessageModel.fromFirestore(doc);
+          final decrypted = await ChatService.instance
+              .decryptForRendering(serverMsg, currentUserId);
+          if (decrypted != null) {
+            toSave.add(decrypted);
+            if (decrypted.mediaUrl != null) {
+              _triggerMediaDownload(decrypted, roomId);
             }
-            final toSave = <MessageModel>[];
-            for (final doc in querySnap.docs) {
-              // Yield to the UI thread for each message in the delta sync
-              // so decrypting historical messages doesn't block the main
-              // thread — especially important on cold start or reinstall
-              // when many rooms sync simultaneously.
-              await Future.delayed(Duration.zero);
-              final serverMsg = MessageModel.fromFirestore(doc);
-              final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
-              if (decrypted != null) {
-                toSave.add(decrypted);
-                if (decrypted.mediaUrl != null) {
-                  _triggerMediaDownload(decrypted, roomId);
-                }
-              } else if (VaultCipher.instance.isReady) {
-                toSave.add(_lockedPlaceholder(serverMsg));
-              }
-            }
-            if (toSave.isNotEmpty) {
-              await store.saveMessagesBatch(toSave, roomId);
-            }
+          } else if (VaultCipher.instance.isReady) {
+            toSave.add(_lockedPlaceholder(serverMsg));
           }
+        }
+        if (toSave.isNotEmpty) {
+          await store.saveMessagesBatch(toSave, roomId);
         }
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('[SyncService] Error performing background delta sync in room $roomId: $e');
+          debugPrint(
+              '[SyncService] Error performing background sync in room $roomId: $e');
         }
       }
     }());
