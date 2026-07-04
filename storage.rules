@@ -52,6 +52,13 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Email assets (logo, banners) — publicly readable so email clients can
+    // fetch them without authentication. Write restricted to admins via Console.
+    match /email_assets/{fileName} {
+      allow read: if true;
+      allow write: if false; // upload manually via Firebase Console
+    }
+
     // Deny everything else
     match /{allPaths=**} {
       allow read, write: if false;

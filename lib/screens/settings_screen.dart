@@ -579,6 +579,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _notifPrefs[NotifPrefs.unreadReminder] ?? true,
               onChanged: (v) => _setNotifPref(NotifPrefs.unreadReminder, v),
             ),
+            _divider(),
+            _buildSwitchTile(
+              icon: Icons.email_outlined,
+              iconColor: const Color(0xFF6C5CE7),
+              title: 'Email notifications',
+              subtitle: 'Receive emails for milestones, digests & alerts',
+              value: _settings.emailNotifications,
+              onChanged: (v) async {
+                await _settings.setEmailNotifications(v, _user.id);
+                setState(() {});
+              },
+            ),
           ]),
           const SizedBox(height: 8),
 
