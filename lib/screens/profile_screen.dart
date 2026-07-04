@@ -11,6 +11,10 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/screens/premium_screen.dart';
+import 'package:video_chat_app/widgets/premium_badge.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -176,8 +180,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 8),
+            // Pro badge
+            if (context.watch<SubscriptionProvider>().isPro)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 4),
+                child: PremiumBadge(size: PremiumBadgeSize.medium),
+              ),
             Text('Tap to change photo',
                 style: TextStyle(color: c.textMid, fontSize: 12)),
+
+            // Upgrade to Pro button (only for free users)
+            if (!context.watch<SubscriptionProvider>().isPro) ...[  
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PremiumScreen()),
+                ),
+                icon: const Icon(Icons.workspace_premium_rounded,
+                    size: 18, color: Color(0xFFFFD700)),
+                label: Text(
+                  'Upgrade to Pro',
+                  style: TextStyle(
+                    color: c.textHigh,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  side: BorderSide(color: const Color(0xFFFFD700).withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 28),
 
             // ── Gup Arcade Mini-Stats Card ─────────────────────────────────

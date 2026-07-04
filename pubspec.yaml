@@ -71,6 +71,9 @@ dependencies:
   # Google Play In-App Update (native full-screen update prompt)
   in_app_update: ^4.2.5
 
+  # In-App Purchases (Google Play Billing — GupShupGo Pro)
+  in_app_purchase: ^3.2.0
+
   # Media picker & video player
   image_picker: ^1.0.7
   url_launcher: ^6.2.1

@@ -14,6 +14,10 @@ import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/screens/premium_screen.dart';
+import 'package:video_chat_app/widgets/premium_badge.dart';
+import 'package:video_chat_app/widgets/premium_gate.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -391,6 +395,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildProfileCard(avatarUrl),
           const SizedBox(height: 8),
 
+          // ── GupShupGo Pro subscription card ────────────────────────
+          _buildProCard(),
+          const SizedBox(height: 8),
+
           // ── End-to-end encryption info card ───────────────────────────
           // High-visibility placement so users see the encryption
           // guarantee right after their profile, before scrolling into
@@ -661,6 +669,109 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+
+  // ── GupShupGo Pro card ────────────────────────────────────────────────────
+  Widget _buildProCard() {
+    final c = AppThemeColors.of(context);
+    final sub = context.watch<SubscriptionProvider>();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GestureDetector(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const PremiumScreen()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: sub.isPro
+                  ? [
+                      const Color(0xFFFFD700).withOpacity(0.12),
+                      const Color(0xFFFFA500).withOpacity(0.06),
+                    ]
+                  : [
+                      c.primary.withOpacity(0.08),
+                      c.primary.withOpacity(0.03),
+                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: sub.isPro
+                  ? const Color(0xFFFFD700).withOpacity(0.3)
+                  : c.primary.withOpacity(0.2),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: sub.isPro
+                        ? [const Color(0xFFFFD700), const Color(0xFFFFA500)]
+                        : [c.primary, c.primary.withOpacity(0.7)],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.workspace_premium_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'GupShupGo Pro',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: c.textHigh,
+                          ),
+                        ),
+                        if (sub.isPro) ...[
+                          const SizedBox(width: 8),
+                          const PremiumBadge(size: PremiumBadgeSize.small),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      sub.isPro
+                          ? '${sub.subscription.planLabel} · ${sub.subscription.daysRemaining} days left'
+                          : 'Unlock premium features',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: c.textMid,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                sub.isPro ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded,
+                color: sub.isPro
+                    ? const Color(0xFFFFD700)
+                    : c.textLow,
+                size: sub.isPro ? 24 : 16,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1035,6 +1146,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         },
                       );
                     }),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Divider(),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Pro Themes & Wallpapers',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: c.textMid,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const PremiumBadge(size: PremiumBadgeSize.small),
+                        ],
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.nightlight_round, color: Color(0xFFFFD700)),
+                      title: const Text('AMOLED True Black'),
+                      subtitle: const Text('Ultra power saving for OLED screens'),
+                      trailing: Icon(
+                        context.watch<SubscriptionProvider>().isPro
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.lock_outline_rounded,
+                        color: context.watch<SubscriptionProvider>().isPro
+                            ? c.primary
+                            : c.textLow,
+                        size: 20,
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (PremiumGate.checkAndPrompt(
+                          context,
+                          featureName: 'AMOLED True Black Theme',
+                          featureIcon: Icons.nightlight_round,
+                          description:
+                              'Unlock ultra dark battery saving themes and custom chat wallpapers with GupShupGo Pro.',
+                        )) {
+                          // Pro user selected AMOLED theme
+                          context.read<ThemeProvider>().setThemeMode(ThemeMode.dark);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('✨ AMOLED True Black active!'),
+                              backgroundColor: c.primary,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.palette_rounded, color: Color(0xFFFFD700)),
+                      title: const Text('Custom Chat Wallpapers'),
+                      subtitle: const Text('Personalize backgrounds for every chat'),
+                      trailing: Icon(
+                        context.watch<SubscriptionProvider>().isPro
+                            ? Icons.arrow_forward_ios_rounded
+                            : Icons.lock_outline_rounded,
+                        color: c.textLow,
+                        size: 16,
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (PremiumGate.checkAndPrompt(
+                          context,
+                          featureName: 'Custom Chat Wallpapers',
+                          featureIcon: Icons.palette_rounded,
+                          description:
+                              'Set unique backgrounds and custom color palettes for any conversation with GupShupGo Pro.',
+                        )) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('🎨 Wallpaper customization coming soon!'),
+                              backgroundColor: c.primary,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                    ),
                   ],
                 ),
               ),

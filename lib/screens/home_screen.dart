@@ -39,6 +39,8 @@ import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/widgets/premium_gate.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -186,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen>
         userId: _currentUserId!,
         displayName: name.isEmpty ? mesh.displayName : name,
       );
+
+      // ── Sync subscription userId for IAP ──
+      Provider.of<SubscriptionProvider>(context, listen: false)
+          .setUserId(_currentUserId!);
 
       // ── Show UI immediately ──
       setState(() {
@@ -1405,6 +1411,18 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _navigateToAddMediaStatus() {
+    // Media statuses (photo/video) are a Pro feature
+    if (!PremiumGate.checkAndPrompt(
+      context,
+      featureName: 'Media Moments',
+      featureIcon: Icons.camera_alt_rounded,
+      description:
+          'Share photos and videos as status updates with GupShupGo Pro. '
+          'Free users can still post text moments.',
+    )) {
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
