@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const nodemailer = require("nodemailer");
+const path = require("path");
 const { defineSecret } = require("firebase-functions/params");
 
 // ─── Secrets (set via: firebase functions:secrets:set SMTP_USER / SMTP_PASS) ──
@@ -71,6 +72,13 @@ async function sendEmail(to, subject, html) {
         // Brevo tracking (optional — disable if you don't want open/click tracking)
         "X-Mailin-Tag": "gupshupgo-transactional",
       },
+      attachments: [
+        {
+          filename: "email_logo.png",
+          path: path.join(__dirname, "assets", "email_logo_white.png"),
+          cid: "email_logo",
+        },
+      ],
     });
 
     console.log(`Email sent to ${to}: ${info.messageId}`);

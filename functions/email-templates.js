@@ -74,11 +74,11 @@ function emailWrapper(preheader, bodyContent, unsubscribeUrl) {
 
           <!-- Header bar -->
           <tr>
-            <td style="background:linear-gradient(135deg, ${BRAND.primary} 0%, ${BRAND.primaryDark} 100%);padding:28px 32px;text-align:center;">
+            <td style="background:linear-gradient(135deg, ${BRAND.primary} 0%, ${BRAND.primaryDark} 100%);padding:24px 32px;text-align:center;">
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center">
-                    <span style="font-size:28px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;font-family:${BRAND.fontStack};">${BRAND.name}</span>
+                    <img src="cid:email_logo" alt="${BRAND.name}" height="48" style="display:block;margin:0 auto;height:48px;border:0;outline:none;text-decoration:none;" />
                   </td>
                 </tr>
               </table>
