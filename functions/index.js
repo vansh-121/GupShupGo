@@ -1,9 +1,14 @@
 // Force redeploy to apply minInstances
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+
+// ─── Email System ──────────────────────────────────────────────────────────────
+const emailService = require("./email-service");
+const emailTemplates = require("./email-templates");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -627,9 +632,9 @@ exports.consumeOneTimePreKey = onRequest(
 
 // ─── Trigger 1: Streak Broken ─────────────────────────────────────────────────
 // Fires the instant streakBrokenAt is written (null → timestamp).
-// Both participants get an immediate personalised push.
+// Both participants get an immediate personalised push + email.
 exports.streakBrokenTrigger = onDocumentUpdated(
-  { document: "chatRooms/{roomId}", region: "us-central1" },
+  { document: "chatRooms/{roomId}", region: "us-central1", secrets: emailService.secrets },
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -646,12 +651,13 @@ exports.streakBrokenTrigger = onDocumentUpdated(
     const nameMap = await getUserNames(participants);
 
     await Promise.all(
-      participants.map((userId) => {
+      participants.map(async (userId) => {
         const otherUserId = participants.find((id) => id !== userId);
         const otherName = nameMap[otherUserId] || "your friend";
         const streakLabel = `${previousStreakCount}-day`;
 
-        return sendToUserDevices(userId, (token) => ({
+        // Push notification
+        await sendToUserDevices(userId, (token) => ({
           token,
           notification: {
             title: "💔 Streak Broken",
@@ -667,6 +673,12 @@ exports.streakBrokenTrigger = onDocumentUpdated(
           android: { priority: "high" },
           apns: { headers: { "apns-priority": "10" } },
         }));
+
+        // Email notification
+        await sendEmailToUser(userId, (name, email) => {
+          const unsub = emailService.buildUnsubscribeUrl(userId);
+          return emailTemplates.streakBrokenEmail(name, otherName, previousStreakCount, unsub);
+        });
       })
     );
 
@@ -678,7 +690,7 @@ exports.streakBrokenTrigger = onDocumentUpdated(
 // ─── Trigger 2: Streak Milestone ──────────────────────────────────────────────
 // Fires when streakCount crosses 7, 30, 100, or 365 days.
 exports.streakMilestoneTrigger = onDocumentUpdated(
-  { document: "chatRooms/{roomId}", region: "us-central1" },
+  { document: "chatRooms/{roomId}", region: "us-central1", secrets: emailService.secrets },
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -698,11 +710,12 @@ exports.streakMilestoneTrigger = onDocumentUpdated(
     const title = milestone >= 365 ? "Year-long Legend!" : milestone >= 100 ? "Century Streak!" : milestone >= 30 ? "Month Milestone!" : "Week Streak!";
 
     await Promise.all(
-      participants.map((userId) => {
+      participants.map(async (userId) => {
         const otherUserId = participants.find((id) => id !== userId);
         const otherName = nameMap[otherUserId] || "your friend";
 
-        return sendToUserDevices(userId, (token) => ({
+        // Push notification
+        await sendToUserDevices(userId, (token) => ({
           token,
           notification: {
             title: `${emoji} ${title}`,
@@ -718,6 +731,12 @@ exports.streakMilestoneTrigger = onDocumentUpdated(
           android: { priority: "high" },
           apns: { headers: { "apns-priority": "10" } },
         }));
+
+        // Email notification
+        await sendEmailToUser(userId, (name, email) => {
+          const unsub = emailService.buildUnsubscribeUrl(userId);
+          return emailTemplates.streakMilestoneEmail(name, otherName, milestone, unsub);
+        });
       })
     );
 
@@ -729,8 +748,9 @@ exports.streakMilestoneTrigger = onDocumentUpdated(
 // ─── Trigger 3: Gup Points Reward ─────────────────────────────────────────────
 // Fires when a user's gupPoints increases by ≥ 20 in one write.
 // Cooldown: once per hour per user.
+// Email: only for gains ≥ 50 to avoid email spam.
 exports.gupPointsEarnedTrigger = onDocumentUpdated(
-  { document: "users/{userId}", region: "us-central1" },
+  { document: "users/{userId}", region: "us-central1", secrets: emailService.secrets },
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -765,6 +785,14 @@ exports.gupPointsEarnedTrigger = onDocumentUpdated(
       android: { priority: "normal" },
       apns: { headers: { "apns-priority": "5" } },
     }));
+
+    // Email only for significant gains (≥ 50 points)
+    if (gained >= 50) {
+      await sendEmailToUser(userId, (name, email) => {
+        const unsub = emailService.buildUnsubscribeUrl(userId);
+        return emailTemplates.gupPointsEarnedEmail(name, gained, newPoints, unsub);
+      });
+    }
 
     // Write cooldown timestamp
     await db.collection("users").doc(userId).update({
@@ -1070,3 +1098,322 @@ exports.unreadReminderBatch = onSchedule(
     console.log(`unreadReminderBatch: reminded ${userIdsToRemind.size} users.`);
   }
 );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL NOTIFICATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Email Helper ──────────────────────────────────────────────────────────────
+// Looks up a user's email and emailNotifications preference, then sends an
+// email via the email-service module. Skips silently if the user has no email
+// or has unsubscribed. templateFn receives (name, email) and must return
+// { subject, html }.
+
+async function sendEmailToUser(userId, templateFn) {
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
+    if (!userDoc.exists) return false;
+
+    const userData = userDoc.data();
+    const email = userData.email;
+    const name = userData.name || "there";
+
+    // Skip if no email or user has unsubscribed
+    if (!email) return false;
+    if (userData.emailNotifications === false) return false;
+
+    const { subject, html } = templateFn(name, email);
+    return await emailService.sendEmail(email, subject, html);
+  } catch (error) {
+    console.error(`sendEmailToUser(${userId}) failed:`, error.message);
+    return false;
+  }
+}
+
+// ─── Trigger: Welcome Email (new user created) ────────────────────────────────
+exports.welcomeEmailTrigger = onDocumentCreated(
+  { document: "users/{userId}", region: "us-central1", secrets: emailService.secrets },
+  async (event) => {
+    const userData = event.data.data();
+    const userId = event.params.userId;
+    const email = userData.email;
+    const name = userData.name || "there";
+
+    if (!email) {
+      console.log(`welcomeEmailTrigger: user ${userId} has no email, skipping`);
+      return null;
+    }
+
+    const unsub = emailService.buildUnsubscribeUrl(userId);
+    const { subject, html } = emailTemplates.welcomeEmail(name, unsub);
+    await emailService.sendEmail(email, subject, html);
+
+    console.log(`welcomeEmailTrigger: welcome email sent to ${email}`);
+    return null;
+  }
+);
+
+// ─── Trigger: Login Alert Email ───────────────────────────────────────────────
+// Uses beforeUserSignedIn blocking function to capture sign-in events.
+// Sends a security-style "new sign-in detected" email.
+exports.loginAlertEmail = beforeUserSignedIn(
+  { region: "us-central1", secrets: emailService.secrets },
+  async (event) => {
+    try {
+      const user = event.data;
+      if (!user || !user.uid) return;
+
+      const userDoc = await db.collection("users").doc(user.uid).get();
+      if (!userDoc.exists) return; // New user — welcome email handles it
+
+      const userData = userDoc.data();
+      const email = userData.email || user.email;
+      const name = userData.name || user.displayName || "there";
+
+      if (!email) return;
+      if (userData.emailNotifications === false) return;
+
+      // Cooldown: max one login alert per 6 hours
+      const lastLoginEmail = userData.notifiedAt?.login_alert;
+      if (lastLoginEmail) {
+        const hoursSince = (Date.now() - lastLoginEmail.toMillis()) / 3600000;
+        if (hoursSince < 6) return;
+      }
+
+      const now = new Date();
+      const loginTime = now.toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+
+      const device = event.ipAddress
+        ? `${event.userAgent || "Unknown device"} (${event.ipAddress})`
+        : event.userAgent || "Unknown device";
+
+      const unsub = emailService.buildUnsubscribeUrl(user.uid);
+      const { subject, html } = emailTemplates.loginAlertEmail(name, device, loginTime, unsub);
+      await emailService.sendEmail(email, subject, html);
+
+      // Record cooldown
+      await db.collection("users").doc(user.uid).update({
+        "notifiedAt.login_alert": admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      // Never block sign-in due to email failure
+      console.error("loginAlertEmail error (non-blocking):", error.message);
+    }
+  }
+);
+
+// ─── Scheduled: Weekly Digest Email (Monday 9 AM IST = 3:30 AM UTC) ──────────
+exports.weeklyDigestEmailJob = onSchedule(
+  { schedule: "30 3 * * 1", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  async () => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
+
+    // Fetch recently-active users who have email and haven't unsubscribed
+    const usersSnap = await db
+      .collection("users")
+      .where("lastSeen", ">", admin.firestore.Timestamp.fromDate(sevenDaysAgo))
+      .get();
+
+    let sentCount = 0;
+
+    await Promise.all(
+      usersSnap.docs.map(async (userDoc) => {
+        const userData = userDoc.data();
+        const email = userData.email;
+        const name = userData.name || "there";
+
+        if (!email) return;
+        if (userData.emailNotifications === false) return;
+
+        // Cooldown: once per 6 days
+        const lastDigestEmail = userData.notifiedAt?.weekly_digest_email;
+        if (lastDigestEmail) {
+          const daysSince = (now - lastDigestEmail.toDate()) / 86400000;
+          if (daysSince < 6) return;
+        }
+
+        // Gather stats for this user
+        const userId = userDoc.id;
+        let messagesSent = 0;
+        let activeBonds = 0;
+        let longestStreak = 0;
+
+        try {
+          const chatRoomsSnap = await db
+            .collection("chatRooms")
+            .where("participants", "array-contains", userId)
+            .get();
+
+          for (const roomDoc of chatRoomsSnap.docs) {
+            const room = roomDoc.data();
+            const streak = room.streakCount || 0;
+            if (streak > 0) activeBonds++;
+            if (streak > longestStreak) longestStreak = streak;
+          }
+        } catch (_) { }
+
+        const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
+
+        const stats = {
+          messagesSent: messagesSent, // We don't track per-user message count easily; left as 0
+          activeBonds,
+          longestStreak,
+          gupPointsEarned,
+        };
+
+        const unsub = emailService.buildUnsubscribeUrl(userId);
+        const { subject, html } = emailTemplates.weeklyDigestEmail(name, stats, unsub);
+        const sent = await emailService.sendEmail(email, subject, html);
+
+        if (sent) {
+          sentCount++;
+          await userDoc.ref.update({
+            "notifiedAt.weekly_digest_email": admin.firestore.FieldValue.serverTimestamp(),
+            "lastWeekPoints": userData.gupPoints || 0,
+          }).catch(() => { });
+        }
+      })
+    );
+
+    console.log(`weeklyDigestEmailJob: sent ${sentCount} weekly digest emails.`);
+  }
+);
+
+// ─── Scheduled: Inactivity Reminder Email (daily at 6 PM IST = 12:30 PM UTC) ─
+exports.inactivityReminderEmailJob = onSchedule(
+  { schedule: "30 12 * * *", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  async () => {
+    const now = new Date();
+    const threeDaysAgo = new Date(now - 3 * 24 * 3600000);
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 3600000);
+
+    // Users who were active in the last 30 days but NOT in the last 3 days
+    const usersSnap = await db
+      .collection("users")
+      .where("lastSeen", "<", admin.firestore.Timestamp.fromDate(threeDaysAgo))
+      .where("lastSeen", ">", admin.firestore.Timestamp.fromDate(thirtyDaysAgo))
+      .get();
+
+    let sentCount = 0;
+
+    await Promise.all(
+      usersSnap.docs.map(async (userDoc) => {
+        const userData = userDoc.data();
+        const email = userData.email;
+        const name = userData.name || "there";
+
+        if (!email) return;
+        if (userData.emailNotifications === false) return;
+
+        // Cooldown: once per 7 days
+        const lastInactivityEmail = userData.notifiedAt?.inactivity_email;
+        if (lastInactivityEmail) {
+          const daysSince = (now - lastInactivityEmail.toDate()) / 86400000;
+          if (daysSince < 7) return;
+        }
+
+        const lastSeen = userData.lastSeen?.toDate ? userData.lastSeen.toDate() : null;
+        const daysSince = lastSeen
+          ? Math.floor((now - lastSeen) / 86400000)
+          : 3;
+
+        const unsub = emailService.buildUnsubscribeUrl(userDoc.id);
+        const { subject, html } = emailTemplates.inactivityReminderEmail(name, daysSince, unsub);
+        const sent = await emailService.sendEmail(email, subject, html);
+
+        if (sent) {
+          sentCount++;
+          await userDoc.ref.update({
+            "notifiedAt.inactivity_email": admin.firestore.FieldValue.serverTimestamp(),
+          }).catch(() => { });
+        }
+      })
+    );
+
+    console.log(`inactivityReminderEmailJob: sent ${sentCount} inactivity emails.`);
+  }
+);
+
+// ─── HTTP: Unsubscribe from Emails ────────────────────────────────────────────
+// One-click unsubscribe endpoint. Sets emailNotifications = false on the user doc.
+// No auth required (link is in emails, must work without sign-in).
+exports.unsubscribeEmail = onRequest(
+  { cors: true, invoker: "public", region: "us-central1" },
+  async (req, res) => {
+    const uid = req.query.uid || (req.body && req.body.uid);
+
+    if (!uid || typeof uid !== "string") {
+      res.status(400).send(unsubscribePage("Invalid request", false));
+      return;
+    }
+
+    try {
+      const userRef = db.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        res.status(404).send(unsubscribePage("Account not found", false));
+        return;
+      }
+
+      await userRef.update({ emailNotifications: false });
+
+      res.status(200).send(unsubscribePage(userDoc.data().name || "there", true));
+    } catch (error) {
+      console.error("unsubscribeEmail error:", error);
+      res.status(500).send(unsubscribePage("Something went wrong", false));
+    }
+  }
+);
+
+// Simple HTML page shown after clicking unsubscribe
+function unsubscribePage(nameOrError, success) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${success ? "Unsubscribed" : "Error"} — GupShupGo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #F5F3FF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 48px 40px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(108,92,231,0.08);
+    }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; color: #1E293B; margin-bottom: 8px; }
+    p { font-size: 15px; color: #64748B; line-height: 1.6; }
+    .brand { color: #6C5CE7; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${success ? "✅" : "⚠️"}</div>
+    <h1>${success ? `You've been unsubscribed` : nameOrError}</h1>
+    <p>${success
+      ? `${nameOrError}, you will no longer receive emails from <span class="brand">GupShupGo</span>. You can re-enable email notifications anytime in the app under Settings.`
+      : "We couldn't process your request. Please try again or manage your preferences in the app."
+    }</p>
+  </div>
+</body>
+</html>`;
+}

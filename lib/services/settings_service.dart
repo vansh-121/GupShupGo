@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/main.dart';
 
 /// Persists all user-facing settings to SharedPreferences so they survive
@@ -16,6 +17,7 @@ class SettingsService {
   static const _kShowReadReceipts = 'pref_show_read_receipts';
   static const _kShowLastSeen = 'pref_show_last_seen';
   static const _kMutedChats = 'pref_muted_chats';
+  static const _kEmailNotifications = 'pref_email_notifications';
 
   // ── Notification prefs ─────────────────────────────────────────────────────
 
@@ -33,6 +35,28 @@ class SettingsService {
       sharedPrefs.getBool(_kCallNotifications) ?? true;
   set callNotifications(bool v) =>
       sharedPrefs.setBool(_kCallNotifications, v);
+
+  // ── Email notification preference ─────────────────────────────────────────
+  // Synced to Firestore so that server-side Cloud Functions respect the
+  // user's preference. The emailNotifications field on the user document
+  // is the source of truth for the server.
+
+  bool get emailNotifications =>
+      sharedPrefs.getBool(_kEmailNotifications) ?? true;
+
+  /// Sets the local preference AND syncs to Firestore so Cloud Functions
+  /// skip sending emails when the user has unsubscribed.
+  Future<void> setEmailNotifications(bool value, String userId) async {
+    sharedPrefs.setBool(_kEmailNotifications, value);
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .update({'emailNotifications': value});
+    } catch (e) {
+      print('Failed to sync emailNotifications to Firestore: $e');
+    }
+  }
 
   // ── Privacy prefs ──────────────────────────────────────────────────────────
 
