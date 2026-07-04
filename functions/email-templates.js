@@ -418,12 +418,12 @@ function weeklyDigestEmail(name, stats, unsubscribeUrl) {
       </tr>
     </table>
 
-    ${s.messagesSent === 0
+    ${s.messagesSent > 0
       ? `<p style="margin:0 0 20px 0;font-size:15px;color:${BRAND.textMid};line-height:1.7;">
-          It was a quiet week. Your friends are just a message away — open the app and say hello.
+          Great week! Keep the momentum going and watch your bonds grow stronger.
         </p>`
       : `<p style="margin:0 0 20px 0;font-size:15px;color:${BRAND.textMid};line-height:1.7;">
-          Great week! Keep the momentum going and watch your bonds grow stronger.
+          It was a quiet week. Your friends are just a message away — open the app and say hello.
         </p>`
     }
 
@@ -556,6 +556,7 @@ function escHtml(str) {
 }
 
 module.exports = {
+  escHtml,
   welcomeEmail,
   loginAlertEmail,
   streakBrokenEmail,

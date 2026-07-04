@@ -9,6 +9,7 @@ const crypto = require("crypto");
 // ─── Email System ──────────────────────────────────────────────────────────────
 const emailService = require("./email-service");
 const emailTemplates = require("./email-templates");
+const { escHtml } = emailTemplates;
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1314,13 +1315,26 @@ exports.weeklyDigestEmailJob = onSchedule(
               const streak = room.streakCount || 0;
               if (streak > 0) activeBonds++;
               if (streak > longestStreak) longestStreak = streak;
+
+              // Count messages sent by this user in the last 7 days
+              try {
+                const msgCountSnap = await db
+                  .collection("chatRooms")
+                  .doc(roomDoc.id)
+                  .collection("messages")
+                  .where("senderId", "==", userId)
+                  .where("timestamp", ">=", admin.firestore.Timestamp.fromDate(sevenDaysAgo))
+                  .count()
+                  .get();
+                messagesSent += msgCountSnap.data().count || 0;
+              } catch (_) {}
             }
           } catch (_) {}
 
           const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
 
           const stats = {
-            messagesSent: messagesSent,
+            messagesSent,
             activeBonds,
             longestStreak,
             gupPointsEarned,
@@ -1440,7 +1454,8 @@ exports.unsubscribeEmail = onRequest(
 
       await userRef.update({ emailNotifications: false });
 
-      res.status(200).send(unsubscribePage(userDoc.data().name || "there", true));
+      const safeName = escHtml(userDoc.data().name || "there");
+      res.status(200).send(unsubscribePage(safeName, true));
     } catch (error) {
       console.error("unsubscribeEmail error:", error);
       res.status(500).send(unsubscribePage("Something went wrong", false));
