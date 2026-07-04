@@ -6,13 +6,17 @@
 // and swallowed so email issues never crash the calling Cloud Function.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const path = require("path");
 const { defineSecret } = require("firebase-functions/params");
 
 // ─── Secrets (set via: firebase functions:secrets:set SMTP_USER / SMTP_PASS) ──
 const smtpUser = defineSecret("SMTP_USER");
 const smtpPass = defineSecret("SMTP_PASS");
+
+// ─── Unsubscribe HMAC Secret ──────────────────────────────────────────────────
+// Set via: firebase functions:secrets:set UNSUBSCRIBE_SECRET
+const unsubscribeSecret = defineSecret("UNSUBSCRIBE_SECRET");
 
 // ─── Transporter (lazy singleton) ──────────────────────────────────────────────
 let _transporter = null;
@@ -72,13 +76,8 @@ async function sendEmail(to, subject, html) {
         // Brevo tracking (optional — disable if you don't want open/click tracking)
         "X-Mailin-Tag": "gupshupgo-transactional",
       },
-      attachments: [
-        {
-          filename: "email_logo.png",
-          path: path.join(__dirname, "assets", "email_logo_white.png"),
-          cid: "email_logo",
-        },
-      ],
+      // Logo is now served inline from Firebase Storage via the HTML template
+      // (see email-templates.js → LOGO_URL), not as an SMTP attachment.
     });
 
     console.log(`Email sent to ${to}: ${info.messageId}`);
@@ -136,18 +135,41 @@ async function sendBatch(recipients, templateFn) {
 
 // ─── Build unsubscribe URL ─────────────────────────────────────────────────────
 /**
- * Generates a Firestore-based unsubscribe URL. In practice this would point to
- * a Cloud Function HTTP endpoint that flips the emailNotifications flag.
+ * Generates a signed unsubscribe URL with an HMAC token so the endpoint
+ * can verify the request originated from a legitimate email link.
  */
 function buildUnsubscribeUrl(userId) {
-  // The unsubscribeEmail Cloud Function handles this
-  return `https://us-central1-videocallapp-81166.cloudfunctions.net/unsubscribeEmail?uid=${encodeURIComponent(userId)}`;
+  const token = crypto
+    .createHmac("sha256", unsubscribeSecret.value())
+    .update(userId)
+    .digest("hex");
+  return `https://us-central1-videocallapp-81166.cloudfunctions.net/unsubscribeEmail?uid=${encodeURIComponent(userId)}&token=${token}`;
+}
+
+// ─── Verify unsubscribe token ──────────────────────────────────────────────────
+/**
+ * Verifies that an HMAC token matches the expected value for a given user ID.
+ * Uses timingSafeEqual to prevent timing attacks.
+ */
+function verifyUnsubscribeToken(userId, token) {
+  if (!userId || !token) return false;
+  try {
+    const expected = crypto
+      .createHmac("sha256", unsubscribeSecret.value())
+      .update(userId)
+      .digest("hex");
+    if (expected.length !== token.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+  } catch {
+    return false;
+  }
 }
 
 module.exports = {
   sendEmail,
   sendBatch,
   buildUnsubscribeUrl,
+  verifyUnsubscribeToken,
   // Export secrets so Cloud Functions that use this module can declare them
-  secrets: [smtpUser, smtpPass],
+  secrets: [smtpUser, smtpPass, unsubscribeSecret],
 };

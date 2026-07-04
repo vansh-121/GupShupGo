@@ -34,6 +34,11 @@ const BRAND = {
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
   supportEmail: "gupshupgo.support@gmail.com",
   playStoreUrl: "https://play.google.com/store/apps/details?id=com.gupshupgo.app",
+  // Logo served from Firebase Storage (upload functions/assets/email_logo_white.png
+  // to the storage bucket at email_assets/email_logo_white.png).
+  // Publicly readable via storage.rules → email_assets rule.
+  logoUrl:
+    "https://firebasestorage.googleapis.com/v0/b/videocallapp-81166.firebasestorage.app/o/email_assets%2Femail_logo_white.png?alt=media",
 };
 
 // ─── Shared Layout ─────────────────────────────────────────────────────────────
@@ -78,7 +83,7 @@ function emailWrapper(preheader, bodyContent, unsubscribeUrl) {
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center">
-                    <img src="cid:email_logo" alt="${BRAND.name}" height="48" style="display:block;margin:0 auto;height:48px;border:0;outline:none;text-decoration:none;" />
+                    <img src="${BRAND.logoUrl}" alt="${BRAND.name}" height="48" style="display:block;margin:0 auto;height:48px;border:0;outline:none;text-decoration:none;" />
                   </td>
                 </tr>
               </table>

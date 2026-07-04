@@ -1192,8 +1192,18 @@ exports.loginAlertEmail = beforeUserSignedIn(
         : event.userAgent || "Unknown device";
 
       const unsub = emailService.buildUnsubscribeUrl(user.uid);
-      const { subject, html } = emailTemplates.loginAlertEmail(name, device, loginTime, unsub);
-      await emailService.sendEmail(email, subject, html);
+      // Write to pendingEmails collection — the processPendingEmails Firestore
+      // trigger handles the actual SMTP send asynchronously, so auth isn't delayed.
+      await db.collection("pendingEmails").add({
+        type: "login_alert",
+        email,
+        name,
+        device,
+        loginTime,
+        unsub,
+        uid: user.uid,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
       // Record cooldown
       await db.collection("users").doc(user.uid).update({
@@ -1204,6 +1214,52 @@ exports.loginAlertEmail = beforeUserSignedIn(
       console.error("loginAlertEmail error (non-blocking):", error.message);
     }
   }
+);
+
+// ─── Firestore Trigger: Process Pending Emails ────────────────────────────────
+// Picks up documents written to the pendingEmails collection and sends them
+// via SMTP. This keeps auth-blocking functions (like loginAlertEmail) fast.
+exports.processPendingEmails = onDocumentCreated(
+  {
+    document: "pendingEmails/{emailId}",
+    region: "us-central1",
+    secrets: emailService.secrets,
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data();
+    if (!data || !data.email) return;
+
+    try {
+      let subject, html;
+
+      switch (data.type) {
+        case "login_alert": {
+          const tpl = emailTemplates.loginAlertEmail(
+            data.name,
+            data.device,
+            data.loginTime,
+            data.unsub,
+          );
+          subject = tpl.subject;
+          html = tpl.html;
+          break;
+        }
+        default:
+          console.warn(`processPendingEmails: unknown type "${data.type}", skipping`);
+          return;
+      }
+
+      const sent = await emailService.sendEmail(data.email, subject, html);
+      if (sent) {
+        console.log(`processPendingEmails: ${data.type} email sent to ${data.email}`);
+      }
+    } catch (error) {
+      console.error(`processPendingEmails error for ${data.email}:`, error.message);
+    }
+  },
 );
 
 // ─── Scheduled: Weekly Digest Email (Monday 9 AM IST = 3:30 AM UTC) ──────────
@@ -1221,64 +1277,71 @@ exports.weeklyDigestEmailJob = onSchedule(
 
     let sentCount = 0;
 
-    await Promise.all(
-      usersSnap.docs.map(async (userDoc) => {
-        const userData = userDoc.data();
-        const email = userData.email;
-        const name = userData.name || "there";
+    // Process users in sequential batches to avoid OOM / rate-limiting
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < usersSnap.docs.length; i += BATCH_SIZE) {
+      const batch = usersSnap.docs.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (userDoc) => {
+          const userData = userDoc.data();
+          const email = userData.email;
+          const name = userData.name || "there";
 
-        if (!email) return;
-        if (userData.emailNotifications === false) return;
+          if (!email) return false;
+          if (userData.emailNotifications === false) return false;
 
-        // Cooldown: once per 6 days
-        const lastDigestEmail = userData.notifiedAt?.weekly_digest_email;
-        if (lastDigestEmail) {
-          const daysSince = (now - lastDigestEmail.toDate()) / 86400000;
-          if (daysSince < 6) return;
-        }
-
-        // Gather stats for this user
-        const userId = userDoc.id;
-        let messagesSent = 0;
-        let activeBonds = 0;
-        let longestStreak = 0;
-
-        try {
-          const chatRoomsSnap = await db
-            .collection("chatRooms")
-            .where("participants", "array-contains", userId)
-            .get();
-
-          for (const roomDoc of chatRoomsSnap.docs) {
-            const room = roomDoc.data();
-            const streak = room.streakCount || 0;
-            if (streak > 0) activeBonds++;
-            if (streak > longestStreak) longestStreak = streak;
+          // Cooldown: once per 6 days
+          const lastDigestEmail = userData.notifiedAt?.weekly_digest_email;
+          if (lastDigestEmail) {
+            const daysSince = (now - lastDigestEmail.toDate()) / 86400000;
+            if (daysSince < 6) return false;
           }
-        } catch (_) { }
 
-        const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
+          // Gather stats for this user
+          const userId = userDoc.id;
+          let messagesSent = 0;
+          let activeBonds = 0;
+          let longestStreak = 0;
 
-        const stats = {
-          messagesSent: messagesSent, // We don't track per-user message count easily; left as 0
-          activeBonds,
-          longestStreak,
-          gupPointsEarned,
-        };
+          try {
+            const chatRoomsSnap = await db
+              .collection("chatRooms")
+              .where("participants", "array-contains", userId)
+              .get();
 
-        const unsub = emailService.buildUnsubscribeUrl(userId);
-        const { subject, html } = emailTemplates.weeklyDigestEmail(name, stats, unsub);
-        const sent = await emailService.sendEmail(email, subject, html);
+            for (const roomDoc of chatRoomsSnap.docs) {
+              const room = roomDoc.data();
+              const streak = room.streakCount || 0;
+              if (streak > 0) activeBonds++;
+              if (streak > longestStreak) longestStreak = streak;
+            }
+          } catch (_) {}
 
-        if (sent) {
-          sentCount++;
-          await userDoc.ref.update({
-            "notifiedAt.weekly_digest_email": admin.firestore.FieldValue.serverTimestamp(),
-            "lastWeekPoints": userData.gupPoints || 0,
-          }).catch(() => { });
-        }
-      })
-    );
+          const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
+
+          const stats = {
+            messagesSent: messagesSent,
+            activeBonds,
+            longestStreak,
+            gupPointsEarned,
+          };
+
+          const unsub = emailService.buildUnsubscribeUrl(userId);
+          const { subject, html } = emailTemplates.weeklyDigestEmail(name, stats, unsub);
+          const sent = await emailService.sendEmail(email, subject, html);
+
+          if (sent) {
+            await userDoc.ref.update({
+              "notifiedAt.weekly_digest_email": admin.firestore.FieldValue.serverTimestamp(),
+              "lastWeekPoints": userData.gupPoints || 0,
+            }).catch(() => {});
+            return true;
+          }
+          return false;
+        }),
+      );
+      sentCount += results.filter((r) => r.status === "fulfilled" && r.value).length;
+    }
 
     console.log(`weeklyDigestEmailJob: sent ${sentCount} weekly digest emails.`);
   }
@@ -1301,39 +1364,46 @@ exports.inactivityReminderEmailJob = onSchedule(
 
     let sentCount = 0;
 
-    await Promise.all(
-      usersSnap.docs.map(async (userDoc) => {
-        const userData = userDoc.data();
-        const email = userData.email;
-        const name = userData.name || "there";
+    // Process users in sequential batches to avoid OOM / rate-limiting
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < usersSnap.docs.length; i += BATCH_SIZE) {
+      const batch = usersSnap.docs.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (userDoc) => {
+          const userData = userDoc.data();
+          const email = userData.email;
+          const name = userData.name || "there";
 
-        if (!email) return;
-        if (userData.emailNotifications === false) return;
+          if (!email) return false;
+          if (userData.emailNotifications === false) return false;
 
-        // Cooldown: once per 7 days
-        const lastInactivityEmail = userData.notifiedAt?.inactivity_email;
-        if (lastInactivityEmail) {
-          const daysSince = (now - lastInactivityEmail.toDate()) / 86400000;
-          if (daysSince < 7) return;
-        }
+          // Cooldown: once per 7 days
+          const lastInactivityEmail = userData.notifiedAt?.inactivity_email;
+          if (lastInactivityEmail) {
+            const daysSince = (now - lastInactivityEmail.toDate()) / 86400000;
+            if (daysSince < 7) return false;
+          }
 
-        const lastSeen = userData.lastSeen?.toDate ? userData.lastSeen.toDate() : null;
-        const daysSince = lastSeen
-          ? Math.floor((now - lastSeen) / 86400000)
-          : 3;
+          const lastSeen = userData.lastSeen?.toDate ? userData.lastSeen.toDate() : null;
+          const daysSinceLastSeen = lastSeen
+            ? Math.floor((now - lastSeen) / 86400000)
+            : 3;
 
-        const unsub = emailService.buildUnsubscribeUrl(userDoc.id);
-        const { subject, html } = emailTemplates.inactivityReminderEmail(name, daysSince, unsub);
-        const sent = await emailService.sendEmail(email, subject, html);
+          const unsub = emailService.buildUnsubscribeUrl(userDoc.id);
+          const { subject, html } = emailTemplates.inactivityReminderEmail(name, daysSinceLastSeen, unsub);
+          const sent = await emailService.sendEmail(email, subject, html);
 
-        if (sent) {
-          sentCount++;
-          await userDoc.ref.update({
-            "notifiedAt.inactivity_email": admin.firestore.FieldValue.serverTimestamp(),
-          }).catch(() => { });
-        }
-      })
-    );
+          if (sent) {
+            await userDoc.ref.update({
+              "notifiedAt.inactivity_email": admin.firestore.FieldValue.serverTimestamp(),
+            }).catch(() => {});
+            return true;
+          }
+          return false;
+        }),
+      );
+      sentCount += results.filter((r) => r.status === "fulfilled" && r.value).length;
+    }
 
     console.log(`inactivityReminderEmailJob: sent ${sentCount} inactivity emails.`);
   }
@@ -1341,14 +1411,21 @@ exports.inactivityReminderEmailJob = onSchedule(
 
 // ─── HTTP: Unsubscribe from Emails ────────────────────────────────────────────
 // One-click unsubscribe endpoint. Sets emailNotifications = false on the user doc.
-// No auth required (link is in emails, must work without sign-in).
+// Uses HMAC-signed tokens to prevent unauthorised unsubscribes.
 exports.unsubscribeEmail = onRequest(
-  { cors: true, invoker: "public", region: "us-central1" },
+  { cors: true, invoker: "public", region: "us-central1", secrets: emailService.secrets },
   async (req, res) => {
     const uid = req.query.uid || (req.body && req.body.uid);
+    const token = req.query.token || (req.body && req.body.token);
 
     if (!uid || typeof uid !== "string") {
       res.status(400).send(unsubscribePage("Invalid request", false));
+      return;
+    }
+
+    // Verify HMAC token to prevent unauthorised unsubscribes
+    if (!emailService.verifyUnsubscribeToken(uid, token)) {
+      res.status(403).send(unsubscribePage("Invalid or expired link", false));
       return;
     }
 
