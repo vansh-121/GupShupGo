@@ -32,7 +32,6 @@ import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
-import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -42,6 +41,8 @@ import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 
 class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
@@ -60,7 +61,6 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
-  final UpdateService _updateService = UpdateService();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -115,8 +115,9 @@ class _HomeScreenState extends State<HomeScreen>
     // drops, ensuring the user is marked offline even on force-kill.
     if (_currentUserId != null) {
       // Best-effort explicit offline write; non-critical if it fails.
-      PresenceService.instance.onAppPaused(_currentUserId!).catchError(
-          (e) => debugPrint('Presence dispose cleanup error: $e'));
+      PresenceService.instance
+          .onAppPaused(_currentUserId!)
+          .catchError((e) => debugPrint('Presence dispose cleanup error: $e'));
     }
     super.dispose();
   }
@@ -138,6 +139,15 @@ class _HomeScreenState extends State<HomeScreen>
         case AppLifecycleState.inactive:
         case AppLifecycleState.detached:
           PresenceService.instance.onAppPaused(_currentUserId!);
+          // Force-flush Signal Protocol state to secure storage when the
+          // app goes to background. The debounced flush (3000ms) may not
+          // have fired yet, and without this the latest session ratchet
+          // state (updated during message decrypt) would be lost if the
+          // app is killed. Lost session state = "🔒 can't decrypt" on
+          // the next incoming message from that peer.
+          try {
+            SignalService.instance.stores.flush();
+          } catch (_) {}
           break;
         case AppLifecycleState.hidden:
           break;
@@ -213,8 +223,11 @@ class _HomeScreenState extends State<HomeScreen>
           _tabController.animateTo(pendingTab);
         }
 
-        final pendingChatContactId = NotificationService.consumePendingChatDeepLink();
-        if (pendingChatContactId != null && pendingChatContactId.isNotEmpty && mounted) {
+        final pendingChatContactId =
+            NotificationService.consumePendingChatDeepLink();
+        if (pendingChatContactId != null &&
+            pendingChatContactId.isNotEmpty &&
+            mounted) {
           try {
             final user = await _userService.getUserById(pendingChatContactId);
             if (user != null && mounted) {
@@ -273,9 +286,6 @@ class _HomeScreenState extends State<HomeScreen>
       // ignore: discarded_futures
       _prewarmEncryption(_currentUserId!);
 
-      // ── Check for app updates via Google Play native API ──
-      _updateService.checkAndPromptUpdate();
-
       // ── Listen to user document in real-time to detect badge unlocks ──
       _currentUserSubscription = FirebaseFirestore.instance
           .collection('users')
@@ -285,7 +295,9 @@ class _HomeScreenState extends State<HomeScreen>
         if (snap.exists && mounted) {
           final user = UserModel.fromFirestore(snap);
           if (_previousBadges != null) {
-            final newBadges = user.badges.where((b) => !_previousBadges!.contains(b)).toList();
+            final newBadges = user.badges
+                .where((b) => !_previousBadges!.contains(b))
+                .toList();
             if (newBadges.isNotEmpty) {
               for (final badgeId in newBadges) {
                 final navContext = navigatorKey.currentContext;
@@ -336,16 +348,17 @@ class _HomeScreenState extends State<HomeScreen>
       // Sort chat rooms in memory by lastMessageTime descending
       final docs = snap.docs.toList()
         ..sort((a, b) {
-          final aTime = (a.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
-          final bTime = (b.data()['lastMessageTime'] as Timestamp?)?.toDate() ?? DateTime(0);
+          final aTime = (a.data()['lastMessageTime'] as Timestamp?)?.toDate() ??
+              DateTime(0);
+          final bTime = (b.data()['lastMessageTime'] as Timestamp?)?.toDate() ??
+              DateTime(0);
           return bTime.compareTo(aTime);
         });
 
       final peers = <String>{};
       // Only prewarm the top 5 most recent chats to prevent startup saturation
       for (final d in docs.take(5)) {
-        final parts =
-            List<String>.from(d.data()['participants'] ?? const []);
+        final parts = List<String>.from(d.data()['participants'] ?? const []);
         for (final p in parts) {
           if (p != userId) peers.add(p);
         }
@@ -453,30 +466,31 @@ class _HomeScreenState extends State<HomeScreen>
         final store = await PlaintextStore.instance();
         // Limit backfill check to the 20 most recent messages on regular startup,
         // or check all messages on manual PIN setup/unlock.
-        final local = await store.getAllMessagePayloads(limit: full ? null : 20);
+        final local =
+            await store.getAllMessagePayloads(limit: full ? null : 20);
         if (local.isEmpty) return;
         final col = FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
             .collection('msgVault');
-        
+
         final ids = local.keys.toList();
         final present = <String>{};
 
         // Chunk Firestore documentId queries (whereIn limit is 30 items)
         for (var i = 0; i < ids.length; i += 30) {
-          final chunk = ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
-          final snap = await col.where(FieldPath.documentId, whereIn: chunk).get();
+          final chunk =
+              ids.sublist(i, (i + 30 < ids.length) ? i + 30 : ids.length);
+          final snap =
+              await col.where(FieldPath.documentId, whereIn: chunk).get();
           present.addAll(snap.docs.map((d) => d.id));
         }
 
-        final missing = local.entries
-            .where((e) => !present.contains(e.key))
-            .toList();
+        final missing =
+            local.entries.where((e) => !present.contains(e.key)).toList();
 
         for (final entry in missing) {
-          final enc =
-              await VaultCipher.instance.encryptPayload(entry.value);
+          final enc = await VaultCipher.instance.encryptPayload(entry.value);
           if (enc == null) return;
           try {
             await col.doc(entry.key).set(enc);
@@ -514,8 +528,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: InkWell(
         onTap: _signOut,
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
               Icon(Icons.sync_problem_rounded, color: c.primary, size: 20),
@@ -542,7 +555,7 @@ class _HomeScreenState extends State<HomeScreen>
     await _authService.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => LoginScreen()),
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
     }
   }
@@ -645,7 +658,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildChatsTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     _chatRoomsStream ??=
@@ -661,7 +674,7 @@ class _HomeScreenState extends State<HomeScreen>
           chatRooms = _chatCacheService.getCachedChatRooms();
           if (chatRooms.isEmpty) {
             // No cache yet — show a brief loading indicator
-            return Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
         } else {
           chatRooms = chatSnapshot.data ?? [];
@@ -684,6 +697,11 @@ class _HomeScreenState extends State<HomeScreen>
             _chatCacheService.cacheChatRooms(chatRooms);
             // ── Refresh user profiles (online status) in background ──
             _refreshChatUsersInBackground(chatRooms);
+            // ── Pre-cache profile images for smoother scrolling ─────
+            // Warms the Flutter image cache with contact avatars so they
+            // render instantly when the user scrolls through the chat list
+            // — no loading flicker, no layout shift.
+            _precacheChatAvatars(chatRooms, context);
           }
         }
 
@@ -765,7 +783,7 @@ class _HomeScreenState extends State<HomeScreen>
               final otherUserId = chatRoom.participants
                   .firstWhere((id) => id != _currentUserId, orElse: () => '');
 
-              if (otherUserId.isEmpty) return SizedBox.shrink();
+              if (otherUserId.isEmpty) return const SizedBox.shrink();
 
               // ── Try cached user first (instant, no Firestore) ──
               final cachedUser = _chatCacheService.getCachedUser(otherUserId);
@@ -869,6 +887,27 @@ class _HomeScreenState extends State<HomeScreen>
       print('Background user refresh error: $e');
       _isRefreshingUsers = false;
     });
+  }
+
+  /// Warms the Flutter image cache with contact avatars so profile pictures
+  /// render instantly when scrolling through the chat list.
+  void _precacheChatAvatars(List<ChatRoom> chatRooms, BuildContext context) {
+    final userIds = <String>{};
+    for (final room in chatRooms) {
+      for (final id in room.participants) {
+        if (id != _currentUserId) userIds.add(id);
+      }
+    }
+    for (final uid in userIds) {
+      final cached = _chatCacheService.getCachedUser(uid);
+      if (cached?.photoUrl != null && cached!.photoUrl!.isNotEmpty) {
+        unawaited(precacheImage(
+          NetworkImage(cached.photoUrl!),
+          context,
+          onError: (_, __) {}, // Silently ignore broken URLs
+        ));
+      }
+    }
   }
 
   /// Minimal placeholder while a single user profile is being fetched.
@@ -994,21 +1033,29 @@ class _HomeScreenState extends State<HomeScreen>
                               const SizedBox(width: 6),
                               StreakBadge(
                                 streakCount: chatRoom.streakCount,
-                                lastInteractionDate: chatRoom.lastInteractionDate,
+                                lastInteractionDate:
+                                    chatRoom.lastInteractionDate,
                                 compact: true,
                               ),
                             ] else if (chatRoom.previousStreakCount > 0 &&
                                 chatRoom.streakBrokenAt != null &&
-                                DateTime.now().difference(chatRoom.streakBrokenAt!).inHours <= 24) ...[
+                                DateTime.now()
+                                        .difference(chatRoom.streakBrokenAt!)
+                                        .inHours <=
+                                    24) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
                                 decoration: BoxDecoration(
                                   color: Colors.red.withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.red.withOpacity(0.25), width: 0.5),
+                                  border: Border.all(
+                                      color: Colors.red.withOpacity(0.25),
+                                      width: 0.5),
                                 ),
-                                child: const Text('💔', style: TextStyle(fontSize: 10)),
+                                child: const Text('💔',
+                                    style: TextStyle(fontSize: 10)),
                               ),
                             ],
                           ],
@@ -1106,7 +1153,7 @@ class _HomeScreenState extends State<HomeScreen>
       String minute = dateTime.minute.toString().padLeft(2, '0');
       String period = dateTime.hour >= 12 ? 'PM' : 'AM';
       return '$hour:$minute $period';
-    } else if (messageDate == today.subtract(Duration(days: 1))) {
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
       return 'Yesterday';
     } else if (now.difference(dateTime).inDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1118,7 +1165,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildStatusTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     return Consumer<StatusProvider>(
@@ -1373,7 +1420,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildCallsTab() {
     if (_currentUserId == null) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
 
     return StreamBuilder<List<CallLogModel>>(
@@ -1381,7 +1428,7 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context, snapshot) {
         final c = AppThemeColors.of(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
+          return const Center(child: CircularProgressIndicator());
         }
 
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
@@ -1619,8 +1666,7 @@ class _HomeScreenState extends State<HomeScreen>
             tooltip: 'Offline Chat — talk to people nearby',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(
-                  builder: (_) => const NearbyPeersScreen()),
+              MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
             ),
           ),
           IconButton(
@@ -1699,8 +1745,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'logout',
                   child: Row(
                     children: [
-                      Icon(Icons.logout_rounded,
-                          color: c.error, size: 20),
+                      Icon(Icons.logout_rounded, color: c.error, size: 20),
                       const SizedBox(width: 12),
                       Text('Log out', style: TextStyle(color: c.error)),
                     ],
@@ -1768,7 +1813,8 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: c.isDark ? const Color(0xFF2A2040) : c.surface,
                       borderRadius: BorderRadius.circular(16),
@@ -1845,7 +1891,7 @@ class _HomeScreenState extends State<HomeScreen>
                     _navigateToAddMediaStatus();
                   }
                 },
-                child: Icon(Icons.camera_alt, color: Colors.white),
+                child: const Icon(Icons.camera_alt, color: Colors.white),
               ),
             ],
           );
@@ -1892,7 +1938,8 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: BoxDecoration(
               color: c.surface.withOpacity(0.95),
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
+              border:
+                  Border.all(color: Colors.yellow.withOpacity(0.4), width: 2),
               boxShadow: [
                 BoxShadow(
                   color: colors[0].withOpacity(0.35),
@@ -1936,7 +1983,8 @@ class _HomeScreenState extends State<HomeScreen>
                         end: Alignment.bottomRight,
                       ),
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withOpacity(0.5), width: 3),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.5), width: 3),
                       boxShadow: [
                         BoxShadow(
                           color: colors[0].withOpacity(0.5),
@@ -1979,7 +2027,8 @@ class _HomeScreenState extends State<HomeScreen>
                           onPressed: () => Navigator.pop(context),
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: c.border),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: Text(
@@ -2007,7 +2056,8 @@ class _HomeScreenState extends State<HomeScreen>
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: c.primary,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             elevation: 2,
                           ),
@@ -2038,11 +2088,11 @@ class AnimatedBuilder2 extends AnimatedWidget {
   final Widget? child;
 
   const AnimatedBuilder2({
-    Key? key,
+    super.key,
     required Animation<double> animation,
     required this.builder,
     this.child,
-  }) : super(key: key, listenable: animation);
+  }) : super(listenable: animation);
 
   @override
   Widget build(BuildContext context) {

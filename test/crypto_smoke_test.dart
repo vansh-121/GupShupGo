@@ -36,7 +36,7 @@ void main() {
     await bSigned.storeSignedPreKey(bSignedPreKey.id, bSignedPreKey);
     await bPreKeys.storePreKey(bOneTime.id, bOneTime);
 
-    final bobAddr = SignalProtocolAddress('bob', 1);
+    const bobAddr = SignalProtocolAddress('bob', 1);
 
     // Alice builds a session to Bob from Bob's published bundle.
     final bundle = PreKeyBundle(
@@ -62,7 +62,7 @@ void main() {
     expect(ct.getType(), CiphertextMessage.prekeyType);
 
     // Bob decrypts. PreKey message on first contact.
-    final aliceAddr = SignalProtocolAddress('alice', 1);
+    const aliceAddr = SignalProtocolAddress('alice', 1);
     final bCipher =
         SessionCipher(bSession, bPreKeys, bSigned, bIdStore, aliceAddr);
     final pt =

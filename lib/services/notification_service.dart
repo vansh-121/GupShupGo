@@ -150,10 +150,9 @@ class NotificationService {
   /// Call this from FCMService.onMessage for all non-call notification types.
   Future<void> handleForegroundMessage(RemoteMessage message) async {
     final type = message.data['type'] ?? '';
-    final prefs = await SharedPreferences.getInstance();
 
     // Check user preferences before showing
-    if (!_shouldShow(type, prefs)) return;
+    if (!_shouldShow(type)) return;
 
     final notification = message.notification;
     final title = notification?.title ?? _defaultTitle(type);
@@ -234,31 +233,29 @@ class NotificationService {
 
   // ─── Notification Preferences ────────────────────────────────────────────────
   Future<Map<String, bool>> getPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
     return {
-      NotifPrefs.streakWarnings: prefs.getBool(NotifPrefs.streakWarnings) ?? true,
-      NotifPrefs.streakMilestones: prefs.getBool(NotifPrefs.streakMilestones) ?? true,
-      NotifPrefs.gupPoints: prefs.getBool(NotifPrefs.gupPoints) ?? true,
-      NotifPrefs.dailyDigest: prefs.getBool(NotifPrefs.dailyDigest) ?? true,
-      NotifPrefs.unreadReminder: prefs.getBool(NotifPrefs.unreadReminder) ?? true,
+      NotifPrefs.streakWarnings: sharedPrefs.getBool(NotifPrefs.streakWarnings) ?? true,
+      NotifPrefs.streakMilestones: sharedPrefs.getBool(NotifPrefs.streakMilestones) ?? true,
+      NotifPrefs.gupPoints: sharedPrefs.getBool(NotifPrefs.gupPoints) ?? true,
+      NotifPrefs.dailyDigest: sharedPrefs.getBool(NotifPrefs.dailyDigest) ?? true,
+      NotifPrefs.unreadReminder: sharedPrefs.getBool(NotifPrefs.unreadReminder) ?? true,
     };
   }
 
   Future<void> setPreference(String key, bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(key, value);
+    await sharedPrefs.setBool(key, value);
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────────
 
-  bool _shouldShow(String type, SharedPreferences prefs) {
+  bool _shouldShow(String type) {
     return switch (type) {
       'streak_warning' || 'streak_broken' =>
-        prefs.getBool(NotifPrefs.streakWarnings) ?? true,
-      'streak_milestone' => prefs.getBool(NotifPrefs.streakMilestones) ?? true,
-      'gup_points_earned' => prefs.getBool(NotifPrefs.gupPoints) ?? true,
-      'daily_digest' => prefs.getBool(NotifPrefs.dailyDigest) ?? true,
-      'unread_reminder' => prefs.getBool(NotifPrefs.unreadReminder) ?? true,
+        sharedPrefs.getBool(NotifPrefs.streakWarnings) ?? true,
+      'streak_milestone' => sharedPrefs.getBool(NotifPrefs.streakMilestones) ?? true,
+      'gup_points_earned' => sharedPrefs.getBool(NotifPrefs.gupPoints) ?? true,
+      'daily_digest' => sharedPrefs.getBool(NotifPrefs.dailyDigest) ?? true,
+      'unread_reminder' => sharedPrefs.getBool(NotifPrefs.unreadReminder) ?? true,
       _ => true,
     };
   }

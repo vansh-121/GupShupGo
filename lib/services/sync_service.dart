@@ -34,6 +34,12 @@ class SyncService {
   final _inFlightDownloads = <String>{};
   int _syncToken = 0;
 
+  /// Per-room sequential Future chain. Instead of discarding snapshots when a
+  /// room is already processing, we queue them: each new snapshot's processing
+  /// Future is chained after the previous one, ensuring they execute in order
+  /// without interleaving or dropping updates.
+  final _roomSyncQueues = <String, Future<void>>{};
+
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
   Future<void> init(String currentUserId, {bool force = false}) async {
@@ -109,146 +115,213 @@ class SyncService {
         .orderBy('timestamp', descending: true)
         .limit(50)
         .snapshots()
-        .listen((snapshot) async {
-      try {
-        final store = await PlaintextStore.instance();
-        
-        // Fetch only recent local messages corresponding to document IDs in snapshot
-        final messageIds = snapshot.docs.map((doc) => doc.id).toList();
-        final localMessages = await store.getMessagesByIds(messageIds);
-        final localMap = {for (final m in localMessages) m.id: m};
-
-        final toSave = <MessageModel>[];
-        bool hasChanges = false;
-
-        for (final doc in snapshot.docs) {
-          final serverMsg = MessageModel.fromFirestore(doc);
-          final localMsg = localMap[serverMsg.id];
-
-          final isLockedPlaceholder = localMsg != null && localMsg.text.startsWith('🔒');
-          if (localMsg == null || isLockedPlaceholder) {
-            final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
-            if (decrypted != null) {
-              final isStillPlaceholder = isLockedPlaceholder && decrypted.text.startsWith('🔒');
-              if (!isStillPlaceholder) {
-                toSave.add(decrypted);
-                hasChanges = true;
-                if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
-                  _triggerMediaDownload(decrypted, roomId);
-                }
-              }
-            } else if (localMsg == null && VaultCipher.instance.isReady) {
-              toSave.add(_lockedPlaceholder(serverMsg));
-              hasChanges = true;
-            }
-          } else {
-            // Check if status, sync status, or media changed
-            if (localMsg.status != serverMsg.status ||
-                localMsg.syncPending != serverMsg.syncPending ||
-                localMsg.mediaUrl != serverMsg.mediaUrl) {
-              final updated = localMsg.copyWith(
-                status: serverMsg.status,
-                syncPending: serverMsg.syncPending,
-                mediaUrl: serverMsg.mediaUrl,
-              );
-              toSave.add(updated);
-              hasChanges = true;
-              if (updated.mediaUrl != null && updated.localFilePath == null) {
-                _triggerMediaDownload(updated, roomId);
-              }
-            } else {
-              // Trigger media download if the local message hasn't cached it yet
-              if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
-                _triggerMediaDownload(localMsg, roomId);
-              }
-            }
-          }
-        }
-
-        if (hasChanges && toSave.isNotEmpty) {
-          await store.saveMessagesBatch(toSave, roomId);
-
-          // Update chat room preview locally using the decrypted form of the last message
-          final latestDoc = snapshot.docs.isNotEmpty ? snapshot.docs.first : null;
-          if (latestDoc != null) {
-            final latestMsgId = latestDoc.id;
-            MessageModel? decryptedLatest;
-            for (final msg in toSave) {
-              if (msg.id == latestMsgId) {
-                decryptedLatest = msg;
-                break;
-              }
-            }
-            decryptedLatest ??= localMap[latestMsgId];
-
-            if (decryptedLatest != null) {
-              final previewText = decryptedLatest.text.isNotEmpty
-                  ? decryptedLatest.text
-                  : (decryptedLatest.mediaUrl != null ? 'Media' : '');
-              if (previewText.isNotEmpty) {
-                await store.saveRoomPreview(
-                  chatRoomId: roomId,
-                  messageId: decryptedLatest.id,
-                  text: previewText,
-                );
-              }
-            }
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
-      }
+        .listen((snapshot) {
+      // Sequential queue per room — chain this snapshot's processing after
+      // any previous one. Never discard snapshots; otherwise a message that
+      // arrives during decrypt would be silently lost forever.
+      final prev = _roomSyncQueues[roomId] ?? Future.value();
+      _roomSyncQueues[roomId] = prev.then((_) => _processRoomSnapshot(
+            roomId,
+            snapshot,
+            currentUserId,
+          ));
     }, onError: (e) {
       if (kDebugMode) debugPrint('[SyncService] Messages stream error in room $roomId: $e');
     });
 
     _messageSubs[roomId] = sub;
 
-    // 2. Perform background delta sync for historical messages since lastSavedTimestamp
+    // 2. Perform background sync for messages — delta (if we have local
+    //    data) or initial bulk fetch (first install).
+    //
+    // On first install, `lastSavedTimestamp` is null and the delta query
+    // is skipped. That leaves only the real-time snapshot listener to
+    // populate the local DB — but that listener can be slow on some devices
+    // (Firestore SDK transport negotiation, cold cache). The one-time
+    // query below acts as a backup: it fetches the latest 50 messages
+    // immediately, ensuring the user sees messages ASAP regardless of
+    // listener latency.
     unawaited(() async {
       try {
         final store = await PlaintextStore.instance();
         final lastSavedTimestamp = await store.getLatestMessageTimestamp(roomId);
+
+        Query query;
         if (lastSavedTimestamp != null) {
-          if (kDebugMode) {
-            debugPrint('[SyncService] Delta query for room $roomId from timestamp $lastSavedTimestamp');
-          }
-          final querySnap = await _firestore
+          // Delta: fetch messages newer than what we have locally
+          query = _firestore
               .collection('chatRooms')
               .doc(roomId)
               .collection('messages')
-              .where('timestamp', isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(lastSavedTimestamp))
-              .orderBy('timestamp')
-              .get();
+              .where('timestamp',
+                  isGreaterThan:
+                      Timestamp.fromMillisecondsSinceEpoch(lastSavedTimestamp))
+              .orderBy('timestamp');
+        } else {
+          // First install / no local data: fetch latest 50 as a one-shot
+          // backup alongside the real-time listener. Whichever finishes
+          // first populates the DB.
+          query = _firestore
+              .collection('chatRooms')
+              .doc(roomId)
+              .collection('messages')
+              .orderBy('timestamp', descending: true)
+              .limit(50);
+        }
 
-          if (querySnap.docs.isNotEmpty) {
-            if (kDebugMode) {
-              debugPrint('[SyncService] Found ${querySnap.docs.length} messages in delta query for room $roomId');
-            }
-            final toSave = <MessageModel>[];
-            for (final doc in querySnap.docs) {
-              final serverMsg = MessageModel.fromFirestore(doc);
-              final decrypted = await ChatService.instance.decryptForRendering(serverMsg, currentUserId);
-              if (decrypted != null) {
-                toSave.add(decrypted);
-                if (decrypted.mediaUrl != null) {
-                  _triggerMediaDownload(decrypted, roomId);
-                }
-              } else if (VaultCipher.instance.isReady) {
-                toSave.add(_lockedPlaceholder(serverMsg));
-              }
-            }
-            if (toSave.isNotEmpty) {
-              await store.saveMessagesBatch(toSave, roomId);
-            }
+        final querySnap = await query.get();
+        if (querySnap.docs.isEmpty) return;
+
+        if (kDebugMode) {
+          debugPrint(
+              '[SyncService] Found ${querySnap.docs.length} messages in background query for room $roomId');
+        }
+        final toSave = <MessageModel>[];
+        // Process in reverse chronological so the oldest messages come
+        // first (matches the listener's order for dedup).
+        final docs = lastSavedTimestamp != null
+            ? querySnap.docs
+            : querySnap.docs.reversed;
+
+        // Chunked processing: decrypt 3 messages, then yield 4ms to the UI.
+        // On cold start with 5 rooms × 50 messages = 250 decrypts at
+        // ~20ms each, the old per-message Duration.zero yield meant the UI
+        // still froze for seconds. Chunking with a real delay gives the
+        // engine a reliable half-frame to render between batches.
+        int chunkIdx = 0;
+        for (final doc in docs) {
+          if (++chunkIdx % 3 == 0) {
+            await Future.delayed(const Duration(milliseconds: 4));
           }
+          final serverMsg = MessageModel.fromFirestore(doc);
+          final decrypted = await ChatService.instance
+              .decryptForRendering(serverMsg, currentUserId);
+          if (decrypted != null) {
+            toSave.add(decrypted);
+            if (decrypted.mediaUrl != null) {
+              _triggerMediaDownload(decrypted, roomId);
+            }
+          } else if (VaultCipher.instance.isReady) {
+            toSave.add(_lockedPlaceholder(serverMsg));
+          }
+        }
+        if (toSave.isNotEmpty) {
+          await store.saveMessagesBatch(toSave, roomId);
         }
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('[SyncService] Error performing background delta sync in room $roomId: $e');
+          debugPrint(
+              '[SyncService] Error performing background sync in room $roomId: $e');
         }
       }
     }());
+  }
+
+  /// Processes a single Firestore snapshot for [roomId]: decrypts new
+  /// messages, updates previews, triggers media downloads. Runs via the
+  /// per-room sequential queue so snapshots are never dropped.
+  Future<void> _processRoomSnapshot(
+    String roomId,
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+    String currentUserId,
+  ) async {
+    try {
+      final store = await PlaintextStore.instance();
+
+      // Fetch only recent local messages corresponding to document IDs in snapshot
+      final messageIds = snapshot.docs.map((doc) => doc.id).toList();
+      final localMessages = await store.getMessagesByIds(messageIds);
+      final localMap = {for (final m in localMessages) m.id: m};
+
+      final toSave = <MessageModel>[];
+      bool hasChanges = false;
+      int decryptIndex = 0;
+
+      for (final doc in snapshot.docs) {
+        if (++decryptIndex % 3 == 0) {
+          await Future.delayed(const Duration(milliseconds: 4));
+        }
+
+        final serverMsg = MessageModel.fromFirestore(doc);
+        final localMsg = localMap[serverMsg.id];
+
+        final isLockedPlaceholder =
+            localMsg != null && localMsg.text.startsWith('🔒');
+        if (localMsg == null || isLockedPlaceholder) {
+          final decrypted = await ChatService.instance
+              .decryptForRendering(serverMsg, currentUserId);
+          if (decrypted != null) {
+            final isStillPlaceholder =
+                isLockedPlaceholder && decrypted.text.startsWith('🔒');
+            if (!isStillPlaceholder) {
+              toSave.add(decrypted);
+              hasChanges = true;
+              if (decrypted.mediaUrl != null &&
+                  decrypted.localFilePath == null) {
+                _triggerMediaDownload(decrypted, roomId);
+              }
+            }
+          } else if (localMsg == null && VaultCipher.instance.isReady) {
+            toSave.add(_lockedPlaceholder(serverMsg));
+            hasChanges = true;
+          }
+        } else {
+          if (localMsg.status != serverMsg.status ||
+              localMsg.syncPending != serverMsg.syncPending ||
+              localMsg.mediaUrl != serverMsg.mediaUrl) {
+            final updated = localMsg.copyWith(
+              status: serverMsg.status,
+              syncPending: serverMsg.syncPending,
+              mediaUrl: serverMsg.mediaUrl,
+            );
+            toSave.add(updated);
+            hasChanges = true;
+            if (updated.mediaUrl != null && updated.localFilePath == null) {
+              _triggerMediaDownload(updated, roomId);
+            }
+          } else {
+            if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
+              _triggerMediaDownload(localMsg, roomId);
+            }
+          }
+        }
+      }
+
+      if (hasChanges && toSave.isNotEmpty) {
+        await store.saveMessagesBatch(toSave, roomId);
+
+        final latestDoc =
+            snapshot.docs.isNotEmpty ? snapshot.docs.first : null;
+        if (latestDoc != null) {
+          final latestMsgId = latestDoc.id;
+          MessageModel? decryptedLatest;
+          for (final msg in toSave) {
+            if (msg.id == latestMsgId) {
+              decryptedLatest = msg;
+              break;
+            }
+          }
+          decryptedLatest ??= localMap[latestMsgId];
+
+          if (decryptedLatest != null) {
+            final previewText = decryptedLatest.text.isNotEmpty
+                ? decryptedLatest.text
+                : (decryptedLatest.mediaUrl != null ? 'Media' : '');
+            if (previewText.isNotEmpty) {
+              await store.saveRoomPreview(
+                chatRoomId: roomId,
+                messageId: decryptedLatest.id,
+                text: previewText,
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
+      }
+    }
   }
 
   void _triggerMediaDownload(MessageModel message, String chatRoomId) {

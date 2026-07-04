@@ -131,7 +131,7 @@ class AppTheme {
       onErrorContainer: Color(0xFFB91C1C),
       surface: AppColors.surface,
       onSurface: AppColors.textHigh,
-      surfaceVariant: AppColors.surfaceAlt,
+      surfaceContainerHighest: AppColors.surfaceAlt,
       onSurfaceVariant: AppColors.textMid,
       outline: AppColors.border,
       outlineVariant: AppColors.divider,
@@ -141,8 +141,6 @@ class AppTheme {
       onInverseSurface: Colors.white,
       inversePrimary: AppColors.primaryLt,
       surfaceTint: Color(0x0A6C5CE7),
-      background: AppColors.surface,
-      onBackground: AppColors.textHigh,
     );
 
     return ThemeData(
@@ -180,7 +178,7 @@ class AppTheme {
         unselectedLabelColor: AppColors.textLow,
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: AppColors.divider,
-        overlayColor: MaterialStateProperty.all(
+        overlayColor: WidgetStateProperty.all(
           AppColors.primaryLt.withOpacity(0.3),
         ),
         labelStyle:
@@ -260,12 +258,12 @@ class AppTheme {
 
       // ── Switch ──────────────────────────────────────────────────
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.all(Colors.white),
-        trackColor: MaterialStateProperty.resolveWith((s) =>
-            s.contains(MaterialState.selected)
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith((s) =>
+            s.contains(WidgetState.selected)
                 ? AppColors.primary
                 : AppColors.textLow.withOpacity(0.35)),
-        trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
 
       // ── Divider ─────────────────────────────────────────────────
@@ -351,7 +349,7 @@ class AppTheme {
       onErrorContainer: Color(0xFFFCA5A5),
       surface: AppColorsDark.surface,
       onSurface: AppColorsDark.textHigh,
-      surfaceVariant: AppColorsDark.surfaceAlt,
+      surfaceContainerHighest: AppColorsDark.surfaceAlt,
       onSurfaceVariant: AppColorsDark.textMid,
       outline: AppColorsDark.border,
       outlineVariant: AppColorsDark.divider,
@@ -361,8 +359,6 @@ class AppTheme {
       onInverseSurface: AppColorsDark.surface,
       inversePrimary: AppColorsDark.primaryLt,
       surfaceTint: Color(0x0A7C6FF0),
-      background: AppColorsDark.surface,
-      onBackground: AppColorsDark.textHigh,
     );
 
     return ThemeData(
@@ -404,7 +400,7 @@ class AppTheme {
         unselectedLabelColor: AppColorsDark.textLow,
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: AppColorsDark.divider,
-        overlayColor: MaterialStateProperty.all(
+        overlayColor: WidgetStateProperty.all(
           AppColorsDark.primaryLt.withOpacity(0.15),
         ),
         labelStyle:
@@ -488,12 +484,12 @@ class AppTheme {
 
       // ── Switch ──────────────────────────────────────────────────
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.all(Colors.white),
-        trackColor: MaterialStateProperty.resolveWith((s) =>
-            s.contains(MaterialState.selected)
+        thumbColor: WidgetStateProperty.all(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith((s) =>
+            s.contains(WidgetState.selected)
                 ? AppColorsDark.primary
                 : AppColorsDark.textLow.withOpacity(0.35)),
-        trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
 
       // ── Divider ─────────────────────────────────────────────────

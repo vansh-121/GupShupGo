@@ -10,7 +10,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 /// or email/password so they can sign back in later without needing the SIM.
 class LinkAccountsScreen extends StatefulWidget {
   final UserModel user;
-  const LinkAccountsScreen({Key? key, required this.user}) : super(key: key);
+  const LinkAccountsScreen({super.key, required this.user});
 
   @override
   State<LinkAccountsScreen> createState() => _LinkAccountsScreenState();
@@ -38,7 +38,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
 
   void _goHome() {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => HomeScreen()),
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 

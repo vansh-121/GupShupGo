@@ -61,12 +61,27 @@ class ChatService {
   // message with status=sent), on failure the entry is updated to
   // status=failed so the user sees an error indicator and can retry.
 
-
-
   // All decrypted message bodies (both incoming and outgoing) live in a
   // local sqflite DB via PlaintextStore. The Firestore stream is the
   // transport, the local DB is the source of truth for rendering — the
   // same architecture WhatsApp uses.
+
+  // ─── In-memory streak state cache ───────────────────────────────────────
+  // Eliminates the per-message Firestore chatRoomRef.get() in _commitMessage.
+  // Streak state is small (a few ints + timestamps) and changes at most once
+  // per calendar day per room, so the cache has a long TTL.
+  static final Map<String, _StreakCacheEntry> _streakCache = {};
+  static const _streakCacheTtl = Duration(minutes: 30);
+
+  // ─── Per-room send lock ───────────────────────────────────────────────
+  // Prevents race conditions when the user taps Send rapidly. Only one
+  // _commitMessage can be in-flight per room at a time; subsequent sends
+  // queue up and execute sequentially. Without this, two concurrent sends
+  // could both read stale streak state or produce duplicate message IDs.
+  final Map<String, Future<void>> _sendLocks = {};
+  // Max time a send can wait for the lock + commit before timing out
+  // (marks the message as failed so the user can retry).
+  static const _sendTimeout = Duration(seconds: 30);
 
   /// Returns true iff the peer has at least one device with a published
   /// key bundle (i.e. they've upgraded to an E2EE-capable build).
@@ -97,8 +112,7 @@ class ChatService {
     // path populates this cache at app open, so on a warm path this
     // resolves synchronously from memory.
     try {
-      final devices =
-          await SignalService.instance.listDeviceIdsCached(peerUid);
+      final devices = await SignalService.instance.listDeviceIdsCached(peerUid);
       final has = devices.isNotEmpty;
       _peerBundleCache[peerUid] = (at: DateTime.now(), has: has);
       return has;
@@ -219,8 +233,7 @@ class ChatService {
         }
       }
       if (pending.isNotEmpty) {
-        final results =
-            await VaultCipher.instance.decryptDocsBatch(pending);
+        final results = await VaultCipher.instance.decryptDocsBatch(pending);
         _payloadMemo.addAll(results);
       }
     } catch (_) {}
@@ -293,7 +306,30 @@ class ChatService {
   // so without this we'd hit SQLite N times per snapshot. Memory cost is
   // small — a Map<String, dynamic> per message — and it's wiped on signOut
   // along with the rest of the crypto state.
+  // In-memory cache of decrypted payloads keyed by message id. Firestore
+  // re-emits the entire message list on every read receipt / typing change,
+  // so without this we'd hit SQLite N times per snapshot.
+  //
+  // LRU eviction: LinkedHashMap preserves insertion order, so when the cache
+  // exceeds [_memoMaxSize] we drop the oldest entries (FIFO). On a heavy user
+  // with 1000+ messages across chats this prevents unbounded memory growth
+  // — each entry is a Map<String, dynamic> that can be several KB for media
+  // messages.
+  static const _memoMaxSize = 500;
   static final Map<String, Map<String, dynamic>> _payloadMemo = {};
+
+  /// Adds an entry to [_payloadMemo] with automatic LRU eviction.
+  /// When the cache exceeds [_memoMaxSize], the oldest 100 entries are
+  /// removed (FIFO order via LinkedHashMap insertion ordering).
+  static void _addToMemo(String key, Map<String, dynamic> value) {
+    _payloadMemo[key] = value;
+    if (_payloadMemo.length > _memoMaxSize) {
+      final keysToRemove = _payloadMemo.keys.take(100).toList();
+      for (final k in keysToRemove) {
+        _payloadMemo.remove(k);
+      }
+    }
+  }
 
   // Dedup set for decrypt-skip log messages. Without this, the same
   // message ID would log every time a Firestore emission re-triggers
@@ -312,7 +348,7 @@ class ChatService {
 
     final cachedPayload = await store.get(msg.id);
     if (cachedPayload != null) {
-      _payloadMemo[msg.id] = cachedPayload;
+      _addToMemo(msg.id, cachedPayload);
       return _applyPayload(msg, cachedPayload);
     }
 
@@ -331,7 +367,7 @@ class ChatService {
     if (env == null) {
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
-        _payloadMemo[msg.id] = vaultPayload;
+        _addToMemo(msg.id, vaultPayload);
         // Fire-and-forget: memo is the source of truth for rendering;
         // SQLite is only for crash/restart recovery.
         unawaited(store.save(msg.id, vaultPayload));
@@ -346,8 +382,8 @@ class ChatService {
         EncryptedEnvelope.fromMap(env),
       );
       final payload = jsonDecode(utf8.decode(pt)) as Map<String, dynamic>;
-      _payloadMemo[msg.id] = payload;
-      
+      _addToMemo(msg.id, payload);
+
       final chatRoomId = getChatRoomId(msg.senderId, msg.receiverId);
 
       // Handle reaction processing E2EE client-side
@@ -397,10 +433,12 @@ class ChatService {
           errStr.contains('InvalidKeyId') ||
           errStr.contains('UntrustedIdentity')) {
         try {
-          final addr = SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
+          final addr =
+              SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
           await SignalService.instance.stores.sessionStore.deleteSession(addr);
           if (errStr.contains('UntrustedIdentity')) {
-            SignalService.instance.stores.identityStore.trustedKeys.remove(addr);
+            SignalService.instance.stores.identityStore.trustedKeys
+                .remove(addr);
           }
           SignalService.instance.stores.markDirty();
         } catch (_) {}
@@ -408,7 +446,7 @@ class ChatService {
       // Libsignal couldn't decrypt — try the vault before giving up.
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
-        _payloadMemo[msg.id] = vaultPayload;
+        _addToMemo(msg.id, vaultPayload);
         unawaited(store.save(msg.id, vaultPayload));
         return _applyPayload(msg, vaultPayload);
       }
@@ -419,7 +457,7 @@ class ChatService {
       final lockedPayload = <String, dynamic>{
         'text': _undecryptablePlaceholderText,
       };
-      _payloadMemo[msg.id] = lockedPayload;
+      _addToMemo(msg.id, lockedPayload);
       // Log once per message to avoid flooding the console on every
       // Firestore re-emission (typing, read receipt, etc.).
       if (kDebugMode && _loggedDecryptSkips.add(msg.id)) {
@@ -429,8 +467,7 @@ class ChatService {
     }
   }
 
-  MessageModel _applyPayload(
-      MessageModel msg, Map<String, dynamic> payload) {
+  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) {
     return msg.copyWith(
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
@@ -439,8 +476,7 @@ class ChatService {
       statusReplyOwnerId: payload['statusReplyOwnerId'] as String?,
       statusReplyItemId: payload['statusReplyItemId'] as String?,
       statusReplyOwnerName: payload['statusReplyOwnerName'] as String?,
-      statusReplyOwnerPhotoUrl:
-          payload['statusReplyOwnerPhotoUrl'] as String?,
+      statusReplyOwnerPhotoUrl: payload['statusReplyOwnerPhotoUrl'] as String?,
       statusReplyType: payload['statusReplyType'] as String?,
       statusReplyText: payload['statusReplyText'] as String?,
       statusReplyMediaUrl: payload['statusReplyMediaUrl'] as String?,
@@ -513,9 +549,8 @@ class ChatService {
 
     // Firestore generates the doc id synchronously client-side, so we have a
     // stable id to publish into the outbox before any async work begins.
-    DocumentReference messageRef = chatRoomRef
-        .collection(_messagesCollection)
-        .doc();
+    DocumentReference messageRef =
+        chatRoomRef.collection(_messagesCollection).doc();
 
     // ── Optimistic bubble: WhatsApp behaviour ───────────────────────────
     final optimistic = MessageModel(
@@ -556,34 +591,58 @@ class ChatService {
     }
 
     try {
-      return await _commitMessage(
-        chatRoomId: chatRoomId,
-        chatRoomRef: chatRoomRef,
-        messageRef: messageRef,
-        senderId: senderId,
-        receiverId: receiverId,
-        text: text,
-        senderName: senderName,
-        type: type,
-        mediaUrl: mediaUrl,
-        audioDuration: audioDuration,
-        statusReplyOwnerId: statusReplyOwnerId,
-        statusReplyItemId: statusReplyItemId,
-        statusReplyOwnerName: statusReplyOwnerName,
-        statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
-        statusReplyType: statusReplyType,
-        statusReplyText: statusReplyText,
-        statusReplyMediaUrl: statusReplyMediaUrl,
-        statusReplyCaption: statusReplyCaption,
-        statusReplyBackgroundColor: statusReplyBackgroundColor,
-        localFilePath: localFilePath,
-        reactionTargetMessageId: reactionTargetMessageId,
-      );
+      // ── Per-room send lock: prevent races when user taps Send rapidly ──
+      // Only one _commitMessage can be in-flight per room. Subsequent sends
+      // wait for the previous one to finish, ensuring streak state, batch
+      // ordering, and Firestore writes are serialized.
+      final prevLock = _sendLocks[chatRoomId];
+      final thisLock = Completer<void>();
+      _sendLocks[chatRoomId] = thisLock.future;
+
+      try {
+        if (prevLock != null) await prevLock;
+
+        final msg = await _commitMessage(
+          chatRoomId: chatRoomId,
+          chatRoomRef: chatRoomRef,
+          messageRef: messageRef,
+          senderId: senderId,
+          receiverId: receiverId,
+          text: text,
+          senderName: senderName,
+          type: type,
+          mediaUrl: mediaUrl,
+          audioDuration: audioDuration,
+          statusReplyOwnerId: statusReplyOwnerId,
+          statusReplyItemId: statusReplyItemId,
+          statusReplyOwnerName: statusReplyOwnerName,
+          statusReplyOwnerPhotoUrl: statusReplyOwnerPhotoUrl,
+          statusReplyType: statusReplyType,
+          statusReplyText: statusReplyText,
+          statusReplyMediaUrl: statusReplyMediaUrl,
+          statusReplyCaption: statusReplyCaption,
+          statusReplyBackgroundColor: statusReplyBackgroundColor,
+          localFilePath: localFilePath,
+          reactionTargetMessageId: reactionTargetMessageId,
+        ).timeout(_sendTimeout, onTimeout: () {
+          throw TimeoutException(
+              'Send timed out after ${_sendTimeout.inSeconds}s');
+        });
+
+        return msg;
+      } finally {
+        thisLock.complete();
+        // Clean up if this is still the current lock
+        if (_sendLocks[chatRoomId] == thisLock.future) {
+          _sendLocks.remove(chatRoomId);
+        }
+      }
     } catch (e) {
       // Keep the bubble visible with a failed indicator so the user can
       // see what didn't go through.
       if (type != MessageType.reaction) {
-        await ps.saveMessage(optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
+        await ps.saveMessage(
+            optimistic.copyWith(status: MessageStatus.failed), chatRoomId);
       }
       rethrow;
     }
@@ -626,9 +685,10 @@ class ChatService {
       SignalService.instance.awaitPrewarm(receiverId),
     ]);
     final senderDeviceId = setupResults[0] as int?;
-    final canEncrypt =
-        senderDeviceId != null && (setupResults[1] as bool);
-    if (kDebugMode) debugPrint('[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
+    final canEncrypt = senderDeviceId != null && (setupResults[1] as bool);
+    if (kDebugMode)
+      debugPrint(
+          '[SEND] setup: ${sw.elapsedMilliseconds}ms (canEncrypt=$canEncrypt)');
 
     Map<String, Map<String, dynamic>>? envelopes;
     String storedText = text;
@@ -643,7 +703,8 @@ class ChatService {
         'text': text,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (audioDuration != null) 'audioDuration': audioDuration,
-        if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+        if (reactionTargetMessageId != null)
+          'reactionTargetMessageId': reactionTargetMessageId,
         if (statusReplyOwnerId != null) ...{
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
@@ -664,7 +725,8 @@ class ChatService {
           recipientUid: receiverId,
           plaintext: Uint8List.fromList(utf8.encode(payload)),
         );
-        if (kDebugMode) debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
+        if (kDebugMode)
+          debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
@@ -673,7 +735,8 @@ class ChatService {
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
-          if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+          if (reactionTargetMessageId != null)
+            'reactionTargetMessageId': reactionTargetMessageId,
           'statusReplyOwnerId': statusReplyOwnerId,
           'statusReplyItemId': statusReplyItemId,
           'statusReplyOwnerName': statusReplyOwnerName,
@@ -687,7 +750,7 @@ class ChatService {
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
         // snapshot for our own message never needs any async lookup.
-        _payloadMemo[messageRef.id] = outgoingPayload;
+        _addToMemo(messageRef.id, outgoingPayload);
 
         // Fire SQLite persistence in the background — the in-memory memo
         // is already set, so rendering is instant. SQLite is only needed
@@ -709,7 +772,8 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        if (kDebugMode) debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
+        if (kDebugMode)
+          debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
       }
     }
 
@@ -776,37 +840,53 @@ class ChatService {
     //   • first time  → streak starts at 1
     // Uses local time (DateTime.now()) — same as Snapchat.
     try {
-      final chatRoomSnap = await chatRoomRef.get();
-      int currentStreak = 0;
+      // ── Try in-memory streak cache first (hot path) ──────────────────
+      _StreakCacheEntry? cached = _streakCache[chatRoomId];
+      bool cacheHit = cached != null;
+      int currentStreak;
       DateTime? lastInteraction;
-      Map<String, DateTime> lastSentAt = {};
-      int previousStreakCount = 0;
+      Map<String, DateTime> lastSentAt;
+      int previousStreakCount;
       DateTime? streakBrokenAt;
 
-      if (chatRoomSnap.exists) {
-        final data = chatRoomSnap.data() as Map<String, dynamic>;
-        currentStreak = data['streakCount'] as int? ?? 0;
-        final timestamp = data['lastInteractionDate'] as Timestamp?;
-        lastInteraction = timestamp?.toDate().toLocal();
-        previousStreakCount = data['previousStreakCount'] as int? ?? 0;
-        final brokenTs = data['streakBrokenAt'] as Timestamp?;
-        streakBrokenAt = brokenTs?.toDate().toLocal();
+      if (cacheHit) {
+        currentStreak = cached!.streakCount;
+        lastInteraction = cached.lastInteraction;
+        lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
+        previousStreakCount = cached.previousStreakCount;
+        streakBrokenAt = cached.streakBrokenAt;
+      } else {
+        // Cache miss — do the Firestore read (cold start or room not yet cached).
+        final chatRoomSnap = await chatRoomRef.get();
+        currentStreak = 0;
+        lastInteraction = null;
+        lastSentAt = {};
+        previousStreakCount = 0;
+        streakBrokenAt = null;
 
-        final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
-        rawSent.forEach((key, value) {
-          if (value is Timestamp) lastSentAt[key] = value.toDate().toLocal();
-        });
+        if (chatRoomSnap.exists) {
+          final data = chatRoomSnap.data() as Map<String, dynamic>;
+          cached = _StreakCacheEntry.fromFirestore(data);
+          currentStreak = cached.streakCount;
+          lastInteraction = cached.lastInteraction;
+          lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
+          previousStreakCount = cached.previousStreakCount;
+          streakBrokenAt = cached.streakBrokenAt;
+          _streakCache[chatRoomId] = cached;
+        }
       }
 
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
 
       debugPrint('[STREAK] senderId=$senderId receiverId=$receiverId');
-      debugPrint('[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
+      debugPrint(
+          '[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
       debugPrint('[STREAK] lastSentAt=$lastSentAt');
 
       // Clean up expired restore windows (>24h after break)
-      if (streakBrokenAt != null && now.difference(streakBrokenAt).inHours > 24) {
+      if (streakBrokenAt != null &&
+          now.difference(streakBrokenAt).inHours > 24) {
         previousStreakCount = 0;
         streakBrokenAt = null;
         roomUpdates['previousStreakCount'] = 0;
@@ -823,9 +903,7 @@ class ChatService {
       // dot-notation for nested fields.
 
       // Determine the other participant
-      final otherUserId = senderId == receiverId
-          ? senderId
-          : receiverId;
+      final otherUserId = senderId == receiverId ? senderId : receiverId;
       final otherLastSent = lastSentAt[otherUserId];
 
       int newStreak = currentStreak;
@@ -838,7 +916,8 @@ class ChatService {
           otherLocal.month == today.month &&
           otherLocal.day == today.day;
 
-      debugPrint('[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
+      debugPrint(
+          '[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
 
       // Only evaluate streak when today becomes a mutual day
       if (otherSentToday) {
@@ -856,7 +935,8 @@ class ChatService {
           );
           final daysDiff = today.difference(lastMutualDay).inDays;
 
-          debugPrint('[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
+          debugPrint(
+              '[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
 
           if (daysDiff == 0) {
             // Same day — streak count stays the same, but refresh the
@@ -864,7 +944,8 @@ class ChatService {
             // Without this, stale timestamps from the old logic keep
             // the badge stuck in at-risk/critical state.
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
+            debugPrint(
+                '[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
           } else if (daysDiff == 1) {
             // Yesterday → streak increments!
             newStreak = currentStreak + 1;
@@ -880,7 +961,8 @@ class ChatService {
             }
             newStreak = 1; // Fresh mutual day starts a new streak
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
+            debugPrint(
+                '[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
           }
         }
       } else {
@@ -891,17 +973,31 @@ class ChatService {
           final hoursSinceInteraction = now.difference(lastInteraction).inHours;
           if (hoursSinceInteraction >= 20) {
             roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
+            debugPrint(
+                '[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
           }
         }
-        debugPrint('[STREAK] Waiting for other user to send today — no streak change');
+        debugPrint(
+            '[STREAK] Waiting for other user to send today — no streak change');
       }
 
       roomUpdates['streakCount'] = newStreak;
 
+      // ── Update in-memory cache so the next send to this room skips
+      //     the Firestore read entirely (hot path).
+      _streakCache[chatRoomId] = _StreakCacheEntry(
+        streakCount: newStreak,
+        lastInteraction: now,
+        lastSentAt: lastSentAt,
+        previousStreakCount: previousStreakCount,
+        streakBrokenAt: streakBrokenAt,
+      );
+
       // Fire streak milestone rewards in the background
-      if (newStreak > currentStreak && (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
-        unawaited(GamificationService.instance.handleStreakMilestone(senderId, newStreak));
+      if (newStreak > currentStreak &&
+          (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
+        unawaited(GamificationService.instance
+            .handleStreakMilestone(senderId, newStreak));
       }
     } catch (e, st) {
       debugPrint('[STREAK] Error computing streak: $e\n$st');
@@ -913,9 +1009,12 @@ class ChatService {
       SetOptions(merge: true),
     );
 
-    if (kDebugMode) debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
+    if (kDebugMode)
+      debugPrint('[SEND] pre-commit: ${sw.elapsedMilliseconds}ms');
     await batch.commit();
-    if (kDebugMode) debugPrint('[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
+    if (kDebugMode)
+      debugPrint(
+          '[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
 
     // Write lastSentAt using update(), which reliably interprets dot-notation
     // as nested field paths (e.g. 'lastSentAt.uid' → lastSentAt/{uid}).
@@ -933,7 +1032,8 @@ class ChatService {
       try {
         await GamificationService.instance.handleMessageSent(
           userId: senderId,
-          messageType: type.name, // 'text', 'audio', 'image', 'video', 'reaction'
+          messageType:
+              type.name, // 'text', 'audio', 'image', 'video', 'reaction'
         );
       } catch (e) {
         debugPrint('Error awarding gamification on commit: $e');
@@ -983,10 +1083,10 @@ class ChatService {
       String currentUserId, String otherUserId) {
     final chatRoomId = getChatRoomId(currentUserId, otherUserId);
     final controller = StreamController<List<MessageModel>>();
-    
+
     StreamSubscription<List<MessageModel>>? dbSub;
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? chatRoomSub;
-    
+
     DateTime? clearedAt;
     List<MessageModel> latestMessages = const [];
 
@@ -1048,7 +1148,6 @@ class ChatService {
 
     return controller.stream;
   }
-
 
   // Get paginated messages (for loading older messages)
   Future<List<MessageModel>> getMessagesPaginated({
@@ -1126,13 +1225,17 @@ class ChatService {
       String currentUserId, String otherUserId) async {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
-    // Get unread messages sent by the other user
+    // Get unread messages sent by the other user (capped at 200 to avoid
+    // unbounded reads on rooms with thousands of unread messages — the batch
+    // limit is 500 ops, so 200 leaves headroom for the chatRoom update).
     QuerySnapshot unreadMessages = await _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .where('receiverId', isEqualTo: currentUserId)
-        .where('status', whereIn: ['sent', 'delivered']).get();
+        .where('status', whereIn: ['sent', 'delivered'])
+        .limit(200)
+        .get();
 
     if (unreadMessages.docs.isEmpty) return;
 
@@ -1149,8 +1252,7 @@ class ChatService {
         await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).get();
     final chatData = chatRoomDoc.data();
     final updateMap = <String, dynamic>{'unreadCount.$currentUserId': 0};
-    if (chatData != null &&
-        chatData['lastMessageSenderId'] != currentUserId) {
+    if (chatData != null && chatData['lastMessageSenderId'] != currentUserId) {
       updateMap['lastMessageStatus'] = MessageStatus.read.name;
     }
     batch.update(
@@ -1167,13 +1269,15 @@ class ChatService {
       String currentUserId, String otherUserId) async {
     String chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
-    // Get sent messages (not yet delivered) sent by the other user
+    // Get sent messages (not yet delivered) sent by the other user.
+    // Capped at 200 to avoid unbounded reads — the batch limit is 500 ops.
     QuerySnapshot sentMessages = await _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .where('receiverId', isEqualTo: currentUserId)
         .where('status', isEqualTo: 'sent')
+        .limit(200)
         .get();
 
     if (sentMessages.docs.isEmpty) return;
@@ -1208,13 +1312,14 @@ class ChatService {
           .collectionGroup(_messagesCollection)
           .where('receiverId', isEqualTo: currentUserId)
           .where('status', isEqualTo: 'sent')
+          .limit(500)
           .get();
 
       if (sentSnap.docs.isEmpty) return;
 
       // Group docs by chatRoomId so we can update lastMessageStatus per room.
-      final byRoom = <String,
-          List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+      final byRoom =
+          <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
       for (final doc in sentSnap.docs) {
         final chatRoomId = doc.reference.parent.parent?.id;
         if (chatRoomId == null) continue;
@@ -1277,9 +1382,8 @@ class ChatService {
       final ps = await PlaintextStore.instance();
       final previews = await ps.getAllRoomPreviewsWithMeta();
 
-      // First pass: build the room list with cached previews applied, and
-      // collect any rooms whose cached preview is missing or stale so we can
-      // decrypt their last message in parallel below.
+      // Build the room list with cached previews applied, and collect
+      // rooms whose cached preview is missing or stale.
       final chatRooms = <ChatRoom>[];
       final needsPreview = <int>[]; // indexes into chatRooms
 
@@ -1297,13 +1401,10 @@ class ChatService {
         }
 
         final localPreview = previews[chatRoom.id];
-        // The cached preview is fresh only when it's at least as new as the
-        // room's lastMessageTime. Otherwise a new message landed (typically
-        // an incoming reply after we sent something) and the cache still
-        // points at our own outgoing text — drop it and eager-decrypt.
         final roomMs = chatRoom.lastMessageTime?.millisecondsSinceEpoch ?? 0;
-        final isFresh = localPreview != null &&
-            localPreview.updatedAt + 1000 >= roomMs;
+        final isFresh =
+            localPreview != null && localPreview.updatedAt + 1000 >= roomMs;
+
         if (isFresh) {
           chatRoom = ChatRoom(
             id: chatRoom.id,
@@ -1321,68 +1422,66 @@ class ChatService {
           );
         } else if (chatRoom.lastMessage == _encryptedPreviewPlaceholder ||
             localPreview != null) {
-          // Either the server text is the encrypted placeholder, or we have
-          // a stale local preview — eager-decrypt the latest message.
           needsPreview.add(chatRooms.length);
         }
 
         chatRooms.add(chatRoom);
       }
 
-      // Eager preview decrypt: fetch the latest message of each room that
-      // still shows the placeholder and decrypt it locally. This is how
-      // WhatsApp's chat list shows the real text without ever opening the
-      // chat. Runs in parallel; per-room cost is one Firestore read + one
-      // libsignal decrypt, and the result is persisted so subsequent
-      // snapshots short-circuit to the SQLite cache.
+      // Decrypt stale previews with frame yields between batches.
+      // Batch size is high (20) so most users see a single batch — identical
+      // to the original parallel behavior. The frame yield only fires for
+      // exceptional cases (20+ stale rooms after reinstall), where it
+      // prevents the main-thread buildup that triggers ANR.
       if (needsPreview.isNotEmpty) {
-        await Future.wait(needsPreview.map((i) async {
-          final room = chatRooms[i];
-          try {
-            final latest = await _firestore
-                .collection(_chatRoomsCollection)
-                .doc(room.id)
-                .collection(_messagesCollection)
-                .orderBy('timestamp', descending: true)
-                .limit(1)
-                .get();
-            if (latest.docs.isEmpty) return;
-            final msg = MessageModel.fromFirestore(latest.docs.first);
-            final decrypted = await decryptForRendering(msg, userId);
-            // Post-reinstall recovery: when the latest message can't be
-            // decrypted, replace the generic "🔒 Encrypted message"
-            // placeholder with the explicit "can't decrypt — ask sender
-            // to resend" indicator so the user understands why their
-            // chat looks empty inside.
-            final text = decrypted == null
-                ? _undecryptablePlaceholderText
-                : (decrypted.text.isNotEmpty
-                    ? decrypted.text
-                    : (decrypted.mediaUrl != null ? 'Media' : ''));
-            if (text.isEmpty) return;
-            await ps.saveRoomPreview(
-              chatRoomId: room.id,
-              messageId: msg.id,
-              text: text,
-            );
-            chatRooms[i] = ChatRoom(
-              id: room.id,
-              participants: room.participants,
-              lastMessage: text,
-              lastMessageTime: room.lastMessageTime,
-              lastMessageSenderId: room.lastMessageSenderId,
-              lastMessageStatus: room.lastMessageStatus,
-              unreadCount: room.unreadCount,
-              streakCount: room.streakCount,
-              lastInteractionDate: room.lastInteractionDate,
-              lastSentAt: room.lastSentAt,
-              previousStreakCount: room.previousStreakCount,
-              streakBrokenAt: room.streakBrokenAt,
-            );
-          } catch (_) {
-            // Leave the placeholder in place; next snapshot will retry.
+        const batchSize = 20;
+        for (int start = 0; start < needsPreview.length; start += batchSize) {
+          final end = (start + batchSize).clamp(0, needsPreview.length);
+          final batch = needsPreview.sublist(start, end);
+          await Future.wait(batch.map((i) async {
+            final room = chatRooms[i];
+            try {
+              final latest = await _firestore
+                  .collection(_chatRoomsCollection)
+                  .doc(room.id)
+                  .collection(_messagesCollection)
+                  .orderBy('timestamp', descending: true)
+                  .limit(1)
+                  .get();
+              if (latest.docs.isEmpty) return;
+              final msg = MessageModel.fromFirestore(latest.docs.first);
+              final decrypted = await decryptForRendering(msg, userId);
+              final text = decrypted == null
+                  ? _undecryptablePlaceholderText
+                  : (decrypted.text.isNotEmpty
+                      ? decrypted.text
+                      : (decrypted.mediaUrl != null ? 'Media' : ''));
+              if (text.isEmpty) return;
+              await ps.saveRoomPreview(
+                chatRoomId: room.id,
+                messageId: msg.id,
+                text: text,
+              );
+              chatRooms[i] = ChatRoom(
+                id: room.id,
+                participants: room.participants,
+                lastMessage: text,
+                lastMessageTime: room.lastMessageTime,
+                lastMessageSenderId: room.lastMessageSenderId,
+                lastMessageStatus: room.lastMessageStatus,
+                unreadCount: room.unreadCount,
+                streakCount: room.streakCount,
+                lastInteractionDate: room.lastInteractionDate,
+                lastSentAt: room.lastSentAt,
+                previousStreakCount: room.previousStreakCount,
+                streakBrokenAt: room.streakBrokenAt,
+              );
+            } catch (_) {}
+          }));
+          if (start + batchSize < needsPreview.length) {
+            await Future.delayed(Duration.zero);
           }
-        }));
+        }
       }
 
       // Sort locally to handle null lastMessageTime
@@ -1584,7 +1683,9 @@ class ChatService {
         await localFile.writeAsBytes(response.bodyBytes);
         return localPath;
       } else {
-        if (kDebugMode) debugPrint('[ChatService] Failed to download media: ${response.statusCode}');
+        if (kDebugMode)
+          debugPrint(
+              '[ChatService] Failed to download media: ${response.statusCode}');
         return null;
       }
     } catch (e) {
@@ -1592,5 +1693,66 @@ class ChatService {
       return null;
     }
   }
+
+  /// Wipes all in-memory caches. Call on sign-out to free memory and
+  /// prevent stale data from leaking across user sessions.
+  static void clearCaches() {
+    _payloadMemo.clear();
+    _loggedDecryptSkips.clear();
+    _peerBundleCache.clear();
+    _peerBundleRefreshInFlight.clear();
+    _streakCache.clear();
+    _preWarmVaultCache.clear();
+  }
 }
 
+/// In-memory snapshot of chat-room streak state. Eliminates the per-message
+/// Firestore `chatRoomRef.get()` in `_commitMessage`. Populated on first send
+/// to a room after cold-start and updated optimistically thereafter.
+class _StreakCacheEntry {
+  _StreakCacheEntry({
+    required this.streakCount,
+    required this.lastInteraction,
+    this.lastSentAt = const {},
+    this.previousStreakCount = 0,
+    this.streakBrokenAt,
+  });
+
+  final int streakCount;
+  final DateTime? lastInteraction;
+  final Map<String, DateTime> lastSentAt;
+  final int previousStreakCount;
+  final DateTime? streakBrokenAt;
+
+  _StreakCacheEntry copyWith({
+    int? streakCount,
+    DateTime? lastInteraction,
+    Map<String, DateTime>? lastSentAt,
+    int? previousStreakCount,
+    DateTime? streakBrokenAt,
+  }) =>
+      _StreakCacheEntry(
+        streakCount: streakCount ?? this.streakCount,
+        lastInteraction: lastInteraction ?? this.lastInteraction,
+        lastSentAt: lastSentAt ?? this.lastSentAt,
+        previousStreakCount: previousStreakCount ?? this.previousStreakCount,
+        streakBrokenAt: streakBrokenAt ?? this.streakBrokenAt,
+      );
+
+  factory _StreakCacheEntry.fromFirestore(Map<String, dynamic> data) {
+    final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
+    final sent = <String, DateTime>{};
+    rawSent.forEach((k, v) {
+      if (v is Timestamp) sent[k] = v.toDate().toLocal();
+    });
+    final brokenTs = data['streakBrokenAt'] as Timestamp?;
+    final interactionTs = data['lastInteractionDate'] as Timestamp?;
+    return _StreakCacheEntry(
+      streakCount: data['streakCount'] as int? ?? 0,
+      lastInteraction: interactionTs?.toDate().toLocal(),
+      lastSentAt: sent,
+      previousStreakCount: data['previousStreakCount'] as int? ?? 0,
+      streakBrokenAt: brokenTs?.toDate().toLocal(),
+    );
+  }
+}

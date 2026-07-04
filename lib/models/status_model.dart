@@ -86,13 +86,13 @@ class StatusModel {
 
   /// Check if the status has any unexpired items.
   bool get hasActiveStatus {
-    final cutoff = DateTime.now().subtract(Duration(hours: 24));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
     return statusItems.any((item) => item.createdAt.isAfter(cutoff));
   }
 
   /// Get only the active (non-expired) status items.
   List<StatusItem> get activeStatusItems {
-    final cutoff = DateTime.now().subtract(Duration(hours: 24));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
     return statusItems.where((item) => item.createdAt.isAfter(cutoff)).toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }

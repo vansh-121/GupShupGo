@@ -694,7 +694,7 @@ class AuthService {
   // Sign out
   Future<void> signOut() async {
     try {
-      String? userId = await _getSavedUserId();
+      String? userId = _getSavedUserId();
       if (userId != null) {
         // Use PresenceService to cleanly tear down RTDB presence
         // (cancels onDisconnect, writes offline, mirrors to Firestore).

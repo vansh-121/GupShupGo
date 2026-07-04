@@ -11,6 +11,8 @@ import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
   @override
   _LoginScreenState createState() => _LoginScreenState();
 }
@@ -115,7 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _goHome() {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => HomeScreen()),
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 
@@ -378,7 +380,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? null
                         : () => Navigator.of(context).push(
                               MaterialPageRoute(
-                                  builder: (_) => PhoneAuthScreen()),
+                                  builder: (_) => const PhoneAuthScreen()),
                             ),
                     icon: const Icon(Icons.phone_android_rounded,
                         color: Colors.white, size: 20),

@@ -52,7 +52,7 @@ class _ScreenShareOverlayHostState extends State<ScreenShareOverlayHost> {
     final padding = MediaQuery.paddingOf(context);
 
     // Draggable bounds in absolute pixels.
-    final minX = 8.0;
+    const minX = 8.0;
     final maxX = size.width - _bubbleW - 8;
     final minY = padding.top + 56; // clear status bar + app bar
     final maxY = size.height - _bubbleH - padding.bottom - 16;

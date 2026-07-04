@@ -56,7 +56,7 @@ class ChatScreen extends StatefulWidget {
   final String currentUserId;
   final String? currentUserName;
 
-  ChatScreen({
+  const ChatScreen({super.key, 
     required this.contact,
     required this.currentUserId,
     this.currentUserName,
@@ -74,7 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final UserService _userService = UserService();
 
   bool _isLoading = true;
-  bool _isSending = false;
+  final bool _isSending = false;
   int _lastMessageCount = 0;
 
   // ─── Search state ─────────────────────────────────────────────────
@@ -453,8 +453,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _subtitleToggleTimer = Timer.periodic(
         const Duration(milliseconds: 5200),
         (_) {
-          if (mounted)
+          if (mounted) {
             setState(() => _showBondInSubtitle = !_showBondInSubtitle);
+          }
         },
       );
     } else {
@@ -772,7 +773,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cannot call yourself')),
+        const SnackBar(content: Text('Cannot call yourself')),
       );
       return;
     }
@@ -823,7 +824,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (widget.currentUserId == widget.contact.id) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cannot call yourself')),
+        const SnackBar(content: Text('Cannot call yourself')),
       );
       return;
     }
@@ -1026,7 +1027,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (messageDate == today) {
       return 'Today';
-    } else if (messageDate == today.subtract(Duration(days: 1))) {
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
       return 'Yesterday';
     } else {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
@@ -1724,7 +1725,14 @@ class _ChatScreenState extends State<ChatScreen> {
             return _buildLoadingOlderIndicator();
           case _DisplayItemType.message:
             final bubble = _buildMessage(item.message!);
-            return item.animate ? _animatedBubble(bubble) : bubble;
+            // RepaintBoundary isolates each message bubble into its own
+            // compositing layer so that scrolling / setState rebuilds on the
+            // parent chat screen don't repaint every bubble — only the ones
+            // whose content actually changed. Critical for smooth scrolling
+            // in chats with hundreds of messages on low-end devices.
+            return RepaintBoundary(
+              child: item.animate ? _animatedBubble(bubble) : bubble,
+            );
         }
       },
     );
@@ -2618,7 +2626,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Block ${widget.contact.name}?'),
-        content: Text(
+        content: const Text(
           'Blocked contacts cannot send you messages or call you. '
           'You can unblock them from Settings → Privacy → Blocked contacts.',
         ),
@@ -2693,7 +2701,7 @@ class _ChatScreenState extends State<ChatScreen> {
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
+              const SnackBar(
                   content:
                       Text('No internet & mesh unavailable. Image not sent.')),
             );

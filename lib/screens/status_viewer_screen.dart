@@ -16,13 +16,13 @@ class StatusViewerScreen extends StatefulWidget {
   final String? initialStatusItemId;
 
   const StatusViewerScreen({
-    Key? key,
+    super.key,
     required this.statusModel,
     required this.currentUserId,
     this.currentUserName,
     this.isMyStatus = false,
     this.initialStatusItemId,
-  }) : super(key: key);
+  });
 
   @override
   State<StatusViewerScreen> createState() => _StatusViewerScreenState();
@@ -77,7 +77,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _pageController = PageController(initialPage: _currentIndex);
     _progressController = AnimationController(
       vsync: this,
-      duration: Duration(seconds: 5),
+      duration: const Duration(seconds: 5),
     )..addStatusListener(_onProgressStatus);
 
     // Hydrate from the process-wide cache synchronously so the first
@@ -189,13 +189,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           print('Error initializing video: $e');
           if (mounted) {
             // Fallback: use 5s timer for broken videos
-            _progressController.duration = Duration(seconds: 5);
+            _progressController.duration = const Duration(seconds: 5);
             _startProgress();
           }
         });
     } else {
       // Text or image: 5 seconds
-      _progressController.duration = Duration(seconds: 5);
+      _progressController.duration = const Duration(seconds: 5);
       _startProgress();
     }
   }
@@ -225,7 +225,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       });
       _pageController.animateToPage(
         _currentIndex,
-        duration: Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
       _loadCurrentStatus();
@@ -242,7 +242,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       });
       _pageController.animateToPage(
         _currentIndex,
-        duration: Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
       _loadCurrentStatus();
@@ -318,7 +318,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
@@ -331,7 +331,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           builder: (context, snapshot) {
         return SafeArea(
           child: Container(
-              padding: EdgeInsets.all(20),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -346,23 +346,23 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       ),
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Row(
                     children: [
                       Icon(Icons.visibility, color: cs.onSurfaceVariant),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Text(
                         'Viewed by ${snapshot.data?.length ?? 0}',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                   if (snapshot.connectionState == ConnectionState.waiting)
-                    Center(
+                    const Center(
                       child: Padding(
                         padding: EdgeInsets.all(20),
                         child: CircularProgressIndicator(),
@@ -370,7 +370,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                     )
                   else if (snapshot.data?.isEmpty ?? true)
                     Padding(
-                      padding: EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(20),
                       child: Center(
                         child: Text(
                           'No views yet',
@@ -410,15 +410,15 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Status'),
-        content: Text('Are you sure you want to delete this status?'),
+        title: const Text('Delete Status'),
+        content: const Text('Are you sure you want to delete this status?'),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context);
               _progressController.forward();
             },
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
@@ -439,7 +439,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 _startProgress();
               }
             },
-            child: Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -559,7 +559,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   Widget build(BuildContext context) {
     if (_activeItems.isEmpty) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
           child: Text(
@@ -584,7 +584,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             // Status content
             PageView.builder(
               controller: _pageController,
-              physics: NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: _activeItems.length,
               itemBuilder: (context, index) {
                 final item = _activeItems[index];
@@ -630,7 +630,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         _activeItems.length,
                         (index) => Expanded(
                           child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
                             child: StatusAnimatedBuilder(
                               animation: _progressController,
                               builder: (context, child) {
@@ -648,7 +648,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                     value: progress,
                                     backgroundColor:
                                         Colors.white.withOpacity(0.3),
-                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                    valueColor: const AlwaysStoppedAnimation<Color>(
                                         Colors.white),
                                     minHeight: 2.5,
                                   ),
@@ -659,7 +659,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         ),
                       ),
                     ),
-                    SizedBox(height: 12),
+                    const SizedBox(height: 12),
 
                     // User info row
                     Row(
@@ -671,7 +671,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(widget.statusModel.userName)}&background=4CAF50&color=fff&size=128',
                           ),
                         ),
-                        SizedBox(width: 10),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -680,7 +680,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                 widget.isMyStatus
                                     ? 'My Moments'
                                     : widget.statusModel.userName,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 15,
@@ -690,7 +690,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                 children: [
                                   Text(
                                     _formatTimeAgo(currentItem.createdAt),
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       color: Colors.white70,
                                       fontSize: 12,
                                     ),
@@ -700,11 +700,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                                   // that the status is encrypted end-to-end.
                                   if (currentItem.type
                                       .startsWith('encrypted')) ...[
-                                    SizedBox(width: 6),
-                                    Icon(Icons.lock_outline_rounded,
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.lock_outline_rounded,
                                         color: Colors.white70, size: 11),
-                                    SizedBox(width: 3),
-                                    Flexible(
+                                    const SizedBox(width: 3),
+                                    const Flexible(
                                       child: Text(
                                         'End-to-end encrypted',
                                         style: TextStyle(
@@ -723,19 +723,19 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         ),
                         if (widget.isMyStatus) ...[
                           IconButton(
-                            icon: Icon(Icons.visibility,
+                            icon: const Icon(Icons.visibility,
                                 color: Colors.white, size: 22),
                             onPressed: _showViewers,
                           ),
                           IconButton(
-                            icon: Icon(Icons.delete,
+                            icon: const Icon(Icons.delete,
                                 color: Colors.white, size: 22),
                             onPressed: _showDeleteDialog,
                           ),
                         ],
                         IconButton(
                           icon:
-                              Icon(Icons.close, color: Colors.white, size: 24),
+                              const Icon(Icons.close, color: Colors.white, size: 24),
                           onPressed: () => Navigator.pop(context),
                         ),
                       ],
@@ -777,7 +777,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   ),
                   child: Text(
                     currentItem.caption!,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 16,
                     ),
@@ -796,8 +796,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   onTap: _showViewers,
                   child: Column(
                     children: [
-                      Icon(Icons.keyboard_arrow_up, color: Colors.white),
-                      SizedBox(height: 4),
+                      const Icon(Icons.keyboard_arrow_up, color: Colors.white),
+                      const SizedBox(height: 4),
                       StreamBuilder<int>(
                         stream: _watchCurrentViewCount(),
                         initialData: currentItem.viewedBy.length,
@@ -805,7 +805,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                           final count = snapshot.data ?? 0;
                           return Text(
                             '$count view${count == 1 ? '' : 's'}',
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
                             ),
@@ -954,10 +954,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       height: double.infinity,
       color: _parseColor(item.backgroundColor),
       alignment: Alignment.center,
-      padding: EdgeInsets.symmetric(horizontal: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Text(
         item.text ?? '',
-        style: TextStyle(
+        style: const TextStyle(
           color: Colors.white,
           fontSize: 24,
           fontWeight: FontWeight.w600,
@@ -990,7 +990,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 );
               },
               errorBuilder: (context, error, stackTrace) {
-                return Center(
+                return const Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1005,7 +1005,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 );
               },
             )
-          : Center(
+          : const Center(
               child: Icon(Icons.image, color: Colors.white54, size: 64),
             ),
     );
@@ -1023,7 +1023,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 child: VideoPlayer(_videoController!),
               ),
             )
-          : Center(
+          : const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -1053,11 +1053,11 @@ class StatusAnimatedBuilder extends AnimatedWidget {
   final Widget? child;
 
   const StatusAnimatedBuilder({
-    Key? key,
+    super.key,
     required Animation<double> animation,
     required this.builder,
     this.child,
-  }) : super(key: key, listenable: animation);
+  }) : super(listenable: animation);
 
   @override
   Widget build(BuildContext context) {

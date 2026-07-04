@@ -27,8 +27,7 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
-import 'package:video_chat_app/services/sync_service.dart';
-import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 import 'package:video_chat_app/widgets/screen_share_overlay.dart';
@@ -58,8 +57,10 @@ void main() async {
   // Enable collection on non-debug builds; disable in debug so local errors
   // are easier to iterate on (they still appear in the Crashlytics console
   // but are tagged as debug events).
-  await FirebaseCrashlytics.instance
-      .setCrashlyticsCollectionEnabled(!kDebugMode);
+  // Fire-and-forget — don't block startup on Crashlytics init.
+  unawaited(FirebaseCrashlytics.instance
+      .setCrashlyticsCollectionEnabled(!kDebugMode)
+      .catchError((_) {}));
 
   // Only wire up Crashlytics error handlers in release/profile builds.
   // In debug mode, collection is disabled above — but calling recordError()
@@ -79,30 +80,21 @@ void main() async {
     };
   }
 
-  // ── Firebase Performance Monitoring ────────────────────────────────────
-  await PerformanceService.init();
+  // ── Firebase Performance Monitoring — fire-and-forget ─────────────────
+  unawaited(PerformanceService.init().catchError((_) {}));
 
-  // ── E2EE: hydrate Signal stores BEFORE any screen tries to encrypt or
-  //         decrypt a message. Without this, the first SignalService.instance
-  //         access after a cold start with a cached session would throw
-  //         StateError("init() must be called…") and the catch-block in
-  //         ChatService.decryptForRendering would surface as
-  //         "⚠ Decryption failed" on every incoming message.
+  // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
+  //         any screen tries to encrypt or decrypt, the service is ready.
+  //         This is critical — without it, the home screen (loaded right
+  //         after auth) would attempt decryption before the crypto layer
+  //         is initialized, causing errors + rebuild storms.
   try {
     await SignalService.init();
   } catch (e) {
     debugPrint('SignalService.init failed at startup (non-fatal): $e');
   }
 
-  // ── Warm the encryption-adjacent caches in the background ──────────────
-  // Opening the Drift-backed PlaintextStore on the first message render
-  // adds a ~30–80ms hitch (disk open + schema check); seeding the device-id
-  // cache for the current user removes the ~100ms first-send Firestore
-  // query. Both are fire-and-forget — failure here is non-fatal, the
-  // downstream code paths still work, they just pay first-use latency.
-  //
-  // CryptoWorker: spawn the persistent background isolate for vault
-  // operations so it's warm before the first batch decrypt request.
+  // ── Warm caches in background (fire-and-forget) ────────────────────────
   // ignore: discarded_futures
   CryptoWorker.instance.init().catchError((e) {
     debugPrint('CryptoWorker warm-up failed (non-fatal): $e');
@@ -112,32 +104,24 @@ void main() async {
     debugPrint('PlaintextStore warm-up failed (non-fatal): $e');
     return Future<PlaintextStore>.error(e);
   });
+
   final cachedUid = FirebaseAuth.instance.currentUser?.uid;
   if (cachedUid != null) {
     SyncService.instance.init(cachedUid);
-    // ignore: discarded_futures
-    SignalService.instance.listDeviceIdsCached(cachedUid).catchError((_) =>
-        const <int>[]); // best-effort warm; cache is self-healing on miss
+    SignalService.instance
+        .listDeviceIdsCached(cachedUid)
+        .catchError((_) => const <int>[]);
   }
 
-  // ── App Check: fire-and-forget (don't block startup) ──
-  _initAppCheck();
-
   // ── Register CallKit event listener BEFORE runApp() ──────────────────
-  // This catches accept/decline/timeout events even when the app is cold-
-  // started from a notification tap (the user tapped "Accept" on the lock
-  // screen, which launched the app).
   _setupCallKitListener();
 
   final connectivityProvider = ConnectivityProvider();
 
-  // ── Stable per-install ID + display name for mesh, used both pre-auth
-  //    (guest mesh chat from the login screen) and as the default before
-  //    the real userId is wired in via updateUserId() on home screen entry.
+  // ── Stable per-install ID + display name for mesh ──────────────────────
   final meshIdentity = _ensureMeshGuestIdentity();
 
-  // 3️⃣  Wrap runApp in a guarded zone — catches synchronous throws that
-  //     escape both FlutterError.onError and PlatformDispatcher.onError.
+  // ── Wrap runApp in a guarded zone ─────────────────────────────────────
   runZonedGuarded(
     () {
       runApp(
@@ -162,8 +146,6 @@ void main() async {
     },
     (Object error, StackTrace stack) {
       if (kDebugMode) {
-        // Single-line summary — the full stack trace was flooding the
-        // terminal for every decrypt / Signal error that escaped a catch.
         debugPrint('⚠ Zone error (${error.runtimeType}): $error');
       } else {
         FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
@@ -171,11 +153,10 @@ void main() async {
     },
   );
 
+  // ── App Check: fire-and-forget (don't block startup) ──
+  _initAppCheck();
+
   // ── Cold-start: check for calls accepted while the app was dead ────────
-  // When the user taps "Accept" on the native CallKit notification and the
-  // app was killed, the actionCallAccept event fires BEFORE our listener is
-  // registered. We catch that case here by querying active calls after the
-  // navigator is mounted.
   _checkPendingAcceptedCalls();
 }
 
@@ -409,6 +390,8 @@ void _initAppCheck() async {
 class MyApp extends StatelessWidget {
   final AuthService _authService = AuthService();
 
+  MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
@@ -464,6 +447,10 @@ class _AuthGateState extends State<_AuthGate> {
     _connectivitySub = Connectivity()
         .onConnectivityChanged
         .listen(_onConnectivityChanged);
+
+    // Check for Play Store update on EVERY launch — auth screen or home,
+    // logged in or not. This fires before any user-visible screen is shown.
+    UpdateService().checkAndPromptUpdate();
   }
 
   @override
@@ -548,6 +535,6 @@ class _AuthGateState extends State<_AuthGate> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    return _resolvedLoggedIn! ? HomeScreen() : LoginScreen();
+    return _resolvedLoggedIn! ? const HomeScreen() : const LoginScreen();
   }
 }

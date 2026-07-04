@@ -13,7 +13,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 /// Works both pre-auth (from the login screen, when the user has no
 /// internet to log in) and post-auth (an entry point in the home screen).
 class NearbyPeersScreen extends StatefulWidget {
-  const NearbyPeersScreen({Key? key}) : super(key: key);
+  const NearbyPeersScreen({super.key});
 
   @override
   State<NearbyPeersScreen> createState() => _NearbyPeersScreenState();

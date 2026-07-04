@@ -11,7 +11,7 @@ class AgoraService {
     // Wait if previous engine is still being released
     if (_isReleasing) {
       print('Waiting for previous engine to release...');
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 500));
     }
 
     return PerformanceService.traceAsync(
@@ -129,7 +129,7 @@ class AgoraService {
   static Future<RtcEngine> initAgoraForScreenShare() async {
     if (_isReleasing) {
       print('Waiting for previous engine to release...');
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 500));
     }
 
     RtcEngine engine = createAgoraRtcEngine();
@@ -158,7 +158,7 @@ class AgoraService {
   /// camera/mic capture is required.
   static Future<RtcEngine> initAgoraForScreenShareViewer() async {
     if (_isReleasing) {
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 500));
     }
 
     RtcEngine engine = createAgoraRtcEngine();
@@ -230,7 +230,7 @@ class AgoraService {
           await engine.leaveChannel();
           await engine.release();
           // Add a small delay to ensure complete cleanup
-          await Future.delayed(Duration(milliseconds: 300));
+          await Future.delayed(const Duration(milliseconds: 300));
         },
       );
     } catch (e, stack) {

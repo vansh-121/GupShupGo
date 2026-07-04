@@ -7,6 +7,8 @@ import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
+  const PhoneAuthScreen({super.key});
+
   @override
   _PhoneAuthScreenState createState() => _PhoneAuthScreenState();
 }
@@ -140,7 +142,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       _otpSent = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      const SnackBar(
         content: Text('Carrier verification unavailable. Use OTP instead.'),
         backgroundColor: Colors.orange,
       ),

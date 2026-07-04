@@ -19,7 +19,7 @@ import 'package:video_chat_app/services/notification_service.dart';
 class SettingsScreen extends StatefulWidget {
   final UserModel currentUser;
 
-  const SettingsScreen({Key? key, required this.currentUser}) : super(key: key);
+  const SettingsScreen({super.key, required this.currentUser});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -70,7 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _authService.signOut();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => LoginScreen()),
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
         (_) => false,
       );
     }
@@ -992,8 +992,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
+                    const Padding(
+                      padding: EdgeInsets.symmetric(
                           horizontal: 20, vertical: 4),
                       child: Align(
                         alignment: Alignment.centerLeft,
