@@ -1,426 +1,406 @@
+# GupShupGo — Enterprise Communication & Decentralized Gaming Ecosystem
+
 <div align="center">
 
-# 🚀 GupShupGo
-### *The Next-Generation, Military-Grade Encrypted, Offline-Capable Communication & Arcade Ecosystem*
+```
+   ______              _____ __                 ______     
+  / ____/_  ______  __/ ___// /_  __  ______  _/ ____/___  
+ / / __/ / / / __ \/ /\__ \/ __ \/ / / / __ \/ / __/ __ \ 
+/ /_/ / /_/ / /_/ / /___/ / / / / /_/ / /_/ / /_/ / /_/ / 
+\____/\__,_/ .___/_//____/_/ /_/\__,_/ .___/\____/\____/  
+          /_/                       /_/                  
+```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-6366f1.svg?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Flutter%20%7C%20Android%20%7C%20iOS%20%7C%20Web-02569B.svg?style=for-the-badge&logo=flutter)](https://flutter.dev)
-[![E2EE](https://img.shields.io/badge/Security-Signal%20Protocol%20E2EE-10b981.svg?style=for-the-badge&logo=signal)](https://signal.org)
-[![Mesh Network](https://img.shields.io/badge/Offline%20Mode-P2P%20Mesh%20Networking-f59e0b.svg?style=for-the-badge&logo=bluetooth)](https://pub.dev/packages/nearby_connections)
-[![Agora SDK](https://img.shields.io/badge/Calling-Agora%20RTC%20Engine-0096e6.svg?style=for-the-badge&logo=agora)](https://agora.io)
-[![Firebase](https://img.shields.io/badge/Backend-Firebase%20Cloud-ffca28.svg?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=for-the-badge)](https://github.com/vansh-121/GupShupGo/pulls)
+**The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
-<p align="center">
-  <b>Inspired by WhatsApp. Powered by Signal Protocol. Elevated by Decentralized Mesh Networking & In-App Gaming.</b><br>
-  GupShupGo is a production-grade communication super-app built with <b>Flutter</b>, featuring zero-knowledge <b>Signal Protocol End-to-End Encryption</b>, <b>Off-Grid Bluetooth/WiFi Mesh Networking</b>, <b>HD Video Calling with Live Screen Sharing</b>, an integrated <b>Gup Arcade Gaming Ecosystem</b>, and a military-grade <b>Secret PIN Vault</b>.
-</p>
+[![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
+[![Flutter SDK](https://img.shields.io/badge/Flutter-%E2%89%A53.2.0-02569B.svg?style=flat-square&logo=flutter)](https://flutter.dev)
+[![Signal Protocol E2EE](https://img.shields.io/badge/Security-Signal%20E2EE-10B981.svg?style=flat-square&logo=signal)](https://signal.org)
+[![Mesh Network P2P](https://img.shields.io/badge/Offline-P2P%20Mesh-F59E0B.svg?style=flat-square&logo=bluetooth)](https://pub.dev/packages/nearby_connections)
+[![Agora RTC](https://img.shields.io/badge/Calling-Agora%20RTC-0096E6.svg?style=flat-square&logo=agora)](https://agora.io)
+[![Firebase Suite](https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com)
 
-<p align="center">
-  <a href="https://play.google.com/store/apps/details?id=com.gupshupgo.app"><b>📲 Pre-Register on Google Play</b></a> •
-  <a href="#-feature-parity--superpowers-matrix"><b>✨ Explore Superpowers</b></a> •
-  <a href="#-system-architecture--data-flow"><b>🏗️ Architecture</b></a> •
-  <a href="#-quickstart--setup-guide"><b>🛠️ Setup Guide</b></a> •
-  <a href="https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link"><b>📽️ Watch Video Demo</b></a>
-</p>
+[📖 Architecture Guide](ARCHITECTURE.md) • [📲 Play Store Pre-Register](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
 
 </div>
 
 ---
 
-## 🌟 Why GupShupGo? (The Paradigm Shift)
+## 🏢 Executive Overview
 
-Traditional messaging apps force you to choose between **user experience**, **absolute privacy**, and **network dependency**. GupShupGo bridges this gap by delivering a seamless Material Design 3 WhatsApp-style interface backed by uncompromising cryptographic security and offline resilience:
+GupShupGo is a production-grade, enterprise-ready messaging and real-time communication application built on Flutter. Engineered for extreme security and absolute offline resilience, GupShupGo integrates zero-knowledge cryptography, peer-to-peer decentralized mesh networks, low-latency video and audio calling with native system CallKit integration, and an interactive casual gaming ecosystem.
 
-* **🔐 Zero-Knowledge Privacy:** Every message is encrypted using the industry-standard **Signal Protocol** (X3DH + Double Ratchet Algorithm). Keys stay on your device; not even our servers can decrypt your conversations.
-* **🌐 Off-Grid Mesh Networking:** No cellular towers? No internet? No problem. When off-grid (camping, flights, natural disasters), GupShupGo automatically switches to **decentralized peer-to-peer Bluetooth & WiFi-Direct mesh networking** (`nearby_connections`), allowing nearby devices to route messages without external infrastructure.
-* **🎮 Integrated Gup Arcade:** Why just chat? Play multiplayer mini-games, compete on leaderboards, and unlock achievements directly within your chat rooms through the built-in **Gup Arcade & Gamification Engine**.
-* **🛡️ Secret Chat Vault:** Protect sensitive conversations behind an encrypted vault locked by a military-grade **Argon2id Key Derivation Function (KDF)** PIN. Even if someone unlocks your phone, your hidden chats remain mathematically impenetrable.
-* **📲 Lock-Screen CallKit & Live Screen Share:** Experience true native iOS and Android call interfaces that wake your phone from a dead sleep, complete with **real-time live screen broadcasting** during HD video calls via **Agora RTC Engine**.
+### 📐 Core Architectural Pillars
 
----
-
-## ⚔️ Feature Parity & Superpowers Matrix
-
-| Feature / Capability | GupShupGo 🚀 | WhatsApp 🟢 | Signal 🔵 | Telegram ✈️ | Discord 🎮 |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Signal Protocol E2EE by Default** | ✅ **Yes (X3DH + Ratchet)** | ✅ Yes | ✅ Yes | ❌ No (Secret Chats only) | ❌ No |
-| **Off-Grid P2P Mesh Networking** | ✅ **Yes (Bluetooth / WiFi Direct)** | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Integrated Arcade Mini-Games** | ✅ **Yes (Gup Arcade)** | ❌ No | ❌ No | ⚠️ Bots Only | ✅ Yes |
-| **Live Screen Sharing in Calls** | ✅ **Yes (HD Real-Time)** | ✅ Yes | ❌ No | ✅ Yes | ✅ Yes |
-| **Secret PIN Vault (Argon2id KDF)** | ✅ **Yes (Encrypted SQLite Store)**| ⚠️ Chat Lock Only | ❌ No | ⚠️ Passcode Lock | ❌ No |
-| **Native Lock-Screen CallKit UI** | ✅ **Yes (Terminated / Cold Start)**| ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Partial |
-| **24-Hour Stories & Status Replies**| ✅ **Yes (Rich Media & Text)** | ✅ Yes | ✅ Yes | ✅ Yes | ❌ No |
-| **Carrier Phone Hint (No SMS Needed)**| ✅ **Yes (Instant Verification)** | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Offline Reactive SQLite Caching** | ✅ **Yes (Drift Database)** | ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Partial |
-| **Isolate Crypto Worker (No UI Lag)**| ✅ **Yes (Dedicated Isolate)** | N/A | N/A | N/A | N/A |
+* **Zero-Knowledge Architecture:** Cryptographic keys are generated and stored strictly on-device. Group and direct messages are encrypted before they hit transit, ensuring that no intermediary—including the Firebase backend—can read message contents.
+* **Offline-First Resilience:** Powered by a reactive Drift (SQLite) local engine, all application states, message queues, and media caches are stored locally first. Real-time sync mechanisms handle recovery and conflicts seamlessly.
+* **Decentralized Peer-to-Peer Routing:** Leveraging nearby network interfaces (Bluetooth & Wi-Fi Direct), devices form ad-hoc mesh networks to deliver messages when cellular networks and internet connections are completely unavailable.
+* **Multi-Threaded Security Engine:** Computationally heavy cryptographic operations are offloaded from the main UI thread to dedicated Dart Background Isolates (`crypto_worker.dart`), maintaining 60+ FPS fluid animations.
 
 ---
 
-## 🔥 Deep-Dive Feature Ecosystem
+## 🗺️ Table of Contents
 
-### 🛡️ Military-Grade E2EE & Secret Vault
-* 🔐 **Signal Protocol Implementation:** Full implementation of **X3DH (Extended Triple Diffie-Hellman)** key agreement and the **Double Ratchet Algorithm** (`libsignal_protocol_dart`).
-* ⚡ **Non-Blocking Crypto Worker Isolate:** All cryptographic key generation, encryption, and decryption happen inside a dedicated background Dart Isolate (`crypto_worker.dart`)—guaranteeing 60+ FPS UI animations even when decrypting massive media batches.
-* 🏷️ **Safety Numbers & QR Verification:** Verify contact authenticity in person via cryptographic Safety Numbers and QR code scanning (`safety_number_service.dart`) to eliminate Man-In-The-Middle (MITM) attacks.
-* 🗄️ **Argon2id Secret Vault:** Hide private chats inside an encrypted SQLite vault (`vault_cipher.dart`). PINs are hashed using memory-hard **Argon2id KDF**, rendering brute-force attacks computationally impossible.
-* 📦 **Encrypted Media Sharing:** Photos and videos are locally compressed and encrypted with unique symmetric keys before uploading to Firebase Storage.
-
----
-
-### 🌐 Off-Grid Mesh Networking (Decentralized Communication)
-* 🔌 **Zero-Infrastructure Messaging:** When cellular towers fail or internet connectivity drops, GupShupGo activates its **Mesh Network Service** (`mesh_network_service.dart`).
-* 📡 **Bluetooth & WiFi-Direct P2P:** Discovers nearby peers using Google's Nearby Connections API, forming a localized peer-to-peer communication network.
-* 🔄 **Store-and-Forward Routing:** Messages sent in offline mode are cached locally in the **Drift SQLite database** and automatically synchronized across cloud servers the moment any network node regains internet access.
+1. [🏛️ Core System Architecture](#%EF%B8%8F-core-system-architecture)
+2. [✨ Feature Ecosystem](#-feature-ecosystem)
+3. [🔐 Cryptographic & Security Specification](#-cryptographic--security-specification)
+4. [📡 Decentralized Mesh Protocol](#-decentralized-mesh-protocol)
+5. [💻 Technical Stack Specification](#-technical-stack-specification)
+6. [📂 Workspace Organization](#-workspace-organization)
+7. [🛠️ Infrastructure Setup & Installation](#%EF%B8%8F-infrastructure-setup--installation)
+8. [🧪 Verification & Testing Procedures](#-verification--testing-procedures)
+9. [⚡ Performance Optimization & Diagnostics](#-performance-optimization--diagnostics)
+10. [📈 Roadmap & Release Plan](#-roadmap--release-plan)
+11. [🤝 Contribution & Compliance](#-contribution--compliance)
 
 ---
 
-### 🎮 Gup Arcade & Gamification Engine
-* 🕹️ **In-App Mini-Games:** Launch directly into interactive games with friends from any chat conversation via the **Gup Arcade** (`gup_arcade_screen.dart`).
-* 🏆 **Gamification & Rewards System:** Earn experience points (XP), unlock achievements, and climb global leaderboards by chatting, winning arcade challenges, and engaging with community statuses (`gamification_service.dart`).
-* 🎖️ **Custom User Badges:** Display earned achievement badges on your public profile and chat headers.
+## 🏛️ Core System Architecture
 
----
-
-### 📞 HD Video Calling & Live Screen Sharing
-* 🎥 **Agora RTC Engine Integration:** Ultra-low-latency HD video and crystal-clear voice calling powered by Agora SDK v6.x (`agora_services.dart`).
-* 🖥️ **Live Screen Broadcasting:** Share your screen in real-time during any video call for collaborative presentations, gaming streams, or remote troubleshooting (`screen_share_session.dart`).
-* 📲 **Native CallKit Lock-Screen UI:** Uses `flutter_callkit_incoming` and data-only Firebase Cloud Messaging (FCM) pushes to wake up terminated or backgrounded devices, displaying a full-screen native accept/decline screen identical to WhatsApp and iOS Phone app.
-* 🎛️ **Professional In-Call Controls:** Flip camera, mute microphone, switch audio routing (speaker/earpiece), hold calls, and view live talk-time duration.
-* 📋 **Comprehensive Call Logs:** Automatically records detailed call histories (incoming, outgoing, missed, duration, media type) with Firestore synchronization.
-
----
-
-### 💬 Reactive Offline Messaging & Voice Notes
-* 🗃️ **Drift Reactive SQLite Database:** Powered by `drift` and `sqlite3_flutter_libs`, providing type-safe, reactive local storage for instant chat list rendering on app launch without waiting for network requests (`chat_cache_service.dart`).
-* 🎙️ **Voice Messaging System:** Record, review, and send high-fidelity voice notes with interactive waveform visualizers and playback speed controls (`voice_recorder_service.dart`).
-* ⚡ **Client-Side Image Compression:** Utilizes `flutter_image_compress` to reduce image payloads by up to 20× before encryption, saving user bandwidth and storage costs.
-* ✅ **Granular Read Receipts:** Real-time tracking of message lifecycle states: Sent (single check), Delivered (double check), and Seen (blue check).
-* 🗑️ **Non-Destructive Chat Clearing:** Timestamp-based per-user chat clearing allows you to wipe your local conversation view without deleting messages for other participants.
-
----
-
-### 📸 WhatsApp-Style 24-Hour Stories & Status
-* 🎨 **Vibrant Text Statuses:** Express yourself with customizable typography and 16 curated gradient backgrounds (`add_text_status_screen.dart`).
-* 🖼️ **Rich Media Stories:** Capture photos/videos from the camera or upload from your gallery (up to 30-second video limit).
-* ⏱️ **Automatic 24-Hour Expiry:** Status updates vanish automatically after 24 hours with background cleanup routines.
-* 👁️ **Viewer Analytics & Direct Replies:** Track exactly who viewed your status and when. Swipe up on any status to send an instant **Status Reply** directly into your private chat!
-
----
-
-### 🔐 Advanced Auth, Presence & Device Sessions
-* 📲 **Carrier-Based Phone Hint API:** Verify phone numbers instantly without waiting for SMS OTPs using Android's Phone Number Hint API (`phone_verification_service.dart`).
-* 🔗 **Multi-Provider Account Linking:** Seamlessly link Phone Number, Google Sign-In, and Email/Password to a single unified user identity (`auth_service.dart`).
-* 🛡️ **Unbreakable Session Persistence:** Uses Android Keystore-backed `flutter_secure_storage` to preserve device authentication tokens—surviving aggressive OEM background battery cleaners (MIUI, HyperOS, ColorOS) and OS-level app force-stops.
-* 🟢 **Real-Time Presence & Privacy Controls:** Live online/offline indicators, typing notifications, and customizable privacy toggles (hide last seen, disable read receipts, block contacts).
-
----
-
-### ⚡ Material Design 3 UI & Enterprise Observability
-* 🌙 **Dynamic Dark & Light Themes:** Crafted with a cohesive purple-indigo brand design system, custom bundled Google Fonts (Poppins), and seamless theme switching (`app_theme.dart`).
-* 🔄 **Google Play In-App Updates:** Enforces mandatory or flexible full-screen native update flows (`in_app_update`) paired with an interactive **"What's New" feature discovery modal** upon launching updated versions.
-* 📈 **Enterprise Observability:** Integrated with **Firebase Performance Monitoring** and **Firebase Crashlytics** (`performance_service.dart`, `crashlytics_service.dart`) for real-time error tracking and latency profiling.
-
----
-
-## 🏗️ System Architecture & Data Flow
-
-GupShupGo follows **Clean Architecture** principles combined with the **Service Layer** and **Provider State Management** patterns, ensuring high testability, strict separation of concerns, and modular scalability.
+GupShupGo utilizes a clean, decoupled architecture utilizing the **Repository Pattern** and **Service Layer** structure to keep UI separate from persistence and external services.
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                               GUPSHUPGO CLIENT APP                               │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  ┌────────────────────────────────────────────────────────────────────────────┐  │
-│  │                              UI / SCREENS LAYER                            │  │
-│  │   Home • Chat • Call • Arcade • Mesh Chat • Secret Vault • Status Viewer   │  │
-│  └─────────────────────────────────────┬──────────────────────────────────────┘  │
-│                                        │ (Consumer / Selector)                   │
-│  ┌─────────────────────────────────────▼──────────────────────────────────────┐  │
-│  │                           STATE MANAGEMENT LAYER                           │  │
-│  │   Provider • CallStateProvider • StatusProvider • Reactive Drift Streams   │  │
-│  └─────────────────────────────────────┬──────────────────────────────────────┘  │
-│                                        │ (Service Invocation)                    │
-│  ┌─────────────────────────────────────▼──────────────────────────────────────┐  │
-│  │                           BUSINESS SERVICE LAYER                           │  │
-│  │   ChatService • SignalService • MeshNetworkService • AgoraService • Vault  │  │
-│  └───────────┬─────────────────────────┬──────────────────────────┬───────────┘  │
-│              │                         │                          │              │
-├──────────────┼─────────────────────────┼──────────────────────────┼──────────────┤
-│              │ (Local SQL/Crypto)      │ (P2P Mesh Bluetooth)     │ (Cloud API)  │
-│  ┌───────────▼────────────┐  ┌─────────▼─────────────┐  ┌─────────▼───────────┐  │
-│  │ LOCAL STORAGE & CRYPTO │  │   OFF-GRID MESH P2P   │  │  FIREBASE / AGORA   │  │
-│  │ • Drift SQLite Store   │  │ • Nearby Connections  │  │ • Cloud Firestore   │  │
-│  │ • Crypto Worker Isolate│  │ • Bluetooth / WiFi    │  │ • Cloud Functions   │  │
-│  │ • Android Keystore     │  │ • Peer Discovery      │  │ • Agora RTC Engine  │  │
-│  └────────────────────────┘  └───────────────────────┘  └─────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 💻 Comprehensive Tech Stack
-
-```yaml
-Frontend Framework:
-  ├── Flutter / Dart: SDK ≥3.2.0 <4.0.0
-  ├── State Management: Provider (^6.1.1)
-  ├── Design System: Material Design 3 + Custom Brand Palette (Purple/Indigo)
-  ├── Typography: Bundled Google Fonts (Poppins)
-  └── Native UI: Flutter CallKit Incoming (^2.5.2) + Google Play In-App Updates
-
-Cryptography & Local Storage:
-  ├── E2E Encryption: libsignal_protocol_dart (^0.7.1) — Signal X3DH & Double Ratchet
-  ├── Cryptographic Primitives: cryptography (^2.7.0), pointycastle, crypto (Argon2id / KDF)
-  ├── Background Isolate: Custom Dart Crypto Worker for non-blocking UI
-  ├── Reactive Database: Drift (^2.18.0) + sqlite3_flutter_libs (Type-safe local cache)
-  ├── Key Persistence: flutter_secure_storage (^9.2.2) (Android Keystore / Apple Keychain)
-  └── Fast Cache: SharedPreferences (^2.2.2)
-
-Backend & Real-Time Infrastructure:
-  ├── Authentication: Firebase Auth (Phone OTP, Carrier Hint API, Google, Email, Anonymous)
-  ├── Database: Cloud Firestore (Real-time sync, Security Rules, Caching)
-  ├── Storage: Firebase Storage (Encrypted media uploads, 30MB limit)
-  ├── Push Notifications: Firebase Cloud Messaging (FCM) + Local Notifications
-  ├── Serverless Backend: Firebase Cloud Functions (Node.js secure data-only FCM delivery)
-  ├── API Security: Firebase App Check (Play Integrity & Debug Providers)
-  └── Audio/Video Engine: Agora RTC Engine (^6.3.1) + audioplayers (^5.2.1)
-
-Decentralized & Peer-to-Peer Networking:
-  ├── Off-Grid Mesh: nearby_connections (^4.1.0) (Bluetooth / WiFi-Direct P2P)
-  └── Network Monitoring: connectivity_plus (^6.0.3)
++-------------------------------------------------------------------------------+
+|                             UI LAYOUT / SCREENS VIEW                           |
+|       Home | Chat Screen | Video/Voice Calling | Vault | Arcade | Status      |
++---------------------------------------+---------------------------------------+
+                                        | (State Consumers / Observers)
++---------------------------------------v---------------------------------------+
+|                            STATE CONTROLLER LAYER                             |
+|          Provider State | CallStateProvider | StatusProvider | Theme          |
++---------------------------------------+---------------------------------------+
+                                        | (Reactive Service Calls)
++---------------------------------------v---------------------------------------+
+|                            BUSINESS SERVICE LAYER                             |
+|    SignalService | AgoraService | MeshNetworkService | AuthService | Sync     |
++-------------------+-------------------+-------------------+-------------------+
+                    |                   |                   |
+                    | (Drift / Crypto)  | (P2P Discovery)   | (Network API)
++-------------------v---+           +---v---------------+   +---v---------------+
+|  LOCAL STORAGE & COGNITION  |     |  OFF-GRID AD-HOC  |   | FIREBASE INFRA    |
+| - Drift SQLite Database     |     | - Nearby Connect  |   | - Firestore DB    |
+| - Crypto Isolate Worker     |     | - Bluetooth/Wi-Fi |   | - Cloud Functions |
+| - Android Secure Keystore   |     | - Mesh Routing    |   | - Agora RTC       |
++-----------------------------+     +-------------------+   +-------------------+
 ```
 
 ---
 
-### 📂 Project Structure Overview
+## ✨ Feature Ecosystem
+
+### 💬 Real-Time Messaging & Media Sharing
+* **Reactive Drift Database:** Integrates `drift` and `sqlite3_flutter_libs` to perform local persistent message storage, query caching, and UI reactivity. The chat list loads instantly, independent of network speed.
+* **Voice Messaging Suite:** In-app audio recording with real-time waveform visualization, scrubbable playback controllers, and adjustable playback speeds (`1.0x`, `1.5x`, `2.0x`).
+* **Intelligent Media Pipelines:** Automatic multi-pass client-side image compression (`flutter_image_compress`) reducing data footprints by up to 20× before encrypting and uploading to Firebase Storage.
+* **Read Receipts & Delivery Indicators:** State tracking for message lifecycles: Sent (single check), Delivered (double check), and Seen (blue double checks).
+* **Non-Destructive Chat Clears:** Timestamp-based chat cleaning allows local wipeout of message history without affecting the conversation logs of other participants.
+
+### 📞 HD calling & Collaborative Screen Sharing
+* **Agora RTC Engine:** Ultra-low latency voice and HD video streams configured through `agora_rtc_engine` (`agora_services.dart`).
+* **Live Screen Sharing:** Real-time desktop/mobile screen casting during active video calls, managed via dedicated screen share controllers (`screen_share_session.dart`).
+* **Native OS Integration:** Integrates `flutter_callkit_incoming` to process incoming data-only push notifications, invoking the native Android/iOS call screen (CallKit) even if the app is killed or sleeping.
+* **Hardware Controls:** Multi-state microphone mute, camera flip, speakerphone toggle, call hold, and real-time call logs synchronized to cloud storage.
+
+### 📸 Ephemeral Updates & Stories (WhatsApp-Style Status)
+* **Interactive Media Statuses:** Rich text stories with 16 vibrant backgrounds or media uploads (photos & video clips up to 30 seconds).
+* **Viewer Analytics:** Logs who has viewed your status with precise timestamps.
+* **Direct Status Replies:** Interactive swiping on active statuses that routes text replies directly into the private, encrypted chat thread.
+* **24-Hour Expiration:** Auto-expiring records managed through background database cleanups.
+
+### 🎮 Gup Arcade & Gamification
+* **In-Chat Casual Gaming:** Launch and play casual arcade games directly from chat rooms (`gup_arcade_screen.dart`).
+* **User Progression Framework:** A gamified experience engine (`gamification_service.dart`) rewarding users with XP and unlockable profile badges for messaging, calling, and community interactions.
+* **Interactive Leaderboards:** High-score leaderboards displaying rankings across contacts.
+
+---
+
+## 🔐 Cryptographic & Security Specification
+
+GupShupGo implements a zero-trust cryptographic model designed to protect user data from local and network eavesdropping.
+
+```
+       [ALICE]                                                 [BOB]
+          |                                                      |
+    Generate Keys (IK, SPK, OPK)                           Download Alice's
+    Publish PreKey Bundle to Cloud                        PreKey Bundle from Cloud
+          |                                                      |
+          | <-------------------------------------------- Perform X3DH (IK_B, EK_B)
+          |                                                      |
+    Perform X3DH (IK_A, SPK_A)                                   |
+    Derive Shared Master Key                               Derive Shared Master Key
+          |                                                      |
+    Init Double Ratchet Chain                              Init Double Ratchet Chain
+          |                                                      |
+          | ===================================================> |
+          |               Send E2EE Message                      |
+          |               (AES-256-GCM + Ratchet)                |
+```
+
+### 🔑 Key Agreement & Ratcheting (Signal Protocol)
+* **X3DH (Extended Triple Diffie-Hellman):** Performs initial key agreement to establish a shared master secret key between two parties who do not trust each other, supporting asynchronous communication.
+* **Double Ratchet Algorithm:** Utilizes Diffie-Hellman ratcheting paired with symmetric KDF chains to generate new session keys for every single message. This guarantees:
+  * **Forward Secrecy:** Compromising current keys does not expose past messages.
+  * **Break-in Recovery (Post-compromise Security):** Compromising current keys does not allow attackers to decrypt future messages once normal ratcheting resumes.
+* **Safety Numbers & QR Code Auditing:** Provides a cryptographic fingerprint based on concatenated identity keys, letting users verify their E2EE sessions in-person or via QR scanning.
+
+### 🛡️ Secret Vault & Local Encryption Keys
+* **Argon2id Key Derivation Function (KDF):** User PIN codes for the hidden chat vaults are processed using Argon2id (configured with memory-hard parameters) to derive the local database decryption keys.
+* **AES-256-GCM Payload Encryption:** Local database caches and media files are encrypted using AES-256 in Galois/Counter Mode (GCM), providing authenticated encryption to prevent tampering.
+* **Android Keystore / iOS Keychain:** Device session tokens and master cryptographic identity keys are stored using hardware-backed secure storage through `flutter_secure_storage`.
+
+---
+
+## 📡 Decentralized Mesh Protocol
+
+In situations where internet or cellular backhaul is fully absent, GupShupGo deploys a peer-to-peer mesh networking layer using the Google Nearby Connections framework (`nearby_connections`).
+
+```
+  +--------------+  1. P2P Discover & Connect  +--------------+
+  |   DEVICE A   |<===========================>|   DEVICE B   |
+  |   (Alice)    |    (Bluetooth / Wi-Fi P2P)  |    (Bob)     |
+  +-------+------+                             +-------+------+
+          |                                            |
+          | 2. Store offline messages                  | 2. Store offline messages
+          v                                            v
+  +--------------+                             +--------------+
+  | Drift SQLite |                             | Drift SQLite |
+  +-------+------+                             +-------+------+
+          |                                            |
+          | 3. Recover internet connectivity           | 3. Recover internet connectivity
+          v                                            v
+  +--------------+    4. Sync to cloud backend         +--------------+
+  | Firebase API |====================================>| Firebase API |
+  +--------------+                                     +--------------+
+```
+
+### 📡 Ad-Hoc Connectivity Mechanics
+* **Dual-Radio Topology:** Operates simultaneously over Bluetooth Low Energy (BLE) for low-power discovery and Wi-Fi Direct / High-Bandwidth Wi-Fi for media and text routing.
+* **Connection Lifecycle Manager:** Automates discovery, handshake verification, connection acceptance, and channel heartbeat monitoring (`mesh_network_service.dart`).
+* **Automatic Queue Synchronization:** Offline message payloads generated in mesh mode are structured in localized tables and automatically synchronized to the cloud when internet access is restored.
+
+---
+
+## 💻 Technical Stack Specification
+
+| Category | Technology | Packages / Dependency | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Framework** | Flutter / Dart | `sdk: ">=3.2.0 <4.0.0"` | Client runtime engine |
+| **State Engine** | Provider | `provider: ^6.1.1` | Decoupled state management |
+| **E2E Cryptography**| Signal Protocol | `libsignal_protocol_dart: ^0.7.1` | X3DH key exchange & Double Ratchet |
+| **KDF & Cryptography**| Crypto Suite | `cryptography: ^2.7.0`, `pointycastle` | Argon2id vault KDF, AES-256-GCM engine |
+| **Local Database** | Drift SQLite | `drift: ^2.18.0`, `sqlite3_flutter_libs` | Reactive local database & cache |
+| **Secure Storage** | OS Keystore | `flutter_secure_storage: ^9.2.2` | Persistent session token vault |
+| **Real-Time Calling**| Agora RTC | `agora_rtc_engine: ^6.3.1` | Low-latency audio and HD video calls |
+| **Native Calling UI**| CallKit | `flutter_callkit_incoming: ^2.5.2` | Native OS call screens |
+| **P2P Mesh Network** | Nearby Conn | `nearby_connections: ^4.1.0` | Peer-to-peer offline chat routing |
+| **Backend Suite** | Firebase | `firebase_core`, `cloud_firestore`, `firebase_storage` | Authentication, database & file storage |
+| **Cloud Messages** | FCM & Functions | `firebase_messaging`, `firebase_functions` | Serverless notifications & data payloads |
+| **App Security** | App Check | `firebase_app_check: ^0.2.1+8` | API call validation & fraud prevention |
+| **Observability** | Telemetry | `firebase_crashlytics`, `firebase_performance` | Real-time crash logs and speed diagnostics |
+
+---
+
+## 📂 Workspace Organization
+
+The project workspace strictly divides visual assets, local functions, client-side Dart files, and backend definitions:
 
 ```plaintext
 gupshupgo/
-├── lib/
-│   ├── main.dart                             # App entry point, cold-start FCM & CallKit routing
-│   ├── models/                               # Domain models (User, Message, Status, CallLog)
-│   ├── provider/                             # Reactive State Management (Call, Status, Theme)
-│   ├── services/                             # Core Business Logic & Infrastructure
-│   │   ├── crypto/                           # Signal Protocol E2EE & Vault Cryptography
-│   │   │   ├── signal_service.dart           # X3DH & Double Ratchet session management
-│   │   │   ├── vault_cipher.dart             # Argon2id KDF & encrypted SQLite vault
-│   │   │   ├── safety_number_service.dart    # QR code & Safety Number MITM verification
-│   │   │   └── crypto_worker.dart            # Dedicated background Isolate worker
-│   │   ├── database/                         # Drift SQLite Reactive Offline Database
-│   │   ├── auth_service.dart                 # Multi-provider Auth & account linking
-│   │   ├── chat_service.dart                 # Real-time messaging & read receipts
-│   │   ├── mesh_network_service.dart         # Off-Grid Bluetooth/WiFi P2P Mesh Engine
-│   │   ├── agora_services.dart               # HD Video/Voice calling & Agora SDK handlers
-│   │   ├── screen_share_session.dart         # Real-time screen broadcasting controller
-│   │   ├── gamification_service.dart         # Gup Arcade XP, achievements & rewards
-│   │   ├── fcm_service.dart                  # Push notifications & CallKit dispatcher
-│   │   └── phone_verification_service.dart   # Carrier Phone Number Hint API
-│   ├── screens/                              # UI Presentation Layer
-│   │   ├── auth/                             # Login, Phone OTP & Account Linking screens
-│   │   ├── home_screen.dart                  # Main tabbed navigation (Chats, Status, Calls)
-│   │   ├── chat_screen.dart                  # E2EE messaging interface with waveforms
-│   │   ├── call_screen.dart                  # Video/Voice call UI with in-call controls
-│   │   ├── screen_share_screen.dart          # Live screen broadcasting presenter
-│   │   ├── gup_arcade_screen.dart            # Integrated Gup Arcade gaming center
-│   │   ├── mesh_chat_screen.dart             # Off-Grid peer-to-peer mesh messaging UI
-│   │   ├── vault_settings_screen.dart        # Secret PIN vault & hidden chat manager
-│   │   ├── status_viewer_screen.dart         # 24-hour stories viewer & direct reply modal
-│   │   └── settings_screen.dart              # Privacy, notifications, and device sessions
-│   └── theme/                                # Material 3 Design System & Poppins tokens
-├── functions/                                # Firebase Cloud Functions (Node.js)
-│   ├── index.js                              # sendCallNotification & sendMessageNotification
-│   └── package.json                          # Backend dependencies (firebase-admin)
-├── firestore.rules                           # Cloud Firestore security rules
-├── storage.rules                             # Firebase Storage security rules
-└── pubspec.yaml                              # Flutter package dependency definitions
+├── android/                      # Native Android configuration, Manifests & Build Scripts
+├── ios/                          # Native iOS workspace, Plists, Runner & Certificates
+├── functions/                    # Node.js Serverless Cloud Functions (FCM signaling backend)
+│   ├── index.js                  # Cloud messaging triggers (FCM call notifications)
+│   └── package.json              # Firebase Admin & SDK requirements
+├── lib/                          # Main Flutter application codebase
+│   ├── main.dart                 # Application entry point, system initialization & FCM routing
+│   ├── models/                   # Clean data models (User, Message, Status, CallLog)
+│   ├── provider/                 # Reactive State Management providers (Status, Call, Theme)
+│   ├── theme/                    # Material 3 typography, spacing & color configurations
+│   ├── services/                 # Business logic, API communication & hardware handlers
+│   │   ├── crypto/               # End-to-End Encryption & Secure Vault engine
+│   │   │   ├── signal_service.dart         # Double Ratchet & X3DH key cycle handling
+│   │   │   ├── vault_cipher.dart           # Argon2id database encryption utilities
+│   │   │   ├── safety_number_service.dart  # QR verification fingerprint calculations
+│   │   │   └── crypto_worker.dart          # Multi-threaded background Dart Isolate
+│   │   ├── database/             # Drift SQLite database structure and Dao entities
+│   │   ├── auth_service.dart     # Identity providers (Phone Hint, Google, Anonymous)
+│   │   ├── chat_service.dart     # Messaging rules, read receipts, and storage sync
+│   │   ├── mesh_network_service.dart       # Offline ad-hoc mesh routing system
+│   │   ├── agora_services.dart            # Voice/Video engine initialization
+│   │   └── screen_share_session.dart       # Screen cast and broadcast pipelines
+│   └── screens/                  # Presentation layout screens (divided by domain)
+│       ├── auth/                 # OTP verification, login screens, account linking
+│       ├── chat_screen.dart      # Interactive conversation layout with waveforms
+│       ├── call_screen.dart      # Real-time video calling controls & display
+│       ├── mesh_chat_screen.dart # P2P Offline chat UI
+│       ├── gup_arcade_screen.dart# Embedded gaming interface
+│       └── vault_settings_screen.dart      # Secured chat PIN setup & vault settings
+├── firestore.rules               # Firestore read/write security rules
+├── storage.rules                 # Cloud Storage object-level permission rules
+└── pubspec.yaml                  # Unified dependency file and asset declarations
 ```
 
 ---
 
-## 🛠️ Quickstart & Setup Guide
+## 🛠️ Infrastructure Setup & Installation
 
-### 📋 Prerequisites
-* **Flutter SDK:** Version `>=3.2.0 <4.0.0`
-* **IDE:** Android Studio, VS Code, or Xcode
-* **Cloud Accounts:** [Firebase Console](https://console.firebase.google.com) & [Agora.io](https://console.agora.io)
-* **Node.js:** Version `>=18.x` (for deploying Firebase Cloud Functions)
+### 📋 Environment Requirements
+* **Flutter SDK:** `>=3.2.0` (ensure `flutter doctor` passes successfully)
+* **Android Tools:** SDK 34, Build Tools 34.0.0, and Android Studio
+* **iOS Tools:** Xcode 15+, CocoaPods (if running on macOS)
+* **Node.js Environment:** Version `>=18.10` (required for Firebase Cloud CLI functions)
+* **Agora Account:** Valid Agora App ID and authorization token (for call services)
 
 ---
 
-### 1️⃣ Clone & Install Dependencies
+### 1️⃣ Clone & Dependency Installation
+Download the workspace repository and trigger package retrieval:
 ```bash
-# Clone the repository
 git clone https://github.com/vansh-121/GupShupGo.git
 cd GupShupGo/gupshupgo
-
-# Fetch all Flutter packages
 flutter pub get
 ```
 
 ---
 
-### 2️⃣ Firebase Configuration & Deployment
+### 2️⃣ Firebase Configuration
 
-#### Step A: Configure Client Projects
-1. Create a new project in the [Firebase Console](https://console.firebase.google.com).
-2. Register your Android app (`com.gupshupgo.app`) and iOS app.
-3. Download the configuration artifacts:
-   * Place `google-services.json` inside `android/app/`.
-   * Place `GoogleService-Info.plist` inside `ios/Runner/`.
+#### Step A: Register Clients
+1. Create a project inside the [Firebase Console](https://console.firebase.google.com).
+2. Register your Android app package name (`com.gupshupgo.app`) and iOS bundle identifier.
+3. Download and place client configuration files:
+   * **Android:** Put `google-services.json` into `android/app/`.
+   * **iOS:** Put `GoogleService-Info.plist` into `ios/Runner/`.
 
-#### Step B: Enable Firebase Services
-* **Authentication:** Enable Phone Auth, Google Sign-In, Email/Password, and Anonymous Login.
-* **Cloud Firestore:** Create database in production mode and deploy security rules:
-  ```bash
-  firebase deploy --only firestore:rules
-  ```
-* **Firebase Storage:** Create storage bucket and deploy access rules:
-  ```bash
-  firebase deploy --only storage
-  ```
-* **App Check (Recommended):** Enable Play Integrity for Android production and Debug Provider for local development.
+#### Step B: Activate Authentication & Databases
+1. **Authentication:** Turn on **Phone Auth** (with OTP verification), **Google Sign-In**, and **Anonymous Login** (for testing guest mode).
+2. **Cloud Firestore:** Enable Database in production mode.
+3. **Firebase Storage:** Configure a media storage bucket in production.
 
-#### Step C: Deploy Serverless Cloud Functions
-GupShupGo utilizes backend Cloud Functions to securely dispatch data-only FCM push payloads without exposing client service accounts:
+#### Step C: Deploy Security Rules
+Using the Firebase CLI, deploy rules from the workspace root to ensure data access restrictions:
+```bash
+# Log in and deploy
+firebase login
+firebase deploy --only firestore:rules
+firebase deploy --only storage
+```
+
+#### Step D: Deploy Cloud Functions (Signaling Server)
+Navigate to the serverless folder and deploy background handlers to FCM:
 ```bash
 cd functions
 npm install
 cd ..
 firebase deploy --only functions
 ```
-*This deploys `sendCallNotification` (for CallKit lock-screen wakeups) and `sendMessageNotification` (for chat alerts).*
+*This deploys `sendCallNotification` (data-only FCM call wakeups) and `sendMessageNotification` endpoints.*
 
 ---
 
-### 3️⃣ Agora RTC & Calling Setup
-1. Log into [Agora Console](https://console.agora.io/) and create a project.
-2. Copy your **Agora App ID**.
-3. Open `lib/services/agora_services.dart` and insert your credentials:
+### 3️⃣ Agora Service Configuration
+1. Log into your account on the [Agora Developer Portal](https://console.agora.io).
+2. Generate an **Agora App ID**.
+3. Open `lib/services/agora_services.dart` and update the core connection string:
    ```dart
    // lib/services/agora_services.dart
-   const String kAgoraAppId = 'YOUR_AGORA_APP_ID_HERE';
+   const String kAgoraAppId = 'YOUR_AGORA_APP_ID';
    ```
 
 ---
 
-### 4️⃣ Android & iOS Manifest Permissions
-All essential hardware permissions are pre-configured in `android/app/src/main/AndroidManifest.xml` and `ios/Runner/Info.plist`:
+### 4️⃣ System Permissions Manifest Matrix
 
-| Permission | Hardware / System Purpose |
-| :--- | :--- |
-| `INTERNET` & `ACCESS_NETWORK_STATE` | Firebase sync, Agora video streaming & connectivity monitoring |
-| `CAMERA` & `RECORD_AUDIO` | HD video calls, voice messages, and story capture |
-| `BLUETOOTH`, `BLUETOOTH_ADMIN`, `BLUETOOTH_ADVERTISE` | **Off-Grid P2P Mesh Networking** peer discovery & routing |
-| `ACCESS_FINE_LOCATION` & `NEARBY_WIFI_DEVICES` | WiFi-Direct endpoint establishment for offline mesh chat |
-| `READ_MEDIA_IMAGES` & `READ_MEDIA_VIDEO` | Gallery media attachments and status uploads |
-| `POST_NOTIFICATIONS` | Foreground push alerts and incoming call notifications (Android 13+) |
-| `FOREGROUND_SERVICE` & `WAKE_LOCK` | Background call persistence and screen-lock prevention |
+GupShupGo requires hardware accesses to run. The configuration files are pre-loaded with:
+
+| Permission | Android Target | iOS Key | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Camera** | `CAMERA` | `NSCameraUsageDescription` | Video calling & status media |
+| **Microphone** | `RECORD_AUDIO` | `NSMicrophoneUsageDescription` | Voice calls & audio recording |
+| **Network State** | `ACCESS_NETWORK_STATE` | Standard | Connection monitoring |
+| **Bluetooth P2P** | `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN` | Standard | Bluetooth discovery for mesh |
+| **Local Wi-Fi** | `NEARBY_WIFI_DEVICES` | Standard | High-speed Wi-Fi P2P mesh chat |
+| **Fine Location** | `ACCESS_FINE_LOCATION` | `NSLocationWhenInUseUsageDescription` | Endpoint discovery for Nearby Connections |
+| **Media Store** | `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` | `NSPhotoLibraryUsageDescription` | Uploading photos/videos to chat/status |
+| **Notifications**| `POST_NOTIFICATIONS` | Standard | Background notifications (Android 13+) |
 
 ---
 
-### 5️⃣ Compile & Run the App
+### 5️⃣ Execution
+Ensure a test device is connected (or launch an emulator instance) and build:
 ```bash
-# Run on connected Android device / emulator
+# Run local debug instance
 flutter run
 
-# Run on connected iOS device / simulator
-flutter run -d ios
-
-# Build production Android APK / App Bundle
+# Compile production Android APK
 flutter build apk --release
-flutter build appbundle --release
 ```
 
 ---
 
-## 🧪 Step-by-Step Testing Guide
+## 🧪 Verification & Testing Procedures
 
-### 📱 1. Testing Multi-Device Connectivity & E2EE
-1. Install GupShupGo on **Device A (Alice)** and **Device B (Bob)**.
-2. Select **Continue as Guest** or verify via Phone OTP on both devices.
-3. On Alice's phone, search for Bob and open a chat room. Notice the **🔒 Messages are end-to-end encrypted** security badge.
-4. Send text, photos, and voice notes. Open `safety_number_service.dart` or tap contact info to scan QR codes and verify Safety Numbers!
+### 📱 Scenario 1: Multi-Device E2EE Verification
+1. Open GupShupGo on **Device A (Alice)** and **Device B (Bob)**.
+2. Register both devices using different numbers, or select **Continue as Guest** for rapid sandbox verification.
+3. On Device A, open contacts and start a conversation with Bob.
+4. Verify the E2E lock symbol in the app bar. Tap on Bob's user profile to verify **Safety Numbers** or scan Bob's QR code.
+5. Send messages and media, verifying real-time delivery and read states.
 
-### 🌐 2. Testing Off-Grid P2P Mesh Networking (No Internet!)
-1. Put **Device A** and **Device B** in **Airplane Mode** (ensure Bluetooth and WiFi remain turned ON, but disconnect from any router/hotspot).
-2. Open the navigation menu and select **🌐 Off-Grid Mesh Chat** (`mesh_chat_screen.dart`).
-3. Tap **Discover Peers**. Both devices will detect each other via Google Nearby Connections.
-4. Connect and start texting! Messages are routed locally from antenna to antenna without internet or cellular towers.
+### 📡 Scenario 2: Off-Grid Mesh Networking Verification
+1. Put both **Device A** and **Device B** in **Airplane Mode** (cellular and Wi-Fi networks disabled).
+2. Turn on **Bluetooth** and **Local Wi-Fi** on both devices.
+3. Open the sidebar navigation menu and select **🌐 Off-Grid Mesh Chat**.
+4. Tap **Discover Peers** on both devices.
+5. Accept the pairing invitation. Verify that text messages transmit directly between the devices without internet routing.
+6. Disable Airplane Mode on either device, and verify that mesh messages synchronize to the cloud backend.
 
-### 📞 3. Testing Lock-Screen CallKit & Live Screen Sharing
-1. Fully **kill / terminate** GupShupGo on Bob's phone and lock the screen.
-2. From Alice's phone, initiate a **Video Call**.
-3. Within 1–2 seconds, Bob's locked phone will ring with the **Native CallKit Lock-Screen UI**!
-4. Answer the call. Tap the **🖥️ Share Screen** icon on Alice's device to broadcast her live screen to Bob in real-time.
-
-### 🎮 4. Testing the Integrated Gup Arcade
-1. From any chat room or the main menu, navigate to **🎮 Gup Arcade**.
-2. Select a mini-game challenge and invite your chat partner.
-3. Complete the challenge to earn XP points, level up your profile badge, and check your ranking on the leaderboard!
-
----
-
-## 🔒 Security, Privacy & Observability
-
-### 🛡️ Why GupShupGo is Mathematically Bulletproof
-* **Zero Client Service Accounts:** Unlike amateur tutorials, no administrative Firebase credentials or service account JSONs are bundled inside the app client.
-* **Strict Security Rules:** `firestore.rules` and `storage.rules` enforce strict user-isolated ownership. Users can only write to their own profile directories and status buckets.
-* **Play Integrity & App Check:** Cryptographically verifies that incoming API requests originate from an authentic, untampered app binary running on a non-rooted device.
-* **Argon2id Memory-Hard KDF:** The Secret Chat Vault PIN uses Argon2id, requiring substantial RAM and CPU cycles per guess to thwart ASIC/GPU brute-force cracking tools.
-
-### ⚡ Performance & Observability
-* **Isolate Offloading:** Heavy cryptographic encryption and decryption operations run in parallel background isolates, preventing main-thread UI jank.
-* **Drift Reactive Caching:** SQLite database indexing guarantees sub-10ms query execution for conversation histories containing 10,000+ messages.
-* **Payload Compression:** Media files undergo intelligent multi-pass compression (`flutter_image_compress`), reducing 12MB photos down to ~400KB without noticeable visual degradation.
+### 📞 Scenario 3: CallKit Lock-Screen Integration
+1. Lock **Device B (Bob)** and completely swipe-close the GupShupGo application (ensuring the process is terminated).
+2. From **Device A (Alice)**, initiate a Video Call.
+3. Verify that Bob's device wakes up from suspension, displaying the full-screen native call receiver UI.
+4. Answer the call, toggling video feeds, microphones, and speakers.
+5. Tap **Share Screen** on Alice's device and confirm Bob can view the cast in real-time.
 
 ---
 
-## 🗺️ Roadmap & Completed Superpowers
+## ⚡ Performance Optimization & Diagnostics
 
-* [x] **Signal Protocol End-to-End Encryption (E2EE)** — X3DH & Double Ratchet implemented
-* [x] **Off-Grid Bluetooth/WiFi Mesh Networking** — Decentralized P2P messaging when offline
-* [x] **Integrated Gup Arcade Gaming Center** — In-app mini-games, XP rewards & achievements
-* [x] **Live Screen Sharing during Video Calls** — Real-time screen broadcasting with Agora
-* [x] **Secret PIN Vault for Hidden Chats** — Protected by memory-hard Argon2id KDF
-* [x] **Native CallKit Lock-Screen Integration** — Wake up terminated devices for incoming calls
-* [x] **Drift Reactive Offline SQLite Database** — Instant launch & persistent offline chat caching
-* [x] **Carrier-Based Phone Number Hint API** — Instant verification without SMS OTP delays
-* [x] **WhatsApp-Style 24-Hour Stories** — Media uploads, colorful backgrounds & status replies
-* [x] **Device Session Token Persistence** — Android Keystore storage surviving OEM battery cleaners
-* [ ] **Group Chats & Group Video Calling** — Expanding E2EE ratchet trees to multi-party rooms
-* [ ] **Cross-Platform Desktop Clients** — Native Windows, macOS, and Linux desktop builds
-* [ ] **Decentralized IPFS Media Storage** — Optional Web3 storage routing for status attachments
+GupShupGo is built to meet strict performance requirements:
+
+* **Garbage Collection Preservation:** Stream controllers and animation controllers implement robust cleanup sequences inside `dispose()` methods, eliminating memory leaks in infinite scroll views.
+* **Local Crypto Performance:** Cryptographic payloads are isolated inside a dedicated background worker (`crypto_worker.dart`), leaving the main Dart isolate free to render smooth transitions.
+* **Network Payload Controls:** Video status clips are limited to 30 seconds, and images undergo a multi-pass compression algorithm to guarantee fast upload/download cycles.
+* **Startup Initialization:** Shared Preferences and Firebase configurations initialize concurrently during the boot process (`main.dart`) to optimize cold start performance.
 
 ---
 
-## 🤝 Contributing
+## 📈 Roadmap & Release Plan
 
-We welcome contributions from developers, designers, and security researchers! To contribute:
+### 🚀 Phase 1: Completed Features
+* [x] **Signal Protocol Core integration:** Fully functional X3DH key exchanges and Double Ratchet pipelines.
+* [x] **Ad-Hoc Mesh Chat Engine:** Decoupled peer-to-peer message routing via Bluetooth and Wi-Fi.
+* [x] **Drift SQLite Caching:** Reactively bound local query caching.
+* [x] **Agora Voice/Video Call integration:** Low latency voice/video streams and native CallKit screens.
+* [x] **Argon2id PIN Vault:** Hidden chats stored behind memory-hard cryptographic keys.
+* [x] **Carrier Hint integration:** Rapid user phone verification without manual SMS entry.
 
-1. **Fork** the repository on GitHub.
-2. **Create a Feature Branch:** `git checkout -b feature/amazing-superpower`
-3. **Commit your Changes:** `git commit -m 'feat: add amazing superpower'`
-4. **Push to Branch:** `git push origin feature/amazing-superpower`
-5. **Open a Pull Request** describing your architectural changes and verification steps.
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.  
-*(Note: If linking against GPL-3.0 libraries like `libsignal_protocol_dart` in your distribution builds, ensure compliance with applicable copyleft terms).*
+### 📅 Phase 2: Future Pipeline
+* [ ] **E2EE Multi-Party Group Calling:** Extending the Double Ratchet protocol to support group calls.
+* [ ] **IPFS Media Backing:** Decentralized media storage integrations using peer-to-peer storage pools.
+* [ ] **Cross-Platform Desktop Apps:** Fully compiled native builds for macOS, Windows, and Linux.
 
 ---
 
-## 📬 Developer Contact & Support
+## 🤝 Contribution & Compliance
 
-<div align="center">
+We welcome contributions from developers, security auditors, and UX designers.
 
-**Built with ❤️ and Flutter by Vansh Sethi**
+1. **Fork the Repository:** Create your workspace fork on GitHub.
+2. **Setup a Feature Branch:** `git checkout -b feat/your-awesome-feature`.
+3. **Commit Code Standards:** Ensure all additions match analysis options and formatting rules (`flutter format .`).
+4. **Deploy Pull Requests:** Provide detailed verification steps, screenshot evidence for UI alterations, and test records.
 
-[![GitHub](https://img.shields.io/badge/GitHub-vansh--121-181717?style=for-the-badge&logo=github)](https://github.com/vansh-121)
-[![Google Play](https://img.shields.io/badge/Google_Play-Pre--Register-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
-[![Repository](https://img.shields.io/badge/Repo-GupShupGo-6366f1?style=for-the-badge&logo=git)](https://github.com/vansh-121/GupShupGo)
-
-*If GupShupGo inspired you or helped your development journey, please consider giving this repository a ⭐!*
-
-</div>
+### 📄 Licensing
+This repository is licensed under the **MIT License**.  
+*(Note: Building and distributing binaries linked with GPL-3.0 libraries like `libsignal_protocol_dart` implies compliance with copyleft specifications. Please review licensing requirements before deployment).*
