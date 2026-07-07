@@ -1,4 +1,8 @@
-# GupShupGo — Enterprise Communication & Decentralized Gaming Ecosystem
+<p align="center">
+  <img src="assets/icon/app_icon.png" width="100" height="100" alt="GupShupGo Logo">
+</p>
+
+# <div align="center">GupShupGo — Realtime Chat & Calls</div>
 
 <div align="center">
 
@@ -22,6 +26,9 @@
 
 [📖 Architecture Guide](ARCHITECTURE.md) • [📲 Play Store Pre-Register](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
 
+<br>
+<img src="assets/images/gupshupgo_portfolio_cover_1783416921910.png" width="900" alt="GupShupGo Hero Graphic">
+
 </div>
 
 ---
@@ -39,19 +46,53 @@ GupShupGo is a production-grade, enterprise-ready messaging and real-time commun
 
 ---
 
+## 📲 Pre-Register on Google Play
+
+<div align="center">
+
+[![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+
+**Be among the first to experience GupShupGo!**  
+Pre-register now on the Google Play Store to receive an automatic notification as soon as the production client is launched. Get access to encrypted chats, mesh networking, HD calling, and arcade gaming instantly on launch day.
+
+[👉 Pre-Register Now on Google Play Store 👈](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+
+</div>
+
+---
+
+## ⚔️ Feature Parity & Superpowers Matrix
+
+| Feature / Capability | GupShupGo 🚀 | WhatsApp 🟢 | Signal 🔵 | Telegram ✈️ | Discord 🎮 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Signal Protocol E2EE by Default** | ✅ **Yes (X3DH + Ratchet)** | ✅ Yes | ✅ Yes | ❌ No (Secret Chats only) | ❌ No |
+| **Off-Grid P2P Mesh Networking** | ✅ **Yes (Bluetooth / WiFi Direct)** | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Integrated Arcade Mini-Games** | ✅ **Yes (Gup Arcade)** | ❌ No | ❌ No | ⚠️ Bots Only | ✅ Yes |
+| **Live Screen Sharing in Calls** | ✅ **Yes (HD Real-Time)** | ✅ Yes | ❌ No | ✅ Yes | ✅ Yes |
+| **Secret PIN Vault (Argon2id KDF)** | ✅ **Yes (Encrypted SQLite Store)**| ⚠️ Chat Lock Only | ❌ No | ⚠️ Passcode Lock | ❌ No |
+| **Native Lock-Screen CallKit UI** | ✅ **Yes (Terminated / Cold Start)**| ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Partial |
+| **24-Hour Stories & Status Replies**| ✅ **Yes (Rich Media & Text)** | ✅ Yes | ✅ Yes | ✅ Yes | ❌ No |
+| **Carrier Phone Hint (No SMS Hint)**| ✅ **Yes (Instant Verification)** | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Offline Reactive SQLite Caching** | ✅ **Yes (Drift Database)** | ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Partial |
+| **Isolate Crypto Worker (No UI Lag)**| ✅ **Yes (Dedicated Isolate)** | N/A | N/A | N/A | N/A |
+
+---
+
 ## 🗺️ Table of Contents
 
-1. [🏛️ Core System Architecture](#%EF%B8%8F-core-system-architecture)
-2. [✨ Feature Ecosystem](#-feature-ecosystem)
-3. [🔐 Cryptographic & Security Specification](#-cryptographic--security-specification)
-4. [📡 Decentralized Mesh Protocol](#-decentralized-mesh-protocol)
-5. [💻 Technical Stack Specification](#-technical-stack-specification)
-6. [📂 Workspace Organization](#-workspace-organization)
-7. [🛠️ Infrastructure Setup & Installation](#%EF%B8%8F-infrastructure-setup--installation)
-8. [🧪 Verification & Testing Procedures](#-verification--testing-procedures)
-9. [⚡ Performance Optimization & Diagnostics](#-performance-optimization--diagnostics)
-10. [📈 Roadmap & Release Plan](#-roadmap--release-plan)
-11. [🤝 Contribution & Compliance](#-contribution--compliance)
+1. [📲 Pre-Register on Google Play](#-pre-register-on-google-play)
+2. [⚔️ Feature Parity & Superpowers Matrix](#%EF%B8%8F-feature-parity--superpowers-matrix)
+3. [🏛️ Core System Architecture](#%EF%B8%8F-core-system-architecture)
+4. [✨ Feature Ecosystem](#-feature-ecosystem)
+5. [🔐 Cryptographic & Security Specification](#-cryptographic--security-specification)
+6. [📡 Decentralized Mesh Protocol](#-decentralized-mesh-protocol)
+7. [💻 Technical Stack Specification](#-technical-stack-specification)
+8. [📂 Workspace Organization](#-workspace-organization)
+9. [🛠️ Infrastructure Setup & Installation](#%EF%B8%8F-infrastructure-setup--installation)
+10. [🧪 Verification & Testing Procedures](#-verification--testing-procedures)
+11. [⚡ Performance Optimization & Diagnostics](#-performance-optimization--diagnostics)
+12. [📈 Roadmap & Release Plan](#-roadmap--release-plan)
+13. [🤝 Contribution & Compliance](#-contribution--compliance)
 
 ---
 
@@ -89,6 +130,11 @@ GupShupGo utilizes a clean, decoupled architecture utilizing the **Repository Pa
 ## ✨ Feature Ecosystem
 
 ### 💬 Real-Time Messaging & Media Sharing
+
+<p align="center">
+  <img src="assets/images/gupshupgo_chat_mockup_1783418008610.png" width="350" alt="Real-Time Messaging & Voice Note Mockup">
+</p>
+
 * **Reactive Drift Database:** Integrates `drift` and `sqlite3_flutter_libs` to perform local persistent message storage, query caching, and UI reactivity. The chat list loads instantly, independent of network speed.
 * **Voice Messaging Suite:** In-app audio recording with real-time waveform visualization, scrubbable playback controllers, and adjustable playback speeds (`1.0x`, `1.5x`, `2.0x`).
 * **Intelligent Media Pipelines:** Automatic multi-pass client-side image compression (`flutter_image_compress`) reducing data footprints by up to 20× before encrypting and uploading to Firebase Storage.
@@ -96,6 +142,11 @@ GupShupGo utilizes a clean, decoupled architecture utilizing the **Repository Pa
 * **Non-Destructive Chat Clears:** Timestamp-based chat cleaning allows local wipeout of message history without affecting the conversation logs of other participants.
 
 ### 📞 HD calling & Collaborative Screen Sharing
+
+<p align="center">
+  <img src="assets/images/gupshupgo_call_mockup_1783418021488.png" width="350" alt="HD Calling & Screen Share Mockup">
+</p>
+
 * **Agora RTC Engine:** Ultra-low latency voice and HD video streams configured through `agora_rtc_engine` (`agora_services.dart`).
 * **Live Screen Sharing:** Real-time desktop/mobile screen casting during active video calls, managed via dedicated screen share controllers (`screen_share_session.dart`).
 * **Native OS Integration:** Integrates `flutter_callkit_incoming` to process incoming data-only push notifications, invoking the native Android/iOS call screen (CallKit) even if the app is killed or sleeping.
@@ -108,6 +159,11 @@ GupShupGo utilizes a clean, decoupled architecture utilizing the **Repository Pa
 * **24-Hour Expiration:** Auto-expiring records managed through background database cleanups.
 
 ### 🎮 Gup Arcade & Gamification
+
+<p align="center">
+  <img src="assets/images/gupshupgo_gamification_mockup_1783418034370.png" width="350" alt="Gup Arcade & Gamification Mockup">
+</p>
+
 * **In-Chat Casual Gaming:** Launch and play casual arcade games directly from chat rooms (`gup_arcade_screen.dart`).
 * **User Progression Framework:** A gamified experience engine (`gamification_service.dart`) rewarding users with XP and unlockable profile badges for messaging, calling, and community interactions.
 * **Interactive Leaderboards:** High-score leaderboards displaying rankings across contacts.
