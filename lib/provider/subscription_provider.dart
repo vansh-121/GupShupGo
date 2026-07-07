@@ -3,6 +3,7 @@
 /// A [ChangeNotifier] that wraps [SubscriptionService] and exposes
 /// reactive subscription state to the widget tree via Provider.
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:video_chat_app/models/subscription_model.dart';
@@ -31,14 +32,21 @@ class SubscriptionProvider extends ChangeNotifier {
     _service.onSubscriptionChanged = _onChanged;
     _service.onPurchaseError = _onError;
     await _service.init();
+    
+    // Automatically trigger a server sync on cold start if already signed in
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      _service.syncFromServer(currentUser.uid);
+    }
+    
     notifyListeners();
   }
 
   /// Set the user ID once the user is authenticated.
   void setUserId(String uid) {
     _service.setUserId(uid);
-    // Sync from Firestore in case this is a new device
-    _service.syncFromFirestore(uid);
+    // Verify subscription status with server (re-validates with Google Play)
+    _service.syncFromServer(uid);
   }
 
   // ── Purchase actions ──────────────────────────────────────────────────────

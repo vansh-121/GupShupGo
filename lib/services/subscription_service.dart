@@ -1,15 +1,18 @@
 /// GupShupGo Pro — Subscription service.
 ///
 /// Handles the business logic of in-app purchases: querying products,
-/// initiating purchases, listening to the purchase stream, verifying
-/// receipts, and persisting subscription state to Firestore +
-/// SharedPreferences.
+/// initiating purchases, listening to the purchase stream, and sending
+/// purchase tokens to the server for verification. The Cloud Function
+/// validates receipts with the Google Play Developer API before activating
+/// Pro status in Firestore.
 library subscription_service;
 
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/subscription_model.dart';
@@ -19,13 +22,19 @@ class SubscriptionService {
   static final SubscriptionService instance = SubscriptionService._();
 
   final InAppPurchase _iap = InAppPurchase.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ── Cloud Function endpoints ──────────────────────────────────────────────
+  static const _verifyPurchaseUrl =
+      'https://us-central1-videocallapp-81166.cloudfunctions.net/verifyPurchase';
+  static const _verifyStatusUrl =
+      'https://us-central1-videocallapp-81166.cloudfunctions.net/verifySubscriptionStatus';
 
   // ── SharedPreferences keys ────────────────────────────────────────────────
   static const _kPlan = 'sub_plan';
   static const _kExpiresAt = 'sub_expires_at';
   static const _kPurchaseToken = 'sub_purchase_token';
   static const _kProductId = 'sub_product_id';
+  static const _kVerifiedAt = 'sub_verified_at';
   static const _kLastStreakRestore = 'sub_last_streak_restore';
   static const _kStreakRestoreCount = 'sub_streak_restore_count';
 
@@ -83,21 +92,30 @@ class SubscriptionService {
 
   Future<void> _loadProducts() async {
     try {
+      debugPrint('[Subscription] Querying store products: ${ProProductIds.all}');
       final response = await _iap.queryProductDetails(ProProductIds.all);
+      
+      if (response.error != null) {
+        debugPrint('[Subscription] ❌ Billing API error: ${response.error!.code} - ${response.error!.message}');
+      }
+      
       if (response.notFoundIDs.isNotEmpty) {
         debugPrint(
-            '[Subscription] Products not found: ${response.notFoundIDs}');
+            '[Subscription] ⚠️ Products not found by Google Play: ${response.notFoundIDs}');
       }
+      
       _products = response.productDetails;
+      debugPrint('[Subscription] Raw products returned: ${_products.map((p) => '${p.id}: ${p.price}')}');
+      
       // Sort so monthly comes first, then yearly
       _products.sort((a, b) {
         if (a.id == ProProductIds.monthly) return -1;
         if (b.id == ProProductIds.monthly) return 1;
         return 0;
       });
-      debugPrint('[Subscription] Loaded ${_products.length} products');
+      debugPrint('[Subscription] ✅ Successfully loaded ${_products.length} products');
     } catch (e) {
-      debugPrint('[Subscription] Failed to load products: $e');
+      debugPrint('[Subscription] ❌ Failed to load products exception: $e');
     }
   }
 
@@ -173,44 +191,89 @@ class SubscriptionService {
 
   Future<void> _verifyAndActivate(PurchaseDetails purchase) async {
     try {
-      // In a production app, you would verify the receipt server-side.
-      // For now, we trust the local verification from the plugin.
-      // The purchase is valid — activate Pro.
+      // Send purchase token to the server for verification.
+      // The Cloud Function validates with the Google Play Developer API,
+      // writes verified subscription status to Firestore, and acknowledges
+      // the purchase if needed.
+      final verified = await _verifyOnServer(
+        purchaseToken: purchase.purchaseID ?? '',
+        productId: purchase.productID,
+      );
 
-      // Determine expiry based on product type
-      final now = DateTime.now();
-      DateTime expiresAt;
-      if (purchase.productID == ProProductIds.monthly) {
-        expiresAt = now.add(const Duration(days: 30));
-      } else if (purchase.productID == ProProductIds.yearly) {
-        expiresAt = now.add(const Duration(days: 365));
+      if (verified) {
+        debugPrint(
+            '[Subscription] ✅ Server verified Pro (${purchase.productID})');
       } else {
-        expiresAt = now.add(const Duration(days: 30)); // fallback
+        debugPrint(
+            '[Subscription] ❌ Server rejected purchase (${purchase.productID})');
+        onPurchaseError?.call('Purchase verification failed on server');
       }
+    } catch (e) {
+      debugPrint('[Subscription] Server verification error: $e');
+      onPurchaseError?.call('Could not verify purchase — check your connection');
+    } finally {
+      // Always complete the purchase to clear it from the queue
+      if (purchase.pendingCompletePurchase) {
+        await _iap.completePurchase(purchase);
+      }
+    }
+  }
+
+  /// Sends the purchase token to the `verifyPurchase` Cloud Function.
+  /// Returns `true` if the server confirmed the subscription is valid.
+  Future<bool> _verifyOnServer({
+    required String purchaseToken,
+    required String productId,
+  }) async {
+    final idToken = await _getIdToken();
+    if (idToken == null) {
+      debugPrint('[Subscription] Cannot verify — user not signed in');
+      return false;
+    }
+
+    final response = await http.post(
+      Uri.parse(_verifyPurchaseUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
+      body: jsonEncode({
+        'purchaseToken': purchaseToken,
+        'productId': productId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+      final expiresAt = data['expiresAt'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(data['expiresAt'] as int)
+          : null;
 
       _subscription = SubscriptionModel(
         plan: SubscriptionPlan.pro,
         expiresAt: expiresAt,
-        purchaseToken: purchase.purchaseID,
-        productId: purchase.productID,
+        purchaseToken: purchaseToken,
+        productId: productId,
+        verifiedAt: DateTime.now(),
       );
 
-      // Persist locally + remotely
       await _saveToPrefs();
-      // Firestore sync is fire-and-forget so UI updates instantly
-      _syncToFirestore();
-
       onSubscriptionChanged?.call();
+      return true;
+    }
 
-      debugPrint(
-          '[Subscription] ✅ Activated Pro (${purchase.productID}) until $expiresAt');
-    } catch (e) {
-      debugPrint('[Subscription] Activation failed: $e');
-    } finally {
-      // Always complete the purchase
-      if (purchase.pendingCompletePurchase) {
-        await _iap.completePurchase(purchase);
-      }
+    debugPrint(
+        '[Subscription] Server verification failed: ${response.statusCode} — ${response.body}');
+    return false;
+  }
+
+  /// Returns the current user's Firebase ID token, or null if not signed in.
+  Future<String?> _getIdToken() async {
+    try {
+      return await FirebaseAuth.instance.currentUser?.getIdToken();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -224,6 +287,7 @@ class SubscriptionService {
     final expiresAt = prefs.getInt(_kExpiresAt);
     final token = prefs.getString(_kPurchaseToken);
     final productId = prefs.getString(_kProductId);
+    final verifiedAt = prefs.getInt(_kVerifiedAt);
 
     if (plan == 'pro' && expiresAt != null) {
       _subscription = SubscriptionModel(
@@ -231,6 +295,9 @@ class SubscriptionService {
         expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAt),
         purchaseToken: token,
         productId: productId,
+        verifiedAt: verifiedAt != null
+            ? DateTime.fromMillisecondsSinceEpoch(verifiedAt)
+            : null,
       );
       // Check if expired
       if (_subscription.isExpired) {
@@ -253,6 +320,10 @@ class SubscriptionService {
     if (_subscription.productId != null) {
       await prefs.setString(_kProductId, _subscription.productId!);
     }
+    if (_subscription.verifiedAt != null) {
+      await prefs.setInt(
+          _kVerifiedAt, _subscription.verifiedAt!.millisecondsSinceEpoch);
+    }
   }
 
   Future<void> _clearPrefs() async {
@@ -261,65 +332,85 @@ class SubscriptionService {
     await prefs.remove(_kExpiresAt);
     await prefs.remove(_kPurchaseToken);
     await prefs.remove(_kProductId);
+    await prefs.remove(_kVerifiedAt);
+  }
+
+  /// Clears the cached subscription status (resets to free) when the user signs out.
+  Future<void> clearSubscription() async {
+    _subscription = SubscriptionModel.free();
+    await _clearPrefs();
+    onSubscriptionChanged?.call();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  Persistence — Firestore (server-side source of truth)
+  //  Server-verified sync (replaces direct Firestore read/write)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Sync subscription state to the user's Firestore document.
-  void _syncToFirestore() {
+  /// Re-verify subscription status with the server.
+  /// Called on login and cross-device sync. The server checks Firestore AND
+  /// re-validates with Google Play if a purchase token is stored.
+  Future<void> syncFromServer(String uid) async {
     try {
-      final uid =
-          _currentUserId; // Set externally when user is authenticated
-      if (uid == null) return;
+      final idToken = await _getIdToken();
+      if (idToken == null) {
+        debugPrint('[Subscription] Cannot sync — user not signed in');
+        return;
+      }
 
-      _firestore.collection('users').doc(uid).update({
-        'subscriptionPlan': _subscription.plan.name,
-        'subscriptionExpiresAt':
-            _subscription.expiresAt?.millisecondsSinceEpoch,
-        'subscriptionProductId': _subscription.productId,
-      }).catchError((e) {
-        debugPrint('[Subscription] Firestore sync failed: $e');
-      });
-    } catch (e) {
-      debugPrint('[Subscription] Firestore sync error: $e');
-    }
-  }
+      final response = await http.post(
+        Uri.parse(_verifyStatusUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({}),
+      );
 
-  /// Load subscription from Firestore (for cross-device sync).
-  Future<void> syncFromFirestore(String uid) async {
-    try {
-      final doc = await _firestore.collection('users').doc(uid).get();
-      if (!doc.exists) return;
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final plan = data['plan'] as String?;
+        final expiresAtMs = data['expiresAt'];
+        final productId = data['productId'] as String?;
 
-      final data = doc.data()!;
-      final plan = data['subscriptionPlan'] as String?;
-      final expiresAt = data['subscriptionExpiresAt'];
-      final productId = data['subscriptionProductId'] as String?;
-
-      if (plan == 'pro' && expiresAt != null) {
-        final expiry = DateTime.fromMillisecondsSinceEpoch(expiresAt as int);
-        if (expiry.isAfter(DateTime.now())) {
-          _subscription = SubscriptionModel(
-            plan: SubscriptionPlan.pro,
-            expiresAt: expiry,
-            productId: productId,
-          );
-          await _saveToPrefs();
-          onSubscriptionChanged?.call();
+        if (plan == 'pro' && expiresAtMs != null) {
+          final expiry =
+              DateTime.fromMillisecondsSinceEpoch(expiresAtMs as int);
+          if (expiry.isAfter(DateTime.now())) {
+            _subscription = SubscriptionModel(
+              plan: SubscriptionPlan.pro,
+              expiresAt: expiry,
+              productId: productId,
+              verifiedAt: DateTime.now(),
+            );
+            await _saveToPrefs();
+            onSubscriptionChanged?.call();
+            debugPrint('[Subscription] Server sync: Pro until $expiry');
+            return;
+          }
         }
+
+        // Server says free (or expired)
+        if (_subscription.isPro) {
+          _subscription = SubscriptionModel.free();
+          await _clearPrefs();
+          onSubscriptionChanged?.call();
+          debugPrint('[Subscription] Server sync: reverted to Free');
+        }
+      } else {
+        debugPrint(
+            '[Subscription] Server sync failed: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('[Subscription] Firestore load failed: $e');
+      debugPrint('[Subscription] Server sync error: $e');
+      // Don't revoke access on network error — keep cached state
     }
   }
 
-  String? _currentUserId;
-
-  /// Set the authenticated user ID for Firestore operations.
+  /// Set the authenticated user ID. Currently a no-op since server-side
+  /// verification uses Firebase ID tokens, but kept for API compatibility
+  /// with [SubscriptionProvider].
   void setUserId(String uid) {
-    _currentUserId = uid;
+    // Server verification uses FirebaseAuth.instance.currentUser directly.
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

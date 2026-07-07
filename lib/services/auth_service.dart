@@ -17,6 +17,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
+import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 
 class AuthService {
@@ -726,6 +727,10 @@ class AuthService {
       try {
         final ps = await PlaintextStore.instance();
         await ps.wipe();
+      } catch (_) {}
+      // Clear subscription cache (resets to free plan)
+      try {
+        await SubscriptionService.instance.clearSubscription();
       } catch (_) {}
       await _googleSignIn.signOut();
       await _auth.signOut();

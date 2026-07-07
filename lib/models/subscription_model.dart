@@ -31,11 +31,16 @@ class SubscriptionModel {
   final String? purchaseToken;
   final String? productId;
 
+  /// When the server last verified this subscription with Google Play.
+  /// Null for legacy client-only activations or free users.
+  final DateTime? verifiedAt;
+
   const SubscriptionModel({
     this.plan = SubscriptionPlan.free,
     this.expiresAt,
     this.purchaseToken,
     this.productId,
+    this.verifiedAt,
   });
 
   // ── Convenience getters ──────────────────────────────────────────────────
@@ -66,6 +71,7 @@ class SubscriptionModel {
         'expiresAt': expiresAt?.millisecondsSinceEpoch,
         'purchaseToken': purchaseToken,
         'productId': productId,
+        'verifiedAt': verifiedAt?.millisecondsSinceEpoch,
       };
 
   factory SubscriptionModel.fromMap(Map<String, dynamic> map) {
@@ -76,6 +82,9 @@ class SubscriptionModel {
           : null,
       purchaseToken: map['purchaseToken'] as String?,
       productId: map['productId'] as String?,
+      verifiedAt: map['verifiedAt'] != null
+          ? _parseDateTime(map['verifiedAt'])
+          : null,
     );
   }
 
@@ -93,12 +102,14 @@ class SubscriptionModel {
     DateTime? expiresAt,
     String? purchaseToken,
     String? productId,
+    DateTime? verifiedAt,
   }) {
     return SubscriptionModel(
       plan: plan ?? this.plan,
       expiresAt: expiresAt ?? this.expiresAt,
       purchaseToken: purchaseToken ?? this.purchaseToken,
       productId: productId ?? this.productId,
+      verifiedAt: verifiedAt ?? this.verifiedAt,
     );
   }
 }

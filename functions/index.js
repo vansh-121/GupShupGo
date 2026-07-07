@@ -5,6 +5,13 @@ const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const { google } = require("googleapis");
+const { defineSecret } = require("firebase-functions/params");
+
+// ─── Google Play Service Account (for subscription verification) ─────────────
+// Set via: firebase functions:secrets:set PLAY_SERVICE_ACCOUNT_KEY
+// Value: the full JSON content of the service account key file.
+const playServiceAccountKey = defineSecret("PLAY_SERVICE_ACCOUNT_KEY");
 
 // ─── Email System ──────────────────────────────────────────────────────────────
 const emailService = require("./email-service");
@@ -622,6 +629,282 @@ exports.consumeOneTimePreKey = onRequest(
     } catch (error) {
       console.error("consumeOneTimePreKey error:", error);
       res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IN-APP PURCHASE — Server-Side Subscription Verification
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PACKAGE_NAME = "com.gupshupgo.app";
+const SUBSCRIPTION_PRODUCT_IDS = new Set([
+  "gupshupgo_pro_monthly",
+  "gupshupgo_pro_yearly",
+]);
+
+// Duration map (fallback if Google API doesn't return expiry)
+const PRODUCT_DURATION_DAYS = {
+  gupshupgo_pro_monthly: 30,
+  gupshupgo_pro_yearly: 365,
+};
+
+/**
+ * Returns an authorized Google Play AndroidPublisher client.
+ * Uses the service account key stored in Firebase Secrets.
+ */
+function getPlayClient() {
+  const keyJson = JSON.parse(playServiceAccountKey.value());
+  const authClient = new google.auth.GoogleAuth({
+    credentials: keyJson,
+    scopes: ["https://www.googleapis.com/auth/androidpublisher"],
+  });
+  return google.androidpublisher({ version: "v3", auth: authClient });
+}
+
+// ─── Verify Purchase ─────────────────────────────────────────────────────────
+// Called by the Flutter client after a successful in-app purchase. Validates
+// the purchase token with Google Play, then writes verified subscription
+// status to Firestore. The client NEVER writes subscription fields directly.
+exports.verifyPurchase = onRequest(
+  { cors: true, invoker: "public", minInstances: 0, secrets: [playServiceAccountKey] },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    // ── Auth ──────────────────────────────────────────────────────────────
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    let uid;
+    try {
+      const decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      uid = decoded.uid;
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return;
+    }
+
+    // ── Validate input ───────────────────────────────────────────────────
+    const { purchaseToken, productId } = req.body || {};
+
+    if (!purchaseToken || typeof purchaseToken !== "string") {
+      res.status(400).json({ error: "Missing or invalid purchaseToken" });
+      return;
+    }
+    if (!productId || !SUBSCRIPTION_PRODUCT_IDS.has(productId)) {
+      res.status(400).json({ error: `Invalid productId: ${productId}` });
+      return;
+    }
+
+    try {
+      // ── Call Google Play Developer API ──────────────────────────────────
+      const play = getPlayClient();
+      const result = await play.purchases.subscriptions.get({
+        packageName: PACKAGE_NAME,
+        subscriptionId: productId,
+        token: purchaseToken,
+      });
+
+      const purchase = result.data;
+
+      // ── Validate the purchase ──────────────────────────────────────────
+      // paymentState: 0 = pending, 1 = received, 2 = free trial, 3 = deferred
+      // cancelReason: 0 = user cancelled, 1 = billing issue, 2 = new sub, 3 = dev cancelled
+      const paymentState = parseInt(purchase.paymentState, 10);
+      const expiryTimeMillis = parseInt(purchase.expiryTimeMillis, 10);
+
+      if (paymentState !== 1 && paymentState !== 2) {
+        res.status(402).json({
+          error: "Payment not received",
+          paymentState,
+        });
+        return;
+      }
+
+      if (expiryTimeMillis && expiryTimeMillis < Date.now()) {
+        res.status(410).json({
+          error: "Subscription expired",
+          expiresAt: expiryTimeMillis,
+        });
+        return;
+      }
+
+      // ── Acknowledge the purchase if needed ─────────────────────────────
+      if (purchase.acknowledgementState === 0) {
+        try {
+          await play.purchases.subscriptions.acknowledge({
+            packageName: PACKAGE_NAME,
+            subscriptionId: productId,
+            token: purchaseToken,
+          });
+          console.log(`Acknowledged purchase for user ${uid}, product ${productId}`);
+        } catch (ackError) {
+          // Non-fatal — the purchase is still valid
+          console.error("Acknowledgement failed (non-fatal):", ackError.message);
+        }
+      }
+
+      // ── Calculate expiry ───────────────────────────────────────────────
+      const expiresAt = expiryTimeMillis
+        ? expiryTimeMillis
+        : Date.now() + (PRODUCT_DURATION_DAYS[productId] || 30) * 86400000;
+
+      // ── Write verified subscription to Firestore ───────────────────────
+      const subscriptionData = {
+        subscriptionPlan: "pro",
+        subscriptionExpiresAt: expiresAt,
+        subscriptionProductId: productId,
+        subscriptionVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        subscriptionPurchaseToken: purchaseToken,
+      };
+
+      await db.collection("users").doc(uid).update(subscriptionData);
+
+      console.log(`verifyPurchase: activated Pro for ${uid} (${productId}), expires ${new Date(expiresAt).toISOString()}`);
+
+      res.status(200).json({
+        success: true,
+        plan: "pro",
+        productId,
+        expiresAt,
+      });
+    } catch (error) {
+      console.error("verifyPurchase error:", error.message);
+
+      // Distinguish between Google API errors and server errors
+      if (error.code === 404 || (error.response && error.response.status === 404)) {
+        res.status(404).json({ error: "Purchase not found — token may be invalid or already consumed" });
+      } else if (error.response && error.response.status === 400) {
+        res.status(400).json({ error: "Invalid purchase token format" });
+      } else {
+        res.status(500).json({ error: "Server error verifying purchase" });
+      }
+    }
+  }
+);
+
+// ─── Verify Subscription Status ──────────────────────────────────────────────
+// Called by the client on app launch / cross-device sync to re-verify the
+// current subscription status from the server. Returns the Firestore-stored
+// subscription data, and optionally re-validates with Google Play if a
+// purchase token exists.
+exports.verifySubscriptionStatus = onRequest(
+  { cors: true, invoker: "public", minInstances: 0, secrets: [playServiceAccountKey] },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    let uid;
+    try {
+      const decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      uid = decoded.uid;
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return;
+    }
+
+    try {
+      const userDoc = await db.collection("users").doc(uid).get();
+      if (!userDoc.exists) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      const userData = userDoc.data();
+      const plan = userData.subscriptionPlan;
+      const expiresAt = userData.subscriptionExpiresAt;
+      const productId = userData.subscriptionProductId;
+      const storedToken = userData.subscriptionPurchaseToken;
+
+      // ── No subscription ────────────────────────────────────────────────
+      if (plan !== "pro" || !expiresAt) {
+        res.status(200).json({ plan: "free", expiresAt: null, productId: null });
+        return;
+      }
+
+      // ── Already expired (server time) ──────────────────────────────────
+      if (expiresAt < Date.now()) {
+        // Clean up expired subscription in Firestore
+        await db.collection("users").doc(uid).update({
+          subscriptionPlan: "free",
+          subscriptionExpiresAt: admin.firestore.FieldValue.delete(),
+          subscriptionProductId: admin.firestore.FieldValue.delete(),
+          subscriptionVerifiedAt: admin.firestore.FieldValue.delete(),
+          subscriptionPurchaseToken: admin.firestore.FieldValue.delete(),
+        });
+        res.status(200).json({ plan: "free", expiresAt: null, productId: null });
+        return;
+      }
+
+      // ── Re-verify with Google Play if we have a token ──────────────────
+      if (storedToken && productId && SUBSCRIPTION_PRODUCT_IDS.has(productId)) {
+        try {
+          const play = getPlayClient();
+          const result = await play.purchases.subscriptions.get({
+            packageName: PACKAGE_NAME,
+            subscriptionId: productId,
+            token: storedToken,
+          });
+
+          const purchase = result.data;
+          const liveExpiryMillis = parseInt(purchase.expiryTimeMillis, 10);
+
+          if (liveExpiryMillis && liveExpiryMillis < Date.now()) {
+            // Subscription expired according to Google
+            await db.collection("users").doc(uid).update({
+              subscriptionPlan: "free",
+              subscriptionExpiresAt: admin.firestore.FieldValue.delete(),
+              subscriptionProductId: admin.firestore.FieldValue.delete(),
+              subscriptionVerifiedAt: admin.firestore.FieldValue.delete(),
+              subscriptionPurchaseToken: admin.firestore.FieldValue.delete(),
+            });
+            res.status(200).json({ plan: "free", expiresAt: null, productId: null });
+            return;
+          }
+
+          // Update expiry if Google returned a newer one (e.g. renewal)
+          if (liveExpiryMillis && liveExpiryMillis !== expiresAt) {
+            await db.collection("users").doc(uid).update({
+              subscriptionExpiresAt: liveExpiryMillis,
+              subscriptionVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            res.status(200).json({
+              plan: "pro",
+              expiresAt: liveExpiryMillis,
+              productId,
+            });
+            return;
+          }
+        } catch (playError) {
+          // If Google Play check fails, fall through to return cached data
+          // (don't revoke access just because of a transient API error)
+          console.warn(`verifySubscriptionStatus: Play API check failed for ${uid}:`, playError.message);
+        }
+      }
+
+      // ── Return cached subscription data ────────────────────────────────
+      res.status(200).json({
+        plan: "pro",
+        expiresAt,
+        productId,
+      });
+    } catch (error) {
+      console.error("verifySubscriptionStatus error:", error.message);
+      res.status(500).json({ error: "Server error checking subscription" });
     }
   }
 );
