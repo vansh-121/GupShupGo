@@ -6,15 +6,6 @@
 
 <div align="center">
 
-```
-   ______              _____ __                 ______     
-  / ____/_  ______  __/ ___// /_  __  ______  _/ ____/___  
- / / __/ / / / __ \/ /\__ \/ __ \/ / / / __ \/ / __/ __ \ 
-/ /_/ / /_/ / /_/ / /___/ / / / / /_/ / /_/ / /_/ / /_/ / 
-\____/\__,_/ .___/_//____/_/ /_/\__,_/ .___/\____/\____/  
-          /_/                       /_/                  
-```
-
 **The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
@@ -37,6 +28,10 @@
 
 GupShupGo is a production-grade, enterprise-ready messaging and real-time communication application built on Flutter. Engineered for extreme security and absolute offline resilience, GupShupGo integrates zero-knowledge cryptography, peer-to-peer decentralized mesh networks, low-latency video and audio calling with native system CallKit integration, and an interactive casual gaming ecosystem.
 
+<p align="center">
+  <img src="assets/icon/gupshupgo_feature_graphic_1024.png" width="850" alt="GupShupGo Feature Graphic">
+</p>
+
 ### 📐 Core Architectural Pillars
 
 * **Zero-Knowledge Architecture:** Cryptographic keys are generated and stored strictly on-device. Group and direct messages are encrypted before they hit transit, ensuring that no intermediary—including the Firebase backend—can read message contents.
@@ -49,9 +44,6 @@ GupShupGo is a production-grade, enterprise-ready messaging and real-time commun
 ## 📲 Pre-Register on Google Play
 
 <div align="center">
-
-<img src="assets/icon/gupshupgo_feature_graphic_1024.png" width="800" alt="GupShupGo Feature Graphic">
-<br><br>
 
 [![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
@@ -96,6 +88,7 @@ Pre-register now on the Google Play Store to receive an automatic notification a
 11. [⚡ Performance Optimization & Diagnostics](#-performance-optimization--diagnostics)
 12. [📈 Roadmap & Release Plan](#-roadmap--release-plan)
 13. [🤝 Contribution & Compliance](#-contribution--compliance)
+14. [📬 Developer Contact & Support](#-developer-contact--support)
 
 ---
 
@@ -463,3 +456,28 @@ We welcome contributions from developers, security auditors, and UX designers.
 ### 📄 Licensing
 This repository is licensed under the **MIT License**.  
 *(Note: Building and distributing binaries linked with GPL-3.0 libraries like `libsignal_protocol_dart` implies compliance with copyleft specifications. Please review licensing requirements before deployment).*
+
+---
+
+## 📬 Developer Contact & Support
+
+<div align="center">
+
+**Built with ❤️ and Flutter by Vansh Sethi**
+
+[![GitHub](https://img.shields.io/badge/GitHub-vansh--121-181717?style=for-the-badge&logo=github)](https://github.com/vansh-121)
+[![Google Play](https://img.shields.io/badge/Google_Play-Pre--Register-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+[![Repository](https://img.shields.io/badge/Repo-GupShupGo-6366f1?style=for-the-badge&logo=git)](https://github.com/vansh-121/GupShupGo)
+
+*If GupShupGo inspired you or helped your development journey, please consider giving this repository a ⭐!*
+
+```
+   ______              _____ __                 ______     
+  / ____/_  ______  __/ ___// /_  __  ______  _/ ____/___  
+ / / __/ / / / __ \/ /\__ \/ __ \/ / / / __ \/ / __/ __ \ 
+/ /_/ / /_/ / /_/ / /___/ / / / / /_/ / /_/ / /_/ / /_/ / 
+\____/\__,_/ .___/_//____/_/ /_/\__,_/ .___/\____/\____/  
+          /_/                       /_/                  
+```
+
+</div>
