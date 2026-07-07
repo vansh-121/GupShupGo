@@ -2,6 +2,8 @@
   <img src="assets/icon/email_logo_color.png" width="320" alt="GupShupGo Wordmark Logo">
 </p>
 
+# <div align="center">GupShupGo — Realtime Chat & Calls</div>
+
 <div align="center">
 
 ```
