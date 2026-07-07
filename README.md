@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/icon/app_icon.png" width="100" height="100" alt="GupShupGo Logo">
+  <img src="assets/icon/email_logo_color.png" width="320" alt="GupShupGo Wordmark Logo">
 </p>
-
-# <div align="center">GupShupGo — Realtime Chat & Calls</div>
 
 <div align="center">
 
@@ -49,6 +47,9 @@ GupShupGo is a production-grade, enterprise-ready messaging and real-time commun
 ## 📲 Pre-Register on Google Play
 
 <div align="center">
+
+<img src="assets/icon/gupshupgo_feature_graphic_1024.png" width="800" alt="GupShupGo Feature Graphic">
+<br><br>
 
 [![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
