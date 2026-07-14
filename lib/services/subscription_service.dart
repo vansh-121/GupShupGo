@@ -195,8 +195,13 @@ class SubscriptionService {
       // The Cloud Function validates with the Google Play Developer API,
       // writes verified subscription status to Firestore, and acknowledges
       // the purchase if needed.
+      final token =
+          purchase.verificationData.serverVerificationData;
+      debugPrint(
+          '[Subscription] Sending token to server (length=${token.length})');
+
       final verified = await _verifyOnServer(
-        purchaseToken: purchase.purchaseID ?? '',
+        purchaseToken: token,
         productId: purchase.productID,
       );
 
