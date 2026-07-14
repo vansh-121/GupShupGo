@@ -2,6 +2,13 @@
 ///
 /// A [ChangeNotifier] that wraps [SubscriptionService] and exposes
 /// reactive subscription state to the widget tree via Provider.
+///
+/// Robustness features:
+/// - Loading state timeout (60s safety net)
+/// - Completer-based restore (no arbitrary delays)
+/// - Granular error messages from the server
+
+import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +21,12 @@ class SubscriptionProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   String? _error;
+
+  /// Safety-net timer: auto-resets [_isLoading] after 60 seconds if
+  /// the purchase stream never fires (e.g. Google Play dialog dismissed
+  /// without the app receiving a stream event).
+  Timer? _loadingTimeout;
+  static const _loadingTimeoutDuration = Duration(seconds: 60);
 
   // ── Getters ───────────────────────────────────────────────────────────────
   bool get isPro => _service.isPro;
@@ -57,12 +70,18 @@ class SubscriptionProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    // Start safety-net timeout: if the purchase stream never fires
+    // (e.g. user dismisses the Google Play dialog without the app receiving
+    // a stream event), auto-reset loading state after 60 seconds.
+    _startLoadingTimeout();
+
     final success = await _service.purchase(product);
 
     // Note: the actual subscription activation happens asynchronously
     // via the purchase stream listener in SubscriptionService.
-    // _isLoading will be cleared when _onChanged fires.
+    // _isLoading will be cleared when _onChanged or _onError fires.
     if (!success) {
+      _cancelLoadingTimeout();
       _isLoading = false;
       notifyListeners();
     }
@@ -93,15 +112,13 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   /// Restore previous purchases.
+  /// Uses the service's Completer-based approach (no arbitrary delays).
   Future<void> restorePurchases() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     await _service.restorePurchases();
-
-    // Wait a bit for the stream to process restored purchases
-    await Future.delayed(const Duration(seconds: 2));
 
     _isLoading = false;
     notifyListeners();
@@ -121,15 +138,38 @@ class SubscriptionProvider extends ChangeNotifier {
   int get maxVoiceDurationSec => PlanLimits.maxVoiceDurationSec(isPro);
   int get maxMediaSizeBytes => PlanLimits.maxMediaSizeBytes(isPro);
 
+  // ── Loading timeout ───────────────────────────────────────────────────────
+
+  void _startLoadingTimeout() {
+    _cancelLoadingTimeout();
+    _loadingTimeout = Timer(_loadingTimeoutDuration, () {
+      if (_isLoading) {
+        debugPrint(
+            '[SubscriptionProvider] Loading timeout — resetting after ${_loadingTimeoutDuration.inSeconds}s');
+        _isLoading = false;
+        _error ??=
+            'Purchase may still be processing — check back shortly';
+        notifyListeners();
+      }
+    });
+  }
+
+  void _cancelLoadingTimeout() {
+    _loadingTimeout?.cancel();
+    _loadingTimeout = null;
+  }
+
   // ── Private callbacks ─────────────────────────────────────────────────────
 
   void _onChanged() {
+    _cancelLoadingTimeout();
     _isLoading = false;
     _error = null;
     notifyListeners();
   }
 
   void _onError(String error) {
+    _cancelLoadingTimeout();
     _isLoading = false;
     _error = error;
     notifyListeners();
@@ -137,6 +177,7 @@ class SubscriptionProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelLoadingTimeout();
     _service.onSubscriptionChanged = null;
     _service.onPurchaseError = null;
     super.dispose();
