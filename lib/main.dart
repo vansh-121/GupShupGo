@@ -29,6 +29,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
@@ -84,6 +85,9 @@ void main() async {
 
   // ── Firebase Performance Monitoring — fire-and-forget ─────────────────
   unawaited(PerformanceService.init().catchError((_) {}));
+
+  // ── Feature Flags (Remote Config) — fire-and-forget ───────────────────
+  unawaited(FeatureFlagService.instance.init().catchError((_) {}));
 
   // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
   //         any screen tries to encrypt or decrypt, the service is ready.

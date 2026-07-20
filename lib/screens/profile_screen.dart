@@ -180,8 +180,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            // Pro badge
-            if (context.watch<SubscriptionProvider>().isPro)
+            // Pro badge (only visible when Pro feature flag is enabled)
+            if (context.watch<SubscriptionProvider>().isProFeatureVisible &&
+                context.watch<SubscriptionProvider>().isPro)
               const Padding(
                 padding: EdgeInsets.only(bottom: 4),
                 child: PremiumBadge(size: PremiumBadgeSize.medium),
@@ -189,8 +190,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Text('Tap to change photo',
                 style: TextStyle(color: c.textMid, fontSize: 12)),
 
-            // Upgrade to Pro button (only for free users)
-            if (!context.watch<SubscriptionProvider>().isPro) ...[  
+            // Upgrade to Pro button (only when flag is on and user is free)
+            if (context.watch<SubscriptionProvider>().isProFeatureVisible &&
+                !context.watch<SubscriptionProvider>().isPro) ...[  
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: () => Navigator.push(

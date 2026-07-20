@@ -18,6 +18,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class PremiumGate extends StatelessWidget {
@@ -43,6 +44,9 @@ class PremiumGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // When Pro feature flag is off, always show the child (no gate)
+    if (!FeatureFlagService.instance.isProEnabled) return child;
+
     final isPro = context.watch<SubscriptionProvider>().isPro;
     if (isPro) return child;
 
@@ -80,12 +84,16 @@ class PremiumGate extends StatelessWidget {
 
   /// Check if Pro and either allow or show upgrade prompt.
   /// Returns `true` if the user has Pro (action can proceed).
+  /// When the Pro feature flag is off, always returns `true` (no gate).
   static bool checkAndPrompt(
     BuildContext context, {
     required String featureName,
     IconData featureIcon = Icons.workspace_premium_rounded,
     String? description,
   }) {
+    // When Pro feature flag is off, let everyone through
+    if (!FeatureFlagService.instance.isProEnabled) return true;
+
     final isPro = context.read<SubscriptionProvider>().isPro;
     if (isPro) return true;
 

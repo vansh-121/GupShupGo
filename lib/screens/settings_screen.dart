@@ -396,8 +396,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
 
           // ── GupShupGo Pro subscription card ────────────────────────
-          _buildProCard(),
-          const SizedBox(height: 8),
+          if (context.watch<SubscriptionProvider>().isProFeatureVisible) ...[
+            _buildProCard(),
+            const SizedBox(height: 8),
+          ],
 
           // ── End-to-end encryption info card ───────────────────────────
           // High-visibility placement so users see the encryption

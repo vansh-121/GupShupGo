@@ -6,6 +6,7 @@ library premium_badge;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 
 class PremiumBadge extends StatelessWidget {
   /// Size variant: `small` for inline text, `medium` for profile cards.
@@ -15,6 +16,11 @@ class PremiumBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Hide badge entirely when Pro feature flag is off
+    if (!FeatureFlagService.instance.isProEnabled) {
+      return const SizedBox.shrink();
+    }
+
     final isSmall = size == PremiumBadgeSize.small;
     final fontSize = isSmall ? 8.0 : 10.0;
     final hPad = isSmall ? 5.0 : 7.0;

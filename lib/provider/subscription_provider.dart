@@ -14,6 +14,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:video_chat_app/models/subscription_model.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
 
 class SubscriptionProvider extends ChangeNotifier {
@@ -29,7 +30,18 @@ class SubscriptionProvider extends ChangeNotifier {
   static const _loadingTimeoutDuration = Duration(seconds: 60);
 
   // ── Getters ───────────────────────────────────────────────────────────────
-  bool get isPro => _service.isPro;
+
+  /// Whether the Pro feature set is visible in the UI at all.
+  /// Controlled by Firebase Remote Config — when `false`, all Pro UI
+  /// (cards, badges, upgrade prompts, purchase flows) is hidden.
+  bool get isProFeatureVisible => FeatureFlagService.instance.isProEnabled;
+
+  /// Whether the current user has an active Pro subscription AND the
+  /// feature flag allows it. When the flag is off, this always returns
+  /// `false` so all existing `isPro` checks throughout the app
+  /// automatically treat the user as free.
+  bool get isPro => isProFeatureVisible && _service.isPro;
+
   bool get isLoading => _isLoading;
   String? get error => _error;
   SubscriptionModel get subscription => _service.subscription;
@@ -46,6 +58,9 @@ class SubscriptionProvider extends ChangeNotifier {
     _service.onPurchaseError = _onError;
     await _service.init();
     
+    // Listen to real-time changes of feature flags to update UI immediately
+    FeatureFlagService.instance.addListener(notifyListeners);
+
     // Automatically trigger a server sync on cold start if already signed in
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
@@ -180,6 +195,7 @@ class SubscriptionProvider extends ChangeNotifier {
     _cancelLoadingTimeout();
     _service.onSubscriptionChanged = null;
     _service.onPurchaseError = null;
+    FeatureFlagService.instance.removeListener(notifyListeners);
     super.dispose();
   }
 }

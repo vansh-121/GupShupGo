@@ -359,7 +359,8 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                 ),
               ],
 
-              if (!context.watch<SubscriptionProvider>().isPro) ...[
+              if (context.watch<SubscriptionProvider>().isProFeatureVisible &&
+                  !context.watch<SubscriptionProvider>().isPro) ...[
                 const SizedBox(height: 12),
                 GestureDetector(
                   onTap: () {
