@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/services/subscription_service.dart';
+import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
@@ -61,9 +65,10 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
   Timer? _countdownTimer;
   Duration _timeRemaining = Duration.zero;
   bool _isRestoring = false;
+  bool _canRestoreFree = false;
 
-  int get _cost => GamificationService.getRestoreCost(widget.previousStreakCount);
-  bool get _canAfford => widget.userGupPoints >= _cost;
+  int get _cost => _canRestoreFree ? 0 : GamificationService.getRestoreCost(widget.previousStreakCount);
+  bool get _canAfford => _canRestoreFree || widget.userGupPoints >= _cost;
 
   @override
   void initState() {
@@ -79,6 +84,12 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _updateTimeRemaining();
     });
+    _checkFreeRestore();
+  }
+
+  Future<void> _checkFreeRestore() async {
+    final canFree = await SubscriptionService.instance.canRestoreStreakFree();
+    if (mounted) setState(() => _canRestoreFree = canFree);
   }
 
   void _updateTimeRemaining() {
@@ -115,6 +126,10 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
       chatRoomId: widget.chatRoomId,
       cost: _cost,
     );
+
+    if (success && _canRestoreFree) {
+      await SubscriptionService.instance.recordStreakRestore();
+    }
 
     if (mounted) {
       Navigator.of(context).pop(success);
@@ -313,20 +328,22 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                             color: Colors.white,
                           ),
                         )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Text('🔥', style: TextStyle(fontSize: 16)),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Restore for ⚡$_cost points',
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(_canRestoreFree ? '✨' : '🔥', style: const TextStyle(fontSize: 16)),
+                              const SizedBox(width: 6),
+                              Text(
+                                _canRestoreFree
+                                    ? 'Restore Free (Pro Perk)'
+                                    : 'Restore for ⚡$_cost points',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
                 ),
               ),
 
@@ -338,6 +355,43 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                     fontSize: 10,
                     color: Colors.red[300],
                     fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+
+              if (context.watch<SubscriptionProvider>().isProFeatureVisible &&
+                  !context.watch<SubscriptionProvider>().isPro) ...[
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () {
+                     Navigator.of(context).pop(false);
+                     Navigator.push(
+                       context,
+                       MaterialPageRoute(builder: (_) => const PremiumScreen()),
+                     );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFD700).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.workspace_premium_rounded, color: Color(0xFFFFD700), size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Pro members get 1 free restore/week!',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFFFFD700),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

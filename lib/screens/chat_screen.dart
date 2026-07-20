@@ -32,6 +32,8 @@ import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/widgets/premium_gate.dart';
 
 class Contact {
   final String id;
@@ -2217,11 +2219,21 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         const SizedBox(width: 4),
-        // ── Screen share button ────────────────────────────────
+        // ── Screen share button ────────────────────────────────────
         IconButton(
           icon: Icon(Icons.screen_share_rounded, color: c.textMid, size: 22),
           tooltip: 'Share screen',
-          onPressed: _initiateScreenShare,
+          onPressed: () {
+            if (PremiumGate.checkAndPrompt(
+              context,
+              featureName: 'Screen Sharing',
+              featureIcon: Icons.screen_share_rounded,
+              description:
+                  'Share your screen live during chats with GupShupGo Pro.',
+            )) {
+              _initiateScreenShare();
+            }
+          },
         ),
         const SizedBox(width: 4),
         // ── Send or Mic button ─────────────────────────────────

@@ -7,9 +7,31 @@ service cloud.firestore {
       // Anyone authenticated can read user profiles (for contacts list)
       allow read: if request.auth != null;
       
+      // Helper functions to prevent client from writing subscription fields
+      // (only server-side Cloud Functions via Admin SDK are allowed to set these)
+      function doesNotCreateSubscriptions() {
+        return !request.resource.data.keys().hasAny([
+          'subscriptionPlan',
+          'subscriptionExpiresAt',
+          'subscriptionProductId',
+          'subscriptionVerifiedAt',
+          'subscriptionPurchaseToken'
+        ]);
+      }
+
+      function doesNotModifySubscriptions() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'subscriptionPlan',
+          'subscriptionExpiresAt',
+          'subscriptionProductId',
+          'subscriptionVerifiedAt',
+          'subscriptionPurchaseToken'
+        ]);
+      }
+
       // Users can only create/update their own profile
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId && doesNotCreateSubscriptions();
+      allow update: if request.auth != null && request.auth.uid == userId && doesNotModifySubscriptions();
       
       // Prevent users from deleting profiles
       allow delete: if false;

@@ -28,6 +28,9 @@ import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
+import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 import 'package:video_chat_app/widgets/screen_share_overlay.dart';
@@ -83,6 +86,9 @@ void main() async {
   // ── Firebase Performance Monitoring — fire-and-forget ─────────────────
   unawaited(PerformanceService.init().catchError((_) {}));
 
+  // ── Feature Flags (Remote Config) — fire-and-forget ───────────────────
+  unawaited(FeatureFlagService.instance.init().catchError((_) {}));
+
   // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
   //         any screen tries to encrypt or decrypt, the service is ready.
   //         This is critical — without it, the home screen (loaded right
@@ -111,7 +117,14 @@ void main() async {
     SignalService.instance
         .listDeviceIdsCached(cachedUid)
         .catchError((_) => const <int>[]);
+    // Set user ID for subscription service
+    SubscriptionService.instance.setUserId(cachedUid);
   }
+
+  // ── In-App Purchases: initialise subscription service (fire-and-forget) ──
+  unawaited(SubscriptionService.instance.init().catchError((e) {
+    debugPrint('SubscriptionService init failed (non-fatal): $e');
+  }));
 
   // ── Register CallKit event listener BEFORE runApp() ──────────────────
   _setupCallKitListener();
@@ -130,6 +143,7 @@ void main() async {
             ChangeNotifierProvider(create: (_) => CallStateNotifier()),
             ChangeNotifierProvider(create: (_) => StatusProvider()),
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider(create: (_) => SubscriptionProvider()..init()),
             ChangeNotifierProvider.value(value: connectivityProvider),
             ChangeNotifierProvider(
               create: (_) => MeshNetworkService(

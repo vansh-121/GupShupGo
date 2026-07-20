@@ -12,6 +12,10 @@ class UserModel {
   final DateTime? lastSeen;
   final DateTime? createdAt;
 
+  // Subscription fields
+  final String subscriptionPlan; // 'free' or 'pro'
+  final DateTime? subscriptionExpiresAt;
+
   // Gamification fields
   final int gupPoints;
   final List<String> badges;
@@ -32,6 +36,8 @@ class UserModel {
     this.isOnline = false,
     this.lastSeen,
     this.createdAt,
+    this.subscriptionPlan = 'free',
+    this.subscriptionExpiresAt,
     this.gupPoints = 0,
     this.badges = const [],
     this.challengeProgress = const {},
@@ -44,6 +50,13 @@ class UserModel {
   // Level computation: e.g. 100 points per level
   int get level => (gupPoints / 100).floor() + 1;
   double get levelProgress => (gupPoints % 100) / 100.0;
+
+  // Subscription helpers
+  bool get isPro {
+    if (subscriptionPlan != 'pro') return false;
+    if (subscriptionExpiresAt == null) return false;
+    return DateTime.now().isBefore(subscriptionExpiresAt!);
+  }
 
   // Convert UserModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -58,6 +71,8 @@ class UserModel {
       'isOnline': isOnline,
       'lastSeen': lastSeen?.millisecondsSinceEpoch,
       'createdAt': createdAt?.millisecondsSinceEpoch,
+      'subscriptionPlan': subscriptionPlan,
+      'subscriptionExpiresAt': subscriptionExpiresAt?.millisecondsSinceEpoch,
       'gupPoints': gupPoints,
       'badges': badges,
       'challengeProgress': challengeProgress,
@@ -84,6 +99,10 @@ class UserModel {
           : null,
       createdAt: map['createdAt'] != null
           ? _parseDateTime(map['createdAt'])
+          : null,
+      subscriptionPlan: map['subscriptionPlan'] ?? 'free',
+      subscriptionExpiresAt: map['subscriptionExpiresAt'] != null
+          ? _parseDateTime(map['subscriptionExpiresAt'])
           : null,
       gupPoints: map['gupPoints'] ?? 0,
       badges: List<String>.from(map['badges'] ?? []),
@@ -122,6 +141,8 @@ class UserModel {
     bool? isOnline,
     DateTime? lastSeen,
     DateTime? createdAt,
+    String? subscriptionPlan,
+    DateTime? subscriptionExpiresAt,
     int? gupPoints,
     List<String>? badges,
     Map<String, int>? challengeProgress,
@@ -141,6 +162,8 @@ class UserModel {
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       createdAt: createdAt ?? this.createdAt,
+      subscriptionPlan: subscriptionPlan ?? this.subscriptionPlan,
+      subscriptionExpiresAt: subscriptionExpiresAt ?? this.subscriptionExpiresAt,
       gupPoints: gupPoints ?? this.gupPoints,
       badges: badges ?? this.badges,
       challengeProgress: challengeProgress ?? this.challengeProgress,
