@@ -953,7 +953,7 @@ exports.verifyPurchase = onRequest(
         subscriptionGracePeriod: isGracePeriod || false,
       };
 
-      await db.collection("users").doc(uid).update(subscriptionData);
+      await db.collection("users").doc(uid).set(subscriptionData, { merge: true });
 
       console.log(`verifyPurchase: activated Pro for ${uid} (${productId}), expires ${new Date(expiresAt).toISOString()}${isGracePeriod ? " [GRACE PERIOD]" : ""}`);
 
