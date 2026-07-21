@@ -1669,7 +1669,7 @@ class _HomeScreenState extends State<HomeScreen>
                 fit: BoxFit.contain,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             Text(
               'GupShupGo',
               style: GoogleFonts.poppins(
