@@ -44,49 +44,61 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.chatBg,
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.currentUserId)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.currentUserId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return Scaffold(
+            backgroundColor: c.surface,
+            body: Center(
+              child: CircularProgressIndicator(color: c.primary),
+            ),
+          );
+        }
 
-          if (snapshot.hasError || !snapshot.hasData || !snapshot.data!.exists) {
-            return Center(
+        if (snapshot.hasError ||
+            !snapshot.hasData ||
+            !snapshot.data!.exists) {
+          return Scaffold(
+            backgroundColor: c.surface,
+            body: Center(
               child: Text(
                 'Failed to load reputation stats.',
                 style: GoogleFonts.poppins(color: c.textMid),
               ),
-            );
-          }
+            ),
+          );
+        }
 
-          final user = UserModel.fromFirestore(snapshot.data!);
+        final user = UserModel.fromFirestore(snapshot.data!);
 
-          return NestedScrollView(
-            headerSliverBuilder: (context, innerBoxScrolled) {
-              return [
-                _buildSliverAppBar(user, c),
-              ];
-            },
-            body: Column(
+        return Scaffold(
+          backgroundColor: c.surface,
+          body: SafeArea(
+            child: Column(
               children: [
-                // Tab bar
+                // ── 1. Top Level Ring Header (Stitch Design) ────────────────
+                _buildStitchHeader(user, c),
+
+                const SizedBox(height: 12),
+
+                // ── 2. Segmented Control Bar (Stitch Design) ────────────────
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: c.surface,
+                    color: c.surfaceAlt,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: c.border.withOpacity(0.5)),
+                    border: Border.all(color: c.border, width: 1.5),
                   ),
                   child: TabBar(
                     controller: _tabController,
                     indicator: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                       color: c.primary,
                     ),
                     dividerColor: Colors.transparent,
@@ -95,11 +107,11 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                     unselectedLabelColor: c.textMid,
                     labelStyle: GoogleFonts.poppins(
                       fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                      fontSize: 14,
                     ),
                     unselectedLabelStyle: GoogleFonts.poppins(
                       fontWeight: FontWeight.w500,
-                      fontSize: 13,
+                      fontSize: 14,
                     ),
                     tabs: const [
                       Tab(text: 'Overview'),
@@ -108,8 +120,9 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
-                // Tab views
+                const SizedBox(height: 16),
+
+                // ── 3. Tab Body Views ───────────────────────────────────────
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -129,127 +142,241 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                 ),
               ],
             ),
-          );
-        },
+          ),
+          bottomNavigationBar: _buildBottomNavDock(user, c),
+        );
+      },
+    );
+  }
+
+  /// Custom bottom navigation dock matching Stitch Arcade design
+  Widget _buildBottomNavDock(UserModel user, AppThemeColors c) {
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(
+          top: BorderSide(color: c.border, width: 1.0),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                label: 'Gup',
+                icon: Icons.chat_bubble_rounded,
+                isSelected: true,
+                c: c,
+                onTap: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+              ),
+              _buildNavItem(
+                label: 'Moments',
+                icon: Icons.camera_alt_outlined,
+                isSelected: false,
+                c: c,
+                onTap: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+              ),
+              _buildNavItem(
+                label: 'Calls',
+                icon: Icons.call_outlined,
+                isSelected: false,
+                c: c,
+                onTap: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+              ),
+              // User Avatar Profile (far right)
+              GestureDetector(
+                onTap: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: c.border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 13,
+                        backgroundImage: user.photoUrl != null
+                            ? NetworkImage(user.photoUrl!)
+                            : null,
+                        backgroundColor: c.primaryLt,
+                        child: user.photoUrl == null
+                            ? Icon(Icons.person, size: 14, color: c.textMid)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Profile',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: c.textMid,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  SliverAppBar _buildSliverAppBar(UserModel user, AppThemeColors c) {
-    final level = user.level;
-    final levelName = getLevelName(level);
-    final levelIcon = getLevelIcon(level);
-    final pointsInCurrentLevel = user.gupPoints % 100;
-    final progress = user.levelProgress;
-
-    return SliverAppBar(
-      expandedHeight: 240,
-      pinned: true,
-      backgroundColor: c.chatBg,
-      foregroundColor: c.textHigh,
-      elevation: 0,
-      title: Text(
-        'Gup Arcade',
-        style: GoogleFonts.poppins(
-          fontWeight: FontWeight.w700,
-          fontSize: 20,
-          color: c.textHigh,
-        ),
-      ),
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: c.isDark
-                  ? [const Color(0xFF1A1A2E), const Color(0xFF16213E)]
-                  : [const Color(0xFF6C5CE7).withOpacity(0.08), c.chatBg],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+  Widget _buildNavItem({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required AppThemeColors c,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 22,
+            color: isSelected ? c.primary : c.textMid,
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              color: isSelected ? c.primary : c.textMid,
             ),
           ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
-              child: Row(
-                children: [
-                  // Animated Level Ring
-                  _AnimatedLevelRing(
-                    level: level,
-                    progress: progress,
-                    primaryColor: c.primary,
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+    );
+  }
+
+  /// Top Level Header matching Stitch Arcade design
+  Widget _buildStitchHeader(UserModel user, AppThemeColors c) {
+    final level = user.level;
+    final levelName = getLevelName(level);
+    final progress = user.levelProgress;
+    final canPop = Navigator.canPop(context);
+
+    return Column(
+      children: [
+        // ── Top Navigation Bar (Back Arrow & Screen Title) ───────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.arrow_back_ios_new_rounded,
+                    color: c.textHigh, size: 20),
+                onPressed: () {
+                  if (canPop) {
+                    Navigator.pop(context);
+                  }
+                },
+                tooltip: 'Back',
+              ),
+              Text(
+                'Gup Arcade',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // ── Level Ring & Rank Info ───────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          child: Row(
+            children: [
+              // Glowing Level Ring
+              _AnimatedLevelRing(
+                level: level,
+                progress: progress,
+                primaryColor: c.primary,
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Text(
-                              levelIcon,
-                              style: const TextStyle(fontSize: 18),
+                        const Text('💎', style: TextStyle(fontSize: 20)),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            levelName,
+                            style: GoogleFonts.poppins(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: c.textHigh,
                             ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                levelName,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                  color: c.textHigh,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${user.gupPoints} Gup Points',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: c.primary,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        // Progress bar
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
-                                child: SizedBox(
-                                  height: 8,
-                                  child: LinearProgressIndicator(
-                                    value: progress,
-                                    backgroundColor: c.border.withOpacity(0.3),
-                                    valueColor: AlwaysStoppedAnimation<Color>(c.primary),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              '$pointsInCurrentLevel/100',
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: c.textMid,
-                              ),
-                            ),
-                          ],
                         ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      '${user.gupPoints} Gup Points',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: c.textMid,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Horizontal Gradient Progress Bar
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        height: 8,
+                        width: double.infinity,
+                        color: c.border.withOpacity(0.4),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress.clamp(0.05, 1.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [const Color(0xFF40C4FF), c.primary],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -340,7 +467,7 @@ class _AnimatedLevelRingState extends State<_AnimatedLevelRing>
                   '${widget.level}',
                   style: GoogleFonts.poppins(
                     fontSize: 28,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
                     color: widget.primaryColor,
                     height: 1.0,
                   ),
@@ -373,19 +500,19 @@ class _LevelRingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawCircle(center, radius, bgPaint);
 
-    // Progress arc
+    // Progress arc (Cyan to Violet Gradient — Stitch Design)
     final progressPaint = Paint()
       ..shader = SweepGradient(
         startAngle: -pi / 2,
         endAngle: 3 * pi / 2,
-        colors: [
-          primaryColor.withOpacity(0.6),
-          primaryColor,
-          primaryColor.withOpacity(0.8),
+        colors: const [
+          Color(0xFF40C4FF),
+          Color(0xFF7C5CFC),
+          Color(0xFF9C27B0),
         ],
       ).createShader(Rect.fromCircle(center: center, radius: radius))
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
+      ..strokeWidth = 6
       ..strokeCap = StrokeCap.round;
 
     canvas.drawArc(
@@ -404,13 +531,13 @@ class _LevelRingPainter extends CustomPainter {
         center.dy + radius * sin(angle),
       );
       final glowPaint = Paint()
-        ..color = primaryColor.withOpacity(0.4)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-      canvas.drawCircle(dotCenter, 5, glowPaint);
+        ..color = const Color(0xFF40C4FF).withOpacity(0.6)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      canvas.drawCircle(dotCenter, 6, glowPaint);
       canvas.drawCircle(
         dotCenter,
-        3,
-        Paint()..color = primaryColor,
+        3.5,
+        Paint()..color = Colors.white,
       );
     }
   }
@@ -464,67 +591,80 @@ class _OverviewTab extends StatelessWidget {
         label: 'Messages',
         value: '${user.challengeProgress['messages_sent'] ?? 0}',
         icon: '💬',
-        color: const Color(0xFF11998e),
+        color: c.primary,
       ),
       _QuickStat(
         label: 'Voice',
         value: '${user.challengeProgress['voice_notes'] ?? 0}',
-        icon: '🎤',
-        color: const Color(0xFFFF416C),
+        icon: '🎙️',
+        color: c.primary,
       ),
       _QuickStat(
         label: 'Reactions',
         value: '${user.reactionsGiven}',
         icon: '🦋',
-        color: const Color(0xFF667eea),
+        color: c.primary,
       ),
       _QuickStat(
         label: 'Best Bond',
         value: '${user.longestStreak}',
         icon: '🔥',
-        color: const Color(0xFFFF8008),
+        color: c.primary,
       ),
     ];
 
-    return Row(
-      children: stats.map((stat) {
-        return Expanded(
-          child: Container(
-            margin: EdgeInsets.only(right: stat == stats.last ? 0 : 8),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: c.border.withOpacity(0.4), width: 0.5),
-            ),
-            child: Column(
-              children: [
-                Text(stat.icon, style: const TextStyle(fontSize: 20)),
-                const SizedBox(height: 6),
-                Text(
-                  stat.value,
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: c.textHigh,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  stat.label,
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: c.textLow,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: stats.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.65,
+      ),
+      itemBuilder: (context, index) {
+        final stat = stats[index];
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: c.surfaceAlt,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: c.border,
+              width: 1.5,
             ),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(stat.icon, style: const TextStyle(fontSize: 26)),
+                  Text(
+                    stat.value,
+                    style: GoogleFonts.poppins(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      color: c.textHigh,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                stat.label,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: c.textMid,
+                ),
+              ),
+            ],
+          ),
         );
-      }).toList(),
+      },
     );
   }
 

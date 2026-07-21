@@ -2108,7 +2108,7 @@ class _HomeScreenState extends State<HomeScreen>
                     'CONGRATULATIONS!',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w800,
                       color: Colors.amber,
                       letterSpacing: 2.0,
                     ),
