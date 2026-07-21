@@ -37,40 +37,40 @@ class AppColors {
   static const Color warning = Color(0xFFF59E0B);
 }
 
-/// Dark-mode equivalents — same brand, dark surfaces.
+/// Dark-mode equivalents — obsidian surfaces & electric violet accents.
 class AppColorsDark {
   AppColorsDark._();
 
-  // ── Brand (same) ───────────────────────────────────────────────────
-  static const Color primary = Color(0xFF7C6FF0);
-  static const Color primaryDk = Color(0xFF5246BE);
-  static const Color primaryLt = Color(0xFF2C2860); // dark lavender tint
+  // ── Brand (Electric Violet) ─────────────────────────────────────────
+  static const Color primary = Color(0xFF7C5CFC);
+  static const Color primaryDk = Color(0xFF6342E8);
+  static const Color primaryLt = Color(0xFF1E1A3D); // dark lavender tint
 
   // ── Bubbles ────────────────────────────────────────────────────────
-  static const Color sent = Color(0xFF6C5CE7);
-  static const Color received = Color(0xFF252540);
+  static const Color sent = Color(0xFF7C5CFC);
+  static const Color received = Color(0xFF181A26);
 
   // ── Status indicator ──────────────────────────────────────────────
-  static const Color online = Color(0xFF34D399);
+  static const Color online = Color(0xFF10B981);
 
-  // ── Surface / Background ──────────────────────────────────────────
-  static const Color surface = Color(0xFF151520);
-  static const Color surfaceAlt = Color(0xFF1E1E30); // settings rows / inputs
-  static const Color chatBg = Color(0xFF0E0E18); // chat body
+  // ── Surface / Background (Obsidian Dark) ──────────────────────────
+  static const Color surface = Color(0xFF0A0B10); // deep midnight obsidian
+  static const Color surfaceAlt = Color(0xFF12141D); // settings rows / inputs
+  static const Color chatBg = Color(0xFF07080D); // chat body
 
   // ── Text ──────────────────────────────────────────────────────────
-  static const Color textHigh = Color(0xFFECECF5); // near-white
-  static const Color textMid = Color(0xFF9B9BB8); // secondary text
-  static const Color textLow = Color(0xFF6A6A88); // placeholder / muted
+  static const Color textHigh = Color(0xFFF1F3F9); // near-white
+  static const Color textMid = Color(0xFF808A9D); // secondary text
+  static const Color textLow = Color(0xFF4A5264); // placeholder / muted
 
   // ── Stroke / Divider ──────────────────────────────────────────────
-  static const Color border = Color(0xFF2A2A45);
-  static const Color divider = Color(0xFF1E1E34);
+  static const Color border = Color(0xFF1F2232); // hairline border
+  static const Color divider = Color(0xFF161824);
 
   // ── Semantic ──────────────────────────────────────────────────────
   static const Color error = Color(0xFFEF4444);
-  static const Color success = Color(0xFF34D399);
-  static const Color warning = Color(0xFFFBBF24);
+  static const Color success = Color(0xFF10B981);
+  static const Color warning = Color(0xFFF59E0B);
 }
 
 /// Context-aware color resolver. Returns light or dark palette based on

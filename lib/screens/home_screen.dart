@@ -95,6 +95,9 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
       final has = user != null;
@@ -1773,14 +1776,6 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Gup'),
-            Tab(text: 'Moments'),
-            Tab(text: 'Calls'),
-          ],
-        ),
       ),
       body: Column(
         children: [
@@ -1797,7 +1792,144 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
+      bottomNavigationBar: _buildBottomNavDock(),
       floatingActionButton: _buildFABRow(),
+    );
+  }
+
+  /// Custom bottom navigation dock matching the ultra-sleek obsidian aesthetic.
+  Widget _buildBottomNavDock() {
+    final c = AppThemeColors.of(context);
+    final selectedIndex = _tabController.index;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(
+          top: BorderSide(color: c.border, width: 1.0),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                index: 0,
+                label: 'Gup',
+                icon: Icons.chat_bubble_rounded,
+                selectedIcon: Icons.chat_bubble_rounded,
+                isSelected: selectedIndex == 0,
+                onTap: () => setState(() => _tabController.animateTo(0)),
+              ),
+              _buildNavItem(
+                index: 1,
+                label: 'Moments',
+                icon: Icons.camera_alt_outlined,
+                selectedIcon: Icons.camera_alt_rounded,
+                isSelected: selectedIndex == 1,
+                onTap: () => setState(() => _tabController.animateTo(1)),
+              ),
+              _buildNavItem(
+                index: 2,
+                label: 'Calls',
+                icon: Icons.call_outlined,
+                selectedIcon: Icons.call_rounded,
+                isSelected: selectedIndex == 2,
+                onTap: () => setState(() => _tabController.animateTo(2)),
+              ),
+              // Profile Tab (Avatar on far right)
+              GestureDetector(
+                onTap: () async {
+                  if (_currentUser != null) {
+                    final updated = await Navigator.push<UserModel>(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ProfileScreen(currentUser: _currentUser!)),
+                    );
+                    if (updated != null) setState(() => _currentUser = updated);
+                  }
+                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: c.border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 13,
+                        backgroundImage: _currentUser?.photoUrl != null
+                            ? NetworkImage(_currentUser!.photoUrl!)
+                            : null,
+                        backgroundColor: c.primaryLt,
+                        child: _currentUser?.photoUrl == null
+                            ? Icon(Icons.person, size: 14, color: c.textMid)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Profile',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: c.textMid,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required int index,
+    required String label,
+    required IconData icon,
+    required IconData selectedIcon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final c = AppThemeColors.of(context);
+    final color = isSelected ? c.primary : c.textMid;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? selectedIcon : icon,
+              color: color,
+              size: 22,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
