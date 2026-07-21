@@ -128,13 +128,24 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       UserModel? user = await _authService.signInWithGoogle();
-      setState(() => _isLoading = false);
+      if (!mounted) return;
       if (user != null) {
+        setState(() => _isLoading = false);
         _goHome();
       } else {
-        setState(() => _errorMessage = 'Google sign-in was cancelled.');
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Google sign-in was cancelled.';
+        });
       }
     } catch (e) {
+      if (!mounted) return;
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        setState(() => _isLoading = false);
+        _goHome();
+        return;
+      }
       setState(() {
         _isLoading = false;
         _errorMessage = 'Google sign-in failed. Please try again.';
