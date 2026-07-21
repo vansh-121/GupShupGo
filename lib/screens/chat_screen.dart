@@ -1872,12 +1872,20 @@ class _ChatScreenState extends State<ChatScreen> {
             )
           else ...[
             IconButton(
-              icon: const Icon(Icons.call_rounded),
+              icon: Icon(
+                Icons.phone_outlined,
+                color: c.isDark ? Colors.white : c.textHigh,
+                size: 22,
+              ),
               onPressed: _initiateAudioCall,
               tooltip: 'Audio Call',
             ),
             IconButton(
-              icon: const Icon(Icons.videocam_rounded),
+              icon: Icon(
+                Icons.videocam_outlined,
+                color: c.isDark ? Colors.white : c.textHigh,
+                size: 24,
+              ),
               onPressed: _initiateVideoCall,
               tooltip: 'Video Call',
             ),
@@ -1925,36 +1933,29 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Container(
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 7),
+                              horizontal: 16, vertical: 8),
                           color: c2.isDark
-                              ? const Color(0xFF1A2E1A)
-                              : const Color(0xFFE8F5E9),
+                              ? const Color(0xFF0B0C12)
+                              : c2.surface,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(Icons.lock_outline_rounded,
                                   size: 13,
                                   color: c2.isDark
-                                      ? const Color(0xFF4ADE80)
-                                      : const Color(0xFF2E7D32)),
+                                      ? Colors.white54
+                                      : c2.textLow),
                               const SizedBox(width: 6),
                               Text(
                                 'End-to-end encrypted',
                                 style: GoogleFonts.poppins(
-                                  fontSize: 11.5,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w500,
                                   color: c2.isDark
-                                      ? const Color(0xFF4ADE80)
-                                      : const Color(0xFF2E7D32),
+                                      ? Colors.white54
+                                      : c2.textLow,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Icon(Icons.info_outline_rounded,
-                                  size: 14,
-                                  color: c2.isDark
-                                      ? const Color(0xFF4ADE80).withOpacity(0.7)
-                                      : const Color(0xFF2E7D32)
-                                          .withOpacity(0.6)),
                             ],
                           ),
                         ),
@@ -2170,122 +2171,135 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// Normal input: attach + text field + send/mic.
+  /// Normal input: attach + sleek pill text field with integrated mic/send (Stitch Design).
   Widget _buildNormalInputBar(AppThemeColors c) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        _isUploadingImage
-            ? Padding(
-                padding: const EdgeInsets.all(12),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: c.primary),
+    const darkPillBg = Color(0xFF141624);
+    const darkPillBorder = Color(0xFF24273D);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Attachment Paperclip
+          _isUploadingImage
+              ? Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: c.primary),
+                  ),
+                )
+              : IconButton(
+                  icon: Icon(Icons.attach_file_rounded,
+                      color: c.isDark ? Colors.white70 : c.textMid, size: 24),
+                  onPressed: _pickAndSendImage,
                 ),
-              )
-            : IconButton(
-                icon:
-                    Icon(Icons.attach_file_rounded, color: c.textMid, size: 22),
-                onPressed: _pickAndSendImage,
-              ),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: c.surfaceAlt,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: c.border, width: 1),
-            ),
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: 'Message...',
-                hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 14),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                fillColor: Colors.transparent,
-                filled: false,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              ),
-              style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
-              maxLines: 5,
-              minLines: 1,
-              textCapitalization: TextCapitalization.sentences,
-              onSubmitted: (_) => _sendMessage(),
-            ),
-          ),
-        ),
-        const SizedBox(width: 4),
-        // ── Screen share button ────────────────────────────────────
-        IconButton(
-          icon: Icon(Icons.screen_share_rounded, color: c.textMid, size: 22),
-          tooltip: 'Share screen',
-          onPressed: () {
-            if (PremiumGate.checkAndPrompt(
-              context,
-              featureName: 'Screen Sharing',
-              featureIcon: Icons.screen_share_rounded,
-              description:
-                  'Share your screen live during chats with GupShupGo Pro.',
-            )) {
-              _initiateScreenShare();
-            }
-          },
-        ),
-        const SizedBox(width: 4),
-        // ── Send or Mic button ─────────────────────────────────
-        if (_hasText || _isSending)
-          GestureDetector(
-            onTap: _isSending ? null : _sendMessage,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 44,
-              height: 44,
+          const SizedBox(width: 4),
+
+          // Integrated Input Pill Container (Stitch Design)
+          Expanded(
+            child: Container(
               decoration: BoxDecoration(
-                color: _isSending ? c.textLow : c.primary,
-                shape: BoxShape.circle,
+                color: c.isDark ? darkPillBg : c.surfaceAlt,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: c.isDark ? darkPillBorder : c.border,
+                  width: 1.5,
+                ),
               ),
-              child: _isSending
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        color: c.isDark ? Colors.white : c.textHigh,
+                      ),
+                      maxLines: 5,
+                      minLines: 1,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: 'Message...',
+                        hintStyle: GoogleFonts.poppins(
+                          color: c.isDark ? Colors.white38 : c.textLow,
+                          fontSize: 15,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        fillColor: Colors.transparent,
+                        filled: false,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 12),
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
+                    ),
+                  ),
+
+                  // Mic / Send Icon inside the Pill
+                  if (_hasText || _isSending)
+                    GestureDetector(
+                      onTap: _isSending ? null : _sendMessage,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12.0),
+                        child: _isSending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                Icons.send_rounded,
+                                color: c.primary,
+                                size: 22,
+                              ),
                       ),
                     )
-                  : const Icon(
-                      Icons.send_rounded,
-                      color: Colors.white,
-                      size: 20,
+                  else
+                    GestureDetector(
+                      onLongPressStart: (_) => _startVoiceRecording(),
+                      onLongPressEnd: (_) => _stopVoiceRecording(),
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12.0),
+                        child: Icon(
+                          Icons.mic_none_rounded,
+                          color: c.isDark ? Colors.white70 : c.textMid,
+                          size: 22,
+                        ),
+                      ),
                     ),
-            ),
-          )
-        else
-          GestureDetector(
-            onLongPressStart: (_) => _startVoiceRecording(),
-            onLongPressMoveUpdate: (details) {
-              // Could track slide-to-cancel offset here
-            },
-            onLongPressEnd: (_) => _stopVoiceRecording(),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.mic_rounded,
-                color: Colors.white,
-                size: 22,
+                ],
               ),
             ),
           ),
-      ],
+
+          // Optional Screen Share shortcut
+          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(Icons.screen_share_rounded,
+                color: c.isDark ? Colors.white54 : c.textMid, size: 20),
+            tooltip: 'Share screen',
+            onPressed: () {
+              if (PremiumGate.checkAndPrompt(
+                context,
+                featureName: 'Screen Sharing',
+                featureIcon: Icons.screen_share_rounded,
+                description:
+                    'Share your screen live during chats with GupShupGo Pro.',
+              )) {
+                _initiateScreenShare();
+              }
+            },
+          ),
+        ],
+      ),
     );
   }
 

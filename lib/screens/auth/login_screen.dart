@@ -304,382 +304,432 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = AppThemeColors.of(context);
+    const bgObsidian = Color(0xFF0B0C12);
+    const primaryIndigo = Color(0xFF5E5CE6);
+    const darkCardBg = Color(0xFF121422);
+    const darkCardBorder = Color(0xFF282A45);
+
     return Scaffold(
-      backgroundColor: c.surface,
-      body: Column(
-        children: [
-          // ── Gradient brand header ────────────────────────────────────
-          Container(
-            width: double.infinity,
-            padding: EdgeInsets.only(
-              top: MediaQuery.of(context).padding.top + 40,
-              bottom: 40,
-              left: 24,
-              right: 24,
-            ),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF6C5CE7), Color(0xFF9B8FF0)],
-              ),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Image.asset(
-                      'assets/icon/app_icon.png',
-                      width: 56,
-                      height: 56,
-                      fit: BoxFit.contain,
+      backgroundColor: bgObsidian,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Column(
+            children: [
+              const Spacer(flex: 2),
+
+              // ── Stitch Logo & Title ─────────────────────────────────────────
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF101221),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: primaryIndigo, width: 3.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: primaryIndigo.withOpacity(0.25),
+                      blurRadius: 24,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    'G',
+                    style: GoogleFonts.poppins(
+                      fontSize: 44,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      height: 1.0,
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'GupShupGo',
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'GupShupGo',
+                style: GoogleFonts.poppins(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: -0.6,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Stay connected with everyone',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: Colors.white.withOpacity(0.85),
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
 
-          // ── Scrollable actions ───────────────────────────────────────
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── PRIMARY: Phone OTP ───────────────────────────────
-                  ElevatedButton.icon(
+              const Spacer(flex: 3),
+
+              // ── Action Buttons Stack (Stitch Design) ────────────────────────
+              if (!_showEmailForm) ...[
+                // 1. Primary: Phone Auth
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
                     onPressed: _isLoading
                         ? null
                         : () => Navigator.of(context).push(
                               MaterialPageRoute(
                                   builder: (_) => const PhoneAuthScreen()),
                             ),
-                    icon: const Icon(Icons.phone_android_rounded,
-                        color: Colors.white, size: 20),
-                    label: Text(
-                      'Continue with Phone',
-                      style: GoogleFonts.poppins(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white),
-                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
+                      backgroundColor: primaryIndigo,
+                      elevation: 0,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      elevation: 0,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.phone_rounded,
+                            color: Colors.white, size: 20),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Continue with Phone',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 14),
+                ),
+                const SizedBox(height: 14),
 
-                  // ── SECONDARY: Google Sign-In ────────────────────────
-                  OutlinedButton(
+                // 2. Secondary: Google Auth
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
                     onPressed: _isLoading ? null : _signInWithGoogle,
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: c.border),
+                      backgroundColor: darkCardBg,
+                      elevation: 0,
+                      side: const BorderSide(color: darkCardBorder, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(16),
                       ),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'G',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Continue with Google',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // 3. Tertiary: Email & Password
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => setState(() => _showEmailForm = true),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: darkCardBg,
+                      elevation: 0,
+                      side: const BorderSide(color: darkCardBorder, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.mail_outline_rounded,
+                            color: Colors.white, size: 20),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Use Email & Password',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else ...[
+                // Expandable Email/Password Form in matching Dark Theme
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _ModeChip(
+                      label: 'Sign In',
+                      selected: !_isSignUp,
+                      onTap: () => setState(() {
+                        _isSignUp = false;
+                        _errorMessage = null;
+                      }),
+                    ),
+                    const SizedBox(width: 12),
+                    _ModeChip(
+                      label: 'Sign Up',
+                      selected: _isSignUp,
+                      onTap: () => setState(() {
+                        _isSignUp = true;
+                        _errorMessage = null;
+                      }),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                if (_isSignUp) ...[
+                  TextField(
+                    controller: _nameController,
+                    style: const TextStyle(color: Colors.white),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      hintText: 'Your Name',
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      prefixIcon: const Icon(Icons.person_outline,
+                          color: Colors.white70),
+                      filled: true,
+                      fillColor: darkCardBg,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: darkCardBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: darkCardBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide:
+                            const BorderSide(color: primaryIndigo, width: 1.5),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                TextField(
+                  controller: _emailController,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    hintText: 'Email',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                    prefixIcon:
+                        const Icon(Icons.email_outlined, color: Colors.white70),
+                    filled: true,
+                    fillColor: darkCardBg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: darkCardBorder),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: darkCardBorder),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide:
+                          const BorderSide(color: primaryIndigo, width: 1.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _passwordController,
+                  style: const TextStyle(color: Colors.white),
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    hintText: 'Password',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                    prefixIcon:
+                        const Icon(Icons.lock_outline, color: Colors.white70),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: Colors.white70,
+                      ),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    filled: true,
+                    fillColor: darkCardBg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: darkCardBorder),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: darkCardBorder),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide:
+                          const BorderSide(color: primaryIndigo, width: 1.5),
+                    ),
+                  ),
+                ),
+
+                if (!_isSignUp)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _resetPassword,
+                      child: Text(
+                        'Forgot Password?',
+                        style: GoogleFonts.poppins(
+                          color: primaryIndigo,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 12),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading
+                        ? null
+                        : (_isSignUp ? _signUpWithEmail : _signInWithEmail),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryIndigo,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
                     ),
                     child: _isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
                           )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.g_mobiledata,
-                                  size: 26, color: Colors.red),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Continue with Google',
-                                style: GoogleFonts.poppins(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w500,
-                                    color: c.textHigh),
-                              ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // ── Offline Chat (no internet needed) ────────────────
-                  OutlinedButton.icon(
-                    onPressed: _isLoading
-                        ? null
-                        : () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const NearbyPeersScreen()),
-                            ),
-                    icon: Icon(Icons.cell_tower_rounded,
-                        color: c.primary, size: 20),
-                    label: Text(
-                      'No internet? Use Offline Chat',
-                      style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: c.primary),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: c.primary.withOpacity(0.5)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Chat with people nearby without signing in.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                        fontSize: 12, color: c.textLow),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ── Divider ──────────────────────────────────────────
-                  Row(
-                    children: [
-                      Expanded(child: Divider(color: c.divider)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: Text(
-                          'or sign in with email',
-                          style: GoogleFonts.poppins(
-                              color: c.textLow, fontSize: 13),
-                        ),
-                      ),
-                      Expanded(child: Divider(color: c.divider)),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // ── TERTIARY: Email/Password (collapsible) ───────────
-                  if (!_showEmailForm)
-                    OutlinedButton.icon(
-                      onPressed: () => setState(() => _showEmailForm = true),
-                      icon: Icon(Icons.email_outlined,
-                          color: c.primary),
-                      label: Text(
-                        'Use Email & Password',
-                        style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: c.primary),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: c.primary),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                    )
-                  else ...[
-                    // Mode toggle
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _ModeChip(
-                          label: 'Sign In',
-                          selected: !_isSignUp,
-                          onTap: () => setState(() {
-                            _isSignUp = false;
-                            _errorMessage = null;
-                          }),
-                        ),
-                        const SizedBox(width: 12),
-                        _ModeChip(
-                          label: 'Sign Up',
-                          selected: _isSignUp,
-                          onTap: () => setState(() {
-                            _isSignUp = true;
-                            _errorMessage = null;
-                          }),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Name field (sign up only)
-                    if (_isSignUp) ...[
-                      TextField(
-                        controller: _nameController,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: InputDecoration(
-                          labelText: 'Your Name',
-                          prefixIcon: const Icon(Icons.person_outline),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // Email field
-                    TextField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      autocorrect: false,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: const Icon(Icons.email_outlined),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Password field
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                          ),
-                          onPressed: () => setState(
-                              () => _obscurePassword = !_obscurePassword),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-
-                    // Forgot password
-                    if (!_isSignUp)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: _isLoading ? null : _resetPassword,
-                          child: Text(
-                            'Forgot Password?',
+                        : Text(
+                            _isSignUp ? 'Create Account' : 'Sign In',
                             style: GoogleFonts.poppins(
-                                color: c.primary,
-                                fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                      )
-                    else
-                      const SizedBox(height: 24),
-
-                    // Submit button
-                    ElevatedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : (_isSignUp ? _signUpWithEmail : _signInWithEmail),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: c.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : Text(
-                              _isSignUp ? 'Create Account' : 'Sign In',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
                             ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _showEmailForm = false;
+                    _errorMessage = null;
+                  }),
+                  child: Text(
+                    'Back to options',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white60,
+                      fontWeight: FontWeight.w400,
                     ),
+                  ),
+                ),
+              ],
 
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => setState(() {
-                        _showEmailForm = false;
-                        _errorMessage = null;
-                      }),
-                      child: Text(
-                        'Hide email options',
+              // Error display
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.redAccent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const Spacer(flex: 2),
+
+              // ── Bottom Action: Offline Chat (Stitch Design) ────────────────
+              GestureDetector(
+                onTap: _isLoading
+                    ? null
+                    : () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const NearbyPeersScreen()),
+                        ),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 24.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.sensors_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Offline Chat',
                         style: GoogleFonts.poppins(
-                            color: c.textMid,
-                            fontWeight: FontWeight.w400),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
-
-                  // Error message
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: c.error.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: c.error.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.error_outline, color: c.error),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _errorMessage!,
-                              style: TextStyle(color: c.error),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 24),
-                ],
+                    ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
