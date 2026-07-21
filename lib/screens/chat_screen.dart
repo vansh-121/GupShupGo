@@ -1168,6 +1168,14 @@ class _ChatScreenState extends State<ChatScreen> {
               style: GoogleFonts.poppins(
                 color: isMe ? Colors.white : c.textHigh,
                 fontSize: 14.5,
+              ).copyWith(
+                fontFamilyFallback: const [
+                  '',
+                  'Noto Color Emoji',
+                  'Apple Color Emoji',
+                  'Segoe UI Emoji',
+                  'sans-serif',
+                ],
               ),
             ),
           const SizedBox(height: 3),
@@ -2218,6 +2226,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.isDark ? Colors.white : c.textHigh,
+                      ).copyWith(
+                        fontFamilyFallback: const [
+                          '',
+                          'Noto Color Emoji',
+                          'Apple Color Emoji',
+                          'Segoe UI Emoji',
+                          'sans-serif',
+                        ],
                       ),
                       maxLines: 5,
                       minLines: 1,

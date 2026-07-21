@@ -143,10 +143,19 @@ class AppTheme {
       surfaceTint: Color(0x0A6C5CE7),
     );
 
+    const emojiFallback = [
+      '',
+      'Noto Color Emoji',
+      'Apple Color Emoji',
+      'Segoe UI Emoji',
+      'Roboto',
+      'sans-serif',
+    ];
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: cs,
-      textTheme: GoogleFonts.poppinsTextTheme(),
+      textTheme: GoogleFonts.poppinsTextTheme().apply(fontFamilyFallback: emojiFallback),
       scaffoldBackgroundColor: AppColors.surface,
 
       // ── AppBar ──────────────────────────────────────────────────
@@ -361,12 +370,21 @@ class AppTheme {
       surfaceTint: Color(0x0A7C6FF0),
     );
 
+    const emojiFallback = [
+      '',
+      'Noto Color Emoji',
+      'Apple Color Emoji',
+      'Segoe UI Emoji',
+      'Roboto',
+      'sans-serif',
+    ];
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: cs,
       textTheme: GoogleFonts.poppinsTextTheme(
         ThemeData(brightness: Brightness.dark).textTheme,
-      ),
+      ).apply(fontFamilyFallback: emojiFallback),
       scaffoldBackgroundColor: AppColorsDark.surface,
 
       // ── AppBar ──────────────────────────────────────────────────
