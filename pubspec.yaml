@@ -59,6 +59,7 @@ dependencies:
   # Secure storage (Android Keystore-backed) for the device session token —
   # survives app force-stop on aggressive OEM cleaners (MIUI/HyperOS).
   flutter_secure_storage: ^9.2.2
+  local_auth: ^2.1.8
 
   # HTTP requests
   http: ^1.1.0
