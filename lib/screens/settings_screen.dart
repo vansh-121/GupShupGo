@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
@@ -382,296 +383,527 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
     final avatarUrl = _user.photoUrl ??
-        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=4CAF50&color=fff&size=128';
+        'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=7C5CFC&color=fff&size=128';
 
     return Scaffold(
-      backgroundColor: c.surfaceAlt,
+      backgroundColor: c.surface,
       appBar: AppBar(
-        title: const Text('Settings'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: c.textHigh, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Settings',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: c.textHigh,
+          ),
+        ),
+        centerTitle: false,
       ),
       body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         children: [
-          // ── Profile card ──────────────────────────────────────────────
-          _buildProfileCard(avatarUrl),
-          const SizedBox(height: 8),
-
-          // ── GupShupGo Pro subscription card ────────────────────────
-          if (context.watch<SubscriptionProvider>().isProFeatureVisible) ...[
-            _buildProCard(),
-            const SizedBox(height: 8),
-          ],
-
-          // ── End-to-end encryption info card ───────────────────────────
-          // High-visibility placement so users see the encryption
-          // guarantee right after their profile, before scrolling into
-          // any other setting — same place WhatsApp puts theirs.
-          E2EEBanner.card(
-            context,
-            body: 'Messages, moments, and calls are secured with the '
-                'Signal Protocol. Only you and the people you chat with can '
-                'read what is sent, listen to what is said, or see your '
-                'status. Not even GupShupGo.',
-          ),
-
-          // ── Account ───────────────────────────────────────────────────
-          _buildSectionHeader('ACCOUNT'),
-          _buildCard(children: [
-            _buildTile(
-              icon: Icons.person_outline,
-              iconColor: AppColors.primary,
-              title: 'Profile',
-              subtitle: 'Name, about, photo',
-              onTap: () async {
-                final updated = await Navigator.push<UserModel>(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => ProfileScreen(currentUser: _user)),
-                );
-                if (updated != null) setState(() => _user = updated);
-              },
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.link_rounded,
-              iconColor: Colors.purple,
-              title: 'Linked sign-in methods',
-              subtitle: 'Phone, Google, Email',
-              onTap: () => Navigator.push(
+          // ── Top User Profile Header (Stitch Design) ──────────────────────────
+          GestureDetector(
+            onTap: () async {
+              final updated = await Navigator.push<UserModel>(
                 context,
-                MaterialPageRoute(
-                    builder: (_) => LinkAccountsScreen(user: _user)),
-              ),
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.phone_outlined,
-              iconColor: Colors.green,
-              title: 'Phone number',
-              subtitle: _user.phoneNumber ?? 'Not linked',
-              onTap: null,
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.email_outlined,
-              iconColor: Colors.orange,
-              title: 'Email',
-              subtitle: _user.email ?? 'Not linked',
-              onTap: null,
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Privacy ───────────────────────────────────────────────────
-          _buildSectionHeader('PRIVACY'),
-          _buildCard(children: [
-            _buildSwitchTile(
-              icon: Icons.access_time,
-              iconColor: Colors.teal,
-              title: 'Last seen',
-              subtitle: 'Show when you were last active',
-              value: _settings.showLastSeen,
-              onChanged: (v) => setState(() => _settings.showLastSeen = v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.done_all,
-              iconColor: AppColors.primary,
-              title: 'Read receipts',
-              subtitle: 'Show blue ticks when you\'ve read messages',
-              value: _settings.showReadReceipts,
-              onChanged: (v) => setState(() => _settings.showReadReceipts = v),
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.block,
-              iconColor: Colors.red,
-              title: 'Blocked contacts',
-              subtitle: 'Manage blocked users',
-              onTap: () => _showBlockedContacts(),
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Encryption ───────────────────────────────────────────────
-          _buildSectionHeader('END-TO-END ENCRYPTION'),
-          _buildCard(children: [
-            _buildTile(
-              icon: Icons.shield_outlined,
-              iconColor: AppColors.primary,
-              title: 'Vault',
-              subtitle: 'PIN, auto-delete window, what\'s stored',
-              onTap: _openVaultSettings,
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.verified_user,
-              iconColor: Colors.green,
-              title: 'Verify safety number',
-              subtitle: 'Confirm a contact\'s identity out-of-band',
-              onTap: _verifySafetyNumber,
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Notifications ─────────────────────────────────────────────
-          _buildSectionHeader('NOTIFICATIONS'),
-          _buildCard(children: [
-            _buildSwitchTile(
-              icon: Icons.chat_bubble_outline,
-              iconColor: AppColors.primary,
-              title: 'Messages',
-              subtitle: 'Notifications for new messages',
-              value: _settings.messageNotifications,
-              onChanged: (v) =>
-                  setState(() => _settings.messageNotifications = v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.group_outlined,
-              iconColor: Colors.green,
-              title: 'Group messages',
-              subtitle: 'Notifications for group activity',
-              value: _settings.groupNotifications,
-              onChanged: (v) =>
-                  setState(() => _settings.groupNotifications = v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.call_outlined,
-              iconColor: Colors.orange,
-              title: 'Calls',
-              subtitle: 'Notifications for incoming calls',
-              value: _settings.callNotifications,
-              onChanged: (v) => setState(() => _settings.callNotifications = v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.local_fire_department_outlined,
-              iconColor: Colors.deepOrange,
-              title: 'Bond warnings',
-              subtitle: 'Alert when a bond is at risk or broken',
-              value: _notifPrefs[NotifPrefs.streakWarnings] ?? true,
-              onChanged: (v) => _setNotifPref(NotifPrefs.streakWarnings, v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.emoji_events_outlined,
-              iconColor: Colors.amber,
-              title: 'Bond milestones',
-              subtitle: 'Celebrate 7, 30, 100-day bond achievements',
-              value: _notifPrefs[NotifPrefs.streakMilestones] ?? true,
-              onChanged: (v) => _setNotifPref(NotifPrefs.streakMilestones, v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.bolt_outlined,
-              iconColor: const Color(0xFF6C5CE7),
-              title: 'Gup Points rewards',
-              subtitle: 'Notify when you earn significant Gup Points',
-              value: _notifPrefs[NotifPrefs.gupPoints] ?? true,
-              onChanged: (v) => _setNotifPref(NotifPrefs.gupPoints, v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.wb_sunny_outlined,
-              iconColor: Colors.teal,
-              title: 'Daily digest',
-              subtitle: 'Morning summary of your activity',
-              value: _notifPrefs[NotifPrefs.dailyDigest] ?? true,
-              onChanged: (v) => _setNotifPref(NotifPrefs.dailyDigest, v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.mark_chat_unread_outlined,
-              iconColor: Colors.blue,
-              title: 'Unread reminders',
-              subtitle: 'Remind about unread messages after 2 hours',
-              value: _notifPrefs[NotifPrefs.unreadReminder] ?? true,
-              onChanged: (v) => _setNotifPref(NotifPrefs.unreadReminder, v),
-            ),
-            _divider(),
-            _buildSwitchTile(
-              icon: Icons.email_outlined,
-              iconColor: const Color(0xFF6C5CE7),
-              title: 'Email notifications',
-              subtitle: 'Receive emails for milestones, digests & alerts',
-              value: _settings.emailNotifications,
-              onChanged: (v) async {
-                await _settings.setEmailNotifications(v, _user.id);
-                setState(() {});
-              },
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Gup ───────────────────────────────────────────────────────
-          _buildSectionHeader('GUP'),
-          _buildCard(children: [
-            _buildTile(
-              icon: Icons.delete_sweep_outlined,
-              iconColor: Colors.red,
-              title: 'Clear all gup',
-              subtitle: 'Delete all message history',
-              onTap: _clearAllChats,
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Appearance ────────────────────────────────────────────────
-          _buildSectionHeader('APPEARANCE'),
-          _buildCard(children: [
-            _buildAppearanceTile(),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Help ──────────────────────────────────────────────────────
-          _buildSectionHeader('HELP'),
-          _buildCard(children: [
-            _buildTile(
-              icon: Icons.help_outline,
-              iconColor: AppColors.primary,
-              title: 'Help Center',
-              subtitle: 'FAQs and support',
-              onTap: _showHelpCenter,
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.bug_report_outlined,
-              iconColor: Colors.orange,
-              title: 'Report a problem',
-              subtitle: 'Something not working?',
-              onTap: _reportProblem,
-            ),
-            _divider(),
-            _buildTile(
-              icon: Icons.info_outline,
-              iconColor: Colors.grey,
-              title: 'App info',
-              subtitle: 'Version 1.1.0',
-              onTap: () => _showAboutDialog(),
-            ),
-          ]),
-          const SizedBox(height: 8),
-
-          // ── Logout ────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: OutlinedButton.icon(
-              onPressed: _signOut,
-              icon: const Icon(Icons.logout, color: Colors.red),
-              label: const Text('Log Out',
-                  style: TextStyle(color: Colors.red, fontSize: 15)),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                side: const BorderSide(color: Colors.red),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
+                MaterialPageRoute(builder: (_) => ProfileScreen(currentUser: _user)),
+              );
+              if (updated != null) setState(() => _user = updated);
+            },
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 44,
+                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundColor: c.surfaceAlt,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _user.name,
+                  style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: c.textHigh,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  (_user.about != null && _user.about!.isNotEmpty)
+                      ? _user.about!
+                      : 'Hey there! I am using GupShupGo.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                    color: c.textMid,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
+
+          // ── GupShupGo Pro subscription card ────────────────────────────────
+          if (context.watch<SubscriptionProvider>().isProFeatureVisible) ...[
+            _buildProCard(),
+            const SizedBox(height: 16),
+          ],
+
+          // ── 1. Account Section Card (Full Width) ────────────────────────────
+          _buildStitchCard(
+            title: 'Account',
+            children: [
+              _buildStitchTile(
+                icon: Icons.person_outline_rounded,
+                title: 'Profile',
+                onTap: () async {
+                  final updated = await Navigator.push<UserModel>(
+                    context,
+                    MaterialPageRoute(builder: (_) => ProfileScreen(currentUser: _user)),
+                  );
+                  if (updated != null) setState(() => _user = updated);
+                },
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.link_rounded,
+                title: 'Linked sign-in methods',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: _user)),
+                ),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.phone_outlined,
+                title: 'Phone number',
+                trailingText: _user.phoneNumber ?? 'Not linked',
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.email_outlined,
+                title: 'Email',
+                trailingText: _user.email ?? 'Not linked',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── 2 & 3. Side-by-Side Cards Grid (Privacy & Appearance) ───────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Left Card: Privacy
+              Expanded(
+                child: _buildStitchCard(
+                  title: 'Privacy',
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                  children: [
+                    _buildStitchSwitchRow(
+                      icon: Icons.access_time_rounded,
+                      title: 'Last seen',
+                      value: _settings.showLastSeen,
+                      onChanged: (v) => setState(() => _settings.showLastSeen = v),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildStitchSwitchRow(
+                      icon: Icons.check_circle_outline_rounded,
+                      title: 'Read receipts',
+                      value: _settings.showReadReceipts,
+                      onChanged: (v) => setState(() => _settings.showReadReceipts = v),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Right Card: Appearance
+              Expanded(
+                child: _buildStitchCard(
+                  title: 'Appearance',
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                  children: [
+                    _buildStitchCompactTile(
+                      icon: Icons.dark_mode_outlined,
+                      title: 'Theme',
+                      subtitle: context.watch<ThemeProvider>().themeMode == ThemeMode.dark
+                          ? 'Dark'
+                          : context.watch<ThemeProvider>().themeMode == ThemeMode.light
+                              ? 'Light'
+                              : 'System',
+                      onTap: _showThemeModal,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildStitchCompactTile(
+                      icon: Icons.g_translate_rounded,
+                      title: 'App Language',
+                      subtitle: 'English',
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('English (US) is active')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── 4. Help & Security Card (Full Width) ────────────────────────────
+          _buildStitchCard(
+            title: 'Help & Security',
+            children: [
+              _buildStitchTile(
+                icon: Icons.help_outline_rounded,
+                title: 'Help Center',
+                onTap: _showHelpCenter,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.description_outlined,
+                title: 'Report a problem',
+                onTap: _reportProblem,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.shield_outlined,
+                title: 'End-to-end encryption (Vault)',
+                onTap: _openVaultSettings,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.verified_user_outlined,
+                title: 'Verify safety number',
+                onTap: _verifySafetyNumber,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.block_outlined,
+                title: 'Blocked contacts',
+                onTap: _showBlockedContacts,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.delete_sweep_outlined,
+                title: 'Clear all gup history',
+                onTap: _clearAllChats,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.info_outline_rounded,
+                title: 'App info',
+                trailingText: 'v1.1.0',
+                onTap: _showAboutDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // ── Log Out Button (Stitch Design) ──────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _signOut,
+              style: OutlinedButton.styleFrom(
+                backgroundColor: c.isDark ? const Color(0xFF121422) : c.surfaceAlt,
+                side: BorderSide(
+                  color: c.error.withOpacity(0.7),
+                  width: 1.5,
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: Text(
+                'Log Out',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: c.error,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
         ],
       ),
+    );
+  }
+
+  // ── Stitch Custom Card & Tile Builders ─────────────────────────────────────
+  Widget _buildStitchCard({
+    required String title,
+    required List<Widget> children,
+    EdgeInsetsGeometry? padding,
+  }) {
+    final c = AppThemeColors.of(context);
+    return Container(
+      width: double.infinity,
+      padding: padding ?? const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.surfaceAlt,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: c.border, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: c.textHigh,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStitchTile({
+    required IconData icon,
+    required String title,
+    String? trailingText,
+    VoidCallback? onTap,
+    bool compact = false,
+  }) {
+    final c = AppThemeColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Icon(icon, color: c.textMid, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: compact ? 13.5 : 15,
+                  fontWeight: FontWeight.w500,
+                  color: c.textHigh,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (trailingText != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                trailingText,
+                style: GoogleFonts.poppins(
+                  fontSize: compact ? 12 : 13,
+                  color: c.textMid,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(width: 6),
+            ],
+            Icon(Icons.chevron_right_rounded, color: c.textMid, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStitchCompactTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    final c = AppThemeColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Icon(icon, color: c.textMid, size: 18),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: c.textHigh,
+                    ),
+                    maxLines: 1,
+                  ),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10.5,
+                      color: c.textMid,
+                    ),
+                    maxLines: 1,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: c.textMid, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStitchSwitchRow({
+    required IconData icon,
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final c = AppThemeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, color: c.textMid, size: 15),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: c.textHigh,
+              ),
+              maxLines: 1,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => onChanged(!value),
+            behavior: HitTestBehavior.opaque,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 28,
+              height: 16,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: value ? c.primary : c.border,
+              ),
+              child: AnimatedAlign(
+                duration: const Duration(milliseconds: 200),
+                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 2,
+                        offset: Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStitchDivider() {
+    final c = AppThemeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Divider(color: c.border.withOpacity(0.5), height: 1),
+    );
+  }
+
+  void _showThemeModal() {
+    final c = AppThemeColors.of(context);
+    final themeProvider = context.read<ThemeProvider>();
+    final currentMode = themeProvider.themeMode;
+
+    final options = [
+      (ThemeMode.light, Icons.light_mode_outlined, 'Light'),
+      (ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
+      (ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: c.textLow,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Choose theme',
+                        style: GoogleFonts.poppins(
+                            fontSize: 16, fontWeight: FontWeight.w700, color: c.textHigh)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...options.map((opt) {
+                  final (mode, icon, label) = opt;
+                  final selected = currentMode == mode;
+                  return ListTile(
+                    leading: Icon(icon, color: selected ? c.primary : c.textMid),
+                    title: Text(label,
+                        style: GoogleFonts.poppins(
+                            fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+                            color: c.textHigh)),
+                    trailing: selected
+                        ? Icon(Icons.check_rounded, color: c.primary)
+                        : null,
+                    onTap: () {
+                      context.read<ThemeProvider>().setThemeMode(mode);
+                      Navigator.pop(context);
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1005,329 +1237,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await FirebaseFirestore.instance.collection('users').doc(_user.id).update({
       'blockedUsers': FieldValue.arrayRemove([userId]),
     });
-  }
-
-  // ── Profile header card ────────────────────────────────────────────────────
-  Widget _buildProfileCard(String avatarUrl) {
-    final c = AppThemeColors.of(context);
-    return GestureDetector(
-      onTap: () async {
-        final updated = await Navigator.push<UserModel>(
-          context,
-          MaterialPageRoute(builder: (_) => ProfileScreen(currentUser: _user)),
-        );
-        if (updated != null) setState(() => _user = updated);
-      },
-      child: Container(
-        color: c.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 32,
-              backgroundImage: NetworkImage(avatarUrl),
-              backgroundColor: c.surfaceAlt,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_user.name,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: c.textHigh)),
-                  const SizedBox(height: 4),
-                  Text(
-                    _user.about ?? 'Hey there! I am using GupShupGo.',
-                    style: TextStyle(color: c.textMid, fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: c.textLow),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  Widget _buildAppearanceTile() {
-    final c = AppThemeColors.of(context);
-    final themeProvider = context.watch<ThemeProvider>();
-    final currentMode = themeProvider.themeMode;
-
-    final options = [
-      (ThemeMode.light, Icons.light_mode_outlined, 'Light'),
-      (ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
-      (ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
-    ];
-
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.indigo.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          currentMode == ThemeMode.dark
-              ? Icons.dark_mode_outlined
-              : currentMode == ThemeMode.light
-                  ? Icons.light_mode_outlined
-                  : Icons.brightness_auto_outlined,
-          color: Colors.indigo,
-          size: 20,
-        ),
-      ),
-      title: Text('Theme', style: TextStyle(fontSize: 15, color: c.textHigh)),
-      subtitle: Text(
-        currentMode == ThemeMode.dark
-            ? 'Dark'
-            : currentMode == ThemeMode.light
-                ? 'Light'
-                : 'System default',
-        style: TextStyle(color: c.textMid, fontSize: 12),
-      ),
-      trailing: Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20),
-      onTap: () {
-        showModalBottomSheet(
-          context: context,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          builder: (_) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: c.textLow,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 4),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('Choose theme',
-                            style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...options.map((opt) {
-                      final (mode, icon, label) = opt;
-                      final selected = currentMode == mode;
-                      return ListTile(
-                        leading:
-                            Icon(icon, color: selected ? c.primary : c.textMid),
-                        title: Text(label,
-                            style: TextStyle(
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.normal)),
-                        trailing: selected
-                            ? Icon(Icons.check_rounded, color: c.primary)
-                            : null,
-                        onTap: () {
-                          context.read<ThemeProvider>().setThemeMode(mode);
-                          Navigator.pop(context);
-                        },
-                      );
-                    }),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Divider(),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                      child: Row(
-                        children: [
-                          Text(
-                            'Pro Themes & Wallpapers',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: c.textMid,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const PremiumBadge(size: PremiumBadgeSize.small),
-                        ],
-                      ),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.nightlight_round, color: Color(0xFFFFD700)),
-                      title: const Text('AMOLED True Black'),
-                      subtitle: const Text('Ultra power saving for OLED screens'),
-                      trailing: Icon(
-                        context.watch<SubscriptionProvider>().isPro
-                            ? Icons.check_circle_outline_rounded
-                            : Icons.lock_outline_rounded,
-                        color: context.watch<SubscriptionProvider>().isPro
-                            ? c.primary
-                            : c.textLow,
-                        size: 20,
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (PremiumGate.checkAndPrompt(
-                          context,
-                          featureName: 'AMOLED True Black Theme',
-                          featureIcon: Icons.nightlight_round,
-                          description:
-                              'Unlock ultra dark battery saving themes and custom chat wallpapers with GupShupGo Pro.',
-                        )) {
-                          // Pro user selected AMOLED theme
-                          context.read<ThemeProvider>().setThemeMode(ThemeMode.dark);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text('✨ AMOLED True Black active!'),
-                              backgroundColor: c.primary,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.palette_rounded, color: Color(0xFFFFD700)),
-                      title: const Text('Custom Chat Wallpapers'),
-                      subtitle: const Text('Personalize backgrounds for every chat'),
-                      trailing: Icon(
-                        context.watch<SubscriptionProvider>().isPro
-                            ? Icons.arrow_forward_ios_rounded
-                            : Icons.lock_outline_rounded,
-                        color: c.textLow,
-                        size: 16,
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (PremiumGate.checkAndPrompt(
-                          context,
-                          featureName: 'Custom Chat Wallpapers',
-                          featureIcon: Icons.palette_rounded,
-                          description:
-                              'Set unique backgrounds and custom color palettes for any conversation with GupShupGo Pro.',
-                        )) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text('🎨 Wallpaper customization coming soon!'),
-                              backgroundColor: c.primary,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildSectionHeader(String label) {
-    final c = AppThemeColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 16, 4),
-      child: Text(label,
-          style: TextStyle(
-              color: c.primary,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8)),
-    );
-  }
-
-  Widget _buildCard({required List<Widget> children}) {
-    final c = AppThemeColors.of(context);
-    return Container(
-      color: c.surface,
-      child: Column(children: children),
-    );
-  }
-
-  Widget _divider() {
-    final c = AppThemeColors.of(context);
-    return Divider(height: 1, indent: 56, endIndent: 0, color: c.divider);
-  }
-
-  Widget _buildTile({
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required VoidCallback? onTap,
-  }) {
-    final c = AppThemeColors.of(context);
-    return ListTile(
-      onTap: onTap,
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: iconColor.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: iconColor, size: 20),
-      ),
-      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
-      subtitle:
-          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
-      trailing: onTap != null
-          ? Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20)
-          : null,
-    );
-  }
-
-  Widget _buildSwitchTile({
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    final c = AppThemeColors.of(context);
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: iconColor.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: iconColor, size: 20),
-      ),
-      title: Text(title, style: TextStyle(fontSize: 15, color: c.textHigh)),
-      subtitle:
-          Text(subtitle, style: TextStyle(color: c.textMid, fontSize: 12)),
-      trailing: Transform.scale(
-        scale: 0.82,
-        child: Switch(
-          value: value,
-          onChanged: onChanged,
-          activeColor: c.primary,
-          activeTrackColor: c.primaryLt,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-      ),
-    );
   }
 
   void _showAboutDialog() {
