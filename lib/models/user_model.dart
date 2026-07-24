@@ -83,6 +83,18 @@ class UserModel {
     };
   }
 
+  /// Convert UserModel to Map for client-side Firestore writes.
+  /// Omits server-managed subscription fields to comply with Firestore security rules.
+  Map<String, dynamic> toWritableMap() {
+    final map = toMap();
+    map.remove('subscriptionPlan');
+    map.remove('subscriptionExpiresAt');
+    map.remove('subscriptionProductId');
+    map.remove('subscriptionVerifiedAt');
+    map.remove('subscriptionPurchaseToken');
+    return map;
+  }
+
   // Create UserModel from Firestore document
   factory UserModel.fromMap(Map<String, dynamic> map, String documentId) {
     return UserModel(

@@ -220,6 +220,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     });
 
     if (user != null) {
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: user)),
       );
@@ -252,6 +253,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     });
 
     if (user != null) {
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: user)),
       );
@@ -267,156 +269,268 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     final c = AppThemeColors.of(context);
     return Scaffold(
       backgroundColor: c.surface,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: c.textHigh, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 40),
-              Icon(Icons.chat_bubble_outline, size: 80, color: c.primary),
-              const SizedBox(height: 24),
-              Text(
-                'Welcome to GupShupGo',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: c.textHigh,
+              const SizedBox(height: 12),
+
+              // ── Top Header Logo (GupShupGo App Icon) ──
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    width: 88,
+                    height: 88,
+                    decoration: BoxDecoration(
+                      boxShadow: [
+                        BoxShadow(
+                          color: c.primary.withOpacity(0.3),
+                          blurRadius: 24,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+              Text(
+                'GupShupGo',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  color: c.textHigh,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Use your phone number to sign in.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  color: c.textMid,
+                ),
+              ),
+              const SizedBox(height: 32),
 
               // ─── Carrier verification flow ───
               if (_flowStep == 0) ...[
-                Text(
-                  'Use your phone number to sign in',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(fontSize: 16, color: c.textMid),
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    "We'll use a Google service to verify your number "
-                    "with your carrier. It's simple and secure—and only "
-                    "takes a few seconds.",
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                        fontSize: 13, color: c.textLow, height: 1.4),
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Name field
+                // 1. Name Input Field (Stitch Style)
                 TextField(
                   controller: _nameController,
+                  style: TextStyle(color: c.textHigh),
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Your Name',
-                    prefixIcon: Icon(Icons.person),
+                  decoration: InputDecoration(
+                    hintText: 'Your Name',
+                    hintStyle: TextStyle(color: c.textLow),
+                    prefixIcon: Icon(Icons.person_outline_rounded, color: c.textMid),
+                    filled: true,
+                    fillColor: c.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.primary, width: 1.5),
+                    ),
                   ),
+                ),
+                const SizedBox(height: 16),
+
+                // 2. Primary: Carrier-based verification button (Stitch Style)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _startCarrierVerification,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: c.primary,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Verify with Phone Number',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.check_rounded,
+                                  color: Colors.white, size: 20),
+                            ],
+                          ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: c.divider, thickness: 1)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'OR use OTP',
+                        style: GoogleFonts.poppins(
+                          color: c.textLow,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Divider(color: c.divider, thickness: 1)),
+                  ],
                 ),
                 const SizedBox(height: 24),
 
-                // Primary: Carrier-based verification button
-                ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _startCarrierVerification,
-                  icon: const Icon(Icons.verified_user, color: Colors.white),
-                  label: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
-                        )
-                      : Text(
-                          'Verify with Phone Number',
-                          style: GoogleFonts.poppins(
-                              fontSize: 16, color: Colors.white),
-                        ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: c.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: c.divider)),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('OR use OTP',
-                          style: GoogleFonts.poppins(
-                              color: c.textLow, fontSize: 13)),
-                    ),
-                    Expanded(child: Divider(color: c.divider)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-
-                // Fallback: Manual phone number + OTP
+                // 3. Fallback: Manual phone number input (Stitch Style)
                 TextField(
                   controller: _phoneController,
+                  style: TextStyle(color: c.textHigh),
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    prefixIcon: Icon(Icons.phone),
-                    hintText: '+91 1234567890',
+                  decoration: InputDecoration(
+                    hintText: 'Phone Number',
+                    hintStyle: TextStyle(color: c.textLow),
+                    prefixIcon: Icon(Icons.phone_outlined, color: c.textMid),
+                    filled: true,
+                    fillColor: c.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.primary, width: 1.5),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: _isLoading ? null : _sendOTP,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(color: c.border),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text('Send OTP Instead',
+
+                // 4. Secondary Action Button (Stitch Style)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: _isLoading ? null : _sendOTP,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: c.surfaceAlt,
+                      elevation: 0,
+                      side: BorderSide(color: c.border, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      'Send OTP Instead',
                       style: GoogleFonts.poppins(
-                          fontSize: 16, color: c.textHigh)),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: c.textHigh,
+                      ),
+                    ),
+                  ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 Row(
                   children: [
-                    Expanded(child: Divider(color: c.divider)),
+                    Expanded(child: Divider(color: c.divider, thickness: 1)),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('OR',
-                          style: GoogleFonts.poppins(
-                              color: c.textMid,
-                              fontWeight: FontWeight.bold)),
+                      child: Text(
+                        'OR',
+                        style: GoogleFonts.poppins(
+                          color: c.textLow,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                    Expanded(child: Divider(color: c.divider)),
+                    Expanded(child: Divider(color: c.divider, thickness: 1)),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                OutlinedButton(
-                  onPressed: _isLoading ? null : _signInAnonymously,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(color: c.border),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text('Continue as Guest',
+                // 5. Tertiary Action: Continue as Guest (Stitch Style)
+                GestureDetector(
+                  onTap: _isLoading ? null : _signInAnonymously,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      'Continue as Guest',
+                      textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(
-                          fontSize: 16, color: c.textHigh)),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: c.textHigh,
+                      ),
+                    ),
+                  ),
                 ),
               ],
 
               // ─── Carrier verification in progress ───
               if (_flowStep == 1 || _flowStep == 2) ...[
-                const SizedBox(height: 40),
-                Icon(Icons.phone_android, size: 64, color: c.primary),
+                const SizedBox(height: 32),
+                Center(
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: c.primary.withOpacity(0.12),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: c.primary.withOpacity(0.3),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.phone_android_rounded,
+                        size: 40, color: c.primary),
+                  ),
+                ),
                 const SizedBox(height: 24),
                 Text(
                   _flowStep == 1
@@ -434,7 +548,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     _verifiedPhoneNumber!,
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
-                        fontSize: 20,
+                        fontSize: 22,
                         fontWeight: FontWeight.bold,
                         color: c.primary,
                         letterSpacing: 1.2),
@@ -458,7 +572,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     _isLoading = false;
                     _carrierVerifying = false;
                   }),
-                  child: const Text('Cancel'),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.poppins(
+                        color: c.textMid, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
 
@@ -467,16 +585,17 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 const SizedBox(height: 20),
                 if (_verifiedPhoneNumber != null) ...[
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: c.warning.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: c.warning.withOpacity(0.4)),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.info_outline, color: c.warning, size: 20),
-                        const SizedBox(width: 8),
+                        Icon(Icons.info_outline_rounded,
+                            color: c.warning, size: 20),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'Carrier verification timed out. '
@@ -492,40 +611,81 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 ],
                 TextField(
                   controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Your Name',
-                    prefixIcon: Icon(Icons.person),
+                  style: TextStyle(color: c.textHigh),
+                  decoration: InputDecoration(
+                    hintText: 'Your Name',
+                    hintStyle: TextStyle(color: c.textLow),
+                    prefixIcon:
+                        Icon(Icons.person_outline_rounded, color: c.textMid),
+                    filled: true,
+                    fillColor: c.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.primary, width: 1.5),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _otpController,
+                  style: TextStyle(color: c.textHigh),
                   keyboardType: TextInputType.number,
                   maxLength: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Enter OTP',
-                    prefixIcon: Icon(Icons.lock),
+                  decoration: InputDecoration(
+                    hintText: 'Enter OTP',
+                    hintStyle: TextStyle(color: c.textLow),
+                    prefixIcon:
+                        Icon(Icons.lock_outline_rounded, color: c.textMid),
+                    filled: true,
+                    fillColor: c.surfaceAlt,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.border, width: 1.5),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(color: c.primary, width: 1.5),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _verifyOTP,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: c.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _verifyOTP,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: c.primary,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          )
+                        : Text('Verify OTP',
+                            style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white)),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
-                        )
-                      : Text('Verify OTP',
-                          style: GoogleFonts.poppins(
-                              fontSize: 16, color: Colors.white)),
                 ),
                 const SizedBox(height: 16),
                 TextButton(
@@ -535,27 +695,36 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     _otpController.clear();
                     _verifiedPhoneNumber = null;
                   }),
-                  child: const Text('Go Back'),
+                  child: Text(
+                    'Go Back',
+                    style: GoogleFonts.poppins(
+                        color: c.textMid, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
 
-              // Error message
+              // Error message banner
               if (_errorMessage != null) ...[
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: c.error.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: c.error.withOpacity(0.3)),
+                    color: c.error.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: c.error.withOpacity(0.3), width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: c.error, size: 20),
-                      const SizedBox(width: 8),
+                      Icon(Icons.error_outline_rounded,
+                          color: c.error, size: 20),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: Text(_errorMessage!,
-                            style: TextStyle(color: c.error)),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(color: c.error),
+                        ),
                       ),
                     ],
                   ),
