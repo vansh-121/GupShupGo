@@ -1185,63 +1185,85 @@ class _HomeScreenState extends State<HomeScreen>
         final hasMyStatus = statusProvider.hasMyStatus;
 
         return ListView(
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
           children: [
-            // My Moments section
-            _buildMyStatusTile(myStatus, hasMyStatus),
-
-            // Divider
-            if (otherStatuses.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(
-                  'Recent updates',
-                  style: GoogleFonts.poppins(
-                    color: c.textMid,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
+            // "My Status" Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                'My Moment',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                  letterSpacing: -0.2,
                 ),
               ),
+            ),
+
+            // My Status Tile
+            _buildMyStatusTile(myStatus, hasMyStatus),
+
+            const SizedBox(height: 12),
+
+            // "Recent Updates" Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                'Recent Moments',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
 
             // Other users' statuses
-            ...otherStatuses.map((status) => _buildStatusTile(status)),
+            if (otherStatuses.isNotEmpty)
+              ...otherStatuses.map((status) => _buildStatusTile(status)),
 
-            // Empty state
+            // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 60),
+                padding: const EdgeInsets.symmetric(vertical: 48),
                 child: Center(
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        width: 80,
-                        height: 80,
-                        decoration: const BoxDecoration(
-                          color: AppColors.primaryLt,
+                        width: 88,
+                        height: 88,
+                        decoration: BoxDecoration(
+                          color: c.surfaceAlt,
                           shape: BoxShape.circle,
+                          border: Border.all(
+                            color: c.border,
+                            width: 1.5,
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.auto_stories_rounded,
-                          size: 40,
-                          color: AppColors.primary,
+                        child: Icon(
+                          Icons.camera_alt_outlined,
+                          size: 44,
+                          color: c.textMid,
                         ),
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        'No updates yet',
+                        'No updates yet.',
                         style: GoogleFonts.poppins(
-                          fontSize: 16,
+                          fontSize: 17,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textHigh,
+                          color: c.textHigh,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera icon to post a moment',
+                        'Tap the camera to share.',
                         style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          color: AppColors.textMid,
+                          fontSize: 14,
+                          color: c.textMid,
                         ),
                       ),
                     ],
@@ -1260,19 +1282,20 @@ class _HomeScreenState extends State<HomeScreen>
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=6C5CE7&color=fff&size=128';
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: Stack(
         children: [
           Container(
-            padding: EdgeInsets.all(hasMyStatus ? 2 : 0),
-            decoration: hasMyStatus
-                ? BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: c.primary, width: 2.5),
-                  )
-                : null,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: hasMyStatus ? c.primary : c.border,
+                width: 2.5,
+              ),
+            ),
             child: CircleAvatar(
-              radius: 28,
+              radius: 26,
               backgroundImage: NetworkImage(avatarUrl),
               backgroundColor: c.primaryLt,
             ),
@@ -1282,28 +1305,31 @@ class _HomeScreenState extends State<HomeScreen>
               bottom: 0,
               right: 0,
               child: Container(
-                width: 22,
-                height: 22,
+                width: 20,
+                height: 20,
                 decoration: BoxDecoration(
                   color: c.primary,
                   shape: BoxShape.circle,
                   border: Border.all(color: c.surface, width: 2),
                 ),
                 child: const Icon(Icons.add_rounded,
-                    color: Colors.white, size: 14),
+                    color: Colors.white, size: 12),
               ),
             ),
         ],
       ),
       title: Text(
-        'My Moments',
+        _currentUser?.name ?? 'My Status',
         style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+          color: c.textHigh,
+        ),
       ),
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to post a moment',
+            : 'Tap to add an update',
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -1347,11 +1373,11 @@ class _HomeScreenState extends State<HomeScreen>
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: Container(
-            padding: const EdgeInsets.all(2),
+            padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: allViewed ? c.textLow : c.primary,
+                color: allViewed ? c.textLow.withOpacity(0.4) : c.primary,
                 width: 2.5,
               ),
             ),
@@ -1361,14 +1387,25 @@ class _HomeScreenState extends State<HomeScreen>
               backgroundColor: c.primaryLt,
             ),
           ),
-          title: Text(
-            status.userName,
-            style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
-          ),
-          subtitle: Text(
-            _formatStatusTime(status.lastUpdated),
-            style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+          title: Row(
+            children: [
+              Text(
+                status.userName,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  color: c.textHigh,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '•  ${_formatStatusTime(status.lastUpdated)}',
+                style: GoogleFonts.poppins(
+                  color: c.textMid,
+                  fontSize: 13,
+                ),
+              ),
+            ],
           ),
           onTap: () async {
             await Navigator.push(
@@ -1392,10 +1429,10 @@ class _HomeScreenState extends State<HomeScreen>
     final now = DateTime.now();
     final diff = now.difference(dateTime);
     if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
-    if (diff.inHours < 24) return '${diff.inHours} hours ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return 'Yesterday';
-    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
   }
 

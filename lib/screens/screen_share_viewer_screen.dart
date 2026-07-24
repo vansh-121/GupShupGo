@@ -109,7 +109,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                               children: [
                                 Text(
                                   '$peerTitle is sharing',
-                                  style: GoogleFonts.plusJakartaSans(
+                                  style: GoogleFonts.poppins(
                                     color: Colors.white,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
@@ -152,7 +152,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                               ),
                               child: Text(
                                 session.formattedDuration,
-                                style: GoogleFonts.firaCode(
+                                style: GoogleFonts.poppins(
                                   color: Colors.white.withOpacity(0.9),
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -256,7 +256,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                                     const SizedBox(width: 6),
                                     Text(
                                       'Leave',
-                                      style: GoogleFonts.plusJakartaSans(
+                                      style: GoogleFonts.poppins(
                                         color: Colors.white,
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,

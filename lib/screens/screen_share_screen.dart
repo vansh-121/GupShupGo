@@ -191,7 +191,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                     ),
                                     child: Text(
                                       session.formattedDuration,
-                                      style: GoogleFonts.firaCode(
+                                      style: GoogleFonts.poppins(
                                         color: Colors.white,
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
@@ -311,7 +311,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                               Text(
                                 statusTitle,
                                 textAlign: TextAlign.center,
-                                style: GoogleFonts.plusJakartaSans(
+                                style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,
@@ -452,7 +452,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                   const SizedBox(width: 10),
                                   Text(
                                     'Stop sharing',
-                                    style: GoogleFonts.plusJakartaSans(
+                                    style: GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
