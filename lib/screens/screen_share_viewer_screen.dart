@@ -30,81 +30,243 @@ class ScreenShareViewerScreen extends StatelessWidget {
             });
           }
 
+          final peerTitle = session.peerName.isEmpty ? 'Someone' : session.peerName;
+
           return Scaffold(
-            backgroundColor: Colors.black,
+            backgroundColor: const Color(0xFF0F1318),
             body: SafeArea(
               child: Stack(
                 children: [
+                  // Remote Screen Video Feed
                   Positioned.fill(child: _buildRemoteScreen(session)),
-                  // Header with minimise + title
+
+                  // Top Floating Glass Header Bar
                   Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
+                    top: 12,
+                    left: 16,
+                    right: 16,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 8),
-                      color: Colors.black.withOpacity(0.4),
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E232A).withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.12),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.4),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
                       child: Row(
                         children: [
-                          IconButton(
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                                color: Colors.white, size: 28),
-                            tooltip: 'Minimise',
-                            onPressed: () {
-                              session.minimize();
-                              Navigator.of(context).pop();
-                            },
-                          ),
-                          const Icon(Icons.screen_share_rounded,
-                              color: Colors.white, size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              '${session.peerName.isEmpty ? 'Someone' : session.peerName} is sharing their screen',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                          // Minimise Action Button
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                session.minimize();
+                                Navigator.of(context).pop();
+                              },
+                              borderRadius: BorderRadius.circular(20),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          const SizedBox(width: 10),
+                          // Screen Share Icon + Status
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.screen_share_rounded,
+                              color: Color(0xFF818CF8),
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '$peerTitle is sharing',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF4CAF50),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'LIVE STREAM',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white60,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Duration Counter Pill
+                          if (session.peerPresent)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                session.formattedDuration,
+                                style: GoogleFonts.firaCode(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
                   ),
-                  // Leave button
+
+                  // Bottom Floating Action Pill
                   Positioned(
-                    bottom: 28,
-                    left: 0,
-                    right: 0,
+                    bottom: 24,
+                    left: 24,
+                    right: 24,
                     child: Center(
-                      child: GestureDetector(
-                        onTap: () => session.end(),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 28, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD32F2F),
-                            borderRadius: BorderRadius.circular(30),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E232A).withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.12),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.close_rounded,
-                                  color: Colors.white, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Leave',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.5),
+                              blurRadius: 20,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Minimise Pill
+                            GestureDetector(
+                              onTap: () {
+                                session.minimize();
+                                Navigator.of(context).pop();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.fullscreen_exit_rounded,
+                                      color: Colors.white70,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Minimize',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white70,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Leave Stream Pill
+                            GestureDetector(
+                              onTap: () => session.end(),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 10),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFFE53935),
+                                      Color(0xFFD32F2F),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFFD32F2F)
+                                          .withOpacity(0.4),
+                                      blurRadius: 10,
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.close_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Leave',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -124,19 +286,54 @@ class ScreenShareViewerScreen extends StatelessWidget {
     final channelId = session.channelId;
 
     if (engine == null || remoteUid == null || channelId == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(color: Colors.white),
-            const SizedBox(height: 20),
-            Text(
-              session.connected
-                  ? 'Waiting for ${session.peerName.isEmpty ? 'the other person' : session.peerName} to share...'
-                  : 'Connecting...',
-              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15),
+      return Container(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(0, -0.2),
+            radius: 1.2,
+            colors: [
+              const Color(0xFF6366F1).withOpacity(0.12),
+              const Color(0xFF0F1318),
+            ],
+          ),
+        ),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.08),
+              ),
             ),
-          ],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(
+                    color: Color(0xFF6366F1),
+                    strokeWidth: 3,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  session.connected
+                      ? 'Waiting for ${session.peerName.isEmpty ? 'participant' : session.peerName} to stream screen...'
+                      : 'Connecting to encrypted stream...',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -153,3 +350,4 @@ class ScreenShareViewerScreen extends StatelessWidget {
     );
   }
 }
+
