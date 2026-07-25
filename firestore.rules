@@ -243,5 +243,45 @@ service cloud.firestore {
       // Prevent updates and deletions
       allow update, delete: if false;
     }
+
+    // ==================== ANONYMOUS MATCHMAKING QUEUE ====================
+    match /match_queue/{userId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null;
+    }
+
+    // ==================== ANONYMOUS ROOMS ====================
+    match /anonymous_rooms/{roomId} {
+      function isAnonymousParticipant() {
+        return resource.data.user1Id == request.auth.uid
+            || resource.data.user2Id == request.auth.uid;
+      }
+
+      allow read: if request.auth != null && isAnonymousParticipant();
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && isAnonymousParticipant();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function isRoomParticipant() {
+          let room = get(/databases/$(database)/documents/anonymous_rooms/$(roomId));
+          return room.data.user1Id == request.auth.uid
+              || room.data.user2Id == request.auth.uid;
+        }
+
+        allow read: if request.auth != null && isRoomParticipant();
+        allow create: if request.auth != null
+          && request.auth.uid == request.resource.data.senderId
+          && isRoomParticipant();
+        allow update, delete: if false;
+      }
+    }
+
+    // ==================== ANONYMOUS REPORTS ====================
+    match /anonymous_reports/{reportId} {
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.reporterUserId;
+      allow read, update, delete: if false;
+    }
   }
 }

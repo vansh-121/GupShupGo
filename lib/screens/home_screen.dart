@@ -41,6 +41,7 @@ import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -1726,6 +1727,22 @@ class _HomeScreenState extends State<HomeScreen>
               context,
               MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.shuffle_rounded),
+            tooltip: 'Anonymous Chat — talk to a stranger',
+            onPressed: () {
+              if (_currentUserId != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnonymousLobbyScreen(
+                      currentUserId: _currentUserId!,
+                    ),
+                  ),
+                );
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
