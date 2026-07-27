@@ -554,7 +554,12 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           if (_transitioningToE2EE)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                MediaQuery.of(context).viewPadding.bottom + 16,
+              ),
               color: c.primary.withOpacity(0.1),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -584,7 +589,12 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           if (_strangerDisconnected && !_transitioningToE2EE)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                MediaQuery.of(context).viewPadding.bottom + 16,
+              ),
               color: c.surfaceAlt,
               child: Column(
                 children: [

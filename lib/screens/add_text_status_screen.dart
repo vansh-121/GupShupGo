@@ -192,12 +192,11 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 24,
+            bottom: MediaQuery.of(context).viewPadding.bottom + 24,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.lock_outline_rounded,
-                    size: 12, color: onBgMuted),
+                Icon(Icons.lock_outline_rounded, size: 12, color: onBgMuted),
                 const SizedBox(width: 6),
                 Text(
                   'End-to-end encrypted',
