@@ -247,7 +247,16 @@ service cloud.firestore {
     // ==================== ANONYMOUS MATCHMAKING QUEUE ====================
     match /match_queue/{userId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null;
+      // Users can only create/delete their own queue entries
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      // Matchmaking (findAndPair) requires one user to update the partner's
+      // entry. Own user may fully overwrite (re-join); cross-user updates
+      // are restricted to only the matchmaking fields.
+      allow update: if request.auth != null
+        && (request.auth.uid == userId
+            || request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'matchedRoomId']));
     }
 
     // ==================== ANONYMOUS ROOMS ====================
@@ -258,7 +267,10 @@ service cloud.firestore {
       }
 
       allow read: if request.auth != null && isAnonymousParticipant();
-      allow create: if request.auth != null;
+      // Creator must be one of the room's participants
+      allow create: if request.auth != null
+        && (request.auth.uid == request.resource.data.user1Id
+            || request.auth.uid == request.resource.data.user2Id);
       allow update: if request.auth != null && isAnonymousParticipant();
       allow delete: if false;
 
@@ -270,12 +282,12 @@ service cloud.firestore {
         }
 
         allow read: if request.auth != null && isRoomParticipant();
-        // Participants can send their own messages OR system messages
-        // (senderId == 'system') such as friend-request notifications.
+        // Participants can only send messages as themselves.
+        // System-style messages use type:'system' for UI rendering but
+        // still carry the real senderId for auditability.
         allow create: if request.auth != null
           && isRoomParticipant()
-          && (request.auth.uid == request.resource.data.senderId
-              || request.resource.data.senderId == 'system');
+          && request.auth.uid == request.resource.data.senderId;
         allow update, delete: if false;
       }
     }

@@ -306,13 +306,19 @@ class AnonymousChatService {
   }
 
   /// Inserts a centred "system" message (e.g. "You are now friends! 🎉").
-  Future<void> _addSystemMessage(String roomId, String text) async {
+  /// Uses the caller's real UID as senderId for Firestore rule compliance;
+  /// the UI renders based on type:'system', not the senderId value.
+  Future<void> _addSystemMessage(
+    String roomId,
+    String userId,
+    String text,
+  ) async {
     await _firestore
         .collection('anonymous_rooms')
         .doc(roomId)
         .collection('messages')
         .add({
-      'senderId': 'system',
+      'senderId': userId,
       'text': text,
       'type': 'system',
       'timestamp': FieldValue.serverTimestamp(),
@@ -352,6 +358,7 @@ class AnonymousChatService {
     // System message visible to both users.
     await _addSystemMessage(
       roomId,
+      fromUserId,
       '🤝 $fromAlias wants to connect!',
     );
   }
@@ -442,7 +449,7 @@ class AnonymousChatService {
     });
 
     // 4. Celebratory system message.
-    await _addSystemMessage(roomId, 'You are now friends! 🎉');
+    await _addSystemMessage(roomId, currentUserId, 'You are now friends! 🎉');
 
     // Clean up queue entries (fire-and-forget).
     try {
@@ -478,7 +485,7 @@ class AnonymousChatService {
       'friendRequestFrom': null,
     });
 
-    await _addSystemMessage(roomId, 'Friend request declined.');
+    await _addSystemMessage(roomId, currentUserId, 'Friend request declined.');
   }
 
   /// Private helper — creates a standard E2EE chat room in `/chatRooms`
