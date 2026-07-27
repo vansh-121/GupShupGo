@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
+import 'package:video_chat_app/models/friend_request_model.dart';
+import 'package:video_chat_app/services/chat_service.dart';
 
 /// Singleton service handling anonymous chat matchmaking, messaging,
 /// session lifecycle, and reporting.
@@ -14,25 +16,107 @@ class AnonymousChatService {
 
   // ── Alias generation ─────────────────────────────────────────────────
   static const _adjectives = [
-    'Cosmic', 'Purple', 'Neon', 'Crimson', 'Golden', 'Silver', 'Mystic',
-    'Shadow', 'Crystal', 'Electric', 'Frozen', 'Blazing', 'Silent', 'Swift',
-    'Lucky', 'Brave', 'Gentle', 'Wild', 'Clever', 'Noble', 'Radiant',
-    'Velvet', 'Iron', 'Emerald', 'Sapphire', 'Ruby', 'Amber', 'Ivory',
-    'Midnight', 'Lunar', 'Solar', 'Stellar', 'Phantom', 'Zen', 'Turbo',
+    'Cosmic',
+    'Purple',
+    'Neon',
+    'Crimson',
+    'Golden',
+    'Silver',
+    'Mystic',
+    'Shadow',
+    'Crystal',
+    'Electric',
+    'Frozen',
+    'Blazing',
+    'Silent',
+    'Swift',
+    'Lucky',
+    'Brave',
+    'Gentle',
+    'Wild',
+    'Clever',
+    'Noble',
+    'Radiant',
+    'Velvet',
+    'Iron',
+    'Emerald',
+    'Sapphire',
+    'Ruby',
+    'Amber',
+    'Ivory',
+    'Midnight',
+    'Lunar',
+    'Solar',
+    'Stellar',
+    'Phantom',
+    'Zen',
+    'Turbo',
   ];
 
   static const _animals = [
-    'Fox', 'Penguin', 'Owl', 'Wolf', 'Panda', 'Tiger', 'Eagle', 'Dolphin',
-    'Phoenix', 'Dragon', 'Falcon', 'Panther', 'Lynx', 'Raven', 'Cobra',
-    'Hawk', 'Bear', 'Lion', 'Otter', 'Koala', 'Jaguar', 'Coyote', 'Crane',
-    'Viper', 'Shark', 'Bison', 'Gecko', 'Mantis', 'Scorpion', 'Sparrow',
+    'Fox',
+    'Penguin',
+    'Owl',
+    'Wolf',
+    'Panda',
+    'Tiger',
+    'Eagle',
+    'Dolphin',
+    'Phoenix',
+    'Dragon',
+    'Falcon',
+    'Panther',
+    'Lynx',
+    'Raven',
+    'Cobra',
+    'Hawk',
+    'Bear',
+    'Lion',
+    'Otter',
+    'Koala',
+    'Jaguar',
+    'Coyote',
+    'Crane',
+    'Viper',
+    'Shark',
+    'Bison',
+    'Gecko',
+    'Mantis',
+    'Scorpion',
+    'Sparrow',
   ];
 
   static const _emojis = [
-    '🦊', '🐧', '🦉', '🐺', '🐼', '🐯', '🦅', '🐬',
-    '🔥', '🐉', '🦅', '🐆', '🐱', '🐦‍⬛', '🐍',
-    '🦜', '🐻', '🦁', '🦦', '🐨', '🐆', '🐺', '🕊️',
-    '🐍', '🦈', '🦬', '🦎', '🦗', '🦂', '🐦',
+    '🦊',
+    '🐧',
+    '🦉',
+    '🐺',
+    '🐼',
+    '🐯',
+    '🦅',
+    '🐬',
+    '🔥',
+    '🐉',
+    '🦅',
+    '🐆',
+    '🐱',
+    '🐦‍⬛',
+    '🐍',
+    '🦜',
+    '🐻',
+    '🦁',
+    '🦦',
+    '🐨',
+    '🐆',
+    '🐺',
+    '🕊️',
+    '🐍',
+    '🦈',
+    '🦬',
+    '🦎',
+    '🦗',
+    '🦂',
+    '🐦',
   ];
 
   /// Returns a fun random pseudonym like "Cosmic Fox 🦊".
@@ -88,9 +172,7 @@ class AnonymousChatService {
           'waiting candidates for $userId');
 
       // Filter out self
-      final others = candidates.docs
-          .where((d) => d.id != userId)
-          .toList();
+      final others = candidates.docs.where((d) => d.id != userId).toList();
 
       if (others.isEmpty) {
         print('[AnonymousChat] findAndPair: no available partners');
@@ -133,6 +215,9 @@ class AnonymousChatService {
           'createdAt': FieldValue.serverTimestamp(),
           'endedAt': null,
           'endedBy': null,
+          'friendRequestFrom': null,
+          'friendRequestStatus': 'none',
+          'e2eeChatRoomId': null,
         });
 
         // Update both queue entries
@@ -183,14 +268,8 @@ class AnonymousChatService {
     try {
       final room = await getRoom(roomId);
       if (room != null) {
-        await _firestore
-            .collection('match_queue')
-            .doc(room.user1Id)
-            .delete();
-        await _firestore
-            .collection('match_queue')
-            .doc(room.user2Id)
-            .delete();
+        await _firestore.collection('match_queue').doc(room.user1Id).delete();
+        await _firestore.collection('match_queue').doc(room.user2Id).delete();
       }
     } catch (_) {}
   }
@@ -224,6 +303,193 @@ class AnonymousChatService {
         .collection('messages')
         .orderBy('timestamp', descending: false)
         .snapshots();
+  }
+
+  /// Inserts a centred "system" message (e.g. "You are now friends! 🎉").
+  Future<void> _addSystemMessage(String roomId, String text) async {
+    await _firestore
+        .collection('anonymous_rooms')
+        .doc(roomId)
+        .collection('messages')
+        .add({
+      'senderId': 'system',
+      'text': text,
+      'type': 'system',
+      'timestamp': FieldValue.serverTimestamp(),
+      'status': 'sent',
+    });
+  }
+
+  // ── Friend Request → E2EE transition ─────────────────────────────────
+
+  /// Sends a friend request to the stranger. Marks the room's
+  /// `friendRequestStatus` as `pending`, records who sent it, creates a
+  /// `/friend_requests` doc, and drops a system message into the room so
+  /// both users get real-time feedback.
+  Future<void> sendFriendRequest({
+    required String roomId,
+    required String fromUserId,
+    required String toUserId,
+    required String fromAlias,
+  }) async {
+    // Create the friend_requests doc.
+    await _firestore.collection('friend_requests').add({
+      'fromUserId': fromUserId,
+      'toUserId': toUserId,
+      'anonymousRoomId': roomId,
+      'fromAlias': fromAlias,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'respondedAt': null,
+    });
+
+    // Flag the room so both clients render the request UI.
+    await _firestore.collection('anonymous_rooms').doc(roomId).update({
+      'friendRequestFrom': fromUserId,
+      'friendRequestStatus': 'pending',
+    });
+
+    // System message visible to both users.
+    await _addSystemMessage(
+      roomId,
+      '🤝 $fromAlias wants to connect!',
+    );
+  }
+
+  /// Streams the pending friend request addressed to [userId] for [roomId],
+  /// if any. Emits null when there is none.
+  Stream<FriendRequestModel?> pendingFriendRequestStream({
+    required String roomId,
+    required String userId,
+  }) {
+    return _firestore
+        .collection('friend_requests')
+        .where('anonymousRoomId', isEqualTo: roomId)
+        .where('toUserId', isEqualTo: userId)
+        .where('status', isEqualTo: 'pending')
+        .limit(1)
+        .snapshots()
+        .map((snap) => snap.docs.isEmpty
+            ? null
+            : FriendRequestModel.fromFirestore(snap.docs.first));
+  }
+
+  /// Finds the pending friend request for a room addressed to [userId].
+  ///
+  /// The `toUserId` filter is REQUIRED — the `/friend_requests` security
+  /// rules only permit queries constrained to docs the caller participates
+  /// in. Without it Firestore rejects the read with permission-denied.
+  Future<FriendRequestModel?> _findRequestForRoom(
+    String roomId,
+    String userId,
+  ) async {
+    final snap = await _firestore
+        .collection('friend_requests')
+        .where('anonymousRoomId', isEqualTo: roomId)
+        .where('toUserId', isEqualTo: userId)
+        .where('status', isEqualTo: 'pending')
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return FriendRequestModel.fromFirestore(snap.docs.first);
+  }
+
+  /// Accepts a friend request. Called by the recipient (`toUserId`).
+  ///
+  /// 1. Marks the `/friend_requests` doc `accepted`.
+  /// 2. Bootstraps a standard E2EE chat room via [ChatService].
+  /// 3. Writes `e2eeChatRoomId` + `friendRequestStatus: accepted` on the
+  ///    anonymous room and ends it — both clients navigate to [ChatScreen].
+  /// 4. Drops a celebratory system message.
+  ///
+  /// Returns the newly-created E2EE `chatRoomId`.
+  Future<String?> acceptFriendRequest({
+    required String roomId,
+    required String currentUserId,
+    String? requestId,
+  }) async {
+    // Resolve the request (allow callers that only have the room id).
+    FriendRequestModel? request;
+    if (requestId != null) {
+      final doc =
+          await _firestore.collection('friend_requests').doc(requestId).get();
+      if (doc.exists) request = FriendRequestModel.fromFirestore(doc);
+    }
+    // currentUserId is the recipient (toUserId) — required for the
+    // security-rules-compliant query in _findRequestForRoom.
+    request ??= await _findRequestForRoom(roomId, currentUserId);
+    if (request == null) return null;
+
+    final user1Id = request.fromUserId;
+    final user2Id = request.toUserId;
+
+    // 1. Mark the request accepted.
+    await _firestore.collection('friend_requests').doc(request.id).update({
+      'status': 'accepted',
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Create the E2EE chat room (Signal session bootstraps lazily on the
+    //    first message send inside ChatService.sendMessage).
+    final chatRoomId = await _createE2EEChatRoom(user1Id, user2Id);
+
+    // 3. Update the anonymous room and end it.
+    await _firestore.collection('anonymous_rooms').doc(roomId).update({
+      'friendRequestStatus': 'accepted',
+      'e2eeChatRoomId': chatRoomId,
+      'status': 'ended',
+      'endedAt': FieldValue.serverTimestamp(),
+    });
+
+    // 4. Celebratory system message.
+    await _addSystemMessage(roomId, 'You are now friends! 🎉');
+
+    // Clean up queue entries (fire-and-forget).
+    try {
+      await _firestore.collection('match_queue').doc(user1Id).delete();
+      await _firestore.collection('match_queue').doc(user2Id).delete();
+    } catch (_) {}
+
+    return chatRoomId;
+  }
+
+  /// Declines a friend request. The anonymous chat continues as normal.
+  Future<void> declineFriendRequest({
+    required String roomId,
+    required String currentUserId,
+    String? requestId,
+  }) async {
+    FriendRequestModel? request;
+    if (requestId != null) {
+      final doc =
+          await _firestore.collection('friend_requests').doc(requestId).get();
+      if (doc.exists) request = FriendRequestModel.fromFirestore(doc);
+    }
+    request ??= await _findRequestForRoom(roomId, currentUserId);
+    if (request == null) return;
+
+    await _firestore.collection('friend_requests').doc(request.id).update({
+      'status': 'declined',
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
+
+    await _firestore.collection('anonymous_rooms').doc(roomId).update({
+      'friendRequestStatus': 'declined',
+      'friendRequestFrom': null,
+    });
+
+    await _addSystemMessage(roomId, 'Friend request declined.');
+  }
+
+  /// Private helper — creates a standard E2EE chat room in `/chatRooms`
+  /// using the existing [ChatService]. Signal Protocol sessions are
+  /// established automatically on the first message send.
+  Future<String> _createE2EEChatRoom(String user1Id, String user2Id) async {
+    final room = await ChatService.instance.getOrCreateChatRoom(
+      user1Id,
+      user2Id,
+    );
+    return room.id;
   }
 
   // ── Reporting ────────────────────────────────────────────────────────

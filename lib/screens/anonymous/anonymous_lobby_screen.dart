@@ -11,8 +11,13 @@ import 'package:video_chat_app/theme/app_theme.dart';
 /// a random stranger to pair with.
 class AnonymousLobbyScreen extends StatefulWidget {
   final String currentUserId;
+  final String? currentUserName;
 
-  const AnonymousLobbyScreen({super.key, required this.currentUserId});
+  const AnonymousLobbyScreen({
+    super.key,
+    required this.currentUserId,
+    this.currentUserName,
+  });
 
   @override
   State<AnonymousLobbyScreen> createState() => _AnonymousLobbyScreenState();
@@ -91,6 +96,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
         builder: (_) => AnonymousChatScreen(
           roomId: roomId,
           currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName,
         ),
       ),
     );

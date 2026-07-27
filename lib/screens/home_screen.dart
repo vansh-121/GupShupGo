@@ -1738,6 +1738,7 @@ class _HomeScreenState extends State<HomeScreen>
                   MaterialPageRoute(
                     builder: (_) => AnonymousLobbyScreen(
                       currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
                     ),
                   ),
                 );
@@ -1901,7 +1902,8 @@ class _HomeScreenState extends State<HomeScreen>
                     final updated = await Navigator.push<UserModel>(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => ProfileScreen(currentUser: _currentUser!)),
+                          builder: (_) =>
+                              ProfileScreen(currentUser: _currentUser!)),
                     );
                     if (updated != null) setState(() => _currentUser = updated);
                   }

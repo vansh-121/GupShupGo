@@ -270,11 +270,27 @@ service cloud.firestore {
         }
 
         allow read: if request.auth != null && isRoomParticipant();
+        // Participants can send their own messages OR system messages
+        // (senderId == 'system') such as friend-request notifications.
         allow create: if request.auth != null
-          && request.auth.uid == request.resource.data.senderId
-          && isRoomParticipant();
+          && isRoomParticipant()
+          && (request.auth.uid == request.resource.data.senderId
+              || request.resource.data.senderId == 'system');
         allow update, delete: if false;
       }
+    }
+
+    // ==================== FRIEND REQUESTS ====================
+    match /friend_requests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.fromUserId == request.auth.uid
+            || resource.data.toUserId == request.auth.uid);
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.fromUserId;
+      // Recipient responds (accept/decline).
+      allow update: if request.auth != null
+        && resource.data.toUserId == request.auth.uid;
+      allow delete: if false;
     }
 
     // ==================== ANONYMOUS REPORTS ====================

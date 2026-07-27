@@ -6,17 +6,21 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
+import 'package:video_chat_app/screens/chat_screen.dart';
+import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Dedicated 1-on-1 anonymous chat screen between two strangers.
 class AnonymousChatScreen extends StatefulWidget {
   final String roomId;
   final String currentUserId;
+  final String? currentUserName;
 
   const AnonymousChatScreen({
     super.key,
     required this.roomId,
     required this.currentUserId,
+    this.currentUserName,
   });
 
   @override
@@ -25,6 +29,7 @@ class AnonymousChatScreen extends StatefulWidget {
 
 class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   final _service = AnonymousChatService.instance;
+  final _userService = UserService();
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -32,6 +37,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   StreamSubscription<DocumentSnapshot>? _roomSub;
   bool _strangerDisconnected = false;
   bool _isEnding = false;
+  bool _sendingFriendRequest = false;
+  bool _respondingToRequest = false;
+  bool _transitioningToE2EE = false;
 
   @override
   void initState() {
@@ -53,13 +61,26 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
       setState(() => _room = room);
     }
 
-    // Listen for room status changes (stranger leaving)
+    // Listen for room status changes (stranger leaving, friend request).
     _roomSub = _service.listenToRoom(widget.roomId).listen((snapshot) {
       if (!snapshot.exists || !mounted) return;
       final updatedRoom = AnonymousRoomModel.fromFirestore(snapshot);
+
+      // ── Friend request accepted → transition to E2EE chat ──────────
+      if (updatedRoom.isFriendRequestAccepted &&
+          updatedRoom.e2eeChatRoomId != null &&
+          !_transitioningToE2EE) {
+        setState(() => _room = updatedRoom);
+        _handleFriendRequestAccepted(updatedRoom);
+        return;
+      }
+
       setState(() {
         _room = updatedRoom;
+        // Only show the "disconnected" banner when the room ended for a
+        // reason OTHER than a friend request acceptance.
         if (!updatedRoom.isActive &&
+            !updatedRoom.isFriendRequestAccepted &&
             updatedRoom.endedBy != widget.currentUserId) {
           _strangerDisconnected = true;
         }
@@ -78,7 +99,6 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
       text: text,
     );
 
-    // Scroll to bottom after sending
     _scrollToBottom();
   }
 
@@ -104,17 +124,113 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   Future<void> _nextStranger() async {
     if (_isEnding) return;
     _isEnding = true;
-    // End current session
     if (_room != null && _room!.isActive) {
       await _service.endSession(widget.roomId, widget.currentUserId);
     }
     if (!mounted) return;
-    // Navigate to lobby to find a new stranger
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) =>
             AnonymousLobbyScreen(currentUserId: widget.currentUserId),
+      ),
+    );
+  }
+
+  // ── Friend Request: Sender ──────────────────────────────────────────
+  Future<void> _sendFriendRequest() async {
+    if (_room == null || _sendingFriendRequest) return;
+    setState(() => _sendingFriendRequest = true);
+
+    final myAlias = _room!.getAlias(widget.currentUserId);
+    final partnerId = _room!.getPartnerId(widget.currentUserId);
+
+    try {
+      await _service.sendFriendRequest(
+        roomId: widget.roomId,
+        fromUserId: widget.currentUserId,
+        toUserId: partnerId,
+        fromAlias: myAlias,
+      );
+    } finally {
+      if (mounted) setState(() => _sendingFriendRequest = false);
+    }
+  }
+
+  // ── Friend Request: Receiver accepts ────────────────────────────────
+  Future<void> _acceptFriendRequest() async {
+    if (_room == null || _respondingToRequest) return;
+    setState(() => _respondingToRequest = true);
+    try {
+      // The accept path updates the room → e2eeChatRoomId → our room listener
+      // handles the navigation for BOTH users.
+      await _service.acceptFriendRequest(
+        roomId: widget.roomId,
+        currentUserId: widget.currentUserId,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not accept request. Please try again.',
+              style: GoogleFonts.poppins(fontSize: 13),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _respondingToRequest = false);
+    }
+  }
+
+  // ── Friend Request: Receiver declines ───────────────────────────────
+  Future<void> _declineFriendRequest() async {
+    if (_room == null || _respondingToRequest) return;
+    setState(() => _respondingToRequest = true);
+    try {
+      await _service.declineFriendRequest(
+        roomId: widget.roomId,
+        currentUserId: widget.currentUserId,
+      );
+    } finally {
+      if (mounted) setState(() => _respondingToRequest = false);
+    }
+  }
+
+  /// When a friend request is accepted, reveal real profiles and navigate
+  /// to the standard E2EE [ChatScreen] after a short celebratory delay.
+  Future<void> _handleFriendRequestAccepted(AnonymousRoomModel room) async {
+    if (_transitioningToE2EE) return;
+    _transitioningToE2EE = true;
+
+    final partnerId = room.getPartnerId(widget.currentUserId);
+
+    // Fetch the partner's real profile — identities are now revealed.
+    final partner = await _userService.getUserById(partnerId);
+
+    // Brief pause so users see "You are now friends! 🎉".
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    final contact = Contact(
+      id: partnerId,
+      name: partner?.name ?? 'New Friend',
+      lastMessage: '',
+      time: '',
+      avatarUrl: partner?.photoUrl ??
+          'https://ui-avatars.com/api/?name=${Uri.encodeComponent(partner?.name ?? 'Friend')}&background=4CAF50&color=fff&size=128',
+      isOnline: partner?.isOnline ?? false,
+    );
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          contact: contact,
+          currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName,
+        ),
       ),
     );
   }
@@ -237,6 +353,12 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     }
 
     final partnerAlias = _room!.getPartnerAlias(widget.currentUserId);
+    final iSentRequest = _room!.didSendFriendRequest(widget.currentUserId);
+    final shouldRespond =
+        _room!.shouldRespondToFriendRequest(widget.currentUserId);
+    final canSendRequest = _room!.isActive &&
+        !_room!.hasPendingFriendRequest &&
+        !_transitioningToE2EE;
 
     return Scaffold(
       backgroundColor: c.surface,
@@ -268,6 +390,19 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ],
         ),
         actions: [
+          // Add Friend
+          IconButton(
+            icon: Icon(
+              iSentRequest
+                  ? Icons.hourglass_top_rounded
+                  : Icons.person_add_alt_1_rounded,
+              color: canSendRequest ? c.primary : c.textLow,
+            ),
+            tooltip: iSentRequest ? 'Request sent' : 'Add friend',
+            onPressed: (canSendRequest && !_sendingFriendRequest)
+                ? _sendFriendRequest
+                : null,
+          ),
           // Next stranger
           IconButton(
             icon: Icon(Icons.skip_next_rounded, color: c.primary),
@@ -305,6 +440,12 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             ),
           ),
 
+          // ── Friend Request: Receiver banner (Accept / Decline) ─
+          if (shouldRespond) _buildFriendRequestBanner(c),
+
+          // ── Friend Request: Sender waiting banner ──────────────
+          if (iSentRequest) _buildWaitingBanner(c),
+
           // ── Messages ─────────────────────────────────────────
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
@@ -336,7 +477,6 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   );
                 }
 
-                // Auto-scroll to bottom on new messages
                 _scrollToBottom();
 
                 return ListView.builder(
@@ -345,8 +485,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    final msg =
-                        messages[index].data() as Map<String, dynamic>;
+                    final msg = messages[index].data() as Map<String, dynamic>;
                     final isMe = msg['senderId'] == widget.currentUserId;
                     final text = msg['text'] as String? ?? '';
                     final type = msg['type'] as String? ?? 'text';
@@ -411,8 +550,38 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             ),
           ),
 
+          // ── E2EE Transition Overlay Banner ────────────────────
+          if (_transitioningToE2EE)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              color: c.primary.withOpacity(0.1),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: c.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'You are now friends! Opening secure chat…',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: c.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // ── Stranger Disconnected Banner ──────────────────────
-          if (_strangerDisconnected)
+          if (_strangerDisconnected && !_transitioningToE2EE)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -450,7 +619,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             ),
 
           // ── Input Bar ─────────────────────────────────────────
-          if (!_strangerDisconnected && _room!.isActive)
+          if (!_strangerDisconnected &&
+              !_transitioningToE2EE &&
+              _room!.isActive)
             Container(
               padding: EdgeInsets.only(
                 left: 12,
@@ -508,6 +679,128 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  // ── Receiver banner: "Stranger wants to connect!" ───────────────────
+  Widget _buildFriendRequestBanner(AppThemeColors c) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: c.primary.withOpacity(0.1),
+        border: Border(
+          bottom: BorderSide(color: c.primary.withOpacity(0.3), width: 1),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Text('🤝', style: GoogleFonts.poppins(fontSize: 20)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Stranger wants to connect!',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.textHigh,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Accepting reveals your real profile and starts an encrypted chat.',
+            style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed:
+                      _respondingToRequest ? null : _declineFriendRequest,
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: c.error.withOpacity(0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Decline',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      color: c.error,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _respondingToRequest ? null : _acceptFriendRequest,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: c.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _respondingToRequest
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          'Accept',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Sender waiting banner ───────────────────────────────────────────
+  Widget _buildWaitingBanner(AppThemeColors c) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: c.surfaceAlt,
+        border: Border(
+          bottom: BorderSide(color: c.border, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hourglass_top_rounded, size: 18, color: c.textMid),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Friend request sent! Waiting for response…',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: c.textMid,
+              ),
+            ),
+          ),
         ],
       ),
     );
