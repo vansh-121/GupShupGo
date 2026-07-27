@@ -1729,23 +1729,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.shuffle_rounded),
-            tooltip: 'Anonymous Chat — talk to a stranger',
-            onPressed: () {
-              if (_currentUserId != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AnonymousLobbyScreen(
-                      currentUserId: _currentUserId!,
-                      currentUserName: _currentUser?.name,
-                    ),
-                  ),
-                );
-              }
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.search_rounded),
             onPressed: () {
               if (_currentUserId != null) {
@@ -1835,6 +1818,21 @@ class _HomeScreenState extends State<HomeScreen>
       body: Column(
         children: [
           if (!_hasFirebaseSession) _buildReverifyBanner(),
+          // ── Anonymous Match Banner — only on Gup tab ──────────────
+          if (_tabController.index == 0 && _currentUserId != null)
+            _AnonymousMatchBanner(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnonymousLobbyScreen(
+                      currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
+                    ),
+                  ),
+                );
+              },
+            ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -2280,6 +2278,145 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
               ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// ─── Full-width Anonymous Match Banner with animated gradient shimmer ───────
+class _AnonymousMatchBanner extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _AnonymousMatchBanner({required this.onTap});
+
+  @override
+  State<_AnonymousMatchBanner> createState() => _AnonymousMatchBannerState();
+}
+
+class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _shimmerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    return AnimatedBuilder2(
+      animation: _shimmerController,
+      builder: (context, child) {
+        final v = _shimmerController.value;
+        return GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: c.isDark
+                    ? const [
+                        Color(0xFF2A1F4E),
+                        Color(0xFF3D2068),
+                        Color(0xFF4A1A6B),
+                        Color(0xFF3D2068),
+                        Color(0xFF2A1F4E),
+                      ]
+                    : const [
+                        Color(0xFF6C5CE7),
+                        Color(0xFF845EC2),
+                        Color(0xFFD65DB1),
+                        Color(0xFF845EC2),
+                        Color(0xFF6C5CE7),
+                      ],
+                begin: Alignment(-1.5 + v * 3.0, 0),
+                end: Alignment(1.5 + v * 3.0, 0),
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: (c.isDark
+                          ? const Color(0xFF7C5CFC)
+                          : const Color(0xFF6C5CE7))
+                      .withOpacity(0.18),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // ── Icon circle ──
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.shuffle_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ── Text ──
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Connect with a Stranger',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Anonymous chat — tap to match!',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w400,
+                          color: Colors.white.withOpacity(0.75),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // ── Arrow ──
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.20),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ],
             ),
           ),
         );
