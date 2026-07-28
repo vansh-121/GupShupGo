@@ -113,6 +113,7 @@ class AuthService {
         name: displayName,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'anonymous',
       );
 
       print('Creating user in Firestore...');
@@ -211,6 +212,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'phone',
             );
           } else {
             // Create new user
@@ -221,6 +223,7 @@ class AuthService {
               photoUrl: photoUrl,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'phone',
             );
           }
 
@@ -300,6 +303,7 @@ class AuthService {
               user = existingUser.copyWith(
                 isOnline: true,
                 lastSeen: DateTime.now(),
+                authProvider: existingUser.authProvider ?? 'phone',
               );
             } else {
               user = UserModel(
@@ -309,6 +313,7 @@ class AuthService {
                 photoUrl: photoUrl,
                 isOnline: true,
                 createdAt: DateTime.now(),
+                authProvider: 'phone',
               );
             }
 
@@ -415,6 +420,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'google',
             );
           } else {
             user = UserModel(
@@ -426,6 +432,7 @@ class AuthService {
               photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'google',
             );
           }
 
@@ -518,6 +525,7 @@ class AuthService {
         photoUrl: photoUrl,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'password',
       );
 
       print('Creating user in Firestore...');
@@ -596,6 +604,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'password',
             );
           } else {
             // Create user profile if it doesn't exist
@@ -605,6 +614,7 @@ class AuthService {
               email: email,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'password',
             );
           }
 
@@ -662,6 +672,7 @@ class AuthService {
       user = existingUser.copyWith(
         email: userCredential.user!.email ?? existingUser.email,
         photoUrl: userCredential.user!.photoURL ?? existingUser.photoUrl,
+        authProvider: existingUser.authProvider ?? 'google',
       );
     } else {
       user = UserModel(
@@ -671,6 +682,7 @@ class AuthService {
         photoUrl: userCredential.user!.photoURL,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'google',
       );
     }
     await _userService.createOrUpdateUser(user);
@@ -696,7 +708,10 @@ class AuthService {
     UserModel? existingUser = await _userService.getUserById(userId);
     UserModel user;
     if (existingUser != null) {
-      user = existingUser.copyWith(email: email);
+      user = existingUser.copyWith(
+        email: email,
+        authProvider: existingUser.authProvider ?? 'password',
+      );
     } else {
       user = UserModel(
         id: userId,
@@ -706,6 +721,7 @@ class AuthService {
         email: email,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'password',
       );
     }
     await _userService.createOrUpdateUser(user);

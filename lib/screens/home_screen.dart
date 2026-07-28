@@ -43,6 +43,8 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
+import 'package:video_chat_app/screens/public_profile_screen.dart';
+import 'package:video_chat_app/services/deep_link_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -245,6 +247,43 @@ class _HomeScreenState extends State<HomeScreen>
         final pendingTab = NotificationService.consumePendingTabDeepLink();
         if (pendingTab != null && mounted) {
           _tabController.animateTo(pendingTab);
+        }
+
+        // Friend-request sent/accepted notification tap → open Contacts
+        // directly on the Requests tab.
+        final pendingContactsTab =
+            NotificationService.consumePendingContactsTabDeepLink();
+        if (pendingContactsTab != null && mounted && _currentUserId != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ContactsScreen(
+                currentUserId: _currentUserId!,
+                currentUserName: _currentUser?.name,
+                initialTabIndex: pendingContactsTab,
+              ),
+            ),
+          );
+        }
+
+        // ── Profile deep link tapped before this user was signed in ──────
+        // (e.g. cold start via a QR scan / shared link). Open it now that
+        // we have an authenticated _currentUserId.
+        final pendingUsername = DeepLinkService.consumePendingUsername();
+        if (pendingUsername != null &&
+            pendingUsername.isNotEmpty &&
+            mounted &&
+            _currentUserId != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PublicProfileScreen(
+                username: pendingUsername,
+                currentUserId: _currentUserId!,
+                currentUserName: _currentUser?.name,
+              ),
+            ),
+          );
         }
 
         final pendingChatContactId =

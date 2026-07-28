@@ -351,6 +351,13 @@ class NotificationService {
         _pendingTabDeepLink = 1; // index of Arcade tab
         break;
 
+      case 'requests':
+        // Friend-request sent/accepted notifications. Route home and let
+        // HomeScreen open ContactsScreen on the Requests tab (index 1).
+        nav.pushNamedAndRemoveUntil('/', (route) => false);
+        _pendingContactsTabDeepLink = 1; // index of Requests tab in ContactsScreen
+        break;
+
       case 'screen_share':
         final channelId = data['channelId'] as String? ?? '';
         final sharerName = data['sharerName'] as String? ?? 'Someone';
@@ -370,6 +377,7 @@ class NotificationService {
   // Pending deep link — HomeScreen reads these after mount
   static String? _pendingChatDeepLink;
   static int? _pendingTabDeepLink;
+  static int? _pendingContactsTabDeepLink;
 
   static String? consumePendingChatDeepLink() {
     final v = _pendingChatDeepLink;
@@ -380,6 +388,14 @@ class NotificationService {
   static int? consumePendingTabDeepLink() {
     final v = _pendingTabDeepLink;
     _pendingTabDeepLink = null;
+    return v;
+  }
+
+  /// Consumed by HomeScreen to open ContactsScreen directly on a specific
+  /// tab (e.g. Requests) after a friend-request notification tap.
+  static int? consumePendingContactsTabDeepLink() {
+    final v = _pendingContactsTabDeepLink;
+    _pendingContactsTabDeepLink = null;
     return v;
   }
 }

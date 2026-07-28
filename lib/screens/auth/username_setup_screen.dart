@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
@@ -16,6 +18,7 @@ class UsernameSetupScreen extends StatefulWidget {
 
 class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   final UserService _userService = UserService();
+  final AuthService _authService = AuthService();
   final TextEditingController _usernameController = TextEditingController();
 
   Timer? _debounce;
@@ -27,25 +30,54 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   @override
   void initState() {
     super.initState();
+    // Fire-and-forget — updates the field once a suggestion resolves.
+    // ignore: discarded_futures
     _suggestInitialUsername();
   }
 
-  void _suggestInitialUsername() {
-    String suggestion = '';
+  /// Derives a starting suggestion from the user's email/name and, if that
+  /// base handle is already taken, appends a random 3-digit suffix (retried
+  /// a few times) so the user isn't stuck staring at a taken handle with no
+  /// clear next step.
+  Future<void> _suggestInitialUsername() async {
+    String base = '';
     if (widget.user.email != null && widget.user.email!.contains('@')) {
-      suggestion = widget.user.email!.split('@').first;
+      base = widget.user.email!.split('@').first;
     } else if (widget.user.name.isNotEmpty) {
-      suggestion = widget.user.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '');
+      base = widget.user.name;
+    }
+    base = base.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '');
+    if (base.length > 16) {
+      base = base.substring(0, 16);
+    }
+    if (base.isEmpty) return;
+    if (base.length < 3) {
+      base = base.padRight(3, '0');
     }
 
-    if (suggestion.length > 20) {
-      suggestion = suggestion.substring(0, 20);
+    String candidate = base;
+    final rng = Random();
+    for (int attempt = 0; attempt < 5; attempt++) {
+      if (!mounted) return;
+      bool available = false;
+      try {
+        available = await _userService.isUsernameAvailable(
+          candidate,
+          currentUserId: widget.user.id,
+        );
+      } catch (_) {
+        break; // Network hiccup — leave the field for manual entry.
+      }
+      if (available) break;
+      candidate = '$base${100 + rng.nextInt(900)}';
+      if (candidate.length > 20) {
+        candidate = candidate.substring(0, 20);
+      }
     }
 
-    if (suggestion.isNotEmpty) {
-      _usernameController.text = suggestion;
-      _onUsernameChanged(suggestion);
-    }
+    if (!mounted) return;
+    _usernameController.text = candidate;
+    _onUsernameChanged(candidate);
   }
 
   @override
@@ -126,15 +158,30 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
     try {
       await _userService.updateUsername(widget.user.id, clean);
+      final updatedUser = widget.user.copyWith(username: clean);
+
+      // Update the local SharedPreferences cache immediately. Without this,
+      // HomeScreen's mandatory-username check reads the stale cached user
+      // (still username == null) on the very next build and bounces the
+      // user straight back to this screen.
+      await _authService.cacheUser(updatedUser);
 
       if (!mounted) return;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const HomeScreen(),
-        ),
-      );
+      if (Navigator.canPop(context)) {
+        // Voluntary "Change handle" flow from Profile — just return the
+        // updated user to the caller instead of tearing down the whole
+        // navigation stack.
+        Navigator.pop(context, updatedUser);
+      } else {
+        // Mandatory first-run onboarding — there's nothing to pop back to.
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const HomeScreen(),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -150,12 +197,17 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
 
+    // Mandatory first-run onboarding has nothing to pop back to (pushed via
+    // pushReplacement), so there's no back button in that case. Voluntary
+    // "Change" from Profile can always be cancelled.
+    final canCancel = Navigator.canPop(context);
+
     return Scaffold(
       backgroundColor: c.surface,
       appBar: AppBar(
         title: const Text('Choose Your Handle'),
         elevation: 0,
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: canCancel,
       ),
       body: SafeArea(
         child: Padding(

@@ -91,6 +91,12 @@
                 <data android:scheme="https" android:host="gupshupgo.app" android:pathPrefix="/u/" />
                 <data android:scheme="http" android:host="gupshupgo.app" android:pathPrefix="/u/" />
             </intent-filter>
+
+            <!-- app_links handles this manually via AppLinks().uriLinkStream —
+                 disable Flutter's built-in deep-link routing to avoid the two
+                 handlers racing/duplicating navigation (required since
+                 Flutter 3.24). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
         </activity>
         
         <!-- Don't delete the meta-data below.

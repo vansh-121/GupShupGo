@@ -39,6 +39,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isUploadingPhoto = false;
   String? _photoUrl;
   String? _errorMessage;
+  String? _username;
 
   static const String _defaultAbout = 'Hey there! I am using GupShupGo.';
 
@@ -49,6 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _aboutController =
         TextEditingController(text: widget.currentUser.about ?? _defaultAbout);
     _photoUrl = widget.currentUser.photoUrl;
+    _username = widget.currentUser.username;
   }
 
   @override
@@ -100,6 +102,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         name: name,
         about: _aboutController.text.trim(),
         photoUrl: _photoUrl,
+        username: _username,
       );
       await _userService.createOrUpdateUser(updatedUser);
 
@@ -391,9 +394,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      widget.currentUser.username != null &&
-                              widget.currentUser.username!.isNotEmpty
-                          ? '@${widget.currentUser.username}'
+                      _username != null && _username!.isNotEmpty
+                          ? '@$_username'
                           : 'Not set yet',
                       style: TextStyle(
                         fontSize: 16,
@@ -403,13 +405,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: () {
-                      Navigator.push(
+                    onPressed: () async {
+                      final updated = await Navigator.push<UserModel>(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => UsernameSetupScreen(user: widget.currentUser),
+                          builder: (_) => UsernameSetupScreen(
+                            user: widget.currentUser.copyWith(username: _username),
+                          ),
                         ),
                       );
+                      if (updated != null && mounted) {
+                        setState(() => _username = updated.username);
+                      }
                     },
                     icon: const Icon(Icons.edit_rounded, size: 16),
                     label: const Text('Change'),

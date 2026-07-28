@@ -297,6 +297,22 @@ service cloud.firestore {
       }
     }
 
+    // ==================== USERNAMES (uniqueness reservation) ====================
+    // Doc ID is the lowercase handle itself, so Firestore's own create
+    // semantics (create fails if the doc already exists) give us an atomic
+    // uniqueness guarantee — no other user can ever "win" a race for the
+    // same handle. UserService.updateUsername() claims the new handle and
+    // releases the old one (if any) inside a single transaction.
+    match /usernames/{handle} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      // Handles are immutable once claimed — to change handle, the owner
+      // deletes this doc and creates a new one under the new handle.
+      allow update: if false;
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
     // ==================== FRIEND REQUESTS ====================
     match /friend_requests/{requestId} {
       allow read: if request.auth != null

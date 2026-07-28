@@ -395,7 +395,7 @@ exports.sendMessageNotification = onRequest(
     }
 
     try {
-      const { receiverId, senderId, senderName, message, chatRoomId } = req.body;
+      const { receiverId, senderId, senderName, message, chatRoomId, screen } = req.body;
 
       if (!receiverId || !senderId || !senderName || !chatRoomId) {
         res.status(400).json({ error: "Missing required fields" });
@@ -411,6 +411,10 @@ exports.sendMessageNotification = onRequest(
           senderName: senderName,
           message: message || "",
           chatRoomId: chatRoomId,
+          // Optional tap-routing hint (e.g. "requests" for friend-request
+          // notifications). Omitted entirely for real chat messages, which
+          // keeps existing client behavior (route via chatRoomId) unchanged.
+          ...(screen ? { screen } : {}),
         },
         notification: {
           title: senderName,

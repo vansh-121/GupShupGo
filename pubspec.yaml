@@ -48,6 +48,21 @@ dependencies:
   google_fonts: ^5.1.0
   qr_flutter: ^4.1.0
 
+  # Device contact matching (Discover tab "Sync Device Contacts").
+  # Pinned to the 1.1.x line — 2.x requires Flutter >=3.44, newer than the
+  # 3.24.3 currently used by this project.
+  flutter_contacts: ^1.1.9
+
+  # Deep link handling for profile QR codes / share links
+  # (https://gupshupgo.app/u/<username>).
+  # Pinned to 6.3.3 — 6.4.0+ changed the Android module's build.gradle to
+  # use `compileSdk = flutter.compileSdkVersion`, a property only exposed
+  # by newer Flutter Gradle tooling than the 3.24.3 this project uses.
+  # That mismatch causes "Could not get unknown property 'flutter'" /
+  # "compileSdkVersion is not specified" build failures. 6.3.3 hardcodes
+  # compileSdk 34 instead and builds cleanly.
+  app_links: 6.3.3
+
   # Permissions
   permission_handler: ^11.1.0
 

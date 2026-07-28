@@ -23,6 +23,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/crypto/crypto_worker.dart';
+import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -172,6 +173,12 @@ void main() async {
 
   // ── Cold-start: check for calls accepted while the app was dead ────────
   _checkPendingAcceptedCalls();
+
+  // ── Deep links: profile QR codes / share links (https://gupshupgo.app/u/*)
+  // Needs the navigator mounted, so wait for the first frame.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(DeepLinkService.instance.init());
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

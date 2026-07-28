@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+// Prefixed — flutter_contacts' Contact class collides with this app's own
+// Contact model (defined in chat_screen.dart) used throughout this file.
+import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -16,10 +19,15 @@ class ContactsScreen extends StatefulWidget {
   final String currentUserId;
   final String? currentUserName;
 
+  /// Tab to open on (0 = Friends, 1 = Requests, 2 = Discover). Defaults to
+  /// Friends. Used when deep-linking from a friend-request notification.
+  final int initialTabIndex;
+
   const ContactsScreen({
     super.key,
     required this.currentUserId,
     this.currentUserName,
+    this.initialTabIndex = 0,
   });
 
   @override
@@ -44,7 +52,11 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 2),
+    );
     _loadCurrentUser();
   }
 
@@ -244,14 +256,16 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               width: double.infinity,
               height: 48,
               child: ElevatedButton.icon(
-                onPressed: () {
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: qrData));
+                  if (!context.mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Handle @$handle copied!')),
+                    SnackBar(content: Text('Profile link for @$handle copied!')),
                   );
                 },
                 icon: const Icon(Icons.copy_rounded),
-                label: const Text('Copy Profile Handle'),
+                label: const Text('Copy Profile Link'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.primary,
                   foregroundColor: Colors.white,
@@ -267,25 +281,135 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     );
   }
 
+  /// Reads device contacts (phone numbers + emails), matches them against
+  /// registered GupShupGo accounts via [UserService.matchDeviceContacts],
+  /// and shows the matches in a bottom sheet with Add Friend / Message
+  /// actions — reusing the same [UserDiscoverTile] as the Discover tab.
   Future<void> _syncDeviceContacts() async {
-    var status = await Permission.contacts.request();
-    if (status.isGranted) {
-      setState(() => _isSyncingContacts = true);
-      // Device contact matching
-      await Future.delayed(const Duration(seconds: 1));
-      if (mounted) {
-        setState(() => _isSyncingContacts = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Device contacts synced! Use search to discover matches.')),
-        );
-      }
-    } else {
+    final granted = await fc.FlutterContacts.requestPermission(readonly: true);
+    if (!granted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Permission to access contacts was denied.')),
         );
       }
+      return;
     }
+
+    setState(() => _isSyncingContacts = true);
+
+    try {
+      final deviceContacts = await fc.FlutterContacts.getContacts(
+        withProperties: true,
+      );
+
+      final rawPhones = <String>[];
+      final rawEmails = <String>[];
+      for (final contact in deviceContacts) {
+        rawPhones.addAll(contact.phones.map((p) => p.number));
+        rawEmails.addAll(contact.emails.map((e) => e.address));
+      }
+
+      final matches = await _userService.matchDeviceContacts(
+        rawPhoneNumbers: rawPhones,
+        rawEmails: rawEmails,
+        currentUserId: widget.currentUserId,
+      );
+
+      if (!mounted) return;
+      setState(() => _isSyncingContacts = false);
+
+      if (matches.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No GupShupGo users found in your contacts yet.'),
+          ),
+        );
+        return;
+      }
+
+      _showMatchedContactsSheet(matches);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSyncingContacts = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to sync contacts: $e')),
+        );
+      }
+    }
+  }
+
+  void _showMatchedContactsSheet(List<UserModel> matches) {
+    final c = AppThemeColors.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: c.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: c.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.contacts_rounded, color: c.primary, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${matches.length} contact${matches.length > 1 ? 's' : ''} on GupShupGo',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: c.textHigh,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.separated(
+                controller: scrollController,
+                itemCount: matches.length,
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, indent: 72, color: c.divider),
+                itemBuilder: (context, index) {
+                  return UserDiscoverTile(
+                    targetUser: matches[index],
+                    currentUserId: widget.currentUserId,
+                    currentUserName:
+                        _currentUserModel?.name ?? widget.currentUserName ?? 'User',
+                    currentUserUsername: _currentUserModel?.username,
+                    onOpenChat: (user) {
+                      Navigator.pop(context);
+                      _openChat(user);
+                    },
+                    onInitiateCall: (user) {
+                      Navigator.pop(context);
+                      _initiateCall(user);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -420,10 +544,14 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           );
         }
 
-        // Sort online first
+        // Sort online first, then alphabetically by name so ordering within
+        // each group is stable across rebuilds instead of following
+        // whatever order Firestore happens to return.
         friends.sort((a, b) {
-          if (a.isOnline == b.isOnline) return 0;
-          return a.isOnline ? -1 : 1;
+          if (a.isOnline != b.isOnline) {
+            return a.isOnline ? -1 : 1;
+          }
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
 
         return ListView.separated(

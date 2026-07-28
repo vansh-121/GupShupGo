@@ -36,11 +36,17 @@ class UserService {
     }
   }
 
-  // Get all users except current user
-  Stream<List<UserModel>> getAllUsers(String currentUserId) {
+  // Get all users except current user.
+  // Capped with a defensive limit — this stream backs both the recent-
+  // contacts row on Home and the "Suggested Users" list on Discover,
+  // neither of which need (or display) more than a couple hundred users.
+  // Without this, the read cost and client-side work scale linearly with
+  // total registered users.
+  Stream<List<UserModel>> getAllUsers(String currentUserId, {int limit = 200}) {
     return _firestore
         .collection(_usersCollection)
         .where(FieldPath.documentId, isNotEqualTo: currentUserId)
+        .limit(limit)
         .snapshots()
         .map((snapshot) {
       return snapshot.docs
@@ -175,41 +181,89 @@ class UserService {
     }
   }
 
+  final String _usernamesCollection = 'usernames';
+
   // Check if a username is available (unique) across all users.
+  //
+  // Backed by the /usernames/{handle} reservation collection rather than
+  // a query over /users — the reservation doc ID *is* the handle, so
+  // existence is a point-lookup and (combined with the security rule that
+  // forbids overwriting someone else's reservation) gives us a real
+  // uniqueness guarantee instead of a racy check-then-write over a query.
   Future<bool> isUsernameAvailable(String username, {String? currentUserId}) async {
     try {
       String cleanUsername = username.trim().toLowerCase();
       if (cleanUsername.length < 3 || cleanUsername.length > 20) return false;
-      
-      QuerySnapshot snapshot = await _firestore
-          .collection(_usersCollection)
-          .where('username_lowercase', isEqualTo: cleanUsername)
-          .limit(1)
+
+      final doc = await _firestore
+          .collection(_usernamesCollection)
+          .doc(cleanUsername)
           .get();
 
-      if (snapshot.docs.isEmpty) {
-        return true;
-      }
-      
-      // If the only doc found belongs to the current user, it is available for them
-      if (currentUserId != null && snapshot.docs.first.id == currentUserId) {
-        return true;
-      }
+      if (!doc.exists) return true;
 
-      return false;
+      // Already reserved by the current user (e.g. re-checking their own
+      // existing handle) — treat as available for them.
+      final owner = doc.data()?['uid'] as String?;
+      return currentUserId != null && owner == currentUserId;
     } catch (e) {
       print('Error checking username availability: $e');
       return false;
     }
   }
 
-  // Update user's username
+  // Update user's username. Atomically claims the new handle in
+  // /usernames/{handle} and releases the previous handle (if any) so two
+  // users can never simultaneously "win" the same handle — Firestore
+  // transactions abort and retry on conflicting concurrent writes, and the
+  // create() on the handle doc is itself guarded by a security rule that
+  // rejects overwriting an existing reservation.
   Future<void> updateUsername(String userId, String username) async {
+    final cleanUsername = username.trim().toLowerCase();
+    if (cleanUsername.length < 3 || cleanUsername.length > 20) {
+      throw Exception('Username must be between 3 and 20 characters.');
+    }
+
+    final userRef = _firestore.collection(_usersCollection).doc(userId);
+    final newHandleRef =
+        _firestore.collection(_usernamesCollection).doc(cleanUsername);
+
     try {
-      String cleanUsername = username.trim().toLowerCase();
-      await _firestore.collection(_usersCollection).doc(userId).update({
-        'username': username.trim(),
-        'username_lowercase': cleanUsername,
+      await _firestore.runTransaction((tx) async {
+        final userSnap = await tx.get(userRef);
+        final existingHandle =
+            (userSnap.data()?['username_lowercase'] as String?)?.trim();
+
+        if (existingHandle == cleanUsername) {
+          // No-op: re-saving the same handle. Still touch the display-case
+          // username field in case only capitalization changed.
+          tx.update(userRef, {'username': username.trim()});
+          return;
+        }
+
+        final newHandleSnap = await tx.get(newHandleRef);
+        if (newHandleSnap.exists) {
+          final owner = newHandleSnap.data()?['uid'] as String?;
+          if (owner != userId) {
+            throw Exception('@$cleanUsername is already taken.');
+          }
+        }
+
+        if (existingHandle != null && existingHandle.isNotEmpty) {
+          final oldHandleRef =
+              _firestore.collection(_usernamesCollection).doc(existingHandle);
+          tx.delete(oldHandleRef);
+        }
+
+        tx.set(newHandleRef, {
+          'uid': userId,
+          'claimedAt': FieldValue.serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          'username': username.trim(),
+          'username_lowercase': cleanUsername,
+        });
       });
       print('Username updated for $userId to @$cleanUsername');
     } catch (e) {
