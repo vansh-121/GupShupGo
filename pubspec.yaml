@@ -90,7 +90,12 @@ dependencies:
   in_app_update: ^4.2.5
 
   # In-App Purchases (Google Play Billing — GupShupGo Pro)
-  in_app_purchase: ^3.2.0
+  # Bumped to pull in_app_purchase_android >=0.5.0, which upgrades the
+  # bundled Google Play Billing Library from 7.1.1 to 8.0.0. Google Play
+  # requires all apps to use Billing Library 8.0.0+ starting Aug 31, 2026.
+  # in_app_purchase_android 0.5.0 requires Flutter >=3.38.0 (pinned via
+  # .fvmrc in this project — see .fvm/ and .fvmrc).
+  in_app_purchase: ^3.3.0
 
   # Media picker & video player
   image_picker: ^1.0.7
