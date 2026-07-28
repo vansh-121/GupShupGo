@@ -46,6 +46,7 @@ dependencies:
   audioplayers: ^5.2.1
 
   google_fonts: ^5.1.0
+  qr_flutter: ^4.1.0
 
   # Permissions
   permission_handler: ^11.1.0

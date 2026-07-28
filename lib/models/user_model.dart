@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class UserModel {
   final String id;
   final String name;
+  final String? username;
+  final String? authProvider; // 'phone' or 'google'
   final String? phoneNumber;
   final String? email;
   final String? photoUrl;
@@ -28,6 +30,8 @@ class UserModel {
   UserModel({
     required this.id,
     required this.name,
+    this.username,
+    this.authProvider,
     this.phoneNumber,
     this.email,
     this.photoUrl,
@@ -63,6 +67,9 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'username': username,
+      'username_lowercase': username?.toLowerCase(),
+      'authProvider': authProvider,
       'phoneNumber': phoneNumber,
       'email': email,
       'photoUrl': photoUrl,
@@ -100,6 +107,8 @@ class UserModel {
     return UserModel(
       id: documentId,
       name: map['name'] ?? 'Unknown',
+      username: map['username'],
+      authProvider: map['authProvider'],
       phoneNumber: map['phoneNumber'],
       email: map['email'],
       photoUrl: map['photoUrl'],
@@ -145,6 +154,8 @@ class UserModel {
   UserModel copyWith({
     String? id,
     String? name,
+    String? username,
+    String? authProvider,
     String? phoneNumber,
     String? email,
     String? photoUrl,
@@ -166,6 +177,8 @@ class UserModel {
     return UserModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      username: username ?? this.username,
+      authProvider: authProvider ?? this.authProvider,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       email: email ?? this.email,
       photoUrl: photoUrl ?? this.photoUrl,

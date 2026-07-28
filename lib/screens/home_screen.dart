@@ -42,6 +42,7 @@ import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
+import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -226,6 +227,19 @@ class _HomeScreenState extends State<HomeScreen>
         }
         if (!mounted) return;
         maybeShowWhatsNew(context);
+
+        // ── Check if user needs to choose a unique @username handle ─────
+        if (_currentUser != null &&
+            (_currentUser!.username == null || _currentUser!.username!.trim().isEmpty) &&
+            mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => UsernameSetupScreen(user: _currentUser!),
+            ),
+          );
+          return;
+        }
 
         // ── Consume pending deep links from notification taps ──────────
         final pendingTab = NotificationService.consumePendingTabDeepLink();

@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
+import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -370,6 +371,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: c.primary),
                 ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // ── Username Handle ──────────────────────────────────────────
+            _buildSectionLabel('UNIQUE HANDLE'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: c.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: c.border.withOpacity(0.5)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.alternate_email_rounded, color: c.primary, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.currentUser.username != null &&
+                              widget.currentUser.username!.isNotEmpty
+                          ? '@${widget.currentUser.username}'
+                          : 'Not set yet',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: c.textHigh,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => UsernameSetupScreen(user: widget.currentUser),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.edit_rounded, size: 16),
+                    label: const Text('Change'),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 24),

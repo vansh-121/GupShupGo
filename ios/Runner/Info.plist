@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSContactsUsageDescription</key>
+	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
 </dict>
 </plist>

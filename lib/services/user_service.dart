@@ -175,6 +175,165 @@ class UserService {
     }
   }
 
+  // Check if a username is available (unique) across all users.
+  Future<bool> isUsernameAvailable(String username, {String? currentUserId}) async {
+    try {
+      String cleanUsername = username.trim().toLowerCase();
+      if (cleanUsername.length < 3 || cleanUsername.length > 20) return false;
+      
+      QuerySnapshot snapshot = await _firestore
+          .collection(_usersCollection)
+          .where('username_lowercase', isEqualTo: cleanUsername)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return true;
+      }
+      
+      // If the only doc found belongs to the current user, it is available for them
+      if (currentUserId != null && snapshot.docs.first.id == currentUserId) {
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      print('Error checking username availability: $e');
+      return false;
+    }
+  }
+
+  // Update user's username
+  Future<void> updateUsername(String userId, String username) async {
+    try {
+      String cleanUsername = username.trim().toLowerCase();
+      await _firestore.collection(_usersCollection).doc(userId).update({
+        'username': username.trim(),
+        'username_lowercase': cleanUsername,
+      });
+      print('Username updated for $userId to @$cleanUsername');
+    } catch (e) {
+      print('Error updating username: $e');
+      rethrow;
+    }
+  }
+
+  // Get user by unique @username
+  Future<UserModel?> getUserByUsername(String username) async {
+    try {
+      String cleanUsername = username.trim().toLowerCase();
+      QuerySnapshot snapshot = await _firestore
+          .collection(_usersCollection)
+          .where('username_lowercase', isEqualTo: cleanUsername)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        return UserModel.fromFirestore(snapshot.docs.first);
+      }
+      return null;
+    } catch (e) {
+      print('Error getting user by username: $e');
+      return null;
+    }
+  }
+
+  // Universal Multi-field Search (Name, @username, Phone Number, Email)
+  Future<List<UserModel>> searchUsersMultiField(
+    String query,
+    String currentUserId, {
+    DocumentSnapshot? startAfterDoc,
+    int limit = 30,
+  }) async {
+    try {
+      String cleanQuery = query.trim().toLowerCase();
+      if (cleanQuery.isEmpty) return [];
+
+      // If query starts with '@', strip it for username search
+      String handleQuery = cleanQuery.startsWith('@') ? cleanQuery.substring(1) : cleanQuery;
+
+      Query q = _firestore
+          .collection(_usersCollection)
+          .where(FieldPath.documentId, isNotEqualTo: currentUserId)
+          .limit(limit);
+
+      if (startAfterDoc != null) {
+        q = q.startAfterDocument(startAfterDoc);
+      }
+
+      QuerySnapshot snapshot = await q.get();
+
+      List<UserModel> users = snapshot.docs
+          .map((doc) => UserModel.fromFirestore(doc))
+          .where((user) {
+            bool matchName = user.name.toLowerCase().contains(cleanQuery);
+            bool matchUsername = user.username != null &&
+                user.username!.toLowerCase().contains(handleQuery);
+            bool matchPhone = user.phoneNumber != null &&
+                user.phoneNumber!.contains(cleanQuery);
+            bool matchEmail = user.email != null &&
+                user.email!.toLowerCase().contains(cleanQuery);
+
+            return matchName || matchUsername || matchPhone || matchEmail;
+          })
+          .toList();
+
+      return users;
+    } catch (e) {
+      print('Error performing multi-field search: $e');
+      return [];
+    }
+  }
+
+  // Match device phone contacts and emails against Firestore registered accounts
+  Future<List<UserModel>> matchDeviceContacts({
+    required List<String> rawPhoneNumbers,
+    required List<String> rawEmails,
+    required String currentUserId,
+  }) async {
+    try {
+      Set<String> cleanPhones = rawPhoneNumbers
+          .map((p) => p.replaceAll(RegExp(r'[^\d+]'), ''))
+          .where((p) => p.isNotEmpty)
+          .toSet();
+
+      Set<String> cleanEmails = rawEmails
+          .map((e) => e.trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+
+      if (cleanPhones.isEmpty && cleanEmails.isEmpty) return [];
+
+      QuerySnapshot snapshot = await _firestore
+          .collection(_usersCollection)
+          .where(FieldPath.documentId, isNotEqualTo: currentUserId)
+          .get();
+
+      List<UserModel> matchedUsers = [];
+
+      for (var doc in snapshot.docs) {
+        UserModel user = UserModel.fromFirestore(doc);
+        
+        bool phoneMatch = user.phoneNumber != null &&
+            cleanPhones.any((p) =>
+                user.phoneNumber!.replaceAll(RegExp(r'[^\d+]'), '').contains(p) ||
+                p.contains(user.phoneNumber!.replaceAll(RegExp(r'[^\d+]'), '')));
+                
+        bool emailMatch = user.email != null &&
+            cleanEmails.contains(user.email!.toLowerCase());
+
+        if (phoneMatch || emailMatch) {
+          matchedUsers.add(user);
+        }
+      }
+
+      return matchedUsers;
+    } catch (e) {
+      print('Error matching device contacts: $e');
+      return [];
+    }
+  }
+
   // Setup presence system (call when app opens).
   // Delegates to PresenceService which uses RTDB onDisconnect for reliable
   // server-side offline detection.
