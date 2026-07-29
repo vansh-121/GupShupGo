@@ -45,7 +45,12 @@ dependencies:
   agora_rtc_engine: ^6.3.1
   audioplayers: ^5.2.1
 
-  google_fonts: ^5.1.0
+  # Pinned >=6.3.0 — that version switched to Flutter's builtin AssetManifest
+  # API. Versions before 6.3.0 (e.g. 5.1.0) read the legacy AssetManifest.json
+  # directly, which fails to load on newer Flutter SDKs (3.38.10, pinned via
+  # .fvmrc) and causes "Unable to load asset: AssetManifest.json" font
+  # loading errors at runtime.
+  google_fonts: ^6.3.3
   qr_flutter: ^4.1.0
 
   # Device contact matching (Discover tab "Sync Device Contacts").
