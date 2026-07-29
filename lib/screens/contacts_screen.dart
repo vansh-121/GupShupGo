@@ -845,7 +845,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     );
   }
 
-  // TAB 2: Incoming Requests
+  // TAB 2: Incoming Requests (Redesigned with Stitch Specs)
   Widget _buildRequestsTab() {
     final c = AppThemeColors.of(context);
 
@@ -858,128 +858,268 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
         final docs = snapshot.data?.docs ?? [];
 
-        if (docs.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Pending Requests Section Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: c.primaryLt,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.mark_email_read_outlined, size: 40, color: c.primary),
-                  ),
-                  const SizedBox(height: 20),
                   Text(
-                    'No Pending Requests',
+                    'PENDING REQUESTS (${docs.length})',
                     style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: c.textHigh,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: c.textMid,
+                      letterSpacing: 1.2,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'When users send you a connection request, they will show up here.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
                   ),
                 ],
               ),
-            ),
-          );
-        }
+              const SizedBox(height: 12),
 
-        return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            final requestId = docs[index].id;
-            final fromUserId = data['fromUserId'] ?? '';
-            final fromName = data['fromName'] ?? 'Unknown User';
-            final fromUsername = data['fromUsername'] ?? '';
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: c.cardBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
-                  ),
-                ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  leading: CircleAvatar(
-                    radius: 24,
-                    backgroundColor: c.primaryLt,
-                    child: Text(
-                      fromName.isNotEmpty ? fromName[0].toUpperCase() : 'U',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: c.primary),
+              if (docs.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  decoration: BoxDecoration(
+                    color: c.cardBg,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: c.isDark ? Colors.white.withOpacity(0.06) : c.divider,
                     ),
                   ),
-                  title: Text(
-                    fromName,
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: c.textHigh,
-                    ),
-                  ),
-                  subtitle: Text(
-                    fromUsername.isNotEmpty ? '@$fromUsername' : 'Wants to connect',
-                    style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Column(
                     children: [
-                      ElevatedButton.icon(
-                        onPressed: () async {
-                          await _friendService.acceptFriendRequest(
-                            requestId: requestId,
-                            currentUserId: widget.currentUserId,
-                            friendId: fromUserId,
-                          );
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Connected with $fromName!', style: GoogleFonts.poppins()),
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.check_rounded, size: 16),
-                        label: Text('Accept', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: c.primaryLt,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.mark_email_read_outlined, size: 32, color: c.primary),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No Pending Requests',
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: c.textHigh,
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      IconButton(
-                        icon: Icon(Icons.close_rounded, color: c.textMid),
-                        onPressed: () async {
-                          await _friendService.declineFriendRequest(requestId);
-                        },
+                      const SizedBox(height: 4),
+                      Text(
+                        'When users send you a connection request, they will show up here.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(fontSize: 12, color: c.textMid),
                       ),
                     ],
                   ),
+                )
+              else
+                Column(
+                  children: docs.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final requestId = doc.id;
+                    final fromUserId = data['fromUserId'] ?? '';
+                    final fromName = data['fromName'] ?? 'Unknown User';
+                    final fromUsername = data['fromUsername'] ?? '';
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: c.cardBg,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
+                          ),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          leading: CircleAvatar(
+                            radius: 26,
+                            backgroundColor: c.primaryLt,
+                            child: Text(
+                              fromName.isNotEmpty ? fromName[0].toUpperCase() : 'U',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.bold,
+                                color: c.primary,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            fromName,
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: c.textHigh,
+                            ),
+                          ),
+                          subtitle: Text(
+                            fromUsername.isNotEmpty ? '@$fromUsername' : 'Wants to connect',
+                            style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ElevatedButton(
+                                onPressed: () async {
+                                  await _friendService.acceptFriendRequest(
+                                    requestId: requestId,
+                                    currentUserId: widget.currentUserId,
+                                    friendId: fromUserId,
+                                  );
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Connected with $fromName!',
+                                          style: GoogleFonts.poppins(),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: c.primary,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                ),
+                                child: Text(
+                                  'ACCEPT',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: c.isDark ? Colors.white.withOpacity(0.2) : c.border,
+                                  ),
+                                ),
+                                child: IconButton(
+                                  padding: EdgeInsets.zero,
+                                  icon: Icon(Icons.close_rounded, color: c.textMid, size: 18),
+                                  onPressed: () async {
+                                    await _friendService.declineFriendRequest(requestId);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
+
+              const SizedBox(height: 28),
+
+              // You Might Know Section Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'YOU MIGHT KNOW',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: c.textMid,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _tabController.animateTo(2),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      'SEE ALL',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: c.primary,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            );
-          },
+              const SizedBox(height: 12),
+
+              // 2-Column Suggestion Grid
+              FutureBuilder<List<QuickConnectSuggestion>>(
+                future: _friendService.getQuickConnectSuggestions(widget.currentUserId),
+                builder: (context, suggestSnapshot) {
+                  if (suggestSnapshot.connectionState == ConnectionState.waiting) {
+                    return Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Center(
+                        child: CircularProgressIndicator(color: c.primary),
+                      ),
+                    );
+                  }
+
+                  final suggestions = suggestSnapshot.data ?? [];
+                  if (suggestions.isEmpty) {
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: c.surfaceAlt,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        'No suggestions right now.',
+                        style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                      ),
+                    );
+                  }
+
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: suggestions.length > 4 ? 4 : suggestions.length,
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 0.85,
+                    ),
+                    itemBuilder: (context, index) {
+                      final item = suggestions[index];
+                      return YouMightKnowCard(
+                        targetUser: item.user,
+                        reasonSubtitle: item.reasonSubtitle,
+                        currentUserId: widget.currentUserId,
+                        currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
+                        currentUserUsername: _currentUserModel?.username,
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
         );
       },
     );
@@ -1230,6 +1370,143 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 },
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// You Might Know Suggestion Card (2-Column Grid Item)
+class YouMightKnowCard extends StatefulWidget {
+  final UserModel targetUser;
+  final String reasonSubtitle;
+  final String currentUserId;
+  final String currentUserName;
+  final String? currentUserUsername;
+
+  const YouMightKnowCard({
+    super.key,
+    required this.targetUser,
+    required this.reasonSubtitle,
+    required this.currentUserId,
+    required this.currentUserName,
+    this.currentUserUsername,
+  });
+
+  @override
+  State<YouMightKnowCard> createState() => _YouMightKnowCardState();
+}
+
+class _YouMightKnowCardState extends State<YouMightKnowCard> {
+  final FriendRequestService _friendService = FriendRequestService();
+  bool _isSending = false;
+  bool _isRequested = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    final user = widget.targetUser;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: c.cardBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundImage: NetworkImage(
+              user.photoUrl ??
+                  'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+            ),
+            backgroundColor: c.primaryLt,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            user.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: c.textHigh,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            widget.reasonSubtitle.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: c.textMid,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 34,
+            child: _isRequested
+                ? OutlinedButton(
+                    onPressed: null,
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: EdgeInsets.zero,
+                    ),
+                    child: Text(
+                      'Requested',
+                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  )
+                : ElevatedButton.icon(
+                    onPressed: _isSending
+                        ? null
+                        : () async {
+                            setState(() => _isSending = true);
+                            bool ok = await _friendService.sendFriendRequest(
+                              fromUserId: widget.currentUserId,
+                              toUserId: user.id,
+                              fromName: widget.currentUserName,
+                              fromUsername: widget.currentUserUsername,
+                            );
+                            if (mounted) {
+                              setState(() {
+                                _isSending = false;
+                                if (ok) _isRequested = true;
+                              });
+                            }
+                          },
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.person_add_rounded, size: 14),
+                    label: Text(
+                      'ADD FRIEND',
+                      style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: c.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
