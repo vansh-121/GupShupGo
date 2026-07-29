@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 // Prefixed — flutter_contacts' Contact class collides with this app's own
 // Contact model (defined in chat_screen.dart) used throughout this file.
 import 'package:flutter_contacts/flutter_contacts.dart' as fc;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -187,7 +188,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             const SizedBox(height: 20),
             Text(
               'My Profile QR Code',
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: c.textHigh,
@@ -197,10 +198,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             Text(
               'Friends can scan this QR code to connect with you instantly',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: c.textMid),
+              style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
             ),
             const SizedBox(height: 20),
-            // High-resolution QR Code Card
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -222,7 +222,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   eyeShape: QrEyeShape.square,
                   color: c.primary,
                 ),
-                dataModuleStyle: QrDataModuleStyle(
+                dataModuleStyle: const QrDataModuleStyle(
                   dataModuleShape: QrDataModuleShape.circle,
                   color: Colors.black87,
                 ),
@@ -242,7 +242,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   const SizedBox(width: 6),
                   Text(
                     '@$handle',
-                    style: TextStyle(
+                    style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: c.primary,
@@ -261,11 +261,16 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   if (!context.mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Profile link for @$handle copied!')),
+                    SnackBar(
+                      content: Text(
+                        'Profile link for @$handle copied!',
+                        style: GoogleFonts.poppins(),
+                      ),
+                    ),
                   );
                 },
                 icon: const Icon(Icons.copy_rounded),
-                label: const Text('Copy Profile Link'),
+                label: Text('Copy Profile Link', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.primary,
                   foregroundColor: Colors.white,
@@ -281,16 +286,17 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     );
   }
 
-  /// Reads device contacts (phone numbers + emails), matches them against
-  /// registered GupShupGo accounts via [UserService.matchDeviceContacts],
-  /// and shows the matches in a bottom sheet with Add Friend / Message
-  /// actions — reusing the same [UserDiscoverTile] as the Discover tab.
   Future<void> _syncDeviceContacts() async {
     final granted = await fc.FlutterContacts.requestPermission(readonly: true);
     if (!granted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permission to access contacts was denied.')),
+          SnackBar(
+            content: Text(
+              'Permission to access contacts was denied.',
+              style: GoogleFonts.poppins(),
+            ),
+          ),
         );
       }
       return;
@@ -321,8 +327,11 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
       if (matches.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No GupShupGo users found in your contacts yet.'),
+          SnackBar(
+            content: Text(
+              'No GupShupGo users found in your contacts yet.',
+              style: GoogleFonts.poppins(),
+            ),
           ),
         );
         return;
@@ -333,7 +342,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       if (mounted) {
         setState(() => _isSyncingContacts = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to sync contacts: $e')),
+          SnackBar(
+            content: Text('Failed to sync contacts: $e', style: GoogleFonts.poppins()),
+          ),
         );
       }
     }
@@ -372,7 +383,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   const SizedBox(width: 8),
                   Text(
                     '${matches.length} contact${matches.length > 1 ? 's' : ''} on GupShupGo',
-                    style: TextStyle(
+                    style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: c.textHigh,
@@ -390,6 +401,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 itemBuilder: (context, index) {
                   return UserDiscoverTile(
                     targetUser: matches[index],
+                    customSubtitle: 'From your device contacts',
                     currentUserId: widget.currentUserId,
                     currentUserName:
                         _currentUserModel?.name ?? widget.currentUserName ?? 'User',
@@ -419,55 +431,87 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     return Scaffold(
       backgroundColor: c.surface,
       appBar: AppBar(
-        title: const Text('Contacts & Discover'),
+        scrolledUnderElevation: 0,
+        backgroundColor: c.surface,
+        elevation: 0,
+        title: Text(
+          'Contacts & Discover',
+          style: GoogleFonts.poppins(
+            color: c.textHigh,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            letterSpacing: -0.4,
+          ),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.qr_code_rounded),
+            icon: Icon(Icons.qr_code_2_rounded, color: c.textHigh, size: 24),
             tooltip: 'My Handle',
             onPressed: _showQRCodeModal,
           ),
+          const SizedBox(width: 8),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: c.primary,
-          labelColor: c.primary,
-          unselectedLabelColor: c.textMid,
-          tabs: [
-            const Tab(text: 'Friends'),
-            StreamBuilder<QuerySnapshot>(
-              stream: _friendService.streamIncomingRequests(widget.currentUserId),
-              builder: (context, snapshot) {
-                int count = snapshot.data?.docs.length ?? 0;
-                return Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text('Requests'),
-                      if (count > 0) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '$count',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: c.divider, width: 1),
+              ),
             ),
-            const Tab(text: 'Discover'),
-          ],
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: c.primary,
+              indicatorWeight: 3,
+              labelColor: c.textHigh,
+              unselectedLabelColor: c.textMid,
+              labelStyle: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                letterSpacing: 0.2,
+              ),
+              unselectedLabelStyle: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+              tabs: [
+                const Tab(text: 'Friends'),
+                StreamBuilder<QuerySnapshot>(
+                  stream: _friendService.streamIncomingRequests(widget.currentUserId),
+                  builder: (context, snapshot) {
+                    int count = snapshot.data?.docs.length ?? 0;
+                    return Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('Requests'),
+                          if (count > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: c.primary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$count',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                const Tab(text: 'Discover'),
+              ],
+            ),
+          ),
         ),
       ),
       body: TabBarView(
@@ -495,58 +539,208 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         List<UserModel> friends = snapshot.data ?? [];
 
         if (friends.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: c.primaryLt,
-                      shape: BoxShape.circle,
+          return SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            child: Column(
+              children: [
+                const SizedBox(height: 24),
+                // Glowing Icon Background (Stitch Design)
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: c.primary.withOpacity(0.12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: c.primary.withOpacity(0.2),
+                            blurRadius: 40,
+                            spreadRadius: 10,
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Icon(Icons.people_outline_rounded, size: 48, color: c.primary),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    'No Friends Added Yet',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: c.textHigh,
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: c.cardBg,
+                        border: Border.all(
+                          color: c.isDark
+                              ? Colors.white.withOpacity(0.1)
+                              : c.primary.withOpacity(0.15),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.person_add_rounded,
+                        size: 44,
+                        color: c.primary,
+                      ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  'No Friends Added Yet',
+                  style: GoogleFonts.poppins(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: c.textHigh,
+                    letterSpacing: -0.3,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Use the Discover tab to search for users by @username, phone, or email and send them a friend request!',
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: RichText(
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: c.textMid),
+                    text: TextSpan(
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: c.textMid,
+                        height: 1.5,
+                      ),
+                      children: [
+                        const TextSpan(
+                          text: 'Use the Discover tab to search for users by ',
+                        ),
+                        TextSpan(
+                          text: '@username',
+                          style: GoogleFonts.poppins(
+                            color: c.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: ', phone, or email and send them a friend request!',
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
+                ),
+                const SizedBox(height: 28),
+                // Primary Action Button (Discover People)
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
                     onPressed: () => _tabController.animateTo(2),
-                    icon: const Icon(Icons.person_add_rounded),
-                    label: const Text('Discover People'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: c.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(14),
                       ),
+                      shadowColor: c.primary.withOpacity(0.3),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Discover People',
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.arrow_forward_rounded, size: 18),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 40),
+
+                // Quick Suggestions Section (Stitch Design Pattern)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'QUICK CONNECT',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: c.textMid,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                FutureBuilder<List<QuickConnectSuggestion>>(
+                  future: _friendService.getQuickConnectSuggestions(widget.currentUserId),
+                  builder: (context, suggestSnapshot) {
+                    if (suggestSnapshot.connectionState == ConnectionState.waiting) {
+                      return Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Center(
+                          child: CircularProgressIndicator(color: c.primary),
+                        ),
+                      );
+                    }
+
+                    List<QuickConnectSuggestion> suggestions = suggestSnapshot.data ?? [];
+                    if (suggestions.isEmpty) {
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: c.surfaceAlt,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          'No suggestions available at the moment.',
+                          style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                        ),
+                      );
+                    }
+
+                    final displayList = suggestions.take(3).toList();
+
+                    return Column(
+                      children: displayList
+                          .map(
+                            (suggestion) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: c.cardBg,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: c.isDark
+                                        ? Colors.white.withOpacity(0.06)
+                                        : c.border,
+                                  ),
+                                ),
+                                child: UserDiscoverTile(
+                                  targetUser: suggestion.user,
+                                  customSubtitle: suggestion.reasonSubtitle,
+                                  currentUserId: widget.currentUserId,
+                                  currentUserName: _currentUserModel?.name ??
+                                      widget.currentUserName ??
+                                      'User',
+                                  currentUserUsername: _currentUserModel?.username,
+                                  onOpenChat: _openChat,
+                                  onInitiateCall: _initiateCall,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    );
+                  },
+                ),
+              ],
             ),
           );
         }
 
-        // Sort online first, then alphabetically by name so ordering within
-        // each group is stable across rebuilds instead of following
-        // whatever order Firestore happens to return.
+        // Sort online first, then alphabetically by name
         friends.sort((a, b) {
           if (a.isOnline != b.isOnline) {
             return a.isOnline ? -1 : 1;
@@ -554,9 +748,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
 
-        return ListView.separated(
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: friends.length,
-          separatorBuilder: (_, __) => Divider(height: 1, indent: 72, color: c.divider),
           itemBuilder: (context, index) => _buildFriendTile(friends[index]),
         );
       },
@@ -566,59 +760,87 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   Widget _buildFriendTile(UserModel user) {
     final c = AppThemeColors.of(context);
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: Stack(
-        children: [
-          CircleAvatar(
-            radius: 26,
-            backgroundImage: NetworkImage(
-              user.photoUrl ??
-                  'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
-            ),
-            backgroundColor: c.primaryLt,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.cardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
           ),
-          if (user.isOnline)
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: c.online,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: c.surface, width: 2),
-                ),
-              ),
-            ),
-        ],
-      ),
-      title: Text(
-        user.name,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-      ),
-      subtitle: Text(
-        user.username != null && user.username!.isNotEmpty
-            ? '@${user.username}'
-            : (user.isOnline ? 'Online' : 'Offline'),
-        style: TextStyle(
-          color: user.username != null ? c.primary : (user.isOnline ? c.online : c.textMid),
-          fontSize: 13,
         ),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: Icon(Icons.videocam_rounded, color: c.primary),
-            onPressed: () => _initiateCall(user),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          leading: Stack(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundImage: NetworkImage(
+                  user.photoUrl ??
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                ),
+                backgroundColor: c.primaryLt,
+              ),
+              if (user.isOnline)
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    width: 13,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      color: c.online,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: c.surface, width: 2),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          IconButton(
-            icon: Icon(Icons.message_rounded, color: c.primary),
-            onPressed: () => _openChat(user),
+          title: Text(
+            user.name,
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+              color: c.textHigh,
+            ),
           ),
-        ],
+          subtitle: Text(
+            user.username != null && user.username!.isNotEmpty
+                ? '@${user.username}'
+                : (user.isOnline ? 'Online' : 'Offline'),
+            style: GoogleFonts.poppins(
+              color: user.username != null
+                  ? c.primary
+                  : (user.isOnline ? c.online : c.textMid),
+              fontSize: 13,
+              fontWeight: user.username != null ? FontWeight.w500 : FontWeight.normal,
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                style: IconButton.styleFrom(
+                  backgroundColor: c.primaryLt,
+                  shape: const CircleBorder(),
+                ),
+                icon: Icon(Icons.videocam_rounded, color: c.primary, size: 20),
+                onPressed: () => _initiateCall(user),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                style: IconButton.styleFrom(
+                  backgroundColor: c.primaryLt,
+                  shape: const CircleBorder(),
+                ),
+                icon: Icon(Icons.message_rounded, color: c.primary, size: 20),
+                onPressed: () => _openChat(user),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -644,18 +866,19 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    width: 80,
+                    height: 80,
                     decoration: BoxDecoration(
                       color: c.primaryLt,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(Icons.mark_email_read_outlined, size: 48, color: c.primary),
+                    child: Icon(Icons.mark_email_read_outlined, size: 40, color: c.primary),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   Text(
                     'No Pending Requests',
-                    style: TextStyle(
-                      fontSize: 17,
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: c.textHigh,
                     ),
@@ -664,7 +887,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   Text(
                     'When users send you a connection request, they will show up here.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: c.textMid),
+                    style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
                   ),
                 ],
               ),
@@ -672,9 +895,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           );
         }
 
-        return ListView.separated(
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 12),
           itemCount: docs.length,
-          separatorBuilder: (_, __) => Divider(height: 1, color: c.divider),
           itemBuilder: (context, index) {
             final data = docs[index].data() as Map<String, dynamic>;
             final requestId = docs[index].id;
@@ -682,59 +905,78 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             final fromName = data['fromName'] ?? 'Unknown User';
             final fromUsername = data['fromUsername'] ?? '';
 
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: CircleAvatar(
-                radius: 24,
-                backgroundColor: c.primaryLt,
-                child: Text(
-                  fromName.isNotEmpty ? fromName[0].toUpperCase() : 'U',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: c.primary),
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: c.cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
+                  ),
                 ),
-              ),
-              title: Text(
-                fromName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
-              subtitle: Text(
-                fromUsername.isNotEmpty ? '@$fromUsername' : 'Wants to connect',
-                style: TextStyle(color: c.textMid, fontSize: 13),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      await _friendService.acceptFriendRequest(
-                        requestId: requestId,
-                        currentUserId: widget.currentUserId,
-                        friendId: fromUserId,
-                      );
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Connected with $fromName!')),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Accept'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  leading: CircleAvatar(
+                    radius: 24,
+                    backgroundColor: c.primaryLt,
+                    child: Text(
+                      fromName.isNotEmpty ? fromName[0].toUpperCase() : 'U',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: c.primary),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.grey),
-                    onPressed: () async {
-                      await _friendService.declineFriendRequest(requestId);
-                    },
+                  title: Text(
+                    fromName,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: c.textHigh,
+                    ),
                   ),
-                ],
+                  subtitle: Text(
+                    fromUsername.isNotEmpty ? '@$fromUsername' : 'Wants to connect',
+                    style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await _friendService.acceptFriendRequest(
+                            requestId: requestId,
+                            currentUserId: widget.currentUserId,
+                            friendId: fromUserId,
+                          );
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Connected with $fromName!', style: GoogleFonts.poppins()),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.check_rounded, size: 16),
+                        label: Text('Accept', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: Icon(Icons.close_rounded, color: c.textMid),
+                        onPressed: () async {
+                          await _friendService.declineFriendRequest(requestId);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             );
           },
@@ -750,45 +992,69 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(16),
           child: Column(
             children: [
               TextField(
                 controller: _searchController,
                 onChanged: _onSearchChanged,
+                style: GoogleFonts.poppins(color: c.textHigh, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search by Name, @username, Phone, Email...',
-                  prefixIcon: Icon(Icons.search, color: c.primary),
+                  hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 13),
+                  prefixIcon: Icon(Icons.search_rounded, color: c.primary),
                   filled: true,
                   fillColor: c.surfaceAlt,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
+                    borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isSyncingContacts ? null : _syncDeviceContacts,
-                      icon: _isSyncingContacts
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.contacts_rounded, size: 18),
-                      label: Text(_isSyncingContacts ? 'Syncing...' : 'Sync Device Contacts'),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(
+                      color: c.isDark ? Colors.white.withOpacity(0.05) : Colors.transparent,
                     ),
                   ),
-                ],
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(color: c.primary, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _isSyncingContacts ? null : _syncDeviceContacts,
+                  icon: _isSyncingContacts
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: c.primary,
+                          ),
+                        )
+                      : Icon(Icons.contacts_rounded, size: 18, color: c.primary),
+                  label: Text(
+                    _isSyncingContacts ? 'Syncing...' : 'Sync Device Contacts',
+                    style: GoogleFonts.poppins(
+                      color: c.textHigh,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: c.isDark ? Colors.white.withOpacity(0.1) : c.border,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
               ),
             ],
           ),
@@ -820,13 +1086,13 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               const SizedBox(height: 12),
               Text(
                 'No Matching Users Found',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: c.textHigh),
+                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: c.textHigh),
               ),
               const SizedBox(height: 4),
               Text(
                 'Check the @username, phone number, or email and try again.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: c.textMid),
+                style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
               ),
             ],
           ),
@@ -834,17 +1100,29 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       );
     }
 
-    return ListView.separated(
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: _searchResults.length,
-      separatorBuilder: (_, __) => Divider(height: 1, indent: 72, color: c.divider),
       itemBuilder: (context, index) {
-        return UserDiscoverTile(
-          targetUser: _searchResults[index],
-          currentUserId: widget.currentUserId,
-          currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
-          currentUserUsername: _currentUserModel?.username,
-          onOpenChat: _openChat,
-          onInitiateCall: _initiateCall,
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Container(
+            decoration: BoxDecoration(
+              color: c.cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
+              ),
+            ),
+            child: UserDiscoverTile(
+              targetUser: _searchResults[index],
+              currentUserId: widget.currentUserId,
+              currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
+              currentUserUsername: _currentUserModel?.username,
+              onOpenChat: _openChat,
+              onInitiateCall: _initiateCall,
+            ),
+          ),
         );
       },
     );
@@ -854,7 +1132,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     final c = AppThemeColors.of(context);
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -862,11 +1140,21 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: c.primaryLt,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: c.primary.withOpacity(0.15),
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.explore_rounded, color: c.primary, size: 32),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: c.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.explore_rounded, color: Colors.white, size: 24),
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -874,7 +1162,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                     children: [
                       Text(
                         'Discover People on GupShupGo',
-                        style: TextStyle(
+                        style: GoogleFonts.poppins(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
                           color: c.textHigh,
@@ -883,7 +1171,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       const SizedBox(height: 2),
                       Text(
                         'Send a friend request to connect, or search by custom @username, phone number, or email.',
-                        style: TextStyle(fontSize: 12, color: c.textMid),
+                        style: GoogleFonts.poppins(fontSize: 12, color: c.textMid, height: 1.3),
                       ),
                     ],
                   ),
@@ -893,11 +1181,12 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           ),
           const SizedBox(height: 24),
           Text(
-            'Suggested Users',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: c.textHigh,
+            'SUGGESTED USERS',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: c.textMid,
+              letterSpacing: 1.2,
             ),
           ),
           const SizedBox(height: 12),
@@ -910,22 +1199,33 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
               List<UserModel> suggested = snapshot.data ?? [];
               if (suggested.isEmpty) {
-                return Text('No suggested users available right now.', style: TextStyle(color: c.textMid));
+                return Text('No suggested users available right now.', style: GoogleFonts.poppins(color: c.textMid));
               }
 
-              return ListView.separated(
+              return ListView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: suggested.length > 8 ? 8 : suggested.length,
-                separatorBuilder: (_, __) => Divider(height: 1, indent: 72, color: c.divider),
                 itemBuilder: (context, index) {
-                  return UserDiscoverTile(
-                    targetUser: suggested[index],
-                    currentUserId: widget.currentUserId,
-                    currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
-                    currentUserUsername: _currentUserModel?.username,
-                    onOpenChat: _openChat,
-                    onInitiateCall: _initiateCall,
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: c.cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
+                        ),
+                      ),
+                      child: UserDiscoverTile(
+                        targetUser: suggested[index],
+                        currentUserId: widget.currentUserId,
+                        currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
+                        currentUserUsername: _currentUserModel?.username,
+                        onOpenChat: _openChat,
+                        onInitiateCall: _initiateCall,
+                      ),
+                    ),
                   );
                 },
               );
@@ -943,6 +1243,7 @@ class UserDiscoverTile extends StatefulWidget {
   final String currentUserId;
   final String currentUserName;
   final String? currentUserUsername;
+  final String? customSubtitle;
   final Function(UserModel) onOpenChat;
   final Function(UserModel) onInitiateCall;
 
@@ -952,6 +1253,7 @@ class UserDiscoverTile extends StatefulWidget {
     required this.currentUserId,
     required this.currentUserName,
     this.currentUserUsername,
+    this.customSubtitle,
     required this.onOpenChat,
     required this.onInitiateCall,
   });
@@ -1010,6 +1312,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
             success
                 ? 'Friend request sent to ${widget.targetUser.name}!'
                 : 'Friend request is already pending or failed.',
+            style: GoogleFonts.poppins(),
           ),
         ),
       );
@@ -1022,9 +1325,9 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
     final user = widget.targetUser;
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: CircleAvatar(
-        radius: 26,
+        radius: 24,
         backgroundImage: NetworkImage(
           user.photoUrl ??
               'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
@@ -1033,19 +1336,24 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
       ),
       title: Text(
         user.name,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        style: GoogleFonts.poppins(
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+          color: c.textHigh,
+        ),
       ),
       subtitle: Text(
-        user.username != null && user.username!.isNotEmpty
-            ? '@${user.username}'
-            : (user.email ?? 'GupShupGo User'),
-        style: TextStyle(color: c.textMid, fontSize: 13),
+        widget.customSubtitle ??
+            (user.username != null && user.username!.isNotEmpty
+                ? '@${user.username}'
+                : (user.email ?? 'GupShupGo User')),
+        style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       trailing: _isLoading
-          ? const SizedBox(
+          ? SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: CircularProgressIndicator(strokeWidth: 2, color: c.primary),
             )
           : _buildActionWidget(c),
     );
@@ -1058,11 +1366,20 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: Icon(Icons.videocam_rounded, color: c.primary),
+              style: IconButton.styleFrom(
+                backgroundColor: c.primaryLt,
+                shape: const CircleBorder(),
+              ),
+              icon: Icon(Icons.videocam_rounded, color: c.primary, size: 20),
               onPressed: () => widget.onInitiateCall(widget.targetUser),
             ),
+            const SizedBox(width: 6),
             IconButton(
-              icon: Icon(Icons.message_rounded, color: c.primary),
+              style: IconButton.styleFrom(
+                backgroundColor: c.primaryLt,
+                shape: const CircleBorder(),
+              ),
+              icon: Icon(Icons.message_rounded, color: c.primary, size: 20),
               onPressed: () => widget.onOpenChat(widget.targetUser),
             ),
           ],
@@ -1071,10 +1388,10 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
       case ConnectionStateStatus.pendingSent:
         return OutlinedButton.icon(
           onPressed: null, // Disabled when pending
-          icon: const Icon(Icons.hourglass_top_rounded, size: 16),
-          label: const Text('Requested'),
+          icon: const Icon(Icons.hourglass_top_rounded, size: 14),
+          label: Text('Requested', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1084,7 +1401,6 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
       case ConnectionStateStatus.pendingReceived:
         return ElevatedButton.icon(
           onPressed: () async {
-            // Find incoming request ID and accept
             QuerySnapshot snap = await FirebaseFirestore.instance
                 .collection('friend_requests')
                 .where('fromUserId', isEqualTo: widget.targetUser.id)
@@ -1104,12 +1420,13 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
               }
             }
           },
-          icon: const Icon(Icons.check_rounded, size: 16),
-          label: const Text('Accept'),
+          icon: const Icon(Icons.check_rounded, size: 14),
+          label: Text('Accept', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1124,12 +1441,14 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
               ? const SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.person_add_rounded, size: 16),
-          label: const Text('Add Friend'),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.person_add_rounded, size: 14),
+          label: Text('Add Friend', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
             backgroundColor: c.primary,
             foregroundColor: Colors.white,
+            elevation: 0,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),

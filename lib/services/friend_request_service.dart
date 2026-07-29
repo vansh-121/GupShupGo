@@ -1,8 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/user_service.dart';
 
 enum ConnectionStateStatus { none, pendingSent, pendingReceived, friends }
+
+class QuickConnectSuggestion {
+  final UserModel user;
+  final String reasonSubtitle;
+
+  QuickConnectSuggestion({
+    required this.user,
+    required this.reasonSubtitle,
+  });
+}
 
 class FriendRequestService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -12,14 +24,6 @@ class FriendRequestService {
   final String _usersCollection = 'users';
 
   /// Send a new connection/friend request.
-  ///
-  /// Guards against BOTH directions of a duplicate: a repeat tap by the
-  /// sender, and the (more important) case where [toUserId] already sent
-  /// [fromUserId] a pending request — creating a second doc in that case
-  /// would leave two competing pending requests instead of just accepting
-  /// the existing one. The UI normally prevents this via
-  /// [getConnectionStatus] (which shows "Accept" instead of "Add Friend"),
-  /// but the service itself should not rely solely on the caller.
   Future<bool> sendFriendRequest({
     required String fromUserId,
     required String toUserId,
@@ -31,9 +35,6 @@ class FriendRequestService {
 
       final status = await getConnectionStatus(fromUserId, toUserId);
       if (status != ConnectionStateStatus.none) {
-        // Already friends, already pending in either direction, or (should
-        // never happen here) some other non-"none" state — refuse to create
-        // a duplicate/conflicting request doc.
         return false;
       }
 
@@ -46,7 +47,7 @@ class FriendRequestService {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Notify target user via FCM — routes to the Requests tab on tap.
+      // Notify target user via FCM
       await _fcmService.sendMessageNotification(
         receiverId: toUserId,
         senderId: fromUserId,
@@ -103,7 +104,7 @@ class FriendRequestService {
 
       await batch.commit();
 
-      // Send confirmation FCM notification — routes to the Friends tab.
+      // Send confirmation FCM notification
       await _fcmService.sendMessageNotification(
         receiverId: friendId,
         senderId: currentUserId,
@@ -142,10 +143,6 @@ class FriendRequestService {
   }
 
   /// Stream accepted friends list for current user.
-  ///
-  /// Fetches profiles in batched `whereIn` queries (chunks of 30 — the
-  /// Firestore limit) instead of one `.get()` per friend, so this scales
-  /// past a handful of friends without a linear number of round-trips.
   Stream<List<UserModel>> streamFriends(String currentUserId) {
     return _firestore
         .collection(_usersCollection)
@@ -224,4 +221,149 @@ class FriendRequestService {
   }
 
   String fromUserIdQuery(String id) => id;
+
+  /// Fetches intelligent Quick Connect suggestions combining:
+  /// 1. Mutual friends ("Mutual friend with [Name]" or "X mutual friends")
+  /// 2. Matched device contacts ("From your phone contacts")
+  /// 3. General suggestions ("Suggested for you" or "@username")
+  ///
+  /// Excludes current user, existing friends, and users with pending requests.
+  Future<List<QuickConnectSuggestion>> getQuickConnectSuggestions(String currentUserId) async {
+    final Map<String, QuickConnectSuggestion> suggestionsMap = {};
+    final Set<String> excludedUserIds = {currentUserId};
+
+    try {
+      // 1. Collect current user's friend IDs
+      final friendsSnap = await _firestore
+          .collection(_usersCollection)
+          .doc(currentUserId)
+          .collection('friends')
+          .get();
+      final List<String> friendIds = friendsSnap.docs.map((d) => d.id).toList();
+      excludedUserIds.addAll(friendIds);
+
+      // 2. Collect pending request user IDs (both directions)
+      final outgoingSnap = await _firestore
+          .collection(_requestsCollection)
+          .where('fromUserId', isEqualTo: currentUserId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+      for (var d in outgoingSnap.docs) {
+        final toId = d.data()['toUserId'] as String?;
+        if (toId != null) excludedUserIds.add(toId);
+      }
+
+      final incomingSnap = await _firestore
+          .collection(_requestsCollection)
+          .where('toUserId', isEqualTo: currentUserId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+      for (var d in incomingSnap.docs) {
+        final fromId = d.data()['fromUserId'] as String?;
+        if (fromId != null) excludedUserIds.add(fromId);
+      }
+
+      // 3. Find Mutual Friends (2nd degree connections)
+      final Map<String, List<String>> mutualFriendNamesMap = {};
+
+      for (String friendId in friendIds.take(10)) {
+        final friendDoc = await _firestore.collection(_usersCollection).doc(friendId).get();
+        if (!friendDoc.exists) continue;
+        final friendUser = UserModel.fromFirestore(friendDoc);
+
+        final subFriendsSnap = await _firestore
+            .collection(_usersCollection)
+            .doc(friendId)
+            .collection('friends')
+            .get();
+
+        for (var doc in subFriendsSnap.docs) {
+          final candidateId = doc.id;
+          if (excludedUserIds.contains(candidateId)) continue;
+          mutualFriendNamesMap.putIfAbsent(candidateId, () => []).add(friendUser.name);
+        }
+      }
+
+      for (var entry in mutualFriendNamesMap.entries) {
+        if (suggestionsMap.length >= 5) break;
+
+        final candidateId = entry.key;
+        final friendNames = entry.value;
+        final candidateDoc = await _firestore.collection(_usersCollection).doc(candidateId).get();
+        if (!candidateDoc.exists) continue;
+
+        final candidateUser = UserModel.fromFirestore(candidateDoc);
+        final String reason = friendNames.length == 1
+            ? 'Mutual friend with ${friendNames.first}'
+            : '${friendNames.length} mutual friends';
+
+        suggestionsMap[candidateId] = QuickConnectSuggestion(
+          user: candidateUser,
+          reasonSubtitle: reason,
+        );
+      }
+
+      // 4. Try matching Device Contacts if room (< 5 suggestions)
+      if (suggestionsMap.length < 5) {
+        try {
+          final hasPermission = await fc.FlutterContacts.requestPermission(readonly: true);
+          if (hasPermission) {
+            final deviceContacts = await fc.FlutterContacts.getContacts(withProperties: true);
+            final rawPhones = <String>[];
+            final rawEmails = <String>[];
+            for (final contact in deviceContacts) {
+              rawPhones.addAll(contact.phones.map((p) => p.number));
+              rawEmails.addAll(contact.emails.map((e) => e.address));
+            }
+
+            final matches = await UserService().matchDeviceContacts(
+              rawPhoneNumbers: rawPhones,
+              rawEmails: rawEmails,
+              currentUserId: currentUserId,
+            );
+
+            for (var matchedUser in matches) {
+              if (suggestionsMap.length >= 5) break;
+              if (excludedUserIds.contains(matchedUser.id) || suggestionsMap.containsKey(matchedUser.id)) {
+                continue;
+              }
+              suggestionsMap[matchedUser.id] = QuickConnectSuggestion(
+                user: matchedUser,
+                reasonSubtitle: 'From your phone contacts',
+              );
+            }
+          }
+        } catch (_) {
+          // Contact permission not granted — skip
+        }
+      }
+
+      // 5. Fallback for new accounts without contacts/mutual friends
+      if (suggestionsMap.length < 3) {
+        final generalSnap = await _firestore
+            .collection(_usersCollection)
+            .where(FieldPath.documentId, isNotEqualTo: currentUserId)
+            .limit(10)
+            .get();
+
+        for (var doc in generalSnap.docs) {
+          if (suggestionsMap.length >= 3) break;
+          final u = UserModel.fromFirestore(doc);
+          if (excludedUserIds.contains(u.id) || suggestionsMap.containsKey(u.id)) {
+            continue;
+          }
+          suggestionsMap[u.id] = QuickConnectSuggestion(
+            user: u,
+            reasonSubtitle: u.username != null && u.username!.isNotEmpty
+                ? '@${u.username}'
+                : 'Suggested for you',
+          );
+        }
+      }
+    } catch (e) {
+      print('Error calculating Quick Connect suggestions: $e');
+    }
+
+    return suggestionsMap.values.toList();
+  }
 }
