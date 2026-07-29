@@ -1,0 +1,328 @@
+# Anonymous Chat Feature — Y99-Style Random Stranger Chat
+
+Add a real-time 1-on-1 anonymous random matching chat feature to GupShupGo, similar to Y99/Omegle, where users are paired with random strangers using masked identities. The feature includes instant "Next" switching, ephemeral messages, safety tools (report/block), and a **Friend Request** flow to transition from anonymous → E2EE permanent chat.
+
+## Two-Phase Encryption Model
+
+> [!NOTE]
+> ### Phase 1 — Anonymous Chat (Non-E2EE, Ephemeral)
+> When two strangers are first matched, messages are **non-E2EE (plaintext ephemeral)**:
+> - Users are masked as random aliases ("Cosmic Fox", "Purple Penguin")
+> - Real identities are hidden — no profile, no phone number visible
+> - Messages are stored in `/anonymous_rooms/{roomId}/messages` (plaintext)
+> - Messages are ephemeral — cleaned up when either user leaves or taps "Next"
+> - **Why no E2EE?** — Strangers don't have persistent identities, no pre-existing Signal PreKey bundles, and the session is throwaway
+>
+> ### Phase 2 — Friend Request Accepted (Full E2EE)
+> If both users enjoy the conversation, either can send a **Friend Request**:
+> 1. User A taps "Add Friend" → a request is sent to User B (their real userId is shared server-side, but alias is still shown until accepted)
+> 2. User B sees "Stranger wants to connect!" notification in the chat → taps Accept or Decline
+> 3. **On Accept:**
+>    - Both users' **real profiles** (name, photo) are revealed to each other
+>    - A standard **E2EE chat room** is created in `/chatRooms/{chatRoomId}` using the existing `ChatService`
+>    - Signal Protocol session is established via `SignalService` (PreKey bundle exchange)
+>    - The new contact appears in both users' **Gup (main chat) tab**
+>    - **All future messages are 100% End-to-End Encrypted** via `libsignal_protocol_dart`
+>    - The anonymous room is ended and cleaned up
+> 4. **On Decline:** Nothing changes — anonymous chat continues as-is
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Safety & Moderation Compliance:**
+> Apple App Store and Google Play require strict UGC safety measures for anonymous chat. This plan includes mandatory **Report User**, **Block User**, and **End Room Cleanup** features. Messages are ephemeral (deleted when room ends).
+
+## Open Questions
+
+> [!IMPORTANT]
+> 1. **Interest Tags / Filters?** — Y99 lets users add interest tags (e.g. "music", "gaming") and matches on common interests. Do you want this in v1 or keep it simple (pure random matching)?
+> 2. **Text Only or Media Too?** — Should anonymous chat support image/audio sending, or text-only for safety in v1?
+> 3. **Rate Limiting?** — Should we limit how many anonymous sessions a user can start per hour/day to prevent abuse?
+> 4. **Premium Gate?** — Should anonymous chat be available to all users or gated behind GupShupGo Pro?
+
+---
+
+## Proposed Changes
+
+### Database — Firestore Collections
+
+#### [NEW] Collection: `match_queue`
+```
+/match_queue/{userId}
+  ├── userId: string
+  ├── status: 'waiting' | 'matched'
+  ├── interests: string[] (optional, for v2)
+  ├── createdAt: timestamp
+  └── matchedRoomId: string? (set when paired)
+```
+
+#### [NEW] Collection: `anonymous_rooms`
+```
+/anonymous_rooms/{roomId}
+  ├── user1Id: string
+  ├── user2Id: string
+  ├── user1Alias: string ("Stranger 1" / random pseudonym)
+  ├── user2Alias: string ("Stranger 2" / random pseudonym)
+  ├── status: 'active' | 'ended'
+  ├── createdAt: timestamp
+  ├── endedAt: timestamp?
+  ├── endedBy: string? (userId who ended)
+  ├── friendRequestFrom: string? (userId who sent friend request)
+  ├── friendRequestStatus: 'none' | 'pending' | 'accepted' | 'declined'
+  └── /messages/{messageId}
+        ├── senderId: string
+        ├── text: string
+        ├── type: 'text' | 'system' (system messages like "Stranger wants to connect!")
+        ├── timestamp: timestamp
+        └── status: 'sent'
+```
+
+#### [NEW] Collection: `friend_requests`
+```
+/friend_requests/{requestId}
+  ├── fromUserId: string
+  ├── toUserId: string
+  ├── anonymousRoomId: string
+  ├── fromAlias: string (alias in the anonymous room)
+  ├── status: 'pending' | 'accepted' | 'declined'
+  ├── createdAt: timestamp
+  └── respondedAt: timestamp?
+```
+
+#### [NEW] Collection: `anonymous_reports`
+```
+/anonymous_reports/{reportId}
+  ├── reporterUserId: string
+  ├── reportedUserId: string
+  ├── roomId: string
+  ├── reason: string
+  ├── createdAt: timestamp
+  └── resolved: bool
+```
+
+---
+
+### Firestore Security Rules
+
+#### [MODIFY] [firestore.rules](file:///e:/GupShupGo/gupshupgo/firestore.rules)
+
+Add rules for the four new collections at the end (before the closing `}`):
+
+```
+// ==================== ANONYMOUS MATCHMAKING QUEUE ====================
+match /match_queue/{userId} {
+  allow read: if request.auth != null;
+  allow create, update: if request.auth != null && request.auth.uid == userId;
+  allow delete: if request.auth != null && request.auth.uid == userId;
+}
+
+// ==================== ANONYMOUS ROOMS ====================
+match /anonymous_rooms/{roomId} {
+  function isAnonymousParticipant() {
+    return resource.data.user1Id == request.auth.uid
+        || resource.data.user2Id == request.auth.uid;
+  }
+
+  allow read: if request.auth != null && isAnonymousParticipant();
+  allow create: if request.auth != null;
+  allow update: if request.auth != null && isAnonymousParticipant();
+  allow delete: if false;
+
+  match /messages/{messageId} {
+    function isRoomParticipant() {
+      let room = get(/databases/$(database)/documents/anonymous_rooms/$(roomId));
+      return room.data.user1Id == request.auth.uid
+          || room.data.user2Id == request.auth.uid;
+    }
+
+    allow read: if request.auth != null && isRoomParticipant();
+    allow create: if request.auth != null
+      && request.auth.uid == request.resource.data.senderId
+      && isRoomParticipant();
+    allow update, delete: if false;
+  }
+}
+
+// ==================== FRIEND REQUESTS ====================
+match /friend_requests/{requestId} {
+  allow read: if request.auth != null
+    && (resource.data.fromUserId == request.auth.uid
+        || resource.data.toUserId == request.auth.uid);
+  allow create: if request.auth != null
+    && request.auth.uid == request.resource.data.fromUserId;
+  allow update: if request.auth != null
+    && resource.data.toUserId == request.auth.uid;
+  allow delete: if false;
+}
+
+// ==================== ANONYMOUS REPORTS ====================
+match /anonymous_reports/{reportId} {
+  allow create: if request.auth != null
+    && request.auth.uid == request.resource.data.reporterUserId;
+  allow read, update, delete: if false;
+}
+```
+
+---
+
+### Model Layer
+
+#### [NEW] [anonymous_room_model.dart](file:///e:/GupShupGo/gupshupgo/lib/models/anonymous_room_model.dart)
+
+Data model for an anonymous chat room:
+- Fields: `id`, `user1Id`, `user2Id`, `user1Alias`, `user2Alias`, `status`, `createdAt`, `endedAt`, `endedBy`, `friendRequestFrom`, `friendRequestStatus`
+- Factory: `fromFirestore(DocumentSnapshot)`, `toMap()`
+- Helper: `getAlias(String userId)` → returns the alias for the given user
+- Helper: `getPartnerId(String myId)` → returns the other user's ID
+- Helper: `isActive` getter
+- Helper: `hasPendingFriendRequest` getter
+
+#### [NEW] [friend_request_model.dart](file:///e:/GupShupGo/gupshupgo/lib/models/friend_request_model.dart)
+
+Data model for friend requests originating from anonymous chat:
+- Fields: `id`, `fromUserId`, `toUserId`, `anonymousRoomId`, `fromAlias`, `status`, `createdAt`, `respondedAt`
+- Factory: `fromFirestore(DocumentSnapshot)`, `toMap()`
+
+---
+
+### Service Layer
+
+#### [NEW] [anonymous_chat_service.dart](file:///e:/GupShupGo/gupshupgo/lib/services/anonymous_chat_service.dart)
+
+Singleton service handling all matchmaking, chat, and friend request operations:
+
+| Method | Description |
+|--------|-------------|
+| **Matchmaking** | |
+| `joinQueue(String userId)` | Adds user to `/match_queue/{userId}` with `status: 'waiting'` |
+| `leaveQueue(String userId)` | Deletes `/match_queue/{userId}` |
+| `findAndPair(String userId)` | Atomic Firestore transaction: queries `match_queue` for `status == 'waiting'` (excluding self), pairs the first match, creates `/anonymous_rooms/{roomId}`, updates both queue entries to `matched` |
+| `listenToQueueEntry(String userId)` | Returns `Stream<DocumentSnapshot>` on `/match_queue/{userId}` — lobby screen listens for `matchedRoomId` to transition |
+| **Messaging** | |
+| `sendMessage(String roomId, String senderId, String text)` | Creates message doc in `/anonymous_rooms/{roomId}/messages` |
+| `messagesStream(String roomId)` | Returns real-time `Stream<QuerySnapshot>` ordered by timestamp |
+| `listenToRoom(String roomId)` | Returns `Stream<DocumentSnapshot>` to detect status changes (stranger left, friend request) |
+| **Session Control** | |
+| `endSession(String roomId, String userId)` | Sets `status: 'ended'`, `endedBy`, `endedAt` |
+| `reportUser(...)` | Creates report in `/anonymous_reports`, then ends session |
+| `generateAlias()` | Returns a fun random pseudonym (e.g. "Purple Penguin", "Cosmic Fox") |
+| **Friend Request Flow** | |
+| `sendFriendRequest(String roomId, String fromUserId, String toUserId, String fromAlias)` | Creates doc in `/friend_requests`, updates room's `friendRequestFrom` and `friendRequestStatus: 'pending'`, inserts a system message ("You sent a friend request!") |
+| `acceptFriendRequest(String requestId, String roomId)` | Updates request `status: 'accepted'` → calls `_createE2EEChatRoom()` to create a standard `/chatRooms` entry with both real profiles → ends anonymous room |
+| `declineFriendRequest(String requestId, String roomId)` | Updates request `status: 'declined'`, resets room's `friendRequestStatus: 'declined'` — anonymous chat continues |
+| `_createE2EEChatRoom(String user1Id, String user2Id)` | **Private helper** — uses existing `ChatService` pattern to create a standard E2EE chat room in `/chatRooms/{chatRoomId}` with `participants: [user1Id, user2Id]`. Signal session is bootstrapped on first message send (existing `ChatService.sendMessage` flow handles this automatically). |
+
+**Matching Algorithm** (inside `findAndPair`):
+1. Query `match_queue` where `status == 'waiting'`, ordered by `createdAt`, limit 10
+2. Filter out self
+3. Use Firestore `runTransaction` to atomically:
+   - Verify first candidate is still `waiting`
+   - Create `anonymous_rooms/{roomId}` with both users
+   - Update both `match_queue` entries: `status: 'matched'`, `matchedRoomId: roomId`
+4. If no candidates found, return `null` (user stays in queue, retries via listener)
+
+**Friend Request → E2EE Transition Flow:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ANONYMOUS CHAT (Non-E2EE)                                      │
+│  /anonymous_rooms/{roomId}/messages — plaintext, ephemeral      │
+│                                                                  │
+│  User A taps "Add Friend" ──→ friendRequestStatus: 'pending'    │
+│  User B sees "Stranger wants to connect!"                        │
+│                                                                  │
+│  ┌─── User B taps "Accept" ───┐                                 │
+│  │                             │                                 │
+│  │  1. Fetch real profiles     │                                 │
+│  │  2. Create /chatRooms/{}    │                                 │
+│  │  3. Signal session init     │                                 │
+│  │  4. End anonymous room      │                                 │
+│  │  5. Navigate to ChatScreen  │                                 │
+│  └─────────────────────────────┘                                 │
+│                                                                  │
+│  STANDARD CHAT (Full E2EE)                                      │
+│  /chatRooms/{chatRoomId}/messages — Signal Protocol encrypted   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### UI Layer
+
+#### [NEW] [anonymous_lobby_screen.dart](file:///e:/GupShupGo/gupshupgo/lib/screens/anonymous/anonymous_lobby_screen.dart)
+
+Entry screen when user taps "Anonymous Chat":
+
+- **Searching State**: Radar ripple animation (concentric expanding circles) with text "Searching for a stranger..."
+- **Cancel Button**: Leaves the queue and pops back
+- **Auto-Transition**: Listens to `match_queue/{userId}` — when `matchedRoomId` appears, navigates to `AnonymousChatScreen`
+- **Theme**: Uses `AppThemeColors.of(context)` for light/dark support
+- **Font**: `GoogleFonts.poppins` exclusively
+
+#### [NEW] [anonymous_chat_screen.dart](file:///e:/GupShupGo/gupshupgo/lib/screens/anonymous/anonymous_chat_screen.dart)
+
+Dedicated 1-on-1 anonymous chat UI:
+
+- **App Bar**:
+  - Title: Partner's alias (e.g. "Cosmic Fox 🦊")
+  - Subtitle: "Anonymous Chat"
+  - Actions:
+    - 👤 **Add Friend** — Sends friend request to the stranger
+    - 🔄 **Next** — Ends current room, re-enters lobby/queue
+    - 🚩 **Report** — Shows report dialog, ends session
+    - 🛑 **Leave** — Ends session, returns to home
+- **Friend Request UI**:
+  - **Sender sees**: "Friend request sent! Waiting for response..." (disabled "Add Friend" button)
+  - **Receiver sees**: Banner at top — "🤝 Stranger wants to connect!" with **Accept** and **Decline** buttons
+  - **On Accept**: Both users see "You are now friends! 🎉" system message → brief 2s delay → auto-navigate to the new E2EE `ChatScreen` with real profiles
+  - **On Decline**: Sender sees "Friend request declined" system message → anonymous chat continues normally
+- **Message List**: Real-time listener on `/anonymous_rooms/{roomId}/messages`, rendered as simple text bubbles (sent = `c.primary`, received = `c.surfaceAlt`). System messages rendered centered with muted styling.
+- **Disconnect Banner**: When room `status` changes to `ended` and `endedBy != currentUser`, show "Stranger has disconnected" banner with a "Find Next Stranger" button
+- **Input Bar**: Text field + send button (text-only in v1)
+- **No E2EE banner**: Shows "Messages are not encrypted" subtle label (unlike regular chat's E2EE banner)
+- **Theme**: Full light/dark mode support via `AppThemeColors`
+
+---
+
+### Navigation Integration
+
+#### [MODIFY] [home_screen.dart](file:///e:/GupShupGo/gupshupgo/lib/screens/home_screen.dart)
+
+Add an "Anonymous Chat" entry point. Two options (pick one):
+
+**Option A — FAB menu item on Gup tab**: Add an `Icons.shuffle_rounded` action button in the app bar or as a secondary FAB that opens `AnonymousLobbyScreen`.
+
+**Option B — New icon in the bottom app bar actions**: Add an anonymous chat icon alongside the existing actions (contacts, camera, etc.).
+
+I recommend **Option A** — a prominent button in the app bar or a card in the home screen, since this is a major new feature.
+
+---
+
+## File Summary
+
+| File | Action | Description |
+|------|--------|-------------|
+| `lib/models/anonymous_room_model.dart` | NEW | Data model for anonymous rooms |
+| `lib/models/friend_request_model.dart` | NEW | Data model for friend requests |
+| `lib/services/anonymous_chat_service.dart` | NEW | Matchmaking + messaging + friend request service |
+| `lib/screens/anonymous/anonymous_lobby_screen.dart` | NEW | Searching/matchmaking lobby UI |
+| `lib/screens/anonymous/anonymous_chat_screen.dart` | NEW | Anonymous 1-on-1 chat UI with friend request flow |
+| `lib/screens/home_screen.dart` | MODIFY | Add entry point for anonymous chat |
+| `firestore.rules` | MODIFY | Add security rules for 4 new collections |
+
+---
+
+## Verification Plan
+
+### Manual Verification
+1. **Matching Test**: Sign in with two accounts, both tap "Anonymous Chat" — verify they pair into the same room within seconds
+2. **Chat Realtime Sync**: Send messages from both sides, verify instant delivery
+3. **Next Stranger Flow**: Tap "Next" on Account A → Account B sees "Stranger disconnected" → Account A re-enters lobby
+4. **Friend Request → Accept**: Account A sends friend request → Account B accepts → verify both navigate to new E2EE ChatScreen with real profiles → verify new chat appears in main Gup tab
+5. **Friend Request → Decline**: Account A sends friend request → Account B declines → verify anonymous chat continues normally
+6. **E2EE Verification**: After accepting friend request, send messages in the new chat → verify messages use Signal Protocol encryption (schemaVersion = 2, envelopes present in Firestore)
+7. **Report Flow**: Tap "Report" → verify report doc created in `/anonymous_reports` and session ends
+8. **Cleanup**: Verify room status is set to `ended` when either user leaves
+9. **Light/Dark Mode**: Verify all screens render correctly in both themes
+
+### Automated Verification
+- `flutter analyze lib/` — 0 compilation errors

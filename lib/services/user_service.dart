@@ -10,7 +10,7 @@ class UserService {
   Future<void> createOrUpdateUser(UserModel user) async {
     try {
       await _firestore.collection(_usersCollection).doc(user.id).set(
-            user.toMap(),
+            user.toWritableMap(),
             SetOptions(merge: true),
           );
       print('User created/updated: ${user.id}');

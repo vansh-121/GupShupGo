@@ -41,6 +41,7 @@ import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -95,6 +96,9 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
       final has = user != null;
@@ -1182,63 +1186,85 @@ class _HomeScreenState extends State<HomeScreen>
         final hasMyStatus = statusProvider.hasMyStatus;
 
         return ListView(
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
           children: [
-            // My Moments section
-            _buildMyStatusTile(myStatus, hasMyStatus),
-
-            // Divider
-            if (otherStatuses.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(
-                  'Recent updates',
-                  style: GoogleFonts.poppins(
-                    color: c.textMid,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
+            // "My Status" Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                'My Moment',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                  letterSpacing: -0.2,
                 ),
               ),
+            ),
+
+            // My Status Tile
+            _buildMyStatusTile(myStatus, hasMyStatus),
+
+            const SizedBox(height: 12),
+
+            // "Recent Updates" Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                'Recent Moments',
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
 
             // Other users' statuses
-            ...otherStatuses.map((status) => _buildStatusTile(status)),
+            if (otherStatuses.isNotEmpty)
+              ...otherStatuses.map((status) => _buildStatusTile(status)),
 
-            // Empty state
+            // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 60),
+                padding: const EdgeInsets.symmetric(vertical: 48),
                 child: Center(
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        width: 80,
-                        height: 80,
-                        decoration: const BoxDecoration(
-                          color: AppColors.primaryLt,
+                        width: 88,
+                        height: 88,
+                        decoration: BoxDecoration(
+                          color: c.surfaceAlt,
                           shape: BoxShape.circle,
+                          border: Border.all(
+                            color: c.border,
+                            width: 1.5,
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.auto_stories_rounded,
-                          size: 40,
-                          color: AppColors.primary,
+                        child: Icon(
+                          Icons.camera_alt_outlined,
+                          size: 44,
+                          color: c.textMid,
                         ),
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        'No updates yet',
+                        'No updates yet.',
                         style: GoogleFonts.poppins(
-                          fontSize: 16,
+                          fontSize: 17,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textHigh,
+                          color: c.textHigh,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera icon to post a moment',
+                        'Tap the camera to share.',
                         style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          color: AppColors.textMid,
+                          fontSize: 14,
+                          color: c.textMid,
                         ),
                       ),
                     ],
@@ -1257,19 +1283,20 @@ class _HomeScreenState extends State<HomeScreen>
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_currentUser?.name ?? "Me")}&background=6C5CE7&color=fff&size=128';
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: Stack(
         children: [
           Container(
-            padding: EdgeInsets.all(hasMyStatus ? 2 : 0),
-            decoration: hasMyStatus
-                ? BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: c.primary, width: 2.5),
-                  )
-                : null,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: hasMyStatus ? c.primary : c.border,
+                width: 2.5,
+              ),
+            ),
             child: CircleAvatar(
-              radius: 28,
+              radius: 26,
               backgroundImage: NetworkImage(avatarUrl),
               backgroundColor: c.primaryLt,
             ),
@@ -1279,28 +1306,31 @@ class _HomeScreenState extends State<HomeScreen>
               bottom: 0,
               right: 0,
               child: Container(
-                width: 22,
-                height: 22,
+                width: 20,
+                height: 20,
                 decoration: BoxDecoration(
                   color: c.primary,
                   shape: BoxShape.circle,
                   border: Border.all(color: c.surface, width: 2),
                 ),
                 child: const Icon(Icons.add_rounded,
-                    color: Colors.white, size: 14),
+                    color: Colors.white, size: 12),
               ),
             ),
         ],
       ),
       title: Text(
-        'My Moments',
+        _currentUser?.name ?? 'My Status',
         style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+          color: c.textHigh,
+        ),
       ),
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to post a moment',
+            : 'Tap to add an update',
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -1344,11 +1374,11 @@ class _HomeScreenState extends State<HomeScreen>
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: Container(
-            padding: const EdgeInsets.all(2),
+            padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: allViewed ? c.textLow : c.primary,
+                color: allViewed ? c.textLow.withOpacity(0.4) : c.primary,
                 width: 2.5,
               ),
             ),
@@ -1358,14 +1388,25 @@ class _HomeScreenState extends State<HomeScreen>
               backgroundColor: c.primaryLt,
             ),
           ),
-          title: Text(
-            status.userName,
-            style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600, fontSize: 15, color: c.textHigh),
-          ),
-          subtitle: Text(
-            _formatStatusTime(status.lastUpdated),
-            style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+          title: Row(
+            children: [
+              Text(
+                status.userName,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  color: c.textHigh,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '•  ${_formatStatusTime(status.lastUpdated)}',
+                style: GoogleFonts.poppins(
+                  color: c.textMid,
+                  fontSize: 13,
+                ),
+              ),
+            ],
           ),
           onTap: () async {
             await Navigator.push(
@@ -1389,10 +1430,10 @@ class _HomeScreenState extends State<HomeScreen>
     final now = DateTime.now();
     final diff = now.difference(dateTime);
     if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
-    if (diff.inHours < 24) return '${diff.inHours} hours ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return 'Yesterday';
-    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
   }
 
@@ -1666,7 +1707,7 @@ class _HomeScreenState extends State<HomeScreen>
                 fit: BoxFit.contain,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             Text(
               'GupShupGo',
               style: GoogleFonts.poppins(
@@ -1773,18 +1814,25 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Gup'),
-            Tab(text: 'Moments'),
-            Tab(text: 'Calls'),
-          ],
-        ),
       ),
       body: Column(
         children: [
           if (!_hasFirebaseSession) _buildReverifyBanner(),
+          // ── Anonymous Match Banner — only on Gup tab ──────────────
+          if (_tabController.index == 0 && _currentUserId != null)
+            _AnonymousMatchBanner(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnonymousLobbyScreen(
+                      currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
+                    ),
+                  ),
+                );
+              },
+            ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -1797,7 +1845,145 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
+      bottomNavigationBar: _buildBottomNavDock(),
       floatingActionButton: _buildFABRow(),
+    );
+  }
+
+  /// Custom bottom navigation dock matching the ultra-sleek obsidian aesthetic.
+  Widget _buildBottomNavDock() {
+    final c = AppThemeColors.of(context);
+    final selectedIndex = _tabController.index;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(
+          top: BorderSide(color: c.border, width: 1.0),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                index: 0,
+                label: 'Gup',
+                icon: Icons.chat_bubble_rounded,
+                selectedIcon: Icons.chat_bubble_rounded,
+                isSelected: selectedIndex == 0,
+                onTap: () => setState(() => _tabController.animateTo(0)),
+              ),
+              _buildNavItem(
+                index: 1,
+                label: 'Moments',
+                icon: Icons.camera_alt_outlined,
+                selectedIcon: Icons.camera_alt_rounded,
+                isSelected: selectedIndex == 1,
+                onTap: () => setState(() => _tabController.animateTo(1)),
+              ),
+              _buildNavItem(
+                index: 2,
+                label: 'Calls',
+                icon: Icons.call_outlined,
+                selectedIcon: Icons.call_rounded,
+                isSelected: selectedIndex == 2,
+                onTap: () => setState(() => _tabController.animateTo(2)),
+              ),
+              // Profile Tab (Avatar on far right)
+              GestureDetector(
+                onTap: () async {
+                  if (_currentUser != null) {
+                    final updated = await Navigator.push<UserModel>(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              ProfileScreen(currentUser: _currentUser!)),
+                    );
+                    if (updated != null) setState(() => _currentUser = updated);
+                  }
+                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: c.border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 13,
+                        backgroundImage: _currentUser?.photoUrl != null
+                            ? NetworkImage(_currentUser!.photoUrl!)
+                            : null,
+                        backgroundColor: c.primaryLt,
+                        child: _currentUser?.photoUrl == null
+                            ? Icon(Icons.person, size: 14, color: c.textMid)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Profile',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: c.textMid,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required int index,
+    required String label,
+    required IconData icon,
+    required IconData selectedIcon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final c = AppThemeColors.of(context);
+    final color = isSelected ? c.primary : c.textMid;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? selectedIcon : icon,
+              color: color,
+              size: 22,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1976,7 +2162,7 @@ class _HomeScreenState extends State<HomeScreen>
                     'CONGRATULATIONS!',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w800,
                       color: Colors.amber,
                       letterSpacing: 2.0,
                     ),
@@ -2092,6 +2278,145 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
               ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// ─── Full-width Anonymous Match Banner with animated gradient shimmer ───────
+class _AnonymousMatchBanner extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _AnonymousMatchBanner({required this.onTap});
+
+  @override
+  State<_AnonymousMatchBanner> createState() => _AnonymousMatchBannerState();
+}
+
+class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _shimmerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    return AnimatedBuilder2(
+      animation: _shimmerController,
+      builder: (context, child) {
+        final v = _shimmerController.value;
+        return GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: c.isDark
+                    ? const [
+                        Color(0xFF2A1F4E),
+                        Color(0xFF3D2068),
+                        Color(0xFF4A1A6B),
+                        Color(0xFF3D2068),
+                        Color(0xFF2A1F4E),
+                      ]
+                    : const [
+                        Color(0xFF6C5CE7),
+                        Color(0xFF845EC2),
+                        Color(0xFFD65DB1),
+                        Color(0xFF845EC2),
+                        Color(0xFF6C5CE7),
+                      ],
+                begin: Alignment(-1.5 + v * 3.0, 0),
+                end: Alignment(1.5 + v * 3.0, 0),
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: (c.isDark
+                          ? const Color(0xFF7C5CFC)
+                          : const Color(0xFF6C5CE7))
+                      .withOpacity(0.18),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // ── Icon circle ──
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.shuffle_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // ── Text ──
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Connect with a Stranger',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Anonymous chat — tap to match!',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w400,
+                          color: Colors.white.withOpacity(0.75),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // ── Arrow ──
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.20),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ],
             ),
           ),
         );

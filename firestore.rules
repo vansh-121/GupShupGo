@@ -243,5 +243,73 @@ service cloud.firestore {
       // Prevent updates and deletions
       allow update, delete: if false;
     }
+
+    // ==================== ANONYMOUS MATCHMAKING QUEUE ====================
+    match /match_queue/{userId} {
+      allow read: if request.auth != null;
+      // Users can only create/delete their own queue entries
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      // Matchmaking (findAndPair) requires one user to update the partner's
+      // entry. Own user may fully overwrite (re-join); cross-user updates
+      // are restricted to only the matchmaking fields.
+      allow update: if request.auth != null
+        && (request.auth.uid == userId
+            || request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'matchedRoomId']));
+    }
+
+    // ==================== ANONYMOUS ROOMS ====================
+    match /anonymous_rooms/{roomId} {
+      function isAnonymousParticipant() {
+        return resource.data.user1Id == request.auth.uid
+            || resource.data.user2Id == request.auth.uid;
+      }
+
+      allow read: if request.auth != null && isAnonymousParticipant();
+      // Creator must be one of the room's participants
+      allow create: if request.auth != null
+        && (request.auth.uid == request.resource.data.user1Id
+            || request.auth.uid == request.resource.data.user2Id);
+      allow update: if request.auth != null && isAnonymousParticipant();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function isRoomParticipant() {
+          let room = get(/databases/$(database)/documents/anonymous_rooms/$(roomId));
+          return room.data.user1Id == request.auth.uid
+              || room.data.user2Id == request.auth.uid;
+        }
+
+        allow read: if request.auth != null && isRoomParticipant();
+        // Participants can only send messages as themselves.
+        // System-style messages use type:'system' for UI rendering but
+        // still carry the real senderId for auditability.
+        allow create: if request.auth != null
+          && isRoomParticipant()
+          && request.auth.uid == request.resource.data.senderId;
+        allow update, delete: if false;
+      }
+    }
+
+    // ==================== FRIEND REQUESTS ====================
+    match /friend_requests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.fromUserId == request.auth.uid
+            || resource.data.toUserId == request.auth.uid);
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.fromUserId;
+      // Recipient responds (accept/decline).
+      allow update: if request.auth != null
+        && resource.data.toUserId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ==================== ANONYMOUS REPORTS ====================
+    match /anonymous_reports/{reportId} {
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.reporterUserId;
+      allow read, update, delete: if false;
+    }
   }
 }

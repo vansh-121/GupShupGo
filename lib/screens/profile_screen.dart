@@ -289,7 +289,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       '$level',
                                       style: GoogleFonts.poppins(
                                         fontSize: 18,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w800,
                                         color: Colors.white,
                                       ),
                                     ),

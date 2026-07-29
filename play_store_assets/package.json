@@ -1,0 +1,12 @@
+{
+  "name": "gupshupgo-play-store-assets",
+  "version": "1.0.0",
+  "description": "Google Play Store Screenshots Asset Generator for GupShupGo",
+  "main": "generate_pngs.js",
+  "scripts": {
+    "generate": "node generate_pngs.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0"
+  }
+}

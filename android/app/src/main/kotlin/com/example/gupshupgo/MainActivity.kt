@@ -7,11 +7,11 @@ import android.media.MediaRecorder
 import android.os.Build
 import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
 import com.google.android.gms.auth.api.identity.Identity
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
 
     private val CHANNEL = "com.gupshupgo.app/phone_verification"
     private val AUDIO_CHANNEL = "com.gupshupgo.app/audio_recorder"

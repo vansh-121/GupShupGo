@@ -18,31 +18,34 @@ class E2EEBanner {
     final c = AppThemeColors.of(context);
     return Center(
       child: Container(
-        margin: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+        margin: const EdgeInsets.fromLTRB(20, 16, 20, 16),
         padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: c.isDark
-              ? const Color(0xFF2A2D32)
-              : const Color(0xFFFFF5C4),
-          borderRadius: BorderRadius.circular(8),
+              ? const Color(0xFF141624)
+              : c.surfaceAlt,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: c.isDark ? const Color(0xFF24273D) : c.border,
+            width: 1.0,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(Icons.lock_outline_rounded,
-                size: 14, color: c.isDark ? c.textMid : Colors.brown[700]),
+                size: 14, color: c.isDark ? Colors.white60 : c.textMid),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                'Messages are end-to-end encrypted. No one outside this '
-                'chat, not even GupShupGo, can read them.',
+                'Messages are end-to-end encrypted',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
-                  fontSize: 11.5,
-                  height: 1.4,
-                  color: c.isDark ? c.textMid : Colors.brown[800],
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: c.isDark ? Colors.white60 : c.textMid,
                 ),
               ),
             ),

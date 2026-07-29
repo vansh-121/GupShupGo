@@ -389,7 +389,26 @@ class AuthService {
           if (userCredential.user == null) return null;
 
           final String userId = userCredential.user!.uid;
-          UserModel? existingUser = await _userService.getUserById(userId);
+
+          // Force ID token refresh so Firebase Auth updates its internal security context
+          try {
+            await userCredential.user!.getIdToken(true);
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 150));
+
+          UserModel? existingUser;
+          for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+              existingUser = await _userService.getUserById(userId);
+              break;
+            } catch (e) {
+              if (attempt == 2) break; // Fallback to creating new user if fetch fails
+              try {
+                await userCredential.user!.getIdToken(true);
+              } catch (_) {}
+              await Future.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+            }
+          }
 
           UserModel user;
           if (existingUser != null) {
@@ -410,11 +429,29 @@ class AuthService {
             );
           }
 
-          await Future.wait([
-            _userService.createOrUpdateUser(user),
-            _saveUserIdLocally(userId),
-            _saveUserLocally(user),
-          ]);
+          for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+              await Future.wait([
+                _userService.createOrUpdateUser(user),
+                _saveUserIdLocally(userId),
+                _saveUserLocally(user),
+              ]);
+              break;
+            } catch (e) {
+              if (attempt == 2) {
+                // Save locally even if Firestore permission stream fails temporarily
+                await Future.wait([
+                  _saveUserIdLocally(userId),
+                  _saveUserLocally(user),
+                ]);
+              } else {
+                try {
+                  await userCredential.user!.getIdToken(true);
+                } catch (_) {}
+                await Future.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+              }
+            }
+          }
 
           // Run remaining setup concurrently in the background.
           _runPostSignInTasks(userId: userId, displayName: user.name);
