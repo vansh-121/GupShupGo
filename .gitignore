@@ -57,3 +57,6 @@ _diag_*
 diag_*
 *.log
 fvm_version_check.txt
+
+/.kiro
+
