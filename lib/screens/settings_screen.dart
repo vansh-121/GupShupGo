@@ -13,6 +13,7 @@ import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
+import 'package:video_chat_app/services/user_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
@@ -33,6 +34,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
   final SettingsService _settings = SettingsService();
+  final UserService _userService = UserService();
   late UserModel _user;
   Map<String, bool> _notifPrefs = {};
 
@@ -51,6 +53,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _setNotifPref(String key, bool value) async {
     await NotificationService.instance.setPreference(key, value);
     setState(() => _notifPrefs[key] = value);
+  }
+
+  /// Toggles profile discoverability. Applies the change optimistically, then
+  /// reverts and tells the user if the write fails — a silently-failed privacy
+  /// switch would leave them believing they are hidden when they are not.
+  Future<void> _setDiscoverable(bool value) async {
+    final previous = _user.isDiscoverable;
+    setState(() => _user = _user.copyWith(isDiscoverable: value));
+
+    try {
+      await _userService.updateDiscoverableStatus(_user.id, value);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _user = _user.copyWith(isDiscoverable: previous));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Couldn't update discoverability. Check your connection and try again.",
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _signOut() async {
@@ -495,40 +520,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 16),
 
-          // ── 2 & 3. Side-by-Side Cards Grid (Privacy & Appearance) ───────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // ── 2. Privacy Card (Full Width) ────────────────────────────────────
+          // Discoverability lives alongside last seen / read receipts so there
+          // is a single place in Settings that answers "who can see what".
+          _buildStitchCard(
+            title: 'Privacy',
             children: [
-              // Left Card: Privacy
-              Expanded(
-                child: _buildStitchCard(
-                  title: 'Privacy',
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                  children: [
-                    _buildStitchSwitchRow(
-                      icon: Icons.access_time_rounded,
-                      title: 'Last seen',
-                      value: _settings.showLastSeen,
-                      onChanged: (v) => setState(() => _settings.showLastSeen = v),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildStitchSwitchRow(
-                      icon: Icons.check_circle_outline_rounded,
-                      title: 'Read receipts',
-                      value: _settings.showReadReceipts,
-                      onChanged: (v) => setState(() => _settings.showReadReceipts = v),
-                    ),
-                  ],
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: _user.isDiscoverable ? c.primaryLt : c.cardBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _user.isDiscoverable ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                    color: _user.isDiscoverable ? c.primary : c.textMid,
+                    size: 20,
+                  ),
                 ),
+                title: Text(
+                  'Allow others to discover me',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.textHigh,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _user.isDiscoverable
+                        ? 'You can be found in search, suggestions, and contact sync.'
+                        : 'You won\'t appear in search, suggestions, or contact sync. People who already have your chat or profile link can still reach you.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: _user.isDiscoverable ? c.primary : c.textMid,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                value: _user.isDiscoverable,
+                activeThumbColor: c.primary,
+                onChanged: _setDiscoverable,
               ),
-              const SizedBox(width: 12),
-              // Right Card: Appearance
-              Expanded(
-                child: _buildStitchCard(
-                  title: 'Appearance',
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                  children: [
-                    _buildStitchCompactTile(
+              Divider(color: c.border, height: 20),
+              _buildStitchSwitchRow(
+                icon: Icons.access_time_rounded,
+                title: 'Last seen',
+                value: _settings.showLastSeen,
+                onChanged: (v) => setState(() => _settings.showLastSeen = v),
+              ),
+              const SizedBox(height: 10),
+              _buildStitchSwitchRow(
+                icon: Icons.check_circle_outline_rounded,
+                title: 'Read receipts',
+                value: _settings.showReadReceipts,
+                onChanged: (v) => setState(() => _settings.showReadReceipts = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── 3. Appearance Card (Full Width) ─────────────────────────────────
+          _buildStitchCard(
+            title: 'Appearance',
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _buildStitchCompactTile(
                       icon: Icons.dark_mode_outlined,
                       title: 'Theme',
                       subtitle: context.watch<ThemeProvider>().themeMode == ThemeMode.dark
@@ -538,8 +603,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : 'System',
                       onTap: _showThemeModal,
                     ),
-                    const SizedBox(height: 10),
-                    _buildStitchCompactTile(
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildStitchCompactTile(
                       icon: Icons.g_translate_rounded,
                       title: 'App Language',
                       subtitle: 'English',
@@ -549,8 +616,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                       },
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -42,6 +42,18 @@ class UserService {
   // neither of which need (or display) more than a couple hundred users.
   // Without this, the read cost and client-side work scale linearly with
   // total registered users.
+  // Opt-out filtering is applied client-side rather than as a Firestore
+  // `where` clause on purpose: profiles created before the discoverability
+  // feature shipped have no `isDiscoverable` field at all, and a server-side
+  // equality/inequality filter would silently exclude every one of them.
+  // UserModel defaults the field to `true`, so filtering after decode keeps
+  // legacy users visible. The trade-off is that hidden users still occupy
+  // slots in [limit]; that is acceptable here because callers display at most
+  // a handful of entries out of the 200 fetched.
+  //
+  // NOTE: this hides opted-out users from *this app's* UI. It is not a read
+  // restriction — /users is readable by any authenticated client per
+  // firestore.rules. Treat it as "don't surface me", not as access control.
   Stream<List<UserModel>> getAllUsers(String currentUserId, {int limit = 200}) {
     return _firestore
         .collection(_usersCollection)
@@ -51,45 +63,25 @@ class UserService {
         .map((snapshot) {
       return snapshot.docs
           .map((doc) => UserModel.fromFirestore(doc))
+          .where((user) => user.isDiscoverable)
           .toList();
     });
   }
 
-  // Search users by name or phone — paginated to prevent unbounded reads.
-  // Uses no server-side search (Firestore doesn't natively support
-  // full-text search), but limits to 50 results per page to cap cost
-  // and client-side work. For production scale, consider Algolia/Typesense.
-  Future<List<UserModel>> searchUsers(
-    String query,
-    String currentUserId, {
-    DocumentSnapshot? startAfterDoc,
-    int limit = 30,
-  }) async {
+  /// Update profile discoverability status in Firestore.
+  ///
+  /// Deliberately rethrows: this is a privacy control, so a failed write must
+  /// surface to the caller (which reverts its optimistic UI) rather than
+  /// leaving the user believing they are hidden when they are not.
+  Future<void> updateDiscoverableStatus(String userId, bool isDiscoverable) async {
     try {
-      String lowerQuery = query.toLowerCase();
-
-      Query q = _firestore
+      await _firestore
           .collection(_usersCollection)
-          .where(FieldPath.documentId, isNotEqualTo: currentUserId)
-          .limit(limit);
-
-      if (startAfterDoc != null) {
-        q = q.startAfterDocument(startAfterDoc);
-      }
-
-      QuerySnapshot snapshot = await q.get();
-
-      List<UserModel> users = snapshot.docs
-          .map((doc) => UserModel.fromFirestore(doc))
-          .where((user) =>
-              user.name.toLowerCase().contains(lowerQuery) ||
-              (user.phoneNumber?.contains(query) ?? false))
-          .toList();
-
-      return users;
+          .doc(userId)
+          .update({'isDiscoverable': isDiscoverable});
     } catch (e) {
-      print('Error searching users: $e');
-      return [];
+      print('Error updating discoverable status: $e');
+      rethrow;
     }
   }
 
@@ -292,7 +284,13 @@ class UserService {
     }
   }
 
-  // Universal Multi-field Search (Name, @username, Phone Number, Email)
+  // Universal Multi-field Search (Name, @username, Phone Number, Email).
+  //
+  // Firestore has no native full-text search, so matching happens client-side
+  // over a capped page of documents — [limit] bounds both read cost and the
+  // work done here. For production scale, move this to Algolia/Typesense and
+  // mirror `isDiscoverable` into the index so opt-outs are honoured
+  // server-side.
   Future<List<UserModel>> searchUsersMultiField(
     String query,
     String currentUserId, {
@@ -320,6 +318,9 @@ class UserService {
       List<UserModel> users = snapshot.docs
           .map((doc) => UserModel.fromFirestore(doc))
           .where((user) {
+            // Respect the user's discoverability opt-out before matching.
+            if (!user.isDiscoverable) return false;
+
             bool matchName = user.name.toLowerCase().contains(cleanQuery);
             bool matchUsername = user.username != null &&
                 user.username!.toLowerCase().contains(handleQuery);
@@ -367,7 +368,11 @@ class UserService {
 
       for (var doc in snapshot.docs) {
         UserModel user = UserModel.fromFirestore(doc);
-        
+
+        // Enforced here (rather than at each call site) so contact sync and
+        // the suggestion engine can't drift apart on this policy.
+        if (!user.isDiscoverable) continue;
+
         bool phoneMatch = user.phoneNumber != null &&
             cleanPhones.any((p) =>
                 user.phoneNumber!.replaceAll(RegExp(r'[^\d+]'), '').contains(p) ||

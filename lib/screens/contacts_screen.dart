@@ -48,6 +48,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   Timer? _searchDebounce;
 
   UserModel? _currentUserModel;
+  StreamSubscription<UserModel?>? _currentUserSub;
   bool _isSyncingContacts = false;
 
   @override
@@ -61,17 +62,24 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     _loadCurrentUser();
   }
 
-  Future<void> _loadCurrentUser() async {
-    final user = await _userService.getUserById(widget.currentUserId);
-    if (mounted) {
-      setState(() {
-        _currentUserModel = user;
-      });
-    }
+  // Watched rather than fetched once, so the discoverability banner reflects
+  // the setting being toggled elsewhere (Settings) without needing a manual
+  // refresh of this screen.
+  void _loadCurrentUser() {
+    _currentUserSub?.cancel();
+    _currentUserSub =
+        _userService.getUserStream(widget.currentUserId).listen((user) {
+      if (mounted && user != null) {
+        setState(() {
+          _currentUserModel = user;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _currentUserSub?.cancel();
     _searchController.dispose();
     _searchDebounce?.cancel();
     _tabController.dispose();
@@ -1125,78 +1133,40 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     );
   }
 
-  // TAB 3: Universal Search & Discover
+  // TAB 3: Universal Search & Discover (Redesigned with Stitch Specs)
   Widget _buildDiscoverTab() {
     final c = AppThemeColors.of(context);
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              TextField(
-                controller: _searchController,
-                onChanged: _onSearchChanged,
-                style: GoogleFonts.poppins(color: c.textHigh, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Search by Name, @username, Phone, Email...',
-                  hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 13),
-                  prefixIcon: Icon(Icons.search_rounded, color: c.primary),
-                  filled: true,
-                  fillColor: c.surfaceAlt,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(
-                      color: c.isDark ? Colors.white.withOpacity(0.05) : Colors.transparent,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide(color: c.primary, width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: TextField(
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            style: GoogleFonts.poppins(color: c.textHigh, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search name, @handle, phone or email...',
+              hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 14),
+              prefixIcon: Icon(Icons.search_rounded, color: c.primary),
+              filled: true,
+              fillColor: c.surfaceAlt,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(20),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(20),
+                borderSide: BorderSide(
+                  color: c.isDark ? Colors.white.withOpacity(0.06) : Colors.transparent,
                 ),
               ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _isSyncingContacts ? null : _syncDeviceContacts,
-                  icon: _isSyncingContacts
-                      ? SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: c.primary,
-                          ),
-                        )
-                      : Icon(Icons.contacts_rounded, size: 18, color: c.primary),
-                  label: Text(
-                    _isSyncingContacts ? 'Syncing...' : 'Sync Device Contacts',
-                    style: GoogleFonts.poppins(
-                      color: c.textHigh,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(
-                      color: c.isDark ? Colors.white.withOpacity(0.1) : c.border,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(20),
+                borderSide: BorderSide(color: c.primary, width: 1.5),
               ),
-            ],
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            ),
           ),
         ),
         Expanded(
@@ -1249,9 +1219,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           child: Container(
             decoration: BoxDecoration(
               color: c.cardBg,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
+                color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
               ),
             ),
             child: UserDiscoverTile(
@@ -1272,64 +1242,173 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     final c = AppThemeColors.of(context);
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Hero Section (Stitch Design Pattern)
           Container(
-            padding: const EdgeInsets.all(16),
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: c.primaryLt,
-              borderRadius: BorderRadius.circular(18),
+              color: c.cardBg,
+              borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: c.primary.withOpacity(0.15),
+                color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: c.primary.withOpacity(0.08),
+                  blurRadius: 24,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: c.primary,
-                    borderRadius: BorderRadius.circular(12),
+                    color: c.primaryLt,
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(Icons.explore_rounded, color: Colors.white, size: 24),
+                  child: Icon(Icons.explore_rounded, color: c.primary, size: 28),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Discover People on GupShupGo',
-                        style: GoogleFonts.poppins(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: c.textHigh,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Send a friend request to connect, or search by custom @username, phone number, or email.',
-                        style: GoogleFonts.poppins(fontSize: 12, color: c.textMid, height: 1.3),
-                      ),
-                    ],
+                const SizedBox(height: 14),
+                Text(
+                  'Discover People on GupShupGo',
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: c.textHigh,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Expand your circle with high-fidelity connections across the globe.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    color: c.textMid,
+                    height: 1.4,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          Text(
-            'SUGGESTED USERS',
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: c.textMid,
-              letterSpacing: 1.2,
+
+          const SizedBox(height: 16),
+
+          if (_currentUserModel != null && !_currentUserModel!.isDiscoverable) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: c.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: c.primary.withOpacity(0.2),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.visibility_off_rounded, color: c.primary, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Discoverability is OFF, so you won\'t appear in other people\'s search, suggestions, or contact sync. You can still find and add people here.',
+                      style: GoogleFonts.poppins(fontSize: 12, color: c.textHigh, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Refined Sync Device Contacts Tile
+          InkWell(
+            onTap: _isSyncingContacts ? null : _syncDeviceContacts,
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: c.cardBg,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: c.primaryLt,
+                      shape: BoxShape.circle,
+                    ),
+                    child: _isSyncingContacts
+                        ? Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: c.primary,
+                            ),
+                          )
+                        : Icon(Icons.sync_rounded, color: c.primary, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _isSyncingContacts ? 'Syncing Contacts...' : 'Sync Device Contacts',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: c.textHigh,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Find your friends instantly from phone contacts',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: c.textMid,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: c.textMid, size: 22),
+                ],
+              ),
             ),
           ),
+
+          const SizedBox(height: 28),
+
+          // Suggested Users Header & List
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'SUGGESTED USERS',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: c.textMid,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
+
           StreamBuilder<List<UserModel>>(
             stream: _userService.getAllUsers(widget.currentUserId),
             builder: (context, snapshot) {
@@ -1339,26 +1418,34 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
               List<UserModel> suggested = snapshot.data ?? [];
               if (suggested.isEmpty) {
-                return Text('No suggested users available right now.', style: GoogleFonts.poppins(color: c.textMid));
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: c.surfaceAlt,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    'No suggested users available right now.',
+                    style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                  ),
+                );
               }
 
-              return ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: suggested.length > 8 ? 8 : suggested.length,
-                itemBuilder: (context, index) {
+              return Column(
+                children: suggested.take(8).map((suggestedUser) {
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 10),
                     child: Container(
                       decoration: BoxDecoration(
                         color: c.cardBg,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: c.isDark ? Colors.white.withOpacity(0.05) : c.divider,
+                          color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
                         ),
                       ),
                       child: UserDiscoverTile(
-                        targetUser: suggested[index],
+                        targetUser: suggestedUser,
                         currentUserId: widget.currentUserId,
                         currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
                         currentUserUsername: _currentUserModel?.username,
@@ -1367,7 +1454,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       ),
                     ),
                   );
-                },
+                }).toList(),
               );
             },
           ),

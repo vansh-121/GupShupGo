@@ -293,6 +293,8 @@ class FriendRequestService {
         if (!candidateDoc.exists) continue;
 
         final candidateUser = UserModel.fromFirestore(candidateDoc);
+        if (!candidateUser.isDiscoverable) continue;
+
         final String reason = friendNames.length == 1
             ? 'Mutual friend with ${friendNames.first}'
             : '${friendNames.length} mutual friends';
@@ -324,6 +326,7 @@ class FriendRequestService {
 
             for (var matchedUser in matches) {
               if (suggestionsMap.length >= 5) break;
+              // matchDeviceContacts already drops non-discoverable users.
               if (excludedUserIds.contains(matchedUser.id) || suggestionsMap.containsKey(matchedUser.id)) {
                 continue;
               }
@@ -349,6 +352,7 @@ class FriendRequestService {
         for (var doc in generalSnap.docs) {
           if (suggestionsMap.length >= 3) break;
           final u = UserModel.fromFirestore(doc);
+          if (!u.isDiscoverable) continue;
           if (excludedUserIds.contains(u.id) || suggestionsMap.containsKey(u.id)) {
             continue;
           }
