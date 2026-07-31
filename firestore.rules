@@ -426,10 +426,31 @@ service cloud.firestore {
     // releases the old one (if any) inside a single transaction.
     match /usernames/{handle} {
       allow read: if request.auth != null;
+
+      // The handle format is enforced here as well as on the client.
+      // `^[a-z0-9_]{3,20}$` mirrors the check in
+      // username_setup_screen.dart and UserService.updateUsername.
+      //
+      // Without it the rule validated only the `uid` field and ignored the
+      // document ID entirely, so a client calling the SDK directly could
+      // reserve arbitrary ids — handles with spaces, punctuation or emoji,
+      // or 1-character handles — permanently polluting this collection,
+      // since a claimed slot can only be released by its owner.
+      //
+      // Scope note: this does NOT stop handle squatting. Reserving a
+      // *validly formatted* handle you never intend to use is still allowed
+      // by `uid == request.auth.uid`, because a reservation is deliberately
+      // decoupled from the user's actual `username` field. Preventing that
+      // needs a Cloud Function that claims the handle and sets the profile
+      // field in one Admin-SDK write.
       allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid;
+        && request.resource.data.uid == request.auth.uid
+        && handle.matches('^[a-z0-9_]{3,20}$');
+
       // Handles are immutable once claimed — to change handle, the owner
       // deletes this doc and creates a new one under the new handle.
+      // Delete is intentionally NOT format-gated, so an owner can still
+      // release a legacy handle that predates this rule.
       allow update: if false;
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }

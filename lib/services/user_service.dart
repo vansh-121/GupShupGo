@@ -182,10 +182,17 @@ class UserService {
   // existence is a point-lookup and (combined with the security rule that
   // forbids overwriting someone else's reservation) gives us a real
   // uniqueness guarantee instead of a racy check-then-write over a query.
+  /// The one definition of a valid handle, matching the `handle.matches(...)`
+  /// guard on /usernames/{handle} in firestore.rules. Anything this rejects
+  /// will be rejected server-side too, so callers should check it before
+  /// offering a handle as available.
+  static final RegExp handleFormat = RegExp(r'^[a-z0-9_]{3,20}$');
+
   Future<bool> isUsernameAvailable(String username, {String? currentUserId}) async {
     try {
       String cleanUsername = username.trim().toLowerCase();
-      if (cleanUsername.length < 3 || cleanUsername.length > 20) return false;
+      // Was length-only, which could report an unusable handle as available.
+      if (!handleFormat.hasMatch(cleanUsername)) return false;
 
       final doc = await _firestore
           .collection(_usernamesCollection)
@@ -214,6 +221,16 @@ class UserService {
     final cleanUsername = username.trim().toLowerCase();
     if (cleanUsername.length < 3 || cleanUsername.length > 20) {
       throw Exception('Username must be between 3 and 20 characters.');
+    }
+    // Character-set validation lived only in UsernameSetupScreen, so calling
+    // this method from anywhere else could write a handle like "bob smith".
+    // firestore.rules now rejects those outright, which would surface here as
+    // an opaque permission-denied — so validate it where the caller can get a
+    // usable message. Keep this pattern in sync with the rule for
+    // /usernames/{handle}.
+    if (!handleFormat.hasMatch(cleanUsername)) {
+      throw Exception(
+          'Username can only contain lowercase letters, numbers and underscores.');
     }
 
     final userRef = _firestore.collection(_usersCollection).doc(userId);
