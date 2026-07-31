@@ -140,9 +140,11 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   // ── Streak restore (Pro perk) ─────────────────────────────────────────────
-
-  Future<bool> canRestoreStreakFree() => _service.canRestoreStreakFree();
-  Future<void> recordStreakRestore() => _service.recordStreakRestore();
+  //
+  // `canRestoreStreakFree` / `recordStreakRestore` are gone. The weekly free
+  // restore allowance is server-side (`users/{uid}.streakRestoreAllowance`):
+  // availability comes from `GET /streakRestoreQuote` (`canUseFreePerk`) and it
+  // is consumed inside the `POST /streakRestore` transaction. See `StreakApi`.
 
   // ── Feature gate helpers ──────────────────────────────────────────────────
 

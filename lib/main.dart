@@ -28,6 +28,7 @@ import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
+import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
@@ -86,6 +87,15 @@ void main() async {
 
   // ── Firebase Performance Monitoring — fire-and-forget ─────────────────
   unawaited(PerformanceService.init().catchError((_) {}));
+
+  // ── Streak clock: sample the server offset and keep it refreshed ───────
+  // Fire-and-forget: until the first sample lands, ServerClock.trusted is
+  // false and every streak countdown stays suppressed (the count and risk
+  // level still render). Awaiting this would delay the first frame by a
+  // network round-trip for no UX gain.
+  unawaited(ServerClock.start().catchError((Object e) {
+    debugPrint('ServerClock.start failed (non-fatal): $e');
+  }));
 
   // ── Feature Flags (Remote Config) — fire-and-forget ───────────────────
   unawaited(FeatureFlagService.instance.init().catchError((_) {}));
@@ -477,6 +487,9 @@ class _AuthGateState extends State<_AuthGate> {
   @override
   void dispose() {
     _connectivitySub?.cancel();
+    // The gate is the root of the authenticated app: when it goes away the
+    // hourly clock refresh has nothing left to serve.
+    ServerClock.stop();
     super.dispose();
   }
 

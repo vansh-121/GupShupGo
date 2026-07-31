@@ -17,6 +17,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
+import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 
@@ -784,6 +785,12 @@ class AuthService {
       // Clear subscription cache (resets to free plan)
       try {
         await SubscriptionService.instance.clearSubscription();
+      } catch (_) {}
+      // Drop every streak stream, derived view and the server-clock sample so
+      // the next user on this device can't inherit this session's state.
+      // Replaces the old in-memory streak cache clear in ChatService.
+      try {
+        await StreakRepository.instance.clearAll();
       } catch (_) {}
       await _googleSignIn.signOut();
       await _auth.signOut();

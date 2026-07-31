@@ -1,38 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// The risk level of a bond based on how long ago the last mutual message was.
-enum StreakRiskLevel {
-  /// 0–19 hours: Bond is healthy. Show 🔥 with normal orange glow.
-  normal,
+import '../services/streak/streak_repository.dart';
+import '../services/streak/streak_state.dart';
 
-  /// 20–35 hours: Bond is at risk. Show ⚠️ with amber pulse.
-  atRisk,
-
-  /// 36–47 hours: Bond is critical. Show ⏳ with aggressive red pulse.
-  critical,
-}
-
-/// Computes the [StreakRiskLevel] from the last mutual interaction date.
-StreakRiskLevel computeStreakRisk(DateTime? lastInteractionDate) {
-  if (lastInteractionDate == null) return StreakRiskLevel.normal;
-  final hoursSince = DateTime.now().difference(lastInteractionDate).inHours;
-  if (hoursSince >= 36) return StreakRiskLevel.critical;
-  if (hoursSince >= 20) return StreakRiskLevel.atRisk;
-  return StreakRiskLevel.normal;
-}
-
-/// Computes the remaining time until the bond expires (48h from last interaction).
-/// Returns null if the bond is healthy or the date is null.
-Duration? computeTimeRemaining(DateTime? lastInteractionDate) {
-  if (lastInteractionDate == null) return null;
-  final expiry = lastInteractionDate.add(const Duration(hours: 48));
-  final remaining = expiry.difference(DateTime.now());
-  if (remaining.isNegative) return Duration.zero;
-  return remaining;
-}
+export '../services/streak/streak_state.dart' show StreakRiskLevel;
 
 /// Formats a remaining duration as a compact string:
 ///  - "12h" if > 6 hours remaining
@@ -48,29 +20,32 @@ String formatTimeRemaining(Duration d) {
   return '${d.inMinutes}m';
 }
 
-/// A self-animating bond badge that displays:
+/// A bond badge that displays:
 ///  - 🔥 N  for normal bonds
 ///  - ⚠️ N · Xh left  for at-risk bonds (amber pulsing border)
 ///  - ⏳ N · X:MM  for critical bonds (red aggressive pulsing glow)
+///  - 💔 N  for a lapsed bond still inside its restore window
 ///
-/// Includes a live countdown timer that updates every minute when
-/// the bond is at risk or critical (like Snapchat's hourglass).
+/// Every number and every instant comes from the [StreakView]: the countdown is
+/// `deadlineAt - view.evaluatedAt`, never `DateTime.now()`. `StreakRepository`
+/// re-derives the view once a minute, which is what makes the countdown tick.
+/// When [StreakView.canShowCountdown] is false (untrusted clock or a stale
+/// observation) the countdown text is suppressed, while the server-stamped
+/// count and risk level still render.
 ///
 /// Usage:
 /// ```dart
-/// StreakBadge(streakCount: room.streakCount, lastInteractionDate: room.lastInteractionDate)
+/// StreakBadge(view: streakView, compact: false)
 /// ```
 class StreakBadge extends StatefulWidget {
-  final int streakCount;
-  final DateTime? lastInteractionDate;
+  final StreakView view;
 
   /// Whether to show the full "N day bond" label or just the count.
   final bool compact;
 
   const StreakBadge({
     super.key,
-    required this.streakCount,
-    required this.lastInteractionDate,
+    required this.view,
     this.compact = true,
   });
 
@@ -82,7 +57,6 @@ class _StreakBadgeState extends State<StreakBadge>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnim;
-  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -95,61 +69,46 @@ class _StreakBadgeState extends State<StreakBadge>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
     _updateAnimation();
-    _startCountdownIfNeeded();
   }
 
   @override
   void didUpdateWidget(StreakBadge oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.lastInteractionDate != widget.lastInteractionDate) {
+    if (oldWidget.view.riskLevel != widget.view.riskLevel) {
       _updateAnimation();
-      _startCountdownIfNeeded();
     }
   }
 
   void _updateAnimation() {
-    final risk = computeStreakRisk(widget.lastInteractionDate);
-    if (risk == StreakRiskLevel.normal) {
-      _pulseController.stop();
-      _pulseController.value = 1.0;
-    } else if (risk == StreakRiskLevel.atRisk) {
-      _pulseController.duration = const Duration(milliseconds: 1400);
-      _pulseController.repeat(reverse: true);
-    } else {
-      // Critical: faster pulse
-      _pulseController.duration = const Duration(milliseconds: 650);
-      _pulseController.repeat(reverse: true);
-    }
-  }
-
-  void _startCountdownIfNeeded() {
-    _countdownTimer?.cancel();
-    final risk = computeStreakRisk(widget.lastInteractionDate);
-    if (risk != StreakRiskLevel.normal) {
-      // Update every minute for the countdown display
-      _countdownTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-        if (mounted) setState(() {});
-      });
+    switch (widget.view.riskLevel) {
+      case StreakRiskLevel.normal:
+      case StreakRiskLevel.broken:
+        _pulseController.stop();
+        _pulseController.value = 1.0;
+      case StreakRiskLevel.atRisk:
+        _pulseController.duration = const Duration(milliseconds: 1400);
+        _pulseController.repeat(reverse: true);
+      case StreakRiskLevel.critical:
+        // Critical: faster pulse
+        _pulseController.duration = const Duration(milliseconds: 650);
+        _pulseController.repeat(reverse: true);
     }
   }
 
   @override
   void dispose() {
-    _countdownTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.streakCount <= 0) return const SizedBox.shrink();
-
-    final risk = computeStreakRisk(widget.lastInteractionDate);
+    if (!widget.view.hasBadge) return const SizedBox.shrink();
 
     return AnimatedBuilder(
       animation: _pulseAnim,
       builder: (context, child) {
-        return _buildBadge(context, risk);
+        return _buildBadge(context, widget.view.riskLevel);
       },
     );
   }
@@ -159,24 +118,31 @@ class _StreakBadgeState extends State<StreakBadge>
       StreakRiskLevel.normal => '🔥',
       StreakRiskLevel.atRisk => '⚠️',
       StreakRiskLevel.critical => '⏳',
+      StreakRiskLevel.broken => '💔',
     };
 
     final textColor = switch (risk) {
       StreakRiskLevel.normal => Colors.orange[400]!,
       StreakRiskLevel.atRisk => Colors.amber[600]!,
       StreakRiskLevel.critical => Colors.red[400]!,
+      StreakRiskLevel.broken => Colors.red[400]!,
     };
 
     final bgColor = switch (risk) {
       StreakRiskLevel.normal => Colors.orange.withOpacity(0.12),
       StreakRiskLevel.atRisk => Colors.amber.withOpacity(0.12),
-      StreakRiskLevel.critical => Colors.red.withOpacity(0.12 * _pulseAnim.value),
+      StreakRiskLevel.critical =>
+        Colors.red.withOpacity(0.12 * _pulseAnim.value),
+      StreakRiskLevel.broken => Colors.red.withOpacity(0.12),
     };
 
     final borderColor = switch (risk) {
       StreakRiskLevel.normal => Colors.orange.withOpacity(0.25),
-      StreakRiskLevel.atRisk => Colors.amber.withOpacity(0.4 * _pulseAnim.value),
-      StreakRiskLevel.critical => Colors.red.withOpacity(0.5 * _pulseAnim.value),
+      StreakRiskLevel.atRisk =>
+        Colors.amber.withOpacity(0.4 * _pulseAnim.value),
+      StreakRiskLevel.critical =>
+        Colors.red.withOpacity(0.5 * _pulseAnim.value),
+      StreakRiskLevel.broken => Colors.red.withOpacity(0.25),
     };
 
     final glowColor = switch (risk) {
@@ -185,22 +151,8 @@ class _StreakBadgeState extends State<StreakBadge>
         Colors.amber.withOpacity(0.12 * _pulseAnim.value),
       StreakRiskLevel.critical =>
         Colors.red.withOpacity(0.25 * _pulseAnim.value),
+      StreakRiskLevel.broken => null,
     };
-
-    // Build the label with countdown for at-risk / critical
-    String label;
-    if (risk == StreakRiskLevel.normal) {
-      label = widget.compact
-          ? '${widget.streakCount}'
-          : '${widget.streakCount} day bond';
-    } else {
-      final remaining = computeTimeRemaining(widget.lastInteractionDate);
-      if (remaining != null && remaining > Duration.zero) {
-        label = '${widget.streakCount} · ${formatTimeRemaining(remaining)}';
-      } else {
-        label = '${widget.streakCount}';
-      }
-    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -224,7 +176,7 @@ class _StreakBadgeState extends State<StreakBadge>
           Text(emoji, style: const TextStyle(fontSize: 10)),
           const SizedBox(width: 2),
           Text(
-            label,
+            _label(risk),
             style: GoogleFonts.poppins(
               fontSize: 9,
               fontWeight: FontWeight.w700,
@@ -235,6 +187,23 @@ class _StreakBadgeState extends State<StreakBadge>
       ),
     );
   }
+
+  /// The badge text. The countdown is appended only for a bond that is both
+  /// at risk and safe to count down (trusted clock, fresh observation).
+  String _label(StreakRiskLevel risk) {
+    final view = widget.view;
+    if (risk == StreakRiskLevel.broken) return '${view.restorableCount}';
+    if (risk == StreakRiskLevel.normal) {
+      return widget.compact ? '${view.count}' : '${view.count} day bond';
+    }
+    if (view.canShowCountdown) {
+      final remaining = view.timeRemaining;
+      if (remaining != null && remaining > Duration.zero) {
+        return '${view.count} · ${formatTimeRemaining(remaining)}';
+      }
+    }
+    return '${view.count}';
+  }
 }
 
 // ─── Arcade Card Variant ─────────────────────────────────────────────────────────────
@@ -242,13 +211,11 @@ class _StreakBadgeState extends State<StreakBadge>
 
 /// A larger arc-style badge overlay for the Gup Arcade bond cards.
 class StreakArcadeBadge extends StatefulWidget {
-  final int streakCount;
-  final DateTime? lastInteractionDate;
+  final StreakView view;
 
   const StreakArcadeBadge({
     super.key,
-    required this.streakCount,
-    required this.lastInteractionDate,
+    required this.view,
   });
 
   @override
@@ -276,22 +243,23 @@ class _StreakArcadeBadgeState extends State<StreakArcadeBadge>
   @override
   void didUpdateWidget(StreakArcadeBadge oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.lastInteractionDate != widget.lastInteractionDate) {
+    if (oldWidget.view.riskLevel != widget.view.riskLevel) {
       _updateAnimation();
     }
   }
 
   void _updateAnimation() {
-    final risk = computeStreakRisk(widget.lastInteractionDate);
-    if (risk == StreakRiskLevel.normal) {
-      _pulseController.stop();
-      _pulseController.value = 1.0;
-    } else if (risk == StreakRiskLevel.atRisk) {
-      _pulseController.duration = const Duration(milliseconds: 1400);
-      _pulseController.repeat(reverse: true);
-    } else {
-      _pulseController.duration = const Duration(milliseconds: 600);
-      _pulseController.repeat(reverse: true);
+    switch (widget.view.riskLevel) {
+      case StreakRiskLevel.normal:
+      case StreakRiskLevel.broken:
+        _pulseController.stop();
+        _pulseController.value = 1.0;
+      case StreakRiskLevel.atRisk:
+        _pulseController.duration = const Duration(milliseconds: 1400);
+        _pulseController.repeat(reverse: true);
+      case StreakRiskLevel.critical:
+        _pulseController.duration = const Duration(milliseconds: 600);
+        _pulseController.repeat(reverse: true);
     }
   }
 
@@ -303,31 +271,53 @@ class _StreakArcadeBadgeState extends State<StreakArcadeBadge>
 
   @override
   Widget build(BuildContext context) {
-    final risk = computeStreakRisk(widget.lastInteractionDate);
+    final risk = widget.view.riskLevel;
+    final pulsing = risk == StreakRiskLevel.atRisk ||
+        risk == StreakRiskLevel.critical;
 
     final emoji = switch (risk) {
       StreakRiskLevel.normal => '🔥',
       StreakRiskLevel.atRisk => '⚠️',
       StreakRiskLevel.critical => '⏳',
+      StreakRiskLevel.broken => '💔',
     };
 
     final gradientColors = switch (risk) {
-      StreakRiskLevel.normal => [const Color(0xFFFF8008), const Color(0xFFFFC837)],
-      StreakRiskLevel.atRisk => [const Color(0xFFFFB300), const Color(0xFFFFD54F)],
-      StreakRiskLevel.critical => [const Color(0xFFFF6B6B), const Color(0xFFEE5A5A)],
+      StreakRiskLevel.normal => [
+          const Color(0xFFFF8008),
+          const Color(0xFFFFC837)
+        ],
+      StreakRiskLevel.atRisk => [
+          const Color(0xFFFFB300),
+          const Color(0xFFFFD54F)
+        ],
+      StreakRiskLevel.critical => [
+          const Color(0xFFFF6B6B),
+          const Color(0xFFEE5A5A)
+        ],
+      StreakRiskLevel.broken => [
+          const Color(0xFFFF6B6B),
+          const Color(0xFFEE5A5A)
+        ],
     };
 
     final glowColor = switch (risk) {
       StreakRiskLevel.normal => Colors.orange,
       StreakRiskLevel.atRisk => Colors.amber,
       StreakRiskLevel.critical => Colors.red,
+      StreakRiskLevel.broken => Colors.red,
     };
 
     final subtitle = switch (risk) {
       StreakRiskLevel.normal => null,
       StreakRiskLevel.atRisk => 'At risk!',
       StreakRiskLevel.critical => 'Send now!',
+      StreakRiskLevel.broken => 'Restore?',
     };
+
+    final count = widget.view.count > 0
+        ? widget.view.count
+        : widget.view.restorableCount;
 
     return AnimatedBuilder(
       animation: _pulseAnim,
@@ -342,13 +332,9 @@ class _StreakArcadeBadgeState extends State<StreakArcadeBadge>
                 boxShadow: [
                   BoxShadow(
                     color: glowColor.withOpacity(
-                      risk == StreakRiskLevel.normal
-                          ? 0.35
-                          : 0.35 + 0.3 * _pulseAnim.value,
+                      pulsing ? 0.35 + 0.3 * _pulseAnim.value : 0.35,
                     ),
-                    blurRadius: risk == StreakRiskLevel.normal
-                        ? 6
-                        : 6 + 8 * _pulseAnim.value,
+                    blurRadius: pulsing ? 6 + 8 * _pulseAnim.value : 6,
                     offset: const Offset(0, 2),
                   ),
                 ],
@@ -359,7 +345,7 @@ class _StreakArcadeBadgeState extends State<StreakArcadeBadge>
                   Text(emoji, style: const TextStyle(fontSize: 10)),
                   const SizedBox(width: 1),
                   Text(
-                    '${widget.streakCount}',
+                    '$count',
                     style: GoogleFonts.poppins(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
@@ -375,9 +361,9 @@ class _StreakArcadeBadgeState extends State<StreakArcadeBadge>
                 style: GoogleFonts.poppins(
                   fontSize: 8,
                   fontWeight: FontWeight.w700,
-                  color: risk == StreakRiskLevel.critical
-                      ? Colors.red[400]
-                      : Colors.amber[700],
+                  color: risk == StreakRiskLevel.atRisk
+                      ? Colors.amber[700]
+                      : Colors.red[400],
                 ),
               ),
             ],

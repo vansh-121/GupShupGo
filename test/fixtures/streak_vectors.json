@@ -1,0 +1,1447 @@
+{
+  "_readme": [
+    "SHARED GOLDEN VECTORS FOR THE STREAK ENGINE. Consumed identically by",
+    "test/services/streak/streak_vectors_test.dart (Dart) and",
+    "functions/test/engine.test.js (Node). Only JSON-native types appear here:",
+    "instants are ISO-8601 UTC strings, canonical days are 'YYYY-MM-DD' keys, so",
+    "neither language needs a Firestore Timestamp to read the file.",
+    "",
+    "THIS FILE IS THE SPECIFICATION. Regenerating it is the only sanctioned way to",
+    "change engine semantics. A change here MUST fail the JavaScript suite until",
+    "functions/streak/engine.js is ported to match, and MUST fail the Dart suite",
+    "until lib/services/streak/streak_engine.dart is ported to match. Never relax a",
+    "vector to make a suite green: either the port is wrong, or the semantics",
+    "changed on purpose and both engines plus this fixture move together.",
+    "",
+    "Canonical zone: Asia/Kolkata, fixed UTC+05:30, so canonical day D begins at",
+    "18:30:00Z on the previous calendar date. Every instant below is a multiple of",
+    "that boundary plus a whole number of hours, so the arithmetic is checkable by",
+    "hand. All dates are in May 2024, a DST-free month in every zone CI might run",
+    "in.",
+    "",
+    "'stored' is a schemaVersion-2 state document as the readers accept it.",
+    "'participants' is passed to evaluate() verbatim, NOT sorted or deduplicated,",
+    "so the step-1 refusals can be expressed. 'event' is null or {uid, instant}.",
+    "'expected.next' pins only the salient carried-forward fields; the rest of the",
+    "document is covered by the transition list and the per-language unit tests.",
+    "",
+    "'restoreCostTiers' pins the tier table that GamificationService.getRestoreCost",
+    "and its JS mirror must both reproduce. The cost function does NOT live in the",
+    "engine; the table lives here so the two mirrors cannot drift apart either."
+  ],
+
+  "engineVersion": 1,
+  "schemaVersion": 2,
+  "dayZone": "Asia/Kolkata",
+  "dayZoneOffsetMinutes": 330,
+  "milestones": [7, 30, 100, 365],
+  "restoreWindowHours": 24,
+  "atRiskThresholdHours": 24,
+  "criticalThresholdHours": 6,
+
+  "restoreCostTiers": [
+    { "count": 0, "cost": 10 },
+    { "count": 9, "cost": 10 },
+    { "count": 10, "cost": 25 },
+    { "count": 29, "cost": 25 },
+    { "count": 30, "cost": 50 },
+    { "count": 99, "cost": 50 },
+    { "count": 100, "cost": 100 }
+  ],
+
+  "vectors": [
+    {
+      "name": "step1/self-chat is refused outright",
+      "notes": "1.9 / 2.9. participants collapses to one uid, so no mutual day is reachable. The document is returned untouched and changed is false, so no writer acts.",
+      "stored": { "schemaVersion": 2, "engineVersion": 1, "participants": ["alice"] },
+      "participants": ["alice", "alice"],
+      "event": { "uid": "alice", "instant": "2024-05-01T06:30:00.000Z" },
+      "serverNow": "2024-05-01T07:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "normal",
+        "transitions": [],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": {},
+          "longestForRoom": 0
+        }
+      }
+    },
+    {
+      "name": "step1/a single-uid room is refused",
+      "notes": "A degenerate participants list is refused rather than guessed at.",
+      "stored": { "schemaVersion": 2, "engineVersion": 1, "participants": ["alice", "bob"] },
+      "participants": ["alice"],
+      "event": { "uid": "alice", "instant": "2024-05-01T06:30:00.000Z" },
+      "serverNow": "2024-05-01T07:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "normal",
+        "transitions": [],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": {},
+          "longestForRoom": 0
+        }
+      }
+    },
+    {
+      "name": "step1/a three-uid room is refused without destroying the document",
+      "notes": "The reported count is 0 so nothing renders, but next is stored: count 5 and longestForRoom 5 survive.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 5,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob", "carol"],
+      "event": { "uid": "alice", "instant": "2024-05-05T12:30:00.000Z" },
+      "serverNow": "2024-05-05T12:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "normal",
+        "transitions": [],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+
+    {
+      "name": "step2/a one-sided first send records participation only",
+      "notes": "2.2. No anchor, no count, no deadline until the day is actually mutual.",
+      "stored": { "schemaVersion": 2, "engineVersion": 1, "participants": ["alice", "bob"] },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "alice", "instant": "2024-05-01T06:30:00.000Z" },
+      "serverNow": "2024-05-01T07:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-01" },
+          "longestForRoom": 0
+        }
+      }
+    },
+    {
+      "name": "step5/the partner completing the day starts the streak at 1",
+      "notes": "3.3. deadlineAt is dayStartUtc(mutualDay + 2): the mutual day itself plus one whole grace day.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "participants": ["alice", "bob"],
+        "sendDays": { "alice": "2024-05-01" },
+        "sendInstants": { "alice": "2024-05-01T06:30:00.000Z" }
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-01T08:30:00.000Z" },
+      "serverNow": "2024-05-01T08:30:00.000Z",
+      "expected": {
+        "count": 1,
+        "lastMutualDay": "2024-05-01",
+        "deadlineAt": "2024-05-02T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "started", "longestRaised"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-01", "bob": "2024-05-01" },
+          "longestForRoom": 1
+        }
+      }
+    },
+    {
+      "name": "step6/extra traffic on a counted day moves neither anchor nor deadline",
+      "notes": "THE 1.2 FIX. sameDay is reported for observability; changed is false so the writer skips the write entirely.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "alice", "instant": "2024-05-05T12:30:00.000Z" },
+      "serverNow": "2024-05-05T12:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["sameDay"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step7/read-side derivation of an untouched active bond is a noop",
+      "notes": "2.15. event == null is the display and sweeper call shape.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-05T12:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step5/the completing reply on the next day increments by exactly one",
+      "notes": "3.1. alice already sent on the grace day; bob's reply makes it mutual and the anchor advances one day.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 5,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 9
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 4,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 9
+        }
+      }
+    },
+    {
+      "name": "step7/a one-sided send on the grace day keeps the deadline where it was",
+      "notes": "Deadline/break-rule agreement: participation alone never refreshes the deadline, so the countdown keeps running and the level falls to atRisk with 12h left.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 9
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "alice", "instant": "2024-05-06T06:30:00.000Z" },
+      "serverNow": "2024-05-06T06:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "transitions": ["participationRecorded"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+          "longestForRoom": 9
+        }
+      }
+    },
+    {
+      "name": "step5/a mutual day after a 2+ day gap stamps the break then restarts at 1",
+      "notes": "3.4 / 2.16. brokenAt is the deadline that was missed (dayStartUtc(horizon + 2)), never the instant the gap was noticed. The lapsed count stays restorable.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 6,
+        "participants": ["alice", "bob"],
+        "count": 6,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "sendDays": { "alice": "2024-05-07", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-07T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 9
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-07T07:30:00.000Z" },
+      "serverNow": "2024-05-07T07:30:00.000Z",
+      "expected": {
+        "count": 1,
+        "lastMutualDay": "2024-05-07",
+        "deadlineAt": "2024-05-08T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "broken", "started"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 6,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-07", "bob": "2024-05-07" },
+          "longestForRoom": 9
+        }
+      }
+    },
+    {
+      "name": "step5/the double-break guard leaves previousCount alone on a restart",
+      "notes": "3.4 / 2.16. A sweep already zeroed the count and stamped the break at 2024-05-06T18:30Z with previousCount 6. Restarting must NOT re-stamp: step 5's break branch only fires when count > 0, so the live restore offer of 6 is not silently withdrawn and replaced by 0. No 'broken' transition is emitted a second time.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 7,
+        "participants": ["alice", "bob"],
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "sendDays": { "alice": "2024-05-07", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-07T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "previousCount": 6,
+        "brokenAt": "2024-05-06T18:30:00.000Z",
+        "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+        "longestForRoom": 9
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-07T07:30:00.000Z" },
+      "serverNow": "2024-05-07T07:30:00.000Z",
+      "expected": {
+        "count": 1,
+        "lastMutualDay": "2024-05-07",
+        "deadlineAt": "2024-05-08T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "started"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 6,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-07", "bob": "2024-05-07" },
+          "longestForRoom": 9
+        }
+      }
+    },
+
+    {
+      "name": "step8/one millisecond before the deadline the bond is still alive",
+      "notes": "Break rule boundary, live side. Nothing is written.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 5,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T18:29:59.999Z",
+      "expected": {
+        "count": 5,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+    {
+      "name": "step8/at the deadline it breaks, with no writer and no event",
+      "notes": "2.15 / 2.16. The anchor and the send evidence survive; brokenAt is the deadline and the 24h restore window opens from there.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 5,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T18:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["broken"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 5,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+    {
+      "name": "step8+9/five weeks stale breaks and closes the window in one pass",
+      "notes": "1.13 / 1.17. The 🔥 badge on a month-dead bond: count 0, nothing restorable, history intact.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 5,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-06-09T06:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["broken", "restoreWindowExpired"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+
+    {
+      "name": "step10/24h + 1ms remaining is normal",
+      "notes": "More than 24h left is exactly 'still inside the mutual day'.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-05T18:29:59.999Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/exactly 24h remaining is atRisk",
+      "notes": "The boundary is inclusive on the atRisk side: 24h left is the first instant of the grace day. changed is true because only the stamped riskLevel moved.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-05T18:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/6h + 1ms remaining is still atRisk",
+      "notes": "",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T12:29:59.999Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/exactly 6h remaining is critical",
+      "notes": "",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T12:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/one millisecond remaining is critical, not broken",
+      "notes": "",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T18:29:59.999Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "critical",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/zero remaining is broken and the count is zero",
+      "notes": "2.17. riskLevel == broken iff serverNow >= deadlineAt: a live count and a passed deadline can never coexist.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T18:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["broken"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 3,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/negative remaining is broken and the window is still open",
+      "notes": "One hour past the deadline: broken, and restorable until deadline + 24h.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-06T19:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["broken"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 3,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+    {
+      "name": "step10/a broken stamp with no deadline reads broken",
+      "notes": "A legacy projection that never recorded a deadline: riskLevelFor falls back to the presence of the break stamp rather than reporting normal.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 2,
+        "participants": ["alice", "bob"],
+        "count": 0,
+        "riskLevel": "broken",
+        "previousCount": 5,
+        "brokenAt": "2024-05-06T18:30:00.000Z",
+        "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-07T06:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "broken",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 5,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": {},
+          "longestForRoom": 5
+        }
+      }
+    },
+    {
+      "name": "step10/a bond that never started has no deadline and no risk",
+      "notes": "No badge, not a broken badge.",
+      "stored": { "schemaVersion": 2, "engineVersion": 1, "participants": ["alice", "bob"] },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-01T06:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": null,
+        "deadlineAt": null,
+        "riskLevel": "normal",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": {},
+          "longestForRoom": 0
+        }
+      }
+    },
+
+    {
+      "name": "step9/the last instant of the restore window is still restorable",
+      "notes": "Step 9 uses a strict comparison, so exactly brokenAt + 24h has not expired. This is the live side of that boundary.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 8,
+        "participants": ["alice", "bob"],
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "previousCount": 5,
+        "brokenAt": "2024-05-06T18:30:00.000Z",
+        "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-07T18:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 5,
+          "brokenAt": "2024-05-06T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+    {
+      "name": "step9/one millisecond past the restore window it expires",
+      "notes": "The expired side of the same boundary. History is not rewritten: lastMutualDay and the send evidence stay.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 8,
+        "participants": ["alice", "bob"],
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "previousCount": 5,
+        "brokenAt": "2024-05-06T18:30:00.000Z",
+        "restoreDeadlineAt": "2024-05-07T18:30:00.000Z",
+        "longestForRoom": 5
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-07T18:30:00.001Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "broken",
+        "transitions": ["restoreWindowExpired"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 5
+        }
+      }
+    },
+
+    {
+      "name": "step11/crossing 7 emits the milestone once and raises the record",
+      "notes": "2.23. The engine reports; the paying transaction records into milestonesAwarded.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 9,
+        "participants": ["alice", "bob"],
+        "count": 6,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 6
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 7,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented", "milestoneCrossed", "longestRaised"],
+        "milestonesCrossed": [7],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 7
+        }
+      }
+    },
+    {
+      "name": "step11/crossing 30 emits only 30",
+      "notes": "milestonesCrossed can hold at most one threshold, because evaluate only ever moves the count by +1 or resets it. A jump (restore 5 → 12, or a repair) is awarded by the writer performing the jump, never by evaluate.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 9,
+        "participants": ["alice", "bob"],
+        "count": 29,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7],
+        "longestForRoom": 40
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 30,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented", "milestoneCrossed"],
+        "milestonesCrossed": [30],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 40
+        }
+      }
+    },
+    {
+      "name": "step11/crossing 100 emits only 100",
+      "notes": "",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 9,
+        "participants": ["alice", "bob"],
+        "count": 99,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7, 30],
+        "longestForRoom": 400
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 100,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented", "milestoneCrossed"],
+        "milestonesCrossed": [100],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 400
+        }
+      }
+    },
+    {
+      "name": "step11/crossing 365 emits only 365",
+      "notes": "The engine emits the crossing even though the award value for 365 is still an open product decision.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 9,
+        "participants": ["alice", "bob"],
+        "count": 364,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7, 30, 100],
+        "longestForRoom": 400
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 365,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented", "milestoneCrossed"],
+        "milestonesCrossed": [365],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 400
+        }
+      }
+    },
+    {
+      "name": "step11/an already-awarded threshold is never re-emitted",
+      "notes": "1.21 / 2.23. The re-climb after a break must not pay twice.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 9,
+        "participants": ["alice", "bob"],
+        "count": 6,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7],
+        "longestForRoom": 12
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-06T07:30:00.000Z" },
+      "serverNow": "2024-05-06T07:30:00.000Z",
+      "expected": {
+        "count": 7,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 12
+        }
+      }
+    },
+
+    {
+      "name": "bridge/a mutual day on the bridge day increments and clears the bridge",
+      "notes": "2.20. A restore wrote count 7, left lastMutualDay at 2024-05-05 (no mutual day is invented) and set bridgedThroughDay to 2024-05-09, from which the deadline is derived. The next real mutual day continues the chain rather than restarting it, and supersedes the bridge.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 11,
+        "participants": ["alice", "bob"],
+        "count": 7,
+        "lastMutualDay": "2024-05-05",
+        "bridgedThroughDay": "2024-05-09",
+        "deadlineAt": "2024-05-10T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-09", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-09T09:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7],
+        "longestForRoom": 7
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-09T10:30:00.000Z" },
+      "serverNow": "2024-05-09T10:30:00.000Z",
+      "expected": {
+        "count": 8,
+        "lastMutualDay": "2024-05-09",
+        "deadlineAt": "2024-05-10T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "incremented", "longestRaised"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-09", "bob": "2024-05-09" },
+          "longestForRoom": 8
+        }
+      }
+    },
+    {
+      "name": "bridge/a restored bond still breaks when the bridged deadline is missed",
+      "notes": "The bridge sets the deadline, so it also sets the break: brokenAt is dayStartUtc(bridge + 2), not dayStartUtc(lastMutualDay + 2).",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 11,
+        "participants": ["alice", "bob"],
+        "count": 7,
+        "lastMutualDay": "2024-05-05",
+        "bridgedThroughDay": "2024-05-09",
+        "deadlineAt": "2024-05-10T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-11", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-11T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "milestonesAwarded": [7],
+        "longestForRoom": 7
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-11T07:30:00.000Z" },
+      "serverNow": "2024-05-11T07:30:00.000Z",
+      "expected": {
+        "count": 1,
+        "lastMutualDay": "2024-05-11",
+        "deadlineAt": "2024-05-12T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["participationRecorded", "broken", "started"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 7,
+          "brokenAt": "2024-05-10T18:30:00.000Z",
+          "restoreDeadlineAt": "2024-05-11T18:30:00.000Z",
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-11", "bob": "2024-05-11" },
+          "longestForRoom": 7
+        }
+      }
+    },
+
+    {
+      "name": "step2/re-delivering the same event changes nothing",
+      "notes": "2.4 / 2.11. Structural idempotency: event.day <= sendDays[uid] is dropped, so no dedupe ledger is needed for the count.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 5,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 9
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "alice", "instant": "2024-05-06T06:30:00.000Z" },
+      "serverNow": "2024-05-06T06:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "atRisk",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-05" },
+          "longestForRoom": 9
+        }
+      }
+    },
+    {
+      "name": "step2/a late event for an earlier day is dropped, not double counted",
+      "notes": "Out-of-order delivery. The event is dropped by step 2, so what is left is an ordinary already-counted day.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 6,
+        "participants": ["alice", "bob"],
+        "count": 1,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+        "sendInstants": {
+          "alice": "2024-05-06T06:30:00.000Z",
+          "bob": "2024-05-06T06:30:00.000Z"
+        },
+        "longestForRoom": 1
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "bob", "instant": "2024-05-05T14:30:00.000Z" },
+      "serverNow": "2024-05-06T14:30:00.000Z",
+      "expected": {
+        "count": 1,
+        "lastMutualDay": "2024-05-06",
+        "deadlineAt": "2024-05-07T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["sameDay"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-06", "bob": "2024-05-06" },
+          "longestForRoom": 1
+        }
+      }
+    },
+    {
+      "name": "step2/an event from a uid outside the pair is ignored",
+      "notes": "carol is not in the room, so nothing is recorded. The already-counted day is reported as sameDay and nothing moves.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 4,
+        "participants": ["alice", "bob"],
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "longestForRoom": 3
+      },
+      "participants": ["alice", "bob"],
+      "event": { "uid": "carol", "instant": "2024-05-05T12:30:00.000Z" },
+      "serverNow": "2024-05-05T12:30:00.000Z",
+      "expected": {
+        "count": 3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["sameDay"],
+        "milestonesCrossed": [],
+        "changed": false,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 3
+        }
+      }
+    },
+
+    {
+      "name": "repair/a negative stored count is treated as zero",
+      "notes": "A corrupt document is repaired implicitly rather than propagated: count and longestForRoom clamp to 0 and no milestone is re-crossed on the way up.",
+      "stored": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "rev": 3,
+        "participants": ["alice", "bob"],
+        "count": -3,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+        "sendInstants": {
+          "alice": "2024-05-05T06:30:00.000Z",
+          "bob": "2024-05-05T06:30:00.000Z"
+        },
+        "previousCount": -1,
+        "longestForRoom": -1
+      },
+      "participants": ["alice", "bob"],
+      "event": null,
+      "serverNow": "2024-05-05T06:30:00.000Z",
+      "expected": {
+        "count": 0,
+        "lastMutualDay": "2024-05-05",
+        "deadlineAt": "2024-05-06T18:30:00.000Z",
+        "riskLevel": "normal",
+        "transitions": ["noop"],
+        "milestonesCrossed": [],
+        "changed": true,
+        "next": {
+          "previousCount": 0,
+          "brokenAt": null,
+          "restoreDeadlineAt": null,
+          "bridgedThroughDay": null,
+          "sendDays": { "alice": "2024-05-05", "bob": "2024-05-05" },
+          "longestForRoom": 0
+        }
+      }
+    }
+  ]
+}

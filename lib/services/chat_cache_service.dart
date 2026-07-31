@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:video_chat_app/main.dart'; // sharedPrefs global
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/streak/streak_state.dart';
 
 /// Lightweight JSON cache for the chat list displayed on the home screen.
 /// Stores chat rooms + the contact info for each room so the UI can
@@ -10,6 +11,18 @@ class ChatCacheService {
   static const _chatListKey = 'cached_chat_list';
   static const _userCacheKey = 'cached_chat_users';
   static const _pendingMeshKey = 'pending_mesh_messages';
+
+  /// Schema version of a cached chat-room entry.
+  ///
+  ///  * 1 (implicit — the key is absent) — legacy entry: flat `streakCount` /
+  ///    `lastInteractionDate` / `lastSentAt` / `previousStreakCount` /
+  ///    `streakBrokenAt` only.
+  ///  * 2 — adds the `streakState` block and a room-level `cachedAt`, while
+  ///    still writing the legacy keys for the compatibility window.
+  ///
+  /// The reader tolerates both, and every added key is optional, so an entry
+  /// written by an older build still loads.
+  static const int cacheSchemaVersion = 2;
 
   // ─── In-memory user cache (populated from disk or Firestore) ────────
 
@@ -41,7 +54,10 @@ class ChatCacheService {
   void cacheChatRooms(List<ChatRoom> rooms) {
     _cachedRooms = rooms;
     try {
-      final list = rooms.map((r) => _chatRoomToJson(r)).toList();
+      // One stamp for the whole batch: every entry was observed at the same
+      // instant, and freshness is judged against it on read.
+      final cachedAt = DateTime.now().toUtc();
+      final list = rooms.map((r) => _chatRoomToJson(r, cachedAt)).toList();
       sharedPrefs.setString(_chatListKey, jsonEncode(list));
     } catch (e) {
       print('Error caching chat rooms: $e');
@@ -96,8 +112,23 @@ class ChatCacheService {
 
   // ─── JSON helpers (Firestore-free serialization) ───────────────────
 
-  Map<String, dynamic> _chatRoomToJson(ChatRoom room) {
+  Map<String, dynamic> _chatRoomToJson(ChatRoom room, [DateTime? cachedAt]) {
+    final stamp = (cachedAt ?? DateTime.now()).toUtc();
+    // Prefer the state the room already carries; otherwise project the legacy
+    // fields so a v2 entry always has a `streakState` block to read back.
+    final state = room.streakState ??
+        StreakState.fromLegacy(
+          participants: room.participants,
+          streakCount: room.streakCount,
+          lastInteractionDate: room.lastInteractionDate,
+          lastSentAt: room.lastSentAt,
+          previousStreakCount: room.previousStreakCount,
+          streakBrokenAt: room.streakBrokenAt,
+        );
     return {
+      'cacheSchemaVersion': cacheSchemaVersion,
+      'cachedAt': stamp.millisecondsSinceEpoch,
+      'streakState': state.toCacheJson(cachedAt: stamp),
       'id': room.id,
       'participants': room.participants,
       'lastMessage': room.lastMessage,
@@ -123,9 +154,33 @@ class ChatCacheService {
       }
     });
 
+    final participants = List<String>.from(map['participants'] ?? []);
+
+    // `cachedAt` is absent on entries written by older builds — those get no
+    // freshness stamp, which `StreakState.isStaleAt` already treats as stale.
+    final cachedAt = streakInstantFrom(map['cachedAt']);
+
+    // v2 entries carry the authoritative block; older ones only have the flat
+    // legacy keys, so project those instead. Either way this is *stored* state:
+    // the badge renders through StreakRepository's derivation, never off the
+    // raw count.
+    final rawState = map['streakState'];
+    StreakState? state = rawState is Map
+        ? StreakState.fromCacheJson(Map<String, dynamic>.from(rawState))
+        : null;
+    state ??= StreakState.fromLegacyRoomMap(
+      map,
+      participants: participants,
+      cachedAt: cachedAt,
+    );
+    if (state.cachedAt == null && cachedAt != null) {
+      state = state.copyWith(cachedAt: cachedAt);
+    }
+
     return ChatRoom(
+      streakState: state,
       id: map['id'] ?? '',
-      participants: List<String>.from(map['participants'] ?? []),
+      participants: participants,
       lastMessage: map['lastMessage'],
       lastMessageTime: map['lastMessageTime'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['lastMessageTime'])

@@ -24,6 +24,8 @@ import 'package:video_chat_app/services/image_compressor.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/services/streak/streak_repository.dart';
+import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -113,11 +115,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _subtitleToggleTimer;
 
   // ─── Streaks state ──────────────────────────────────────────────────
-  int _streakCount = 0;
-  int _previousStreakCount = 0;
-  DateTime? _streakBrokenAt;
-  DateTime? _streakLastInteractionDate;
-  StreamSubscription? _chatRoomSubscription;
+  // Read-only, derived by StreakRepository (engine + ServerClock). The screen
+  // owns no streak arithmetic of its own — not the deadline, not the
+  // restore-window expiry (engine step 9 owns that).
+  StreakView? _streakView;
+  StreamSubscription<StreakView>? _streakSubscription;
 
   // ─── Typing indicator state ───────────────────────────────────────
   Timer? _typingTimer;
@@ -164,37 +166,17 @@ class _ChatScreenState extends State<ChatScreen> {
     _initializeChat();
     _messageController.addListener(_onTextChanged);
 
-    _chatRoomSubscription = FirebaseFirestore.instance
-        .collection('chatRooms')
-        .doc(chatRoomId)
-        .snapshots()
-        .listen((snap) {
-      if (mounted && snap.exists) {
-        final data = snap.data();
-        final streak = data?['streakCount'] as int? ?? 0;
-        final prevStreak = data?['previousStreakCount'] as int? ?? 0;
-        final brokenTs = data?['streakBrokenAt'] as Timestamp?;
-        final brokenAt = brokenTs?.toDate();
-        final interactionTs = data?['lastInteractionDate'] as Timestamp?;
-        final interactionDate = interactionTs?.toDate();
-
-        // Clean up expired restore windows locally
-        final isExpired = brokenAt != null &&
-            DateTime.now().difference(brokenAt).inHours > 24;
-
-        if (streak != _streakCount ||
-            prevStreak != _previousStreakCount ||
-            brokenAt != _streakBrokenAt ||
-            interactionDate != _streakLastInteractionDate) {
-          setState(() {
-            _streakCount = streak;
-            _previousStreakCount = isExpired ? 0 : prevStreak;
-            _streakBrokenAt = isExpired ? null : brokenAt;
-            _streakLastInteractionDate = interactionDate;
-          });
-          // Re-evaluate alternating timer now that bond state changed
-          _updateSubtitleTimer(_isContactOnline);
-        }
+    // Bond badge: one derived view per room, re-derived every minute by the
+    // repository so the countdown ticks and a lapse shows up without a write.
+    _streakSubscription =
+        StreakRepository.instance.watch(chatRoomId).listen((view) {
+      if (!mounted) return;
+      if (view == _streakView) return;
+      final hadBadge = _hasBondBadge;
+      setState(() => _streakView = view);
+      if (hadBadge != _hasBondBadge) {
+        // Re-evaluate alternating timer now that bond state changed
+        _updateSubtitleTimer(_isContactOnline);
       }
     });
 
@@ -235,7 +217,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _meshService.setActiveConversation(null);
     // Re-enable foreground chat notifications.
     NotificationService.activeChatRoomId = null;
-    _chatRoomSubscription?.cancel();
+    _streakSubscription?.cancel();
     _subtitleToggleTimer?.cancel();
     super.dispose();
   }
@@ -252,7 +234,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Shows the streak-restore dialog when the user taps the broken-streak badge.
   Future<void> _showStreakRestoreDialog() async {
-    if (_previousStreakCount <= 0 || _streakBrokenAt == null) return;
+    final view = _streakView;
+    if (view == null || !view.isRestorable) return;
+    final restoreDeadline = view.restoreDeadlineAt;
+    if (restoreDeadline == null) return;
+    // The dialog counts down from `brokenAt + kStreakRestoreWindow`; the
+    // derived view carries the far end of that window.
+    final brokenAt = restoreDeadline.subtract(kStreakRestoreWindow);
     final chatRoomId =
         _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     // Fetch current user's Gup Points
@@ -268,8 +256,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     await StreakRestoreDialog.show(
       context,
-      previousStreakCount: _previousStreakCount,
-      streakBrokenAt: _streakBrokenAt!,
+      previousStreakCount: view.restorableCount,
+      streakBrokenAt: brokenAt,
       userGupPoints: gupPoints,
       contactName: widget.contact.name,
       userId: widget.currentUserId,
@@ -447,9 +435,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _updateSubtitleTimer(bool isOnline) {
     _subtitleToggleTimer?.cancel();
     _subtitleToggleTimer = null;
-    if (!isOnline &&
-        (_streakCount > 0 ||
-            (_previousStreakCount > 0 && _streakBrokenAt != null))) {
+    if (!isOnline && _hasBondBadge) {
       // Show last seen first, then after 2 s animate to bond badge, repeat
       _showBondInSubtitle = false;
       _subtitleToggleTimer = Timer.periodic(
@@ -476,14 +462,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildBondBadge(AppThemeColors c) {
-    if (_streakCount > 0) {
-      return StreakBadge(
-        streakCount: _streakCount,
-        lastInteractionDate: _streakLastInteractionDate,
-        compact: false,
-      );
+    final view = _streakView;
+    if (view == null) return const SizedBox.shrink();
+    if (view.count > 0) {
+      return StreakBadge(view: view, compact: false);
     }
-    if (_previousStreakCount > 0 && _streakBrokenAt != null) {
+    if (view.isRestorable) {
       return GestureDetector(
         onTap: () => _showStreakRestoreDialog(),
         child: Container(
@@ -514,8 +498,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return const SizedBox.shrink();
   }
 
-  bool get _hasBondBadge =>
-      _streakCount > 0 || (_previousStreakCount > 0 && _streakBrokenAt != null);
+  bool get _hasBondBadge => _streakView?.hasBadge ?? false;
 
   Widget _buildSubtitleRow(AppThemeColors c) {
     // ── Typing ──────────────────────────────────────────────────────

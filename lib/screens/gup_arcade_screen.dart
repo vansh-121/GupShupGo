@@ -1,6 +1,9 @@
 import 'dart:math';
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/models/gamification_data.dart';
@@ -9,6 +12,8 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
+import 'package:video_chat_app/services/streak/streak_repository.dart';
+import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
@@ -669,78 +674,24 @@ class _OverviewTab extends StatelessWidget {
   }
 
   Widget _buildStreaksSection(AppThemeColors c) {
-    return StreamBuilder<List<ChatRoom>>(
-      stream: chatService.getChatRooms(currentUserId),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox.shrink();
-
-        final allRooms = snapshot.data!;
-        final roomsWithStreaks = allRooms
-            .where((room) => room.streakCount > 0)
-            .toList()
-          ..sort((a, b) => b.streakCount.compareTo(a.streakCount));
-
-        final brokenStreaks = allRooms
-            .where((room) =>
-                room.previousStreakCount > 0 &&
-                room.streakBrokenAt != null &&
-                DateTime.now().difference(room.streakBrokenAt!).inHours <= 24)
-            .toList()
-          ..sort((a, b) => b.previousStreakCount.compareTo(a.previousStreakCount));
-
-        if (roomsWithStreaks.isEmpty && brokenStreaks.isEmpty) {
-          return _buildEmptySection(
-            c,
-            title: 'Active Bonds 🤝',
-            emoji: '🔥',
-            message: 'Chat daily with friends to build bonds!',
-          );
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Active Bonds ─────────────────────────────────────────
-            if (roomsWithStreaks.isNotEmpty) ...[
-              _sectionHeader('Active Bonds 🤝', '🔥', c),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 120,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: roomsWithStreaks.length,
-                  itemBuilder: (context, index) {
-                    final room = roomsWithStreaks[index];
-                    return _buildActiveStreakCard(room, c);
-                  },
-                ),
-              ),
-            ],
-
-            // ── Broken Bonds ─────────────────────────────────────────
-            if (brokenStreaks.isNotEmpty) ...[
-              if (roomsWithStreaks.isNotEmpty) const SizedBox(height: 20),
-              _sectionHeader('Broken Bonds 💔', '💔', c),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 130,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: brokenStreaks.length,
-                  itemBuilder: (context, index) {
-                    final room = brokenStreaks[index];
-                    return _buildBrokenStreakCard(context, room, c);
-                  },
-                ),
-              ),
-            ],
-          ],
-        );
-      },
+    return _BondStreaksSection(
+      currentUserId: currentUserId,
+      chatService: chatService,
+      buildHeader: (title, emoji) => _sectionHeader(title, emoji, c),
+      buildEmpty: () => _buildEmptySection(
+        c,
+        title: 'Active Bonds 🤝',
+        emoji: '🔥',
+        message: 'Chat daily with friends to build bonds!',
+      ),
+      buildActiveCard: (room, view) => _buildActiveStreakCard(room, view, c),
+      buildBrokenCard: (context, room, view) =>
+          _buildBrokenStreakCard(context, room, view, c),
     );
   }
 
-  Widget _buildActiveStreakCard(ChatRoom room, AppThemeColors c) {
+  Widget _buildActiveStreakCard(
+      ChatRoom room, StreakView view, AppThemeColors c) {
     final otherUserId = room.participants
         .firstWhere((id) => id != currentUserId, orElse: () => '');
     if (otherUserId.isEmpty) return const SizedBox.shrink();
@@ -752,7 +703,7 @@ class _OverviewTab extends StatelessWidget {
         final name = user?.name ?? '...';
         final avatarUrl = user?.photoUrl ??
             'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=6C5CE7&color=fff&size=128';
-        final risk = computeStreakRisk(room.lastInteractionDate);
+        final risk = view.riskLevel;
 
         final cardColors = switch (risk) {
           StreakRiskLevel.normal => c.isDark
@@ -762,7 +713,7 @@ class _OverviewTab extends StatelessWidget {
               const Color(0xFFFFB300).withOpacity(0.12),
               const Color(0xFFFFD54F).withOpacity(0.04),
             ],
-          StreakRiskLevel.critical => [
+          StreakRiskLevel.critical || StreakRiskLevel.broken => [
               const Color(0xFFFF6B6B).withOpacity(0.15),
               const Color(0xFFFF6B6B).withOpacity(0.04),
             ],
@@ -771,7 +722,9 @@ class _OverviewTab extends StatelessWidget {
         final borderColor = switch (risk) {
           StreakRiskLevel.normal => Colors.orange.withOpacity(0.2),
           StreakRiskLevel.atRisk => Colors.amber.withOpacity(0.35),
-          StreakRiskLevel.critical => Colors.red.withOpacity(0.35),
+          StreakRiskLevel.critical ||
+          StreakRiskLevel.broken =>
+            Colors.red.withOpacity(0.35),
         };
 
         return Container(
@@ -801,10 +754,7 @@ class _OverviewTab extends StatelessWidget {
                   Positioned(
                     bottom: -5,
                     right: -8,
-                    child: StreakArcadeBadge(
-                      streakCount: room.streakCount,
-                      lastInteractionDate: room.lastInteractionDate,
-                    ),
+                    child: StreakArcadeBadge(view: view),
                   ),
                 ],
               ),
@@ -823,12 +773,13 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
-  Widget _buildBrokenStreakCard(BuildContext context, ChatRoom room, AppThemeColors c) {
+  Widget _buildBrokenStreakCard(BuildContext context, ChatRoom room,
+      StreakView view, AppThemeColors c) {
     final otherUserId = room.participants
         .firstWhere((id) => id != currentUserId, orElse: () => '');
     if (otherUserId.isEmpty) return const SizedBox.shrink();
 
-    final cost = GamificationService.getRestoreCost(room.previousStreakCount);
+    final cost = GamificationService.getRestoreCost(view.restorableCount);
 
     return FutureBuilder<UserModel?>(
       future: _resolveUser(otherUserId),
@@ -881,7 +832,7 @@ class _OverviewTab extends StatelessWidget {
                           const Text('💔', style: TextStyle(fontSize: 9)),
                           const SizedBox(width: 1),
                           Text(
-                            '${room.previousStreakCount}',
+                            '${view.restorableCount}',
                             style: GoogleFonts.poppins(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white),
                           ),
                         ],
@@ -900,7 +851,7 @@ class _OverviewTab extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               GestureDetector(
-                onTap: () => _handleStreakRestore(context, room, name),
+                onTap: () => _handleStreakRestore(context, room, view, name),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -922,7 +873,10 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
-  Future<void> _handleStreakRestore(BuildContext context, ChatRoom room, String contactName) async {
+  Future<void> _handleStreakRestore(BuildContext context, ChatRoom room,
+      StreakView view, String contactName) async {
+    final restoreDeadline = view.restoreDeadlineAt;
+    if (!view.isRestorable || restoreDeadline == null) return;
     int gupPoints = 0;
     try {
       final userDoc = await FirebaseFirestore.instance
@@ -932,12 +886,14 @@ class _OverviewTab extends StatelessWidget {
       gupPoints = (userDoc.data()?['gupPoints'] as int?) ?? 0;
     } catch (_) {}
 
-    if (!context.mounted || room.streakBrokenAt == null) return;
+    if (!context.mounted) return;
 
     await StreakRestoreDialog.show(
       context,
-      previousStreakCount: room.previousStreakCount,
-      streakBrokenAt: room.streakBrokenAt!,
+      previousStreakCount: view.restorableCount,
+      // The dialog counts down from `brokenAt + kStreakRestoreWindow`; the
+      // derived view carries the far end of that window.
+      streakBrokenAt: restoreDeadline.subtract(kStreakRestoreWindow),
       userGupPoints: gupPoints,
       contactName: contactName,
       userId: currentUserId,
@@ -1758,4 +1714,151 @@ class _QuickStat {
     required this.icon,
     required this.color,
   });
+}
+
+/// The Overview tab's bond lists, driven by [StreakRepository].
+///
+/// Stateful on purpose: it owns the room-list stream *and* a single
+/// `watchMany` subscription for the rooms on screen, so the derived views are
+/// not torn down and rebuilt on every parent rebuild (which would blank the
+/// badges for a frame). Which rooms count as active and which as broken is
+/// decided entirely by the derived view — `view.count` and `view.isRestorable`
+/// — never by the raw room fields plus a local 24-hour calculation.
+class _BondStreaksSection extends StatefulWidget {
+  const _BondStreaksSection({
+    required this.currentUserId,
+    required this.chatService,
+    required this.buildHeader,
+    required this.buildEmpty,
+    required this.buildActiveCard,
+    required this.buildBrokenCard,
+  });
+
+  final String currentUserId;
+  final ChatService chatService;
+  final Widget Function(String title, String emoji) buildHeader;
+  final Widget Function() buildEmpty;
+  final Widget Function(ChatRoom room, StreakView view) buildActiveCard;
+  final Widget Function(BuildContext context, ChatRoom room, StreakView view)
+      buildBrokenCard;
+
+  @override
+  State<_BondStreaksSection> createState() => _BondStreaksSectionState();
+}
+
+class _BondStreaksSectionState extends State<_BondStreaksSection> {
+  late final Stream<List<ChatRoom>> _roomsStream = widget.chatService
+      .getChatRooms(widget.currentUserId)
+      .asBroadcastStream();
+
+  StreamSubscription<Map<String, StreakView>>? _viewsSub;
+  Map<String, StreakView> _views = const <String, StreakView>{};
+  List<String> _watchedIds = const <String>[];
+
+  @override
+  void dispose() {
+    _viewsSub?.cancel();
+    super.dispose();
+  }
+
+  /// Hands the rooms we already have to the repository (no extra Firestore
+  /// read for the legacy fallback or the participants) and keeps one
+  /// `watchMany` subscription open for exactly that set.
+  void _sync(List<ChatRoom> rooms) {
+    final repo = StreakRepository.instance;
+    for (final room in rooms) {
+      if (room.id.isEmpty) continue;
+      repo.primeRoom(room.id, room.toMap());
+      final cached = room.streakState;
+      if (cached != null) repo.primeCachedState(room.id, cached);
+    }
+    final ids = <String>[
+      for (final room in rooms)
+        if (room.id.isNotEmpty) room.id,
+    ];
+    if (listEquals(ids, _watchedIds)) return;
+    _watchedIds = ids;
+    _viewsSub?.cancel();
+    if (ids.isEmpty) {
+      _views = const <String, StreakView>{};
+      return;
+    }
+    _viewsSub = repo.watchMany(ids).listen((views) {
+      if (!mounted) return;
+      setState(() => _views = views);
+    });
+  }
+
+  StreakView? _viewFor(String roomId) =>
+      _views[roomId] ?? StreakRepository.instance.latest(roomId);
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ChatRoom>>(
+      stream: _roomsStream,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+
+        final allRooms = snapshot.data!;
+        _sync(allRooms);
+
+        final active = <(ChatRoom, StreakView)>[];
+        final broken = <(ChatRoom, StreakView)>[];
+        for (final room in allRooms) {
+          final view = _viewFor(room.id);
+          if (view == null) continue;
+          if (view.count > 0) {
+            active.add((room, view));
+          } else if (view.isRestorable) {
+            broken.add((room, view));
+          }
+        }
+        active.sort((a, b) => b.$2.count.compareTo(a.$2.count));
+        broken.sort(
+            (a, b) => b.$2.restorableCount.compareTo(a.$2.restorableCount));
+
+        if (active.isEmpty && broken.isEmpty) return widget.buildEmpty();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Active Bonds ─────────────────────────────────────────
+            if (active.isNotEmpty) ...[
+              widget.buildHeader('Active Bonds 🤝', '🔥'),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 120,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: active.length,
+                  itemBuilder: (context, index) {
+                    final (room, view) = active[index];
+                    return widget.buildActiveCard(room, view);
+                  },
+                ),
+              ),
+            ],
+
+            // ── Broken Bonds ─────────────────────────────────────────
+            if (broken.isNotEmpty) ...[
+              if (active.isNotEmpty) const SizedBox(height: 20),
+              widget.buildHeader('Broken Bonds 💔', '💔'),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 130,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: broken.length,
+                  itemBuilder: (context, index) {
+                    final (room, view) = broken[index];
+                    return widget.buildBrokenCard(context, room, view);
+                  },
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -242,8 +244,47 @@ class NotificationService {
     };
   }
 
+  /// Persists a preference locally AND mirrors it to
+  /// `users/{uid}.notifPrefs.{key}` so the server can honour it too.
+  ///
+  /// The local write is the source of truth for the on-device `_shouldShow`
+  /// gate; the Firestore mirror is what lets Cloud Functions skip an opted-out
+  /// user before spending a push. The mirror is best-effort: a failure (offline,
+  /// signed out) leaves the local switch applied, and the client-side gate still
+  /// suppresses the notification on arrival.
   Future<void> setPreference(String key, bool value) async {
     await sharedPrefs.setBool(key, value);
+    await _mirrorPreference(key, value);
+  }
+
+  Future<void> _mirrorPreference(String key, bool value) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'notifPrefs': {key: value}}, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('setPreference: notifPrefs mirror failed for $key: $e');
+    }
+  }
+
+  /// Pushes every locally-stored preference to the Firestore mirror. Called
+  /// after sign-in so a user who set their switches on an older build (before
+  /// the mirror existed) still gets server-side filtering.
+  Future<void> syncPreferencesToServer() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final prefs = await getPreferences();
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .set({'notifPrefs': prefs}, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('syncPreferencesToServer failed: $e');
+    }
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────────

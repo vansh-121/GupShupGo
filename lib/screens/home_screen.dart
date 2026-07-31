@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/main.dart';
@@ -30,6 +31,7 @@ import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
@@ -95,6 +97,14 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription<DocumentSnapshot>? _currentUserSubscription;
   List<String>? _previousBadges;
 
+  // ─── Bond badges ─────────────────────────────────────────────────────
+  // One `watchMany` subscription for the whole visible chat list, so a change
+  // to any bond rebuilds the list once rather than once per row. The views are
+  // derived by StreakRepository — the list does no streak arithmetic.
+  StreamSubscription<Map<String, StreakView>>? _streakViewsSub;
+  Map<String, StreakView> _streakViews = const <String, StreakView>{};
+  List<String> _watchedStreakRoomIds = const <String>[];
+
   @override
   void initState() {
     super.initState();
@@ -117,6 +127,7 @@ class _HomeScreenState extends State<HomeScreen>
     _authSub?.cancel();
     _recentContactsSub?.cancel();
     _currentUserSubscription?.cancel();
+    _streakViewsSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     // No manual updateOnlineStatus(false) needed here — the RTDB
@@ -768,6 +779,11 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }
 
+        // Prime + watch the bonds for whatever set we are about to render.
+        // Only ever schedules an async setState (stream events), never one
+        // during this build.
+        _syncStreakWatch(chatRooms);
+
         if (chatRooms.isEmpty) {
           return RefreshIndicator(
             onRefresh: () => _manualRefresh(chatRooms),
@@ -1001,6 +1017,44 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Feeds the room list into [StreakRepository] and keeps one `watchMany`
+  /// subscription open for exactly the rooms currently on screen.
+  ///
+  /// [primeRoom] hands over the room document we already have, so the legacy
+  /// dual-read fallback and the participant list cost no extra Firestore read;
+  /// [primeCachedState] hands over the state the disk cache rehydrated, so the
+  /// first frame after a cold start shows a count instead of a blank.
+  void _syncStreakWatch(List<ChatRoom> chatRooms) {
+    final repo = StreakRepository.instance;
+    for (final room in chatRooms) {
+      if (room.id.isEmpty) continue;
+      repo.primeRoom(room.id, room.toMap());
+      final cached = room.streakState;
+      if (cached != null) repo.primeCachedState(room.id, cached);
+    }
+
+    final ids = <String>[
+      for (final room in chatRooms)
+        if (room.id.isNotEmpty) room.id,
+    ];
+    if (listEquals(ids, _watchedStreakRoomIds)) return;
+    _watchedStreakRoomIds = ids;
+    _streakViewsSub?.cancel();
+    if (ids.isEmpty) {
+      _streakViews = const <String, StreakView>{};
+      return;
+    }
+    _streakViewsSub = repo.watchMany(ids).listen((views) {
+      if (!mounted) return;
+      setState(() => _streakViews = views);
+    });
+  }
+
+  /// The derived view for a room: the live one, else the last one the
+  /// repository derived (so a scroll or a rebuild never blanks a badge).
+  StreakView? _streakViewFor(String roomId) =>
+      _streakViews[roomId] ?? StreakRepository.instance.latest(roomId);
+
   int _effectiveUnreadCount(ChatRoom chatRoom) {
     final storedUnread = chatRoom.unreadCount[_currentUserId] ?? 0;
     if (storedUnread > 0) return storedUnread;
@@ -1017,6 +1071,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildChatRoomItem(
       UserModel user, ChatRoom chatRoom, int unreadCount) {
     final c = AppThemeColors.of(context);
+    final streakView = _streakViewFor(chatRoom.id);
     final contact = Contact(
       id: user.id,
       name: user.name,
@@ -1092,20 +1147,12 @@ class _HomeScreenState extends State<HomeScreen>
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (chatRoom.streakCount > 0) ...[
+                            if (streakView != null &&
+                                streakView.count > 0) ...[
                               const SizedBox(width: 6),
-                              StreakBadge(
-                                streakCount: chatRoom.streakCount,
-                                lastInteractionDate:
-                                    chatRoom.lastInteractionDate,
-                                compact: true,
-                              ),
-                            ] else if (chatRoom.previousStreakCount > 0 &&
-                                chatRoom.streakBrokenAt != null &&
-                                DateTime.now()
-                                        .difference(chatRoom.streakBrokenAt!)
-                                        .inHours <=
-                                    24) ...[
+                              StreakBadge(view: streakView, compact: true),
+                            ] else if (streakView != null &&
+                                streakView.isRestorable) ...[
                               const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(

@@ -48,8 +48,11 @@ class SubscriptionService {
   static const _kPurchaseToken = 'sub_purchase_token';
   static const _kProductId = 'sub_product_id';
   static const _kVerifiedAt = 'sub_verified_at';
-  static const _kLastStreakRestore = 'sub_last_streak_restore';
-  static const _kStreakRestoreCount = 'sub_streak_restore_count';
+  // NOTE: the Pro weekly free-restore allowance used to live in
+  // SharedPreferences here (`sub_last_streak_restore` /
+  // `sub_streak_restore_count`). It is now server-side at
+  // `users/{uid}.streakRestoreAllowance` — the client must never decide
+  // eligibility. See functions/streak (streakRestoreQuote / streakRestore).
   // Pending verification keys — for crash recovery
   static const _kPendingToken = 'sub_pending_token';
   static const _kPendingProductId = 'sub_pending_product_id';
@@ -535,14 +538,12 @@ class SubscriptionService {
   }
 
   /// Clears the cached subscription status (resets to free) when the user signs out.
-  /// Also clears streak restore prefs to prevent data leaking across accounts.
   Future<void> clearSubscription() async {
     _subscription = SubscriptionModel.free();
     await _clearPrefs();
-    // Also clear streak restore tracking — prevents cross-account data leaks
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kLastStreakRestore);
-    await prefs.remove(_kStreakRestoreCount);
+    // No streak-restore prefs to clear any more: the weekly allowance is
+    // server-side (`users/{uid}.streakRestoreAllowance`), so there is nothing
+    // device-local that could leak across accounts.
     // Clear any pending verification
     await _clearPendingVerification();
     onSubscriptionChanged?.call();
@@ -642,60 +643,19 @@ class SubscriptionService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  Streak restore tracking (Pro perk: 1 free restore per week)
+  //  Streak restore perk — REMOVED (now server-side)
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /// Check if the Pro user can still restore a streak this week.
-  Future<bool> canRestoreStreakFree() async {
-    if (!isPro) return false;
-
-    final prefs = await SharedPreferences.getInstance();
-    final lastRestore = prefs.getInt(_kLastStreakRestore);
-    final restoreCount = prefs.getInt(_kStreakRestoreCount) ?? 0;
-
-    if (lastRestore == null) return true; // never restored
-
-    final lastDate = DateTime.fromMillisecondsSinceEpoch(lastRestore);
-    final now = DateTime.now();
-
-    // Reset counter if it's a new week (Monday-based)
-    final lastWeek = _weekNumber(lastDate);
-    final currentWeek = _weekNumber(now);
-
-    if (currentWeek != lastWeek || now.year != lastDate.year) {
-      return true; // new week
-    }
-
-    return restoreCount < 1; // 1 free restore per week for Pro
-  }
-
-  /// Record that a free streak restore was used.
-  Future<void> recordStreakRestore() async {
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    await prefs.setInt(_kLastStreakRestore, now.millisecondsSinceEpoch);
-
-    final lastRestore = prefs.getInt(_kLastStreakRestore);
-    final lastDate = lastRestore != null
-        ? DateTime.fromMillisecondsSinceEpoch(lastRestore)
-        : now;
-    final lastWeek = _weekNumber(lastDate);
-    final currentWeek = _weekNumber(now);
-
-    int count = prefs.getInt(_kStreakRestoreCount) ?? 0;
-    if (currentWeek != lastWeek || now.year != lastDate.year) {
-      count = 1; // reset for new week
-    } else {
-      count += 1;
-    }
-    await prefs.setInt(_kStreakRestoreCount, count);
-  }
-
-  int _weekNumber(DateTime date) {
-    // ISO 8601 week number
-    final dayOfYear = date.difference(DateTime(date.year, 1, 1)).inDays;
-    return ((dayOfYear - date.weekday + 10) / 7).floor();
-  }
+  //
+  // `canRestoreStreakFree()` and `recordStreakRestore()` used to track the Pro
+  // "1 free restore per week" allowance in SharedPreferences. They were wrong
+  // in two ways: `recordStreakRestore` wrote the timestamp and then read it
+  // straight back, so the week comparison never differed and the counter never
+  // reset; and clearing app data reset the allowance for free.
+  //
+  // The allowance now lives at `users/{uid}.streakRestoreAllowance`
+  // (`{weekKey, used}`, ISO week in the canonical zone) and is consumed inside
+  // the same transaction as the restore. Callers read availability from
+  // `GET /streakRestoreQuote` (`canUseFreePerk`) via `StreakApi`.
 }
 
 /// Thrown when the server returns a 4xx error, meaning the purchase is

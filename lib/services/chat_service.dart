@@ -66,12 +66,10 @@ class ChatService {
   // transport, the local DB is the source of truth for rendering — the
   // same architecture WhatsApp uses.
 
-  // ─── In-memory streak state cache ───────────────────────────────────────
-  // Eliminates the per-message Firestore chatRoomRef.get() in _commitMessage.
-  // Streak state is small (a few ints + timestamps) and changes at most once
-  // per calendar day per room, so the cache has a long TTL.
-  static final Map<String, _StreakCacheEntry> _streakCache = {};
-  static const _streakCacheTtl = Duration(minutes: 30);
+  // ─── Streak state ───────────────────────────────────────────────────────
+  // Streaks are owned entirely by the server-side engine and read through
+  // StreakRepository. ChatService neither reads nor writes streak state on
+  // the send path — the message document itself is the participation event.
 
   // ─── Per-room send lock ───────────────────────────────────────────────
   // Prevents race conditions when the user taps Send rapidly. Only one
@@ -829,180 +827,6 @@ class ChatService {
       roomUpdates['unreadCount.$receiverId'] = FieldValue.increment(1);
     }
 
-    // ── Mutual streak logic (Snapchat-style, calendar-day based) ───────
-    // Both participants must send at least one message within the SAME
-    // local calendar day for it to count as a mutual day.  When the
-    // second person replies (completing the pair), we compare today's
-    // date with the last mutual date:
-    //   • same day    → no change (already counted today)
-    //   • yesterday   → streak increments
-    //   • 2+ days ago → streak broken (saved for restore)
-    //   • first time  → streak starts at 1
-    // Uses local time (DateTime.now()) — same as Snapchat.
-    try {
-      // ── Try in-memory streak cache first (hot path) ──────────────────
-      _StreakCacheEntry? cached = _streakCache[chatRoomId];
-      bool cacheHit = cached != null;
-      int currentStreak;
-      DateTime? lastInteraction;
-      Map<String, DateTime> lastSentAt;
-      int previousStreakCount;
-      DateTime? streakBrokenAt;
-
-      if (cacheHit) {
-        currentStreak = cached!.streakCount;
-        lastInteraction = cached.lastInteraction;
-        lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
-        previousStreakCount = cached.previousStreakCount;
-        streakBrokenAt = cached.streakBrokenAt;
-      } else {
-        // Cache miss — do the Firestore read (cold start or room not yet cached).
-        final chatRoomSnap = await chatRoomRef.get();
-        currentStreak = 0;
-        lastInteraction = null;
-        lastSentAt = {};
-        previousStreakCount = 0;
-        streakBrokenAt = null;
-
-        if (chatRoomSnap.exists) {
-          final data = chatRoomSnap.data() as Map<String, dynamic>;
-          cached = _StreakCacheEntry.fromFirestore(data);
-          currentStreak = cached.streakCount;
-          lastInteraction = cached.lastInteraction;
-          lastSentAt = Map<String, DateTime>.from(cached.lastSentAt);
-          previousStreakCount = cached.previousStreakCount;
-          streakBrokenAt = cached.streakBrokenAt;
-          _streakCache[chatRoomId] = cached;
-        }
-      }
-
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-
-      debugPrint('[STREAK] senderId=$senderId receiverId=$receiverId');
-      debugPrint(
-          '[STREAK] currentStreak=$currentStreak lastInteraction=$lastInteraction');
-      debugPrint('[STREAK] lastSentAt=$lastSentAt');
-
-      // Clean up expired restore windows (>24h after break)
-      if (streakBrokenAt != null &&
-          now.difference(streakBrokenAt).inHours > 24) {
-        previousStreakCount = 0;
-        streakBrokenAt = null;
-        roomUpdates['previousStreakCount'] = 0;
-        roomUpdates['streakBrokenAt'] = null;
-      }
-
-      // Record this sender's last-send time (in-memory for the logic below)
-      lastSentAt[senderId] = now;
-      // NOTE: We intentionally do NOT write lastSentAt via roomUpdates here.
-      // set(merge:true) treats dot-notation keys like 'lastSentAt.$uid' as
-      // literal top-level field names, not nested paths — so the nested
-      // lastSentAt map never gets populated.  Instead, we use update()
-      // after the batch commit (see below), which reliably supports
-      // dot-notation for nested fields.
-
-      // Determine the other participant
-      final otherUserId = senderId == receiverId ? senderId : receiverId;
-      final otherLastSent = lastSentAt[otherUserId];
-
-      int newStreak = currentStreak;
-
-      // Check if BOTH participants have sent at least one message TODAY
-      // Use .toLocal() explicitly to ensure timezone-consistent comparison.
-      final otherLocal = otherLastSent?.toLocal();
-      final otherSentToday = otherLocal != null &&
-          otherLocal.year == today.year &&
-          otherLocal.month == today.month &&
-          otherLocal.day == today.day;
-
-      debugPrint(
-          '[STREAK] otherUserId=$otherUserId otherLastSent=$otherLastSent otherLocal=$otherLocal otherSentToday=$otherSentToday today=$today');
-
-      // Only evaluate streak when today becomes a mutual day
-      if (otherSentToday) {
-        if (lastInteraction == null) {
-          // First-ever mutual day — start the streak
-          newStreak = 1;
-          roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-          debugPrint('[STREAK] First mutual day → streak=1');
-        } else {
-          // Compare the last mutual date with today (calendar-day diff)
-          final lastMutualDay = DateTime(
-            lastInteraction.year,
-            lastInteraction.month,
-            lastInteraction.day,
-          );
-          final daysDiff = today.difference(lastMutualDay).inDays;
-
-          debugPrint(
-              '[STREAK] lastMutualDay=$lastMutualDay daysDiff=$daysDiff');
-
-          if (daysDiff == 0) {
-            // Same day — streak count stays the same, but refresh the
-            // interaction timestamp so the streak badge timer resets.
-            // Without this, stale timestamps from the old logic keep
-            // the badge stuck in at-risk/critical state.
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint(
-                '[STREAK] Same day → refreshing lastInteractionDate, streak=$newStreak');
-          } else if (daysDiff == 1) {
-            // Yesterday → streak increments!
-            newStreak = currentStreak + 1;
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint('[STREAK] Yesterday → streak incremented to $newStreak');
-          } else {
-            // 2+ days gap → streak broken
-            if (currentStreak > 0) {
-              previousStreakCount = currentStreak;
-              streakBrokenAt = now;
-              roomUpdates['previousStreakCount'] = currentStreak;
-              roomUpdates['streakBrokenAt'] = Timestamp.fromDate(now);
-            }
-            newStreak = 1; // Fresh mutual day starts a new streak
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint(
-                '[STREAK] Gap of $daysDiff days → streak broken, restart at 1');
-          }
-        }
-      } else {
-        // Only one person sent today. Still refresh lastInteractionDate
-        // if it's stale (>20h old) to prevent the badge timer from being
-        // stuck in at-risk/critical state when the user is actively messaging.
-        if (lastInteraction != null) {
-          final hoursSinceInteraction = now.difference(lastInteraction).inHours;
-          if (hoursSinceInteraction >= 20) {
-            roomUpdates['lastInteractionDate'] = Timestamp.fromDate(now);
-            debugPrint(
-                '[STREAK] Not mutual yet, but refreshing stale lastInteractionDate (${hoursSinceInteraction}h old)');
-          }
-        }
-        debugPrint(
-            '[STREAK] Waiting for other user to send today — no streak change');
-      }
-
-      roomUpdates['streakCount'] = newStreak;
-
-      // ── Update in-memory cache so the next send to this room skips
-      //     the Firestore read entirely (hot path).
-      _streakCache[chatRoomId] = _StreakCacheEntry(
-        streakCount: newStreak,
-        lastInteraction: now,
-        lastSentAt: lastSentAt,
-        previousStreakCount: previousStreakCount,
-        streakBrokenAt: streakBrokenAt,
-      );
-
-      // Fire streak milestone rewards in the background
-      if (newStreak > currentStreak &&
-          (newStreak == 7 || newStreak == 30 || newStreak == 100)) {
-        unawaited(GamificationService.instance
-            .handleStreakMilestone(senderId, newStreak));
-      }
-    } catch (e, st) {
-      debugPrint('[STREAK] Error computing streak: $e\n$st');
-    }
-
     batch.set(
       chatRoomRef,
       roomUpdates,
@@ -1015,15 +839,6 @@ class ChatService {
     if (kDebugMode)
       debugPrint(
           '[SEND] committed: ${sw.elapsedMilliseconds}ms — ${message.id}');
-
-    // Write lastSentAt using update(), which reliably interprets dot-notation
-    // as nested field paths (e.g. 'lastSentAt.uid' → lastSentAt/{uid}).
-    // This MUST happen after batch.commit() so the document already exists.
-    unawaited(chatRoomRef.update({
-      'lastSentAt.$senderId': Timestamp.fromDate(DateTime.now()),
-    }).catchError((e) {
-      debugPrint('[STREAK] Failed to update lastSentAt: $e');
-    }));
 
     // Award points, progress challenges, and unlock badges in a single
     // Firestore transaction — avoids the race condition where multiple
@@ -1696,63 +1511,14 @@ class ChatService {
 
   /// Wipes all in-memory caches. Call on sign-out to free memory and
   /// prevent stale data from leaking across user sessions.
+  ///
+  /// Streak state is not part of this: it lives in [StreakRepository], which
+  /// is cleared separately on the sign-out path via `clearAll()`.
   static void clearCaches() {
     _payloadMemo.clear();
     _loggedDecryptSkips.clear();
     _peerBundleCache.clear();
     _peerBundleRefreshInFlight.clear();
-    _streakCache.clear();
     _preWarmVaultCache.clear();
-  }
-}
-
-/// In-memory snapshot of chat-room streak state. Eliminates the per-message
-/// Firestore `chatRoomRef.get()` in `_commitMessage`. Populated on first send
-/// to a room after cold-start and updated optimistically thereafter.
-class _StreakCacheEntry {
-  _StreakCacheEntry({
-    required this.streakCount,
-    required this.lastInteraction,
-    this.lastSentAt = const {},
-    this.previousStreakCount = 0,
-    this.streakBrokenAt,
-  });
-
-  final int streakCount;
-  final DateTime? lastInteraction;
-  final Map<String, DateTime> lastSentAt;
-  final int previousStreakCount;
-  final DateTime? streakBrokenAt;
-
-  _StreakCacheEntry copyWith({
-    int? streakCount,
-    DateTime? lastInteraction,
-    Map<String, DateTime>? lastSentAt,
-    int? previousStreakCount,
-    DateTime? streakBrokenAt,
-  }) =>
-      _StreakCacheEntry(
-        streakCount: streakCount ?? this.streakCount,
-        lastInteraction: lastInteraction ?? this.lastInteraction,
-        lastSentAt: lastSentAt ?? this.lastSentAt,
-        previousStreakCount: previousStreakCount ?? this.previousStreakCount,
-        streakBrokenAt: streakBrokenAt ?? this.streakBrokenAt,
-      );
-
-  factory _StreakCacheEntry.fromFirestore(Map<String, dynamic> data) {
-    final rawSent = data['lastSentAt'] as Map<String, dynamic>? ?? {};
-    final sent = <String, DateTime>{};
-    rawSent.forEach((k, v) {
-      if (v is Timestamp) sent[k] = v.toDate().toLocal();
-    });
-    final brokenTs = data['streakBrokenAt'] as Timestamp?;
-    final interactionTs = data['lastInteractionDate'] as Timestamp?;
-    return _StreakCacheEntry(
-      streakCount: data['streakCount'] as int? ?? 0,
-      lastInteraction: interactionTs?.toDate().toLocal(),
-      lastSentAt: sent,
-      previousStreakCount: data['previousStreakCount'] as int? ?? 0,
-      streakBrokenAt: brokenTs?.toDate().toLocal(),
-    );
   }
 }
