@@ -175,6 +175,12 @@ class UserService {
 
   final String _usernamesCollection = 'usernames';
 
+  /// The one definition of a valid handle, matching the `handle.matches(...)`
+  /// guard on /usernames/{handle} in firestore.rules. Anything this rejects
+  /// will be rejected server-side too, so callers should check it before
+  /// offering a handle as available.
+  static final RegExp handleFormat = RegExp(r'^[a-z0-9_]{3,20}$');
+
   // Check if a username is available (unique) across all users.
   //
   // Backed by the /usernames/{handle} reservation collection rather than
@@ -182,12 +188,6 @@ class UserService {
   // existence is a point-lookup and (combined with the security rule that
   // forbids overwriting someone else's reservation) gives us a real
   // uniqueness guarantee instead of a racy check-then-write over a query.
-  /// The one definition of a valid handle, matching the `handle.matches(...)`
-  /// guard on /usernames/{handle} in firestore.rules. Anything this rejects
-  /// will be rejected server-side too, so callers should check it before
-  /// offering a handle as available.
-  static final RegExp handleFormat = RegExp(r'^[a-z0-9_]{3,20}$');
-
   Future<bool> isUsernameAvailable(String username, {String? currentUserId}) async {
     try {
       String cleanUsername = username.trim().toLowerCase();
