@@ -88,6 +88,7 @@ class FriendRequestService {
           .doc(friendId);
       batch.set(myFriendRef, {
         'friendId': friendId,
+        'requestId': requestId,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -97,8 +98,14 @@ class FriendRequestService {
           .doc(friendId)
           .collection('friends')
           .doc(currentUserId);
+      // `requestId` is REQUIRED by firestore.rules for this write: it is the
+      // reciprocal insert into the requester's friends list, and the rule
+      // uses it to confirm a pending request from them to us actually
+      // exists. Dropping this field will make accepting a request fail with
+      // permission-denied.
       batch.set(targetFriendRef, {
         'friendId': currentUserId,
+        'requestId': requestId,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
