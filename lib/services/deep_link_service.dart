@@ -44,7 +44,7 @@ class DeepLinkService {
   }
 
   void _handleUri(Uri uri) {
-    final username = _extractUsername(uri);
+    final username = extractUsername(uri);
     if (username == null || username.isEmpty) return;
 
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
@@ -60,11 +60,16 @@ class DeepLinkService {
 
   /// Extracts the handle from a `/u/<username>` path. Returns null for any
   /// URL that doesn't match the expected profile-link shape.
-  String? _extractUsername(Uri uri) {
+  ///
+  /// Public and static so the QR scanner validates scanned codes with exactly
+  /// the same rule that the deep-link handler uses — otherwise a code that
+  /// scans fine could fail when the same link is tapped, or vice versa.
+  static String? extractUsername(Uri uri) {
     final segments = uri.pathSegments;
     final uIndex = segments.indexOf('u');
     if (uIndex == -1 || uIndex + 1 >= segments.length) return null;
-    return segments[uIndex + 1];
+    final handle = segments[uIndex + 1].trim();
+    return handle.isEmpty ? null : handle;
   }
 
   void _openProfile(String username, String currentUserId) {

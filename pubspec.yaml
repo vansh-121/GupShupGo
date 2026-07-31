@@ -144,6 +144,16 @@ dependencies:
   # Local notifications for foreground FCM handling & deep-link routing.
   flutter_local_notifications: ^18.0.0
 
+  # QR scanning for profile codes (Contacts → Scan).
+  #
+  # Pinned to the 5.2.x line, NOT the latest. mobile_scanner 6.x/7.x depend on
+  # CameraX 1.6.x, whose AAR metadata demands Android Gradle Plugin 8.9.1+;
+  # this project builds with AGP 8.3.2, so those versions fail at
+  # :app:checkDebugAarMetadata. 5.2.3 uses a CameraX release compatible with
+  # the current AGP. Revisit when the AGP/Gradle upgrade Flutter is already
+  # warning about gets done.
+  mobile_scanner: 5.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

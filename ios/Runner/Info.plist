@@ -47,5 +47,7 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>GupShupGo needs camera access to scan profile QR codes and for video calls.</string>
 </dict>
 </plist>

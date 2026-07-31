@@ -298,12 +298,56 @@ class UserService {
     int limit = 30,
   }) async {
     try {
-      String cleanQuery = query.trim().toLowerCase();
+      final cleanQuery = query.trim().toLowerCase();
       if (cleanQuery.isEmpty) return [];
 
       // If query starts with '@', strip it for username search
-      String handleQuery = cleanQuery.startsWith('@') ? cleanQuery.substring(1) : cleanQuery;
+      final handleQuery =
+          cleanQuery.startsWith('@') ? cleanQuery.substring(1) : cleanQuery;
 
+      // ── Targeted server-side lookups first ─────────────────────────
+      //
+      // The old implementation ONLY did the capped client-side scan below.
+      // That meant searching for a real @handle or email returned nothing
+      // unless that user happened to fall inside the first [limit]
+      // documents ordered by document id — so search appeared broken for
+      // essentially everybody once the user table grew past a page.
+      //
+      // These are equality filters on single fields, which Firestore
+      // indexes automatically. No composite index is needed.
+      final results = <String, UserModel>{};
+
+      Future<void> runExact(String field, String value) async {
+        if (value.isEmpty) return;
+        try {
+          final snap = await _firestore
+              .collection(_usersCollection)
+              .where(field, isEqualTo: value)
+              .limit(5)
+              .get();
+          for (final doc in snap.docs) {
+            if (doc.id == currentUserId) continue;
+            final u = UserModel.fromFirestore(doc);
+            if (!u.isDiscoverable) continue;
+            results[u.id] = u;
+          }
+        } catch (e) {
+          print('Search: exact lookup on $field failed: $e');
+        }
+      }
+
+      final normalizedPhone = normalizePhone(cleanQuery);
+
+      await Future.wait([
+        runExact('username_lowercase', handleQuery),
+        runExact('email', cleanQuery),
+        // Phone is stored unnormalised, so try the raw query too.
+        runExact('phoneNumber', query.trim()),
+        if (normalizedPhone.isNotEmpty && normalizedPhone != query.trim())
+          runExact('phoneNumber', normalizedPhone),
+      ]);
+
+      // ── Then the paged client-side scan for partial / name matches ──
       Query q = _firestore
           .collection(_usersCollection)
           .where(FieldPath.documentId, isNotEqualTo: currentUserId)
@@ -313,31 +357,49 @@ class UserService {
         q = q.startAfterDocument(startAfterDoc);
       }
 
-      QuerySnapshot snapshot = await q.get();
+      try {
+        final snapshot = await q.get();
+        for (final doc in snapshot.docs) {
+          final user = UserModel.fromFirestore(doc);
+          if (results.containsKey(user.id)) continue;
+          // Respect the user's discoverability opt-out before matching.
+          if (!user.isDiscoverable) continue;
 
-      List<UserModel> users = snapshot.docs
-          .map((doc) => UserModel.fromFirestore(doc))
-          .where((user) {
-            // Respect the user's discoverability opt-out before matching.
-            if (!user.isDiscoverable) return false;
+          final matchName = user.name.toLowerCase().contains(cleanQuery);
+          final matchUsername = user.username != null &&
+              user.username!.toLowerCase().contains(handleQuery);
+          final matchPhone = user.phoneNumber != null &&
+              normalizedPhone.isNotEmpty &&
+              normalizePhone(user.phoneNumber!).contains(normalizedPhone);
+          final matchEmail =
+              user.email != null && user.email!.toLowerCase().contains(cleanQuery);
 
-            bool matchName = user.name.toLowerCase().contains(cleanQuery);
-            bool matchUsername = user.username != null &&
-                user.username!.toLowerCase().contains(handleQuery);
-            bool matchPhone = user.phoneNumber != null &&
-                user.phoneNumber!.contains(cleanQuery);
-            bool matchEmail = user.email != null &&
-                user.email!.toLowerCase().contains(cleanQuery);
+          if (matchName || matchUsername || matchPhone || matchEmail) {
+            results[user.id] = user;
+          }
+        }
+      } catch (e) {
+        print('Search: paged scan failed: $e');
+      }
 
-            return matchName || matchUsername || matchPhone || matchEmail;
-          })
-          .toList();
-
-      return users;
+      return results.values.toList();
     } catch (e) {
       print('Error performing multi-field search: $e');
       return [];
     }
+  }
+
+  /// Reduces a phone number to comparable digits, dropping punctuation,
+  /// spaces and country-code prefixes.
+  ///
+  /// Matching on the last 10 digits is what makes "+91 98765 43210",
+  /// "098765 43210" and "9876543210" resolve to the same person — the three
+  /// ways the same contact is realistically stored across a device address
+  /// book and a signup form.
+  static String normalizePhone(String raw) {
+    final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+    if (digits.length <= 10) return digits;
+    return digits.substring(digits.length - 10);
   }
 
   // Match device phone contacts and emails against Firestore registered accounts
@@ -347,39 +409,52 @@ class UserService {
     required String currentUserId,
   }) async {
     try {
-      Set<String> cleanPhones = rawPhoneNumbers
-          .map((p) => p.replaceAll(RegExp(r'[^\d+]'), ''))
-          .where((p) => p.isNotEmpty)
+      // Normalised to the last 10 digits so the same person matches whether
+      // the address book stored "+91 98765 43210" or "09876543210".
+      //
+      // The previous comparison was a bidirectional `contains`, which
+      // produced false matches in both directions: a stored number of "7890"
+      // matched any contact ending in 7890, and a short contact entry
+      // (extensions, shortcodes like "121") matched large numbers of real
+      // accounts — strangers were being suggested as phone contacts.
+      final Set<String> cleanPhones = rawPhoneNumbers
+          .map(normalizePhone)
+          .where((p) => p.length >= 7)
           .toSet();
 
-      Set<String> cleanEmails = rawEmails
+      final Set<String> cleanEmails = rawEmails
           .map((e) => e.trim().toLowerCase())
           .where((e) => e.isNotEmpty)
           .toSet();
 
       if (cleanPhones.isEmpty && cleanEmails.isEmpty) return [];
 
-      QuerySnapshot snapshot = await _firestore
+      // Bounded read. This previously fetched EVERY user document in the
+      // database on every contact sync — unbounded read cost that grows
+      // linearly with signups. Proper scaling needs server-side matching on
+      // hashed phone/email (a Cloud Function over a phoneHash field); until
+      // then the scan is at least capped.
+      final QuerySnapshot snapshot = await _firestore
           .collection(_usersCollection)
           .where(FieldPath.documentId, isNotEqualTo: currentUserId)
+          .limit(contactScanLimit)
           .get();
 
-      List<UserModel> matchedUsers = [];
+      final List<UserModel> matchedUsers = [];
 
-      for (var doc in snapshot.docs) {
-        UserModel user = UserModel.fromFirestore(doc);
+      for (final doc in snapshot.docs) {
+        final user = UserModel.fromFirestore(doc);
 
         // Enforced here (rather than at each call site) so contact sync and
         // the suggestion engine can't drift apart on this policy.
         if (!user.isDiscoverable) continue;
 
-        bool phoneMatch = user.phoneNumber != null &&
-            cleanPhones.any((p) =>
-                user.phoneNumber!.replaceAll(RegExp(r'[^\d+]'), '').contains(p) ||
-                p.contains(user.phoneNumber!.replaceAll(RegExp(r'[^\d+]'), '')));
-                
-        bool emailMatch = user.email != null &&
-            cleanEmails.contains(user.email!.toLowerCase());
+        final userPhone =
+            user.phoneNumber == null ? '' : normalizePhone(user.phoneNumber!);
+        final phoneMatch = userPhone.length >= 7 && cleanPhones.contains(userPhone);
+
+        final emailMatch =
+            user.email != null && cleanEmails.contains(user.email!.toLowerCase());
 
         if (phoneMatch || emailMatch) {
           matchedUsers.add(user);
@@ -392,6 +467,9 @@ class UserService {
       return [];
     }
   }
+
+  /// Upper bound on documents scanned by [matchDeviceContacts].
+  static const int contactScanLimit = 500;
 
   // Setup presence system (call when app opens).
   // Delegates to PresenceService which uses RTDB onDisconnect for reliable

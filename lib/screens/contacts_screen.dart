@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/friend_request_service.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
+import 'package:video_chat_app/screens/qr_scanner_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 
@@ -47,9 +48,53 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   bool _isSearching = false;
   Timer? _searchDebounce;
 
+  /// Monotonic token used to discard out-of-order search responses.
+  int _searchToken = 0;
+
   UserModel? _currentUserModel;
   StreamSubscription<UserModel?>? _currentUserSub;
   bool _isSyncingContacts = false;
+
+  /// Cached suggestions future.
+  ///
+  /// This MUST NOT be created inside build(). Both the Friends empty-state
+  /// and the Requests tab used `future: _friendService.getQuickConnect...()`
+  /// inline, so the query re-ran on every rebuild — and since the Requests
+  /// tab sits inside a StreamBuilder on the incoming-requests stream, every
+  /// stream tick fired a fresh multi-read suggestion query and flashed the
+  /// spinner. Created once here, refreshed explicitly via [_refreshSuggestions].
+  Future<List<QuickConnectSuggestion>>? _suggestionsFuture;
+
+  /// Cached for the same reason as [_suggestionsFuture] — a stream created in
+  /// build() is torn down and resubscribed on every rebuild.
+  Stream<List<UserModel>>? _friendsStream;
+
+  // Two separate cached streams rather than one shared broadcast stream: the
+  // TabBarView only builds the active tab, so the Requests tab subscribes
+  // long after the badge does. A broadcast stream would leave that late
+  // subscriber with no initial snapshot until the next server change. Two
+  // snapshots() subscriptions on an identical query are cheap — the Firestore
+  // SDK shares the underlying listener and replays the cached snapshot to
+  // each.
+  Stream<QuerySnapshot>? _badgeRequestsStream;
+  Stream<QuerySnapshot>? _tabRequestsStream;
+  Stream<List<UserModel>>? _allUsersStream;
+
+  /// Request ids with an accept/decline in flight, so their buttons disable
+  /// instead of allowing a second tap before the stream removes the row.
+  final Set<String> _busyRequestIds = {};
+
+  Future<List<QuickConnectSuggestion>> get _suggestions =>
+      _suggestionsFuture ??=
+          _friendService.getQuickConnectSuggestions(widget.currentUserId);
+
+  void _refreshSuggestions() {
+    if (!mounted) return;
+    setState(() {
+      _suggestionsFuture =
+          _friendService.getQuickConnectSuggestions(widget.currentUserId);
+    });
+  }
 
   @override
   void initState() {
@@ -86,6 +131,45 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  /// Shared failure state. None of the builders in this screen had an error
+  /// branch, so every failure looked like an empty list.
+  Widget _buildErrorState(String message, {required VoidCallback onRetry}) {
+    final c = AppThemeColors.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 44, color: c.textMid),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: c.textHigh,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text('Retry', style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _onSearchChanged(String query) {
     _searchDebounce?.cancel();
     if (query.trim().isEmpty) {
@@ -100,18 +184,22 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       _isSearching = true;
     });
 
+    // Cancelling the debounce timer does not cancel an already-dispatched
+    // query. Without a token, typing "ab" then "abc" could resolve out of
+    // order and leave the results for "ab" on screen under the query "abc".
+    final token = ++_searchToken;
+
     _searchDebounce = Timer(const Duration(milliseconds: 350), () async {
       List<UserModel> results = await _userService.searchUsersMultiField(
         query,
         widget.currentUserId,
       );
 
-      if (mounted) {
-        setState(() {
-          _searchResults = results;
-          _isSearching = false;
-        });
-      }
+      if (!mounted || token != _searchToken) return;
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
     });
   }
 
@@ -168,20 +256,72 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     );
   }
 
+  Future<void> _openQRScanner() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => QrScannerScreen(
+          currentUserId: widget.currentUserId,
+          currentUserName:
+              _currentUserModel?.name ?? widget.currentUserName,
+        ),
+      ),
+    );
+    // A scan may have produced a new friendship or pending request, so the
+    // cached suggestions are stale by the time we come back.
+    _refreshSuggestions();
+  }
+
   void _showQRCodeModal() {
     final c = AppThemeColors.of(context);
-    String handle = _currentUserModel?.username ?? widget.currentUserId;
-    String qrData = 'https://gupshupgo.app/u/$handle';
+
+    // Previously this fell back to the raw Firebase uid when no username was
+    // set, producing a link like /u/8fJ2k... that resolves to nothing and a
+    // label reading "@8fJ2k...". Ask the user to pick a handle instead of
+    // handing them a broken link.
+    final handle = _currentUserModel?.username;
+    if (handle == null || handle.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Set a @username in your profile first — that\'s what your QR code shares.',
+            style: GoogleFonts.poppins(),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final String qrData = 'https://gupshupgo.app/u/$handle';
 
     showModalBottomSheet(
       context: context,
       backgroundColor: c.surface,
       isScrollControlled: true,
+      // Keeps the sheet clear of the status bar / notch when its content is
+      // tall enough to fill the screen.
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24),
+      // Scrollable, and padded past the system navigation bar.
+      //
+      // This was a fixed EdgeInsets.all(24) Column with no scroll view, so the
+      // content had no way to fit on a short screen: the action buttons ran off
+      // the bottom edge and sat underneath Android's navigation bar. Adding the
+      // "Scan Someone's Code" button is what pushed it over.
+      //
+      // viewPadding.bottom covers the nav bar / home indicator; viewInsets.bottom
+      // covers a keyboard, which can appear here on small screens in landscape.
+      builder: (context) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          24,
+          24,
+          24 +
+              MediaQuery.of(context).viewPadding.bottom +
+              MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -193,7 +333,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Text(
               'My Profile QR Code',
               style: GoogleFonts.poppins(
@@ -208,9 +348,9 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
@@ -222,10 +362,15 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   ),
                 ],
               ),
+              // Sized against the viewport instead of a hard 200px so the whole
+              // sheet still fits on short screens without the buttons being
+              // driven off the bottom. Clamped so it stays scannable on small
+              // phones and doesn't balloon on tablets.
               child: QrImageView(
                 data: qrData,
                 version: QrVersions.auto,
-                size: 200.0,
+                size: (MediaQuery.of(context).size.height * 0.24)
+                    .clamp(150.0, 200.0),
                 eyeStyle: QrEyeStyle(
                   eyeShape: QrEyeShape.square,
                   color: c.primary,
@@ -236,7 +381,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
@@ -259,7 +404,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
               height: 48,
@@ -282,6 +427,29 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.primary,
                   foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _openQRScanner();
+                },
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                label: Text(
+                  'Scan Someone\'s Code',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: c.primary,
+                  side: BorderSide(color: c.primary),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -403,11 +571,18 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             Expanded(
               child: ListView.separated(
                 controller: scrollController,
+                // Same nav-bar clearance issue as the QR sheet: without this the
+                // last matched contact's action buttons sit under the system
+                // navigation bar and can't be tapped.
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewPadding.bottom + 12,
+                ),
                 itemCount: matches.length,
                 separatorBuilder: (_, __) =>
                     Divider(height: 1, indent: 72, color: c.divider),
                 itemBuilder: (context, index) {
                   return UserDiscoverTile(
+                    key: ValueKey(matches[index].id),
                     targetUser: matches[index],
                     customSubtitle: 'From your device contacts',
                     currentUserId: widget.currentUserId,
@@ -442,19 +617,38 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         scrolledUnderElevation: 0,
         backgroundColor: c.surface,
         elevation: 0,
+        // titleSpacing + the smaller size stop the title eliding to
+        // "Contacts & Discov..." now that there are two action icons
+        // competing for the same row.
+        titleSpacing: 8,
         title: Text(
           'Contacts & Discover',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: GoogleFonts.poppins(
             color: c.textHigh,
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
             letterSpacing: -0.4,
           ),
         ),
+        // Compact tap targets (still 40x40, above the 40dp guidance) so both
+        // icons fit without squeezing the title.
         actions: [
           IconButton(
-            icon: Icon(Icons.qr_code_2_rounded, color: c.textHigh, size: 24),
+            icon: Icon(Icons.qr_code_scanner_rounded, color: c.textHigh, size: 23),
+            tooltip: 'Scan QR Code',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+            padding: EdgeInsets.zero,
+            onPressed: _openQRScanner,
+          ),
+          IconButton(
+            icon: Icon(Icons.qr_code_2_rounded, color: c.textHigh, size: 23),
             tooltip: 'My Handle',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+            padding: EdgeInsets.zero,
             onPressed: _showQRCodeModal,
           ),
           const SizedBox(width: 8),
@@ -485,7 +679,8 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               tabs: [
                 const Tab(text: 'Friends'),
                 StreamBuilder<QuerySnapshot>(
-                  stream: _friendService.streamIncomingRequests(widget.currentUserId),
+                  stream: _badgeRequestsStream ??= _friendService
+                      .streamIncomingRequests(widget.currentUserId),
                   builder: (context, snapshot) {
                     int count = snapshot.data?.docs.length ?? 0;
                     return Tab(
@@ -538,10 +733,25 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     final c = AppThemeColors.of(context);
 
     return StreamBuilder<List<UserModel>>(
-      stream: _friendService.streamFriends(widget.currentUserId),
+      stream: _friendsStream ??= _friendService.streamFriends(widget.currentUserId),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return Center(child: CircularProgressIndicator(color: c.primary));
+        }
+
+        // Without this, a permission or network failure rendered as the
+        // "No Friends Added Yet" empty state — indistinguishable from
+        // genuinely having no friends, which is how the earlier breakage
+        // stayed invisible.
+        if (snapshot.hasError) {
+          return _buildErrorState(
+            'Couldn\'t load your friends.',
+            onRetry: () => setState(() {
+              _friendsStream =
+                  _friendService.streamFriends(widget.currentUserId);
+            }),
+          );
         }
 
         List<UserModel> friends = snapshot.data ?? [];
@@ -682,7 +892,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 const SizedBox(height: 14),
 
                 FutureBuilder<List<QuickConnectSuggestion>>(
-                  future: _friendService.getQuickConnectSuggestions(widget.currentUserId),
+                  future: _suggestions,
                   builder: (context, suggestSnapshot) {
                     if (suggestSnapshot.connectionState == ConnectionState.waiting) {
                       return Padding(
@@ -726,6 +936,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                   ),
                                 ),
                                 child: UserDiscoverTile(
+                                  key: ValueKey(suggestion.user.id),
                                   targetUser: suggestion.user,
                                   customSubtitle: suggestion.reasonSubtitle,
                                   currentUserId: widget.currentUserId,
@@ -858,10 +1069,22 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     final c = AppThemeColors.of(context);
 
     return StreamBuilder<QuerySnapshot>(
-      stream: _friendService.streamIncomingRequests(widget.currentUserId),
+      stream: _tabRequestsStream ??=
+          _friendService.streamIncomingRequests(widget.currentUserId),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return Center(child: CircularProgressIndicator(color: c.primary));
+        }
+
+        if (snapshot.hasError) {
+          return _buildErrorState(
+            'Couldn\'t load your requests.',
+            onRetry: () => setState(() {
+              _tabRequestsStream =
+                  _friendService.streamIncomingRequests(widget.currentUserId);
+            }),
+          );
         }
 
         final docs = snapshot.data?.docs ?? [];
@@ -977,22 +1200,38 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               ElevatedButton(
-                                onPressed: () async {
-                                  await _friendService.acceptFriendRequest(
+                                onPressed: _busyRequestIds.contains(requestId)
+                                    ? null
+                                    : () async {
+                                  // Guard against double-taps: the row stays
+                                  // on screen until the stream re-emits, so
+                                  // the button was tappable twice, running
+                                  // the accept batch (and its notification)
+                                  // more than once.
+                                  setState(
+                                      () => _busyRequestIds.add(requestId));
+                                  final ok =
+                                      await _friendService.acceptFriendRequest(
                                     requestId: requestId,
                                     currentUserId: widget.currentUserId,
                                     friendId: fromUserId,
                                   );
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Connected with $fromName!',
-                                          style: GoogleFonts.poppins(),
-                                        ),
+                                  if (!mounted) return;
+                                  setState(
+                                      () => _busyRequestIds.remove(requestId));
+                                  // The result was previously ignored, so a
+                                  // rejected write still showed "Connected!".
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        ok
+                                            ? 'Connected with $fromName!'
+                                            : 'Couldn\'t accept the request. Please try again.',
+                                        style: GoogleFonts.poppins(),
                                       ),
-                                    );
-                                  }
+                                    ),
+                                  );
+                                  if (ok) _refreshSuggestions();
                                 },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: c.primary,
@@ -1025,9 +1264,28 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                 child: IconButton(
                                   padding: EdgeInsets.zero,
                                   icon: Icon(Icons.close_rounded, color: c.textMid, size: 18),
-                                  onPressed: () async {
-                                    await _friendService.declineFriendRequest(requestId);
-                                  },
+                                  onPressed: _busyRequestIds.contains(requestId)
+                                      ? null
+                                      : () async {
+                                          setState(() =>
+                                              _busyRequestIds.add(requestId));
+                                          final ok = await _friendService
+                                              .declineFriendRequest(requestId);
+                                          if (!mounted) return;
+                                          setState(() => _busyRequestIds
+                                              .remove(requestId));
+                                          if (!ok) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  'Couldn\'t decline the request. Please try again.',
+                                                  style: GoogleFonts.poppins(),
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
                                 ),
                               ),
                             ],
@@ -1076,7 +1334,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
               // 2-Column Suggestion Grid
               FutureBuilder<List<QuickConnectSuggestion>>(
-                future: _friendService.getQuickConnectSuggestions(widget.currentUserId),
+                future: _suggestions,
                 builder: (context, suggestSnapshot) {
                   if (suggestSnapshot.connectionState == ConnectionState.waiting) {
                     return Padding(
@@ -1116,6 +1374,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                     itemBuilder: (context, index) {
                       final item = suggestions[index];
                       return YouMightKnowCard(
+                        key: ValueKey(item.user.id),
                         targetUser: item.user,
                         reasonSubtitle: item.reasonSubtitle,
                         currentUserId: widget.currentUserId,
@@ -1225,6 +1484,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               ),
             ),
             child: UserDiscoverTile(
+              key: ValueKey(_searchResults[index].id),
               targetUser: _searchResults[index],
               currentUserId: widget.currentUserId,
               currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
@@ -1410,10 +1670,22 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           const SizedBox(height: 12),
 
           StreamBuilder<List<UserModel>>(
-            stream: _userService.getAllUsers(widget.currentUserId),
+            stream: _allUsersStream ??=
+                _userService.getAllUsers(widget.currentUserId),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !snapshot.hasData) {
                 return Center(child: CircularProgressIndicator(color: c.primary));
+              }
+
+              if (snapshot.hasError) {
+                return _buildErrorState(
+                  'Couldn\'t load suggestions.',
+                  onRetry: () => setState(() {
+                    _allUsersStream =
+                        _userService.getAllUsers(widget.currentUserId);
+                  }),
+                );
               }
 
               List<UserModel> suggested = snapshot.data ?? [];
@@ -1445,6 +1717,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                         ),
                       ),
                       child: UserDiscoverTile(
+                        key: ValueKey(suggestedUser.id),
                         targetUser: suggestedUser,
                         currentUserId: widget.currentUserId,
                         currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
@@ -1638,16 +1911,85 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
     _checkStatus();
   }
 
+  // These tiles are built from .map() over a live list. When the list
+  // re-emits in a different order, Flutter reuses an existing State object
+  // for a DIFFERENT targetUser — leaving the previous user's connection
+  // status (and its Add Friend / Requested / message buttons) attached to
+  // the wrong person. Re-resolving on identity change fixes that, and the
+  // ValueKey at each call site avoids the swap in the first place.
+  @override
+  void didUpdateWidget(UserDiscoverTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.targetUser.id != widget.targetUser.id) {
+      setState(() {
+        _status = ConnectionStateStatus.none;
+        _isLoading = true;
+        _isSending = false;
+      });
+      _checkStatus();
+    }
+  }
+
   Future<void> _checkStatus() async {
+    final targetId = widget.targetUser.id;
     ConnectionStateStatus s = await _friendService.getConnectionStatus(
       widget.currentUserId,
-      widget.targetUser.id,
+      targetId,
     );
-    if (mounted) {
+    // Ignore a result that arrived after this State was recycled onto a
+    // different user.
+    if (mounted && targetId == widget.targetUser.id) {
       setState(() {
         _status = s;
         _isLoading = false;
       });
+    }
+  }
+
+  /// Accepts a request that the target user already sent us.
+  ///
+  /// Previously this ran a raw Firestore query inline in the widget (a
+  /// duplicate of the service's own query) and then set the status to
+  /// `friends` unconditionally — so a failed accept still rendered the
+  /// message/call buttons as though the connection existed.
+  Future<void> _acceptIncoming() async {
+    if (_isSending) return;
+    setState(() => _isSending = true);
+
+    final requestId = await _friendService.findPendingRequestId(
+      fromUserId: widget.targetUser.id,
+      currentUserId: widget.currentUserId,
+    );
+
+    bool ok = false;
+    if (requestId != null) {
+      ok = await _friendService.acceptFriendRequest(
+        requestId: requestId,
+        currentUserId: widget.currentUserId,
+        friendId: widget.targetUser.id,
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isSending = false;
+      if (ok) _status = ConnectionStateStatus.friends;
+    });
+
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            requestId == null
+                ? 'That request is no longer available.'
+                : 'Couldn\'t accept the request. Please try again.',
+            style: GoogleFonts.poppins(),
+          ),
+        ),
+      );
+      // Re-resolve: the request may have been withdrawn or already handled
+      // on another device.
+      await _checkStatus();
     }
   }
 
@@ -1764,26 +2106,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
 
       case ConnectionStateStatus.pendingReceived:
         return ElevatedButton.icon(
-          onPressed: () async {
-            QuerySnapshot snap = await FirebaseFirestore.instance
-                .collection('friend_requests')
-                .where('fromUserId', isEqualTo: widget.targetUser.id)
-                .where('toUserId', isEqualTo: widget.currentUserId)
-                .where('status', isEqualTo: 'pending')
-                .limit(1)
-                .get();
-
-            if (snap.docs.isNotEmpty) {
-              await _friendService.acceptFriendRequest(
-                requestId: snap.docs.first.id,
-                currentUserId: widget.currentUserId,
-                friendId: widget.targetUser.id,
-              );
-              if (mounted) {
-                setState(() => _status = ConnectionStateStatus.friends);
-              }
-            }
-          },
+          onPressed: _isSending ? null : _acceptIncoming,
           icon: const Icon(Icons.check_rounded, size: 14),
           label: Text('Accept', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
