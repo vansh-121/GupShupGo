@@ -46,7 +46,7 @@ android {
         // by August 31, 2026. compileSdk is already 36, so this just aligns
         // targetSdk to match — see Play Console policy warning.
         targetSdk = 36
-        versionCode = 43
+        versionCode = 44
         versionName = "1.1.1"
         minSdkVersion = 24
         multiDexEnabled true
