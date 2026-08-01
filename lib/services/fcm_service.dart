@@ -502,12 +502,18 @@ class FCMService {
   }
 
   /// Send chat message notification via Cloud Function.
+  ///
+  /// [screen] is an optional tap-routing hint forwarded verbatim in the FCM
+  /// data payload (e.g. 'requests' for friend-request notifications so
+  /// [NotificationService] opens the Requests tab instead of just Home).
+  /// Omitted for real chat messages, which route via chatRoomId/contactId.
   Future<void> sendMessageNotification({
     required String receiverId,
     required String senderId,
     required String senderName,
     required String message,
     required String chatRoomId,
+    String? screen,
   }) async {
     final metric =
         PerformanceService.newHttpMetric(_messageFunctionUrl, HttpMethod.Post);
@@ -527,6 +533,7 @@ class FCMService {
           'senderName': senderName,
           'message': message,
           'chatRoomId': chatRoomId,
+          if (screen != null) 'screen': screen,
         }),
       );
 

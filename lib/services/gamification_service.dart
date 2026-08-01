@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/streak/streak_api.dart';
 
 class GamificationService {
   GamificationService._();
@@ -148,8 +149,18 @@ class GamificationService {
     }
   }
 
-  /// Called when a streak reaches a milestone. Awards bonus points and
-  /// unlocks the streak_warrior badge at 7 days.
+  /// Awards streak milestone points and the streak_warrior badge at 7 days.
+  ///
+  /// DEPRECATED — has no callers. Milestones are awarded server-side by
+  /// `functions/streak` (idempotently, per `users/{uid}/streakAwards/{roomId}_{threshold}`,
+  /// for BOTH participants, on threshold *crossing* rather than exact match).
+  /// The client version awarded the sender only and on exact equality, so a
+  /// count that skipped a threshold (e.g. a restore from 5 to 12) lost it.
+  ///
+  /// Kept for one release so an in-flight caller cannot break; it is safe to
+  /// call (server awards are idempotency-keyed) but nothing should. Task 10.4
+  /// deletes it.
+  @Deprecated('Milestones are awarded server-side; removed in task 10.4.')
   Future<void> handleStreakMilestone(String userId, int newStreak) async {
     try {
       if (userId.isEmpty) return;
@@ -195,7 +206,14 @@ class GamificationService {
     }
   }
 
-  /// Returns the Gup Point cost to restore a broken streak (tiered).
+  /// Gup Point cost to restore a broken streak, by tier.
+  ///
+  /// DISPLAY ONLY. The SERVER is authoritative: `POST /streakRestore` computes
+  /// the charge with `restoreCost` in `functions/streak/engine.js`, which
+  /// mirrors this table (10/25/50/100 at 0/10/30/100). This copy exists so a
+  /// card label can show an estimate before a quote is fetched; never deduct,
+  /// gate or reconcile points against it. The authoritative figure for a given
+  /// room comes back from `GET /streakRestoreQuote` (`cost`).
   static int getRestoreCost(int streakCount) {
     if (streakCount >= 100) return 100;
     if (streakCount >= 30) return 50;
@@ -203,60 +221,28 @@ class GamificationService {
     return 10;
   }
 
-  /// Restore a broken streak by spending Gup Points.
-  /// Returns `true` if the restore succeeded, `false` if the user has
-  /// insufficient points or the restore window has expired.
+  /// Restore a broken streak for [chatRoomId] by calling `POST /streakRestore`.
+  ///
+  /// A thin passthrough to [StreakApi.streakRestore]. The server owns the whole
+  /// decision — window validity against server time, the cost tier, the Pro
+  /// weekly allowance, the point deduction and `bridgedThroughDay` — so no
+  /// cost is passed in and no Firestore write happens here.
+  ///
+  /// Prefer calling [StreakApi.instance.streakRestore] directly: it returns a
+  /// [StreakRestoreResult] whose status the dialog renders per refusal reason.
+  /// This bool-returning shim is kept only for the older call shape.
   Future<bool> restoreStreak({
-    required String userId,
     required String chatRoomId,
-    required int cost,
+    bool useFreePerk = false,
   }) async {
-    try {
-      if (userId.isEmpty || chatRoomId.isEmpty) return false;
-
-      final userDocRef = _firestore.collection(_usersCollection).doc(userId);
-      final chatRoomRef = _firestore.collection('chatRooms').doc(chatRoomId);
-
-      return await _firestore.runTransaction<bool>((transaction) async {
-        final userSnap = await transaction.get(userDocRef);
-        final roomSnap = await transaction.get(chatRoomRef);
-        if (!userSnap.exists || !roomSnap.exists) return false;
-
-        final userData = userSnap.data() as Map<String, dynamic>;
-        final roomData = roomSnap.data() as Map<String, dynamic>;
-
-        final currentPoints = userData['gupPoints'] as int? ?? 0;
-        if (currentPoints < cost) return false; // Insufficient points
-
-        final previousStreak = roomData['previousStreakCount'] as int? ?? 0;
-        if (previousStreak <= 0) return false; // Nothing to restore
-
-        final brokenTs = roomData['streakBrokenAt'] as Timestamp?;
-        if (brokenTs == null) return false;
-        final brokenAt = brokenTs.toDate();
-        if (DateTime.now().difference(brokenAt).inHours > 24) {
-          return false; // Restore window expired
-        }
-
-        // Deduct points from user
-        transaction.update(userDocRef, {
-          'gupPoints': currentPoints - cost,
-        });
-
-        // Restore the streak on the chatRoom
-        transaction.update(chatRoomRef, {
-          'streakCount': previousStreak,
-          'previousStreakCount': 0,
-          'streakBrokenAt': null,
-          'lastInteractionDate': Timestamp.fromDate(DateTime.now()),
-        });
-
-        return true;
-      });
-    } catch (e) {
-      debugPrint('[Gamification] restoreStreak failed: $e');
-      return false;
+    if (chatRoomId.isEmpty) return false;
+    final result = await StreakApi.instance
+        .streakRestore(chatRoomId, useFreePerk: useFreePerk);
+    if (!result.isSuccess) {
+      debugPrint(
+          '[Gamification] restoreStreak refused: ${result.status.name} ${result.message ?? ''}');
     }
+    return result.isSuccess;
   }
 
   /// Increment challenge progress for non-message actions (e.g. status posts).

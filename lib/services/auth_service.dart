@@ -17,6 +17,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
+import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 
@@ -113,6 +114,7 @@ class AuthService {
         name: displayName,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'anonymous',
       );
 
       print('Creating user in Firestore...');
@@ -211,6 +213,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'phone',
             );
           } else {
             // Create new user
@@ -221,6 +224,7 @@ class AuthService {
               photoUrl: photoUrl,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'phone',
             );
           }
 
@@ -300,6 +304,7 @@ class AuthService {
               user = existingUser.copyWith(
                 isOnline: true,
                 lastSeen: DateTime.now(),
+                authProvider: existingUser.authProvider ?? 'phone',
               );
             } else {
               user = UserModel(
@@ -309,6 +314,7 @@ class AuthService {
                 photoUrl: photoUrl,
                 isOnline: true,
                 createdAt: DateTime.now(),
+                authProvider: 'phone',
               );
             }
 
@@ -415,6 +421,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'google',
             );
           } else {
             user = UserModel(
@@ -426,6 +433,7 @@ class AuthService {
               photoUrl: userCredential.user!.photoURL ?? googleUser.photoUrl,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'google',
             );
           }
 
@@ -518,6 +526,7 @@ class AuthService {
         photoUrl: photoUrl,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'password',
       );
 
       print('Creating user in Firestore...');
@@ -596,6 +605,7 @@ class AuthService {
             user = existingUser.copyWith(
               isOnline: true,
               lastSeen: DateTime.now(),
+              authProvider: existingUser.authProvider ?? 'password',
             );
           } else {
             // Create user profile if it doesn't exist
@@ -605,6 +615,7 @@ class AuthService {
               email: email,
               isOnline: true,
               createdAt: DateTime.now(),
+              authProvider: 'password',
             );
           }
 
@@ -662,6 +673,7 @@ class AuthService {
       user = existingUser.copyWith(
         email: userCredential.user!.email ?? existingUser.email,
         photoUrl: userCredential.user!.photoURL ?? existingUser.photoUrl,
+        authProvider: existingUser.authProvider ?? 'google',
       );
     } else {
       user = UserModel(
@@ -671,6 +683,7 @@ class AuthService {
         photoUrl: userCredential.user!.photoURL,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'google',
       );
     }
     await _userService.createOrUpdateUser(user);
@@ -696,7 +709,10 @@ class AuthService {
     UserModel? existingUser = await _userService.getUserById(userId);
     UserModel user;
     if (existingUser != null) {
-      user = existingUser.copyWith(email: email);
+      user = existingUser.copyWith(
+        email: email,
+        authProvider: existingUser.authProvider ?? 'password',
+      );
     } else {
       user = UserModel(
         id: userId,
@@ -706,6 +722,7 @@ class AuthService {
         email: email,
         isOnline: true,
         createdAt: DateTime.now(),
+        authProvider: 'password',
       );
     }
     await _userService.createOrUpdateUser(user);
@@ -768,6 +785,12 @@ class AuthService {
       // Clear subscription cache (resets to free plan)
       try {
         await SubscriptionService.instance.clearSubscription();
+      } catch (_) {}
+      // Drop every streak stream, derived view and the server-clock sample so
+      // the next user on this device can't inherit this session's state.
+      // Replaces the old in-memory streak cache clear in ChatService.
+      try {
+        await StreakRepository.instance.clearAll();
       } catch (_) {}
       await _googleSignIn.signOut();
       await _auth.signOut();

@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+42
+version: 1.1.1+44
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
@@ -45,7 +45,28 @@ dependencies:
   agora_rtc_engine: ^6.3.1
   audioplayers: ^5.2.1
 
-  google_fonts: ^5.1.0
+  # Pinned >=6.3.0 — that version switched to Flutter's builtin AssetManifest
+  # API. Versions before 6.3.0 (e.g. 5.1.0) read the legacy AssetManifest.json
+  # directly, which fails to load on newer Flutter SDKs (3.38.10, pinned via
+  # .fvmrc) and causes "Unable to load asset: AssetManifest.json" font
+  # loading errors at runtime.
+  google_fonts: ^6.3.3
+  qr_flutter: ^4.1.0
+
+  # Device contact matching (Discover tab "Sync Device Contacts").
+  # Pinned to the 1.1.x line — 2.x requires Flutter >=3.44, newer than the
+  # 3.24.3 currently used by this project.
+  flutter_contacts: ^1.1.9
+
+  # Deep link handling for profile QR codes / share links
+  # (https://gupshupgo.app/u/<username>).
+  # Pinned to 6.3.3 — 6.4.0+ changed the Android module's build.gradle to
+  # use `compileSdk = flutter.compileSdkVersion`, a property only exposed
+  # by newer Flutter Gradle tooling than the 3.24.3 this project uses.
+  # That mismatch causes "Could not get unknown property 'flutter'" /
+  # "compileSdkVersion is not specified" build failures. 6.3.3 hardcodes
+  # compileSdk 34 instead and builds cleanly.
+  app_links: 6.3.3
 
   # Permissions
   permission_handler: ^11.1.0
@@ -74,7 +95,12 @@ dependencies:
   in_app_update: ^4.2.5
 
   # In-App Purchases (Google Play Billing — GupShupGo Pro)
-  in_app_purchase: ^3.2.0
+  # Bumped to pull in_app_purchase_android >=0.5.0, which upgrades the
+  # bundled Google Play Billing Library from 7.1.1 to 8.0.0. Google Play
+  # requires all apps to use Billing Library 8.0.0+ starting Aug 31, 2026.
+  # in_app_purchase_android 0.5.0 requires Flutter >=3.38.0 (pinned via
+  # .fvmrc in this project — see .fvm/ and .fvmrc).
+  in_app_purchase: ^3.3.0
 
   # Media picker & video player
   image_picker: ^1.0.7
@@ -118,6 +144,16 @@ dependencies:
   # Local notifications for foreground FCM handling & deep-link routing.
   flutter_local_notifications: ^18.0.0
 
+  # QR scanning for profile codes (Contacts → Scan).
+  #
+  # Pinned to the 5.2.x line, NOT the latest. mobile_scanner 6.x/7.x depend on
+  # CameraX 1.6.x, whose AAR metadata demands Android Gradle Plugin 8.9.1+;
+  # this project builds with AGP 8.3.2, so those versions fail at
+  # :app:checkDebugAarMetadata. 5.2.3 uses a CameraX release compatible with
+  # the current AGP. Revisit when the AGP/Gradle upgrade Flutter is already
+  # warning about gets done.
+  mobile_scanner: 5.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -125,6 +161,10 @@ dev_dependencies:
   drift_dev: ">=2.18.0 <2.19.2"
   build_runner: ^2.4.0
   flutter_launcher_icons: ^0.13.1
+
+  # Property-based testing for the streak domain layer
+  # (test/services/streak/**). Test-only: never imported by lib/.
+  glados: 1.1.7
 
 flutter_launcher_icons:
   android: true

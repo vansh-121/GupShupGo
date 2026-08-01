@@ -48,3 +48,15 @@ functions/node_modules/
 /videocallapp-81166-1f00ab6518bf.json
 node_modules/
 /play_store_assets/node_modules
+  
+# FVM Version Cache
+.fvm/
+
+# Temporary diagnostic scripts & logs
+_diag_*
+diag_*
+*.log
+fvm_version_check.txt
+
+/.kiro
+

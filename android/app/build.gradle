@@ -42,9 +42,12 @@ android {
     defaultConfig {
         applicationId = "com.gupshupgo.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
-        versionCode = 42
-        versionName = "1.1.0"
+        // Google Play requires existing apps to target Android 16 (API 36)
+        // by August 31, 2026. compileSdk is already 36, so this just aligns
+        // targetSdk to match — see Play Console policy warning.
+        targetSdk = 36
+        versionCode = 44
+        versionName = "1.1.1"
         minSdkVersion = 24
         multiDexEnabled true
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)

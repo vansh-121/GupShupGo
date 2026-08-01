@@ -18,6 +18,22 @@ const emailService = require("./email-service");
 const emailTemplates = require("./email-templates");
 const { escHtml } = emailTemplates;
 
+// ─── Streak Engine (server-authoritative) ─────────────────────────────────────
+// Pure engine + transactional state adapter. Both resolve their Firestore handle
+// lazily, so requiring them above `admin.initializeApp()` is safe.
+const streakState = require("./streak/state");
+const streakDay = require("./streak/day");
+const streakEngine = require("./streak/engine");
+const streakAwards = require("./streak/awards");
+const streakNotify = require("./streak/notify");
+const streakRepair = require("./streak/repair");
+
+// ─── Repair admin token ────────────────────────────────────────────────────────
+// Set via: firebase functions:secrets:set STREAK_ADMIN_TOKEN
+// The only credential that can drive `streakRepairRoom`. Not a user id token: the
+// endpoint is an operator tool, so no end user — Pro or otherwise — can reach it.
+const streakAdminToken = defineSecret("STREAK_ADMIN_TOKEN");
+
 admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
@@ -199,6 +215,15 @@ async function getUserNames(userIds) {
   );
   return nameMap;
 }
+
+// ─── Streak notification wiring ────────────────────────────────────────────
+// `functions/streak/notify.js` reuses the helpers above rather than
+// re-implementing them; injection here avoids a circular require.
+streakNotify.configure({
+  sendToUserDevices,
+  getUserNames,
+  sendMulticastBatch,
+});
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
 exports.sendCallNotification = onRequest(
@@ -395,7 +420,7 @@ exports.sendMessageNotification = onRequest(
     }
 
     try {
-      const { receiverId, senderId, senderName, message, chatRoomId } = req.body;
+      const { receiverId, senderId, senderName, message, chatRoomId, screen } = req.body;
 
       if (!receiverId || !senderId || !senderName || !chatRoomId) {
         res.status(400).json({ error: "Missing required fields" });
@@ -411,6 +436,10 @@ exports.sendMessageNotification = onRequest(
           senderName: senderName,
           message: message || "",
           chatRoomId: chatRoomId,
+          // Optional tap-routing hint (e.g. "requests" for friend-request
+          // notifications). Omitted entirely for real chat messages, which
+          // keeps existing client behavior (route via chatRoomId) unchanged.
+          ...(screen ? { screen } : {}),
         },
         notification: {
           title: senderName,
@@ -1096,8 +1125,8 @@ exports.verifySubscriptionStatus = onRequest(
 
           // Revoked or expired according to Google
           if (state === "SUBSCRIPTION_STATE_REVOKED" ||
-              state === "SUBSCRIPTION_STATE_EXPIRED" ||
-              (liveExpiryMillis && liveExpiryMillis < Date.now())) {
+            state === "SUBSCRIPTION_STATE_EXPIRED" ||
+            (liveExpiryMillis && liveExpiryMillis < Date.now())) {
             await clearSubscriptionFirestore(uid);
             console.log(`verifySubscriptionStatus: revoked/expired for ${uid} (state: ${state})`);
             res.status(200).json({ plan: "free", expiresAt: null, productId: null });
@@ -1149,6 +1178,1105 @@ exports.verifySubscriptionStatus = onRequest(
     } catch (error) {
       console.error("verifySubscriptionStatus error:", error.message);
       res.status(500).json({ error: "Server error checking subscription", detail: error.message });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STREAK ENGINE — server-authoritative write path
+// ═══════════════════════════════════════════════════════════════════════════════
+// The legacy streak functions below (streakBrokenTrigger, streakMilestoneTrigger,
+// hourlyStreakWarningBatch, streakExpiryJob) stay in place for the dual-write
+// window and are retired in tasks 10.2 / 10.4. This section is the NEW path.
+
+/** How long the message timestamp may lag server time and still count (2.11). */
+const STREAK_BACKDATE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/** Kill-switch cache TTL — one config read per minute per instance, not per message. */
+const STREAK_FLAG_TTL_MS = 60 * 1000;
+
+// Module-scope cache for `_config/streak`. Warm instances therefore cost zero
+// extra reads on the hot send path.
+let _streakFlagValue = null;
+let _streakFlagFetchedAt = 0;
+
+/**
+ * Whether the streak engine is enabled.
+ *
+ * DEFAULT IS **ENABLED**, deliberately: `_config/streak` is only created in task
+ * 10.1, and a missing config document must not silently disable the feature.
+ * Only an explicit `engineEnabled: false` turns the engine off. A failed read
+ * also defaults to enabled — we'd rather evaluate a streak than lose a day of
+ * participation because a config read blipped.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function isStreakEngineEnabled() {
+  const now = Date.now();
+  if (_streakFlagValue !== null && now - _streakFlagFetchedAt < STREAK_FLAG_TTL_MS) {
+    return _streakFlagValue;
+  }
+  let enabled = true; // explicit default
+  try {
+    const snap = await db.collection("_config").doc("streak").get();
+    if (snap.exists && snap.data().engineEnabled === false) enabled = false;
+  } catch (error) {
+    console.warn("streak: config read failed, defaulting to ENABLED:", error.message);
+  }
+  _streakFlagValue = enabled;
+  _streakFlagFetchedAt = now;
+  return enabled;
+}
+
+/**
+ * Whether an error is worth a platform retry. Transient Firestore/gRPC failures
+ * (contention, unavailable, deadline exceeded) are RETHROWN so the trigger is
+ * re-delivered — safe, because `applyParticipation` is idempotent. Anything that
+ * looks permanent (a malformed document, a rejected invariant) is swallowed, so a
+ * single bad message cannot spin in an infinite retry loop.
+ *
+ * @param {*} error
+ * @returns {boolean}
+ */
+function isTransientFirestoreError(error) {
+  if (!error) return false;
+  const code = error.code;
+  // gRPC numeric codes: 4 DEADLINE_EXCEEDED, 8 RESOURCE_EXHAUSTED, 10 ABORTED,
+  // 13 INTERNAL, 14 UNAVAILABLE.
+  if (typeof code === "number") return [4, 8, 10, 13, 14].includes(code);
+  if (typeof code === "string") {
+    return [
+      "deadline-exceeded",
+      "resource-exhausted",
+      "aborted",
+      "internal",
+      "unavailable",
+    ].includes(code);
+  }
+  return false;
+}
+
+/**
+ * The side effects of one evaluation: milestone awards + the three pushes.
+ *
+ * Shared by `streakOnMessageCreate` and `streakSweepJob` so the two paths cannot
+ * drift. Everything in here is idempotent or guarded elsewhere:
+ *   * awards are guarded by the `streakAwards/{roomId}_{threshold}` create,
+ *   * every push is guarded by `notifiedAt` on the state document inside
+ *     `notify.js` — this function deliberately re-implements none of that.
+ *
+ * NEVER THROWS. A payout or a push must not fail (and therefore retry) the write
+ * that produced it. The underlying helpers already swallow their own failures;
+ * the outer try/catch is belt-and-braces.
+ *
+ * @param {string} roomId
+ * @param {object} result envelope from `state.applyParticipation` / `state.reevaluate`
+ * @param {*} serverNow the instant the evaluation was made against
+ * @param {object} [opts]
+ * @param {boolean} [opts.allowWarnings=false] send `atRisk`/`critical` warnings.
+ *   Only the sweeper does: a warning belongs to the passage of time, not to a send.
+ * @returns {Promise<{broken: boolean, warned: ?string, milestones: Array<number>}>}
+ */
+async function applyStreakSideEffects(roomId, result, serverNow, opts = {}) {
+  const outcome = { broken: false, warned: null, milestones: [] };
+  try {
+    const next = (result && result.evaluation && result.evaluation.next) || null;
+    if (next === null) return outcome;
+
+    const transitions = Array.isArray(result.transitions) ? result.transitions : [];
+    // Already empty unless `result.sideEffectsAllowed` — state.js applies the
+    // (uid, day) dedupe before handing the envelope back.
+    const milestones = Array.isArray(result.milestonesCrossed)
+      ? result.milestonesCrossed
+      : [];
+
+    // ── milestones: pay first, announce second ────────────────────────────
+    if (milestones.length > 0) {
+      const awarded = await streakAwards.applyAwardsSafely(result, { serverNow });
+      if (awarded && awarded.wrote) {
+        console.log(
+          `streak: awarded room=${roomId} thresholds=[${awarded.thresholdsAwarded.join(",")}]`
+        );
+      }
+      // Announced per CROSSING, not per payout: a threshold with no configured
+      // point value (today: 365) is still a real milestone for the user. The
+      // milestone guard in notify.js is once-per-room-per-threshold forever, so a
+      // re-emitted crossing cannot produce a second push.
+      for (const threshold of milestones) {
+        await streakNotify.notifyStreakMilestone(roomId, next, threshold, { serverNow });
+        outcome.milestones.push(threshold);
+      }
+    }
+
+    // ── broken beats at-risk: never tell someone to hurry after it lapsed ──
+    if (transitions.includes(streakEngine.Transition.broken)) {
+      await streakNotify.notifyStreakBroken(roomId, next, { serverNow });
+      outcome.broken = true;
+    } else if (
+      opts.allowWarnings === true &&
+      (next.riskLevel === streakEngine.RiskLevel.atRisk ||
+        next.riskLevel === streakEngine.RiskLevel.critical)
+    ) {
+      await streakNotify.notifyStreakWarning(roomId, next, next.riskLevel, { serverNow });
+      outcome.warned = next.riskLevel;
+    }
+  } catch (error) {
+    console.error(
+      `streak: side effects failed for room ${roomId} (swallowed):`,
+      error && error.stack ? error.stack : error
+    );
+  }
+  return outcome;
+}
+
+// ─── Trigger: participation from a persisted message ──────────────────────────
+// The ONLY entry point that folds a send into a room's streak. Because it fires
+// from the persisted document, a delivered message is always eventually counted
+// even if the app dies right after `batch.commit()` (2.8), and the client send
+// path performs no streak write at all.
+//
+// Reads only the cleartext fields `senderId`, `type` and `timestamp` — present
+// even at `schemaVersion: 2` (MessageModel.toMap) — so E2EE is untouched.
+exports.streakOnMessageCreate = onDocumentCreated(
+  { document: "chatRooms/{roomId}/messages/{messageId}", region: "us-central1" },
+  async (event) => {
+    const roomId = event.params.roomId;
+    const messageId = event.params.messageId;
+
+    try {
+      // ── 0. kill switch ────────────────────────────────────────────────────
+      if (!(await isStreakEngineEnabled())) return null;
+
+      const snap = event.data;
+      if (!snap || !snap.exists) return null;
+      const message = snap.data() || {};
+
+      // ── 1. reactions never qualify (2.10) — single enforcement point ──────
+      if (message.type === "reaction") return null;
+
+      const senderId = message.senderId;
+      if (typeof senderId !== "string" || senderId.length === 0) {
+        console.warn(`streakOnMessageCreate: ${roomId}/${messageId} has no senderId, skipping`);
+        return null; // permanently bad document — do not retry
+      }
+
+      // ── 2. two distinct participants only (2.9) ───────────────────────────
+      // Read the parent room once here and hand `participants` to the state
+      // adapter so it does not read the same document again.
+      const roomSnap = await db.collection("chatRooms").doc(roomId).get();
+      if (!roomSnap.exists) return null;
+      const rawParticipants = roomSnap.data().participants;
+      if (!Array.isArray(rawParticipants)) return null;
+      const participants = Array.from(
+        new Set(rawParticipants.filter((id) => typeof id === "string" && id.length > 0))
+      );
+      if (participants.length !== 2) return null; // self-chat or group-shaped room
+      if (!participants.includes(senderId)) {
+        console.warn(
+          `streakOnMessageCreate: sender ${senderId} is not a participant of ${roomId}, skipping`
+        );
+        return null;
+      }
+
+      // ── 3. clamp the client timestamp into a trustworthy window (2.11/2.13)
+      // Upper bound: server time — a skewed client clock cannot push a send into
+      // the future. Lower bound: server time − 48h — a legitimately late mesh or
+      // retried message still lands on its real day, but arbitrary backdating is
+      // impossible. Missing/unparseable timestamp falls back to server time.
+      const serverNow = streakDay.instantFrom(event.time) || new Date();
+      const serverNowMs = serverNow.getTime();
+      const claimedMs = streakDay.instantMillis(message.timestamp);
+      const qualifyingMs =
+        claimedMs === null
+          ? serverNowMs
+          : Math.min(Math.max(claimedMs, serverNowMs - STREAK_BACKDATE_WINDOW_MS), serverNowMs);
+      const qualifyingInstant = new Date(qualifyingMs);
+
+      // ── 4. fold the participation in, transactionally ─────────────────────
+      const result = await streakState.applyParticipation(
+        roomId,
+        { uid: senderId, instant: qualifyingInstant },
+        { serverNow, reason: streakState.EvaluationReason.send, participants }
+      );
+
+      // ── 5. side effects: awards, then notifications ───────────────────────
+      // `result.milestonesCrossed` is already empty unless
+      // `result.sideEffectsAllowed`, so the dedupe verdict needs no re-check
+      // here. Both helpers are the *Safely / never-throw variants, and the whole
+      // block is additionally wrapped: a push or a payout must never fail (and so
+      // never retry) a message write that has already been folded in.
+      await applyStreakSideEffects(roomId, result, serverNow);
+
+      if (result.wrote) {
+        console.log(
+          `streakOnMessageCreate: ${roomId} rev=${result.rev} ` +
+          `count=${result.evaluation.next.count} transitions=[${result.transitions.join(",")}]`
+        );
+      }
+      return null;
+    } catch (error) {
+      if (isTransientFirestoreError(error)) {
+        // Let the platform retry: applyParticipation is idempotent.
+        console.warn(
+          `streakOnMessageCreate: transient failure for ${roomId}/${messageId}, retrying:`,
+          error.message
+        );
+        throw error;
+      }
+      console.error(
+        `streakOnMessageCreate: permanent failure for ${roomId}/${messageId}:`,
+        error && error.stack ? error.stack : error
+      );
+      return null; // swallow — never spin on a permanently bad document
+    }
+  }
+);
+
+// ─── Scheduled: the streak sweeper ────────────────────────────────────────────
+// Replaces BOTH `hourlyStreakWarningBatch` and `streakExpiryJob` (design §6).
+// Every 15 minutes it re-derives the streaks that are near or past their deadline
+// and lets the engine decide: stamp the break at the real `deadlineAt` (not the
+// sweep instant, defect 1.14), or move the room into `atRisk`/`critical`. It is
+// the reason a streak breaks, and a warning arrives, with no app open anywhere.
+
+/** Rooms per query page. Small enough to keep one page's work well inside the timeout. */
+const SWEEP_PAGE_SIZE = 200;
+
+/**
+ * Hard ceiling on rooms per invocation. A scheduled function has a wall-clock
+ * timeout; without a cap a large backlog would be killed mid-page and silently
+ * lose the tail. With it, the overflow is LOGGED and picked up 15 minutes later —
+ * the query is ordered by `deadlineAt`, so the oldest lapses are always swept
+ * first and no room can starve.
+ */
+const SWEEP_MAX_ROOMS = 3000;
+
+/** How far ahead of now to look: the whole grace day plus 2h of slack. */
+const SWEEP_HORIZON_MS = 26 * 60 * 60 * 1000;
+
+let _sweepFlagValue = null;
+let _sweepFlagFetchedAt = 0;
+
+/**
+ * Whether the sweeper is enabled.
+ *
+ * DEFAULT IS **DISABLED** — deliberately the OPPOSITE of `isStreakEngineEnabled`,
+ * and that asymmetry is not a mistake. The engine defaults on because a missing
+ * config document must not lose participation. The sweeper defaults off because
+ * the legacy `streakExpiryJob` / `hourlyStreakWarningBatch` are still live: a
+ * sweeper that self-enabled before the rollout's step 3 (task 10.2) would
+ * double-process the same rooms and double-notify. It runs only on an explicit
+ * `sweepEnabled: true`, and a failed config read also means "stay dark".
+ *
+ * @returns {Promise<boolean>}
+ */
+async function isStreakSweepEnabled() {
+  const now = Date.now();
+  if (_sweepFlagValue !== null && now - _sweepFlagFetchedAt < STREAK_FLAG_TTL_MS) {
+    return _sweepFlagValue;
+  }
+  let enabled = false; // explicit default
+  try {
+    const snap = await db.collection("_config").doc("streak").get();
+    if (snap.exists && snap.data().sweepEnabled === true) enabled = true;
+  } catch (error) {
+    console.warn("streakSweepJob: config read failed, staying DISABLED:", error.message);
+  }
+  _sweepFlagValue = enabled;
+  _sweepFlagFetchedAt = now;
+  return enabled;
+}
+
+exports.streakSweepJob = onSchedule(
+  { schedule: "every 15 minutes", region: "us-central1" },
+  async () => {
+    if (!(await isStreakSweepEnabled())) {
+      console.log("streakSweepJob: disabled (_config/streak.sweepEnabled is not true)");
+      return;
+    }
+
+    const serverNow = new Date();
+    const horizon = admin.firestore.Timestamp.fromDate(
+      new Date(serverNow.getTime() + SWEEP_HORIZON_MS)
+    );
+
+    // Precise by construction: `deadlineAt <= now + 26h` is exactly the set of
+    // rooms in the grace day, critical, or already lapsed. No scan of every room
+    // with `streakCount > 0`. Backed by the collection-group index on
+    // `streak.deadlineAt` in firestore.indexes.json.
+    const baseQuery = db
+      .collectionGroup("streak")
+      .where("deadlineAt", "<=", horizon)
+      .orderBy("deadlineAt")
+      .limit(SWEEP_PAGE_SIZE);
+
+    let cursor = null;
+    let scanned = 0;
+    let rewritten = 0;
+    let broken = 0;
+    let warned = 0;
+    let milestoned = 0;
+    let failed = 0;
+    let capped = false;
+
+    while (true) {
+      const page = await (cursor === null ? baseQuery : baseQuery.startAfter(cursor)).get();
+      if (page.empty) break;
+      cursor = page.docs[page.docs.length - 1];
+
+      for (const doc of page.docs) {
+        if (scanned >= SWEEP_MAX_ROOMS) {
+          capped = true;
+          break;
+        }
+        // chatRooms/{roomId}/streak/state → the room is the grandparent.
+        const roomId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
+        if (roomId === null) continue;
+        scanned++;
+
+        // One room's failure must never abort the sweep: log it and move on. The
+        // next invocation retries it, since its deadline still matches the query.
+        try {
+          const result = await streakState.reevaluate(
+            roomId,
+            streakState.EvaluationReason.sweep,
+            { serverNow }
+          );
+          if (result.wrote) rewritten++;
+
+          const outcome = await applyStreakSideEffects(roomId, result, serverNow, {
+            allowWarnings: true,
+          });
+          if (outcome.broken) broken++;
+          if (outcome.warned !== null) warned++;
+          if (outcome.milestones.length > 0) milestoned++;
+        } catch (error) {
+          failed++;
+          console.error(
+            `streakSweepJob: room ${roomId} failed:`,
+            error && error.stack ? error.stack : error
+          );
+        }
+      }
+
+      if (capped || page.size < SWEEP_PAGE_SIZE) break;
+    }
+
+    if (capped) {
+      console.warn(
+        `streakSweepJob: hit the ${SWEEP_MAX_ROOMS}-room cap; the remainder is ` +
+        "deferred to the next run (oldest deadlines are swept first)"
+      );
+    }
+    console.log(
+      `streakSweepJob done: scanned=${scanned} rewritten=${rewritten} ` +
+      `broken=${broken} warned=${warned} milestoned=${milestoned} failed=${failed} capped=${capped}`
+    );
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STREAK REPAIR / MIGRATION (design §10, task 9.2)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Two drivers over `functions/streak/repair.js`:
+//
+//   streakRepairJob   onSchedule("every 5 minutes") — 200 rooms per invocation,
+//                     resumable from the `_migrations/streakV2` cursor,
+//   streakRepairRoom  onRequest + admin token — dry runs and spot fixes on one
+//                     room, and a `?status=1` read of the cursor.
+//
+// THREE independent brakes, all of which must be released for a live run:
+//   1. `_config/streak.repairEnabled === true`  — default DISABLED,
+//   2. `_config/streak.engineEnabled !== false` — a repair into a dark engine
+//      would be rewritten by nobody and read by nobody,
+//   3. `_config/streak.repairDryRun === false`  — default DRY RUN. Anything
+//      ambiguous (missing document, missing field, non-boolean) stays dry.
+// The job can therefore never self-start, and cannot mutate a streak on its own.
+
+/** Rooms per scheduled invocation (design §10). */
+const REPAIR_PAGE_SIZE = 200;
+
+let _repairFlagValue = null;
+let _repairFlagFetchedAt = 0;
+
+/**
+ * The repair flags, cached for `STREAK_FLAG_TTL_MS`.
+ *
+ * DEFAULTS ARE THE SAFE ONES in every direction: disabled, and dry-run if it were
+ * somehow enabled. A failed config read returns the same defaults — a blipped
+ * read must not be able to start a migration.
+ *
+ * @returns {Promise<{enabled: boolean, dryRun: boolean, engineOff: boolean}>}
+ */
+async function readStreakRepairFlags() {
+  const now = Date.now();
+  if (_repairFlagValue !== null && now - _repairFlagFetchedAt < STREAK_FLAG_TTL_MS) {
+    return _repairFlagValue;
+  }
+  let flags = { enabled: false, dryRun: true, engineOff: false };
+  try {
+    const snap = await db.collection("_config").doc("streak").get();
+    const data = snap.exists ? snap.data() || {} : {};
+    flags = {
+      enabled: data.repairEnabled === true,
+      // `resolveDryRun` is the single definition of "live": the boolean false.
+      dryRun: streakRepair.resolveDryRun(data.repairDryRun),
+      engineOff: data.engineEnabled === false,
+    };
+  } catch (error) {
+    console.warn(
+      "streakRepair: config read failed, staying DISABLED and DRY:",
+      error.message
+    );
+  }
+  _repairFlagValue = flags;
+  _repairFlagFetchedAt = now;
+  return flags;
+}
+
+/**
+ * Constant-time secret comparison. Byte lengths are compared first (which
+ * `timingSafeEqual` requires anyway, and which leaks nothing useful about a
+ * random token), and an unset/empty secret never matches.
+ *
+ * @param {string} presented
+ * @param {*} expected
+ * @returns {boolean}
+ */
+function _secretEquals(presented, expected) {
+  if (typeof expected !== "string" || expected.length === 0) return false;
+  const a = Buffer.from(String(presented || ""), "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/** One-line summary of a page aggregate, for the job log. */
+function _repairAggregateLine(aggregate) {
+  const histogram = Object.entries(aggregate.mismatchHistogram || {})
+    .map(([bucket, hits]) => `${bucket}=${hits}`)
+    .join(" ");
+  return (
+    `dryRun=${aggregate.dryRun} processed=${aggregate.processed} ` +
+    `repaired=${aggregate.repaired} fallback=${aggregate.fallback} ` +
+    `skipped=${aggregate.skipped} failed=${aggregate.failed} ` +
+    `lastRoomId=${aggregate.lastRoomId} finished=${aggregate.finished}` +
+    (histogram ? ` | ${histogram}` : "")
+  );
+}
+
+exports.streakRepairJob = onSchedule(
+  { schedule: "every 5 minutes", region: "us-central1" },
+  async () => {
+    const flags = await readStreakRepairFlags();
+    if (!flags.enabled) {
+      // Deliberately quiet-ish: this is the steady state until task 9.4/9.5.
+      console.log("streakRepairJob: disabled (_config/streak.repairEnabled is not true)");
+      return;
+    }
+    if (flags.engineOff) {
+      console.warn(
+        "streakRepairJob: refusing to run while _config/streak.engineEnabled is false"
+      );
+      return;
+    }
+
+    const serverNow = new Date();
+    const { aggregate, cursorBefore } = await streakRepair.runNextPage({
+      dryRun: flags.dryRun,
+      limit: REPAIR_PAGE_SIZE,
+      serverNow,
+    });
+
+    if (aggregate.processed === 0 && aggregate.skipped === 0 && aggregate.finished) {
+      console.log(
+        `streakRepairJob: nothing left after ${cursorBefore.lastRoomId || "<start>"} ` +
+        `(dryRun=${aggregate.dryRun})`
+      );
+      return;
+    }
+    console.log(`streakRepairJob done: ${_repairAggregateLine(aggregate)}`);
+  }
+);
+
+// ─── Admin: dry runs, spot fixes and cursor inspection ────────────────────────
+// `POST /streakRepairRoom  {roomId, dryRun?, force?}` → the per-room report
+// `GET  /streakRepairRoom?status=1`                   → the cursor document
+//
+// `dryRun` defaults to TRUE here too, and a request may only go live by sending
+// `dryRun: false` explicitly AND having `_config/streak.repairEnabled === true`.
+// A spot fix does not consult `repairDryRun`: it is one room, chosen by an
+// operator, and the report comes straight back in the response.
+exports.streakRepairRoom = onRequest(
+  { cors: false, invoker: "public", secrets: [streakAdminToken] },
+  async (req, res) => {
+    // ── admin token, compared in constant time ────────────────────────────────
+    const expected = streakAdminToken.value();
+    const authHeader = req.headers.authorization || "";
+    const presented = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length)
+      : String(req.headers["x-streak-admin-token"] || "");
+    if (!_secretEquals(presented, expected)) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      if (req.method === "GET" && (req.query.status || req.query.cursor)) {
+        const cursor = await streakRepair.readCursor();
+        res.status(200).json({
+          cursor: Object.assign({}, cursor, {
+            startedAt: cursor.startedAt ? cursor.startedAt.getTime() : null,
+            finishedAt: cursor.finishedAt ? cursor.finishedAt.getTime() : null,
+          }),
+        });
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
+
+      const body = req.body || {};
+      const roomId = body.roomId;
+      if (typeof roomId !== "string" || roomId.length === 0) {
+        res.status(400).json({ error: "roomId is required" });
+        return;
+      }
+
+      const dryRun = streakRepair.resolveDryRun(body.dryRun);
+      if (!dryRun) {
+        const flags = await readStreakRepairFlags();
+        if (!flags.enabled || flags.engineOff) {
+          res.status(409).json({
+            error: "Live repair is not enabled",
+            detail:
+              "_config/streak.repairEnabled must be true and engineEnabled must not be false",
+          });
+          return;
+        }
+      }
+
+      const report = await streakRepair.repairRoom(roomId, {
+        dryRun,
+        force: body.force === true,
+        serverNow: new Date(),
+      });
+      res.status(200).json({ ok: true, dryRun, report });
+    } catch (error) {
+      console.error(
+        "streakRepairRoom error:",
+        error && error.stack ? error.stack : error
+      );
+      res.status(500).json({ error: "Server error repairing room", detail: error.message });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STREAK HTTP ENDPOINTS (design §8, task 5.8)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Four `onRequest` functions consumed by `lib/services/streak/streak_api.dart`:
+//
+//   GET  /serverTime                     → { now: <epochMillis> }   (public)
+//   POST /streakEvaluate       {roomId}  → { ok, ... }              (participant)
+//   GET  /streakRestoreQuote?roomId=…    → quote                    (participant)
+//   POST /streakRestore  {roomId, useFreePerk} → restore outcome    (participant)
+//
+// Auth, CORS and error shapes are copied verbatim from `verifySubscriptionStatus`:
+// `{ cors: true, invoker: "public" }`, `Authorization: Bearer <idToken>` verified
+// with `auth.verifyIdToken`, 401 `{error}` on a missing/bad token, 405 on the
+// wrong method, 500 `{error, detail}` on an unexpected failure.
+//
+// Instants are emitted as EPOCH MILLIS — `streakInstantFrom` on the client
+// accepts millis, and a number cannot be mangled by a timezone-naive parse.
+
+/** One nudge per room per five minutes (task 5.8). */
+const STREAK_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** Rejects a request that carries no usable `Authorization: Bearer` header. */
+async function _streakAuthUid(req, res) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized", reason: "unauthenticated" });
+    return null;
+  }
+  try {
+    const decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+    return decoded.uid;
+  } catch (_) {
+    res.status(401).json({ error: "Invalid or expired token", reason: "unauthenticated" });
+    return null;
+  }
+}
+
+function _epochOrNull(value) {
+  return streakDay.instantMillis(value);
+}
+
+/**
+ * The ISO-8601 week key (`'GGGG-Www'`) that [instant] falls in, computed in the
+ * CANONICAL streak zone — so the Pro allowance resets on the same boundary the
+ * streak calendar uses, in every deployment region.
+ *
+ * Implementation: shift the instant into canonical wall-clock time, then apply
+ * the standard Thursday rule on UTC getters only (never local ones): move to the
+ * Thursday of the current ISO week (Monday = day 1), and the week number is
+ * `1 + floor(dayOfYear(thursday) / 7)` with that Thursday's year as the ISO
+ * week-year. This is exactly ISO 8601, including the year-boundary cases where
+ * 1 January belongs to week 52/53 of the previous year.
+ *
+ * @param {*} instant
+ * @returns {string} e.g. `'2026-W07'`
+ */
+function isoWeekKeyInCanonicalZone(instant) {
+  const ms = streakDay.instantMillis(instant);
+  if (ms === null) throw new TypeError("instant is required");
+  const shifted = new Date(
+    ms + streakDay.CANONICAL_DAY_OFFSET_MINUTES * streakDay.MS_PER_MINUTE
+  );
+  // Midnight of that canonical day, as a UTC instant we can do integer days on.
+  const dayStart = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  );
+  const isoDow = shifted.getUTCDay() === 0 ? 7 : shifted.getUTCDay(); // Mon=1..Sun=7
+  const thursday = new Date(dayStart + (4 - isoDow) * streakDay.MS_PER_DAY);
+  const weekYear = thursday.getUTCFullYear();
+  const jan1 = Date.UTC(weekYear, 0, 1);
+  const dayOfYear = Math.round((thursday.getTime() - jan1) / streakDay.MS_PER_DAY);
+  const week = 1 + Math.floor(dayOfYear / 7);
+  return `${weekYear}-W${String(week).padStart(2, "0")}`;
+}
+
+/**
+ * Whether [userData] is Pro right now, per the SERVER-side mirror only
+ * (`subscriptionPlan === 'pro'` and `subscriptionExpiresAt` in the future).
+ * `SubscriptionService` on the device is never consulted (defect 1.20).
+ *
+ * @param {?object} userData
+ * @param {number} nowMs
+ * @returns {boolean}
+ */
+function isProUser(userData, nowMs) {
+  if (!userData || userData.subscriptionPlan !== "pro") return false;
+  const expiresAt = _epochOrNull(userData.subscriptionExpiresAt);
+  return expiresAt !== null && expiresAt > nowMs;
+}
+
+/**
+ * Whether the weekly free-restore allowance is still unused for the ISO week
+ * [weekKey]. A stored key from any other week is stale and means "unused" — that
+ * is the real weekly reset the SharedPreferences version could never do.
+ *
+ * @param {?object} userData
+ * @param {string} weekKey
+ * @returns {boolean}
+ */
+function hasFreeRestoreAllowance(userData, weekKey) {
+  const allowance = userData && userData.streakRestoreAllowance;
+  if (!allowance || typeof allowance !== "object") return true;
+  if (allowance.weekKey !== weekKey) return true; // different week → reset
+  const used = Number(allowance.used);
+  return !Number.isFinite(used) || used < 1;
+}
+
+/**
+ * The participants of a room, preferring the state document and falling back to
+ * the parent room (a bond with no state document yet).
+ *
+ * @param {string} roomId
+ * @returns {Promise<{participants: Array<string>, state: ?object, exists: boolean}>}
+ */
+async function _readStreakParticipants(roomId) {
+  const snap = await streakState.stateRef(roomId).get();
+  if (snap.exists) {
+    const state = streakEngine.normalizeState(snap.data());
+    if (state.participants.length === 2) {
+      return { participants: state.participants, state, exists: true };
+    }
+    const roomSnap = await db.collection("chatRooms").doc(roomId).get();
+    const raw = roomSnap.exists ? roomSnap.data().participants : null;
+    return { participants: Array.isArray(raw) ? raw : [], state, exists: true };
+  }
+  const roomSnap = await db.collection("chatRooms").doc(roomId).get();
+  const raw = roomSnap.exists ? roomSnap.data().participants : null;
+  return { participants: Array.isArray(raw) ? raw : [], state: null, exists: false };
+}
+
+// ─── 1. GET /serverTime ───────────────────────────────────────────────────────
+// The clock source for `ServerClock` (task 7.1). Deliberately trivial: no auth,
+// no Firestore read, no body parsing — the whole point is that it is the cheapest
+// and fastest endpoint in the project, because every client polls it.
+exports.serverTime = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.status(200).json({ now: Date.now() });
+  }
+);
+
+// ─── 2. POST /streakEvaluate ───────────────────────────────────────────────────
+// A client nudge: "my derived state says this bond is broken but the stored
+// document has not caught up". Purely an optimisation over the sweeper, so it is
+// idempotent (`state.reevaluate` writes only when the derivation differs) and
+// rate-limited.
+//
+// RATE LIMIT MECHANISM: a `lastNudgedAt` field on the state document, claimed in
+// its own tiny transaction before the evaluation runs. Chosen over a `_rateLimits`
+// collection because the document is already the contention point for this room,
+// it needs no new collection, no new security rule and no TTL sweeper, and
+// `normalizeState` round-trips unknown fields through `extraFields` so the field
+// survives every subsequent engine write untouched.
+exports.streakEvaluate = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const uid = await _streakAuthUid(req, res);
+    if (uid === null) return;
+
+    const roomId = req.body && req.body.roomId;
+    if (typeof roomId !== "string" || roomId.length === 0) {
+      res.status(400).json({ error: "roomId is required", reason: "bad-request" });
+      return;
+    }
+
+    try {
+      const { participants, exists } = await _readStreakParticipants(roomId);
+      if (!participants.includes(uid)) {
+        res.status(403).json({ error: "Not a participant", reason: "not-participant" });
+        return;
+      }
+      if (!exists) {
+        // Nothing has ever been evaluated for this room; there is no stored
+        // state to correct, and a nudge must not bootstrap one.
+        res.status(200).json({ ok: true, skipped: "no-state" });
+        return;
+      }
+
+      // ── rate-limit claim ──────────────────────────────────────────────────
+      const ref = streakState.stateRef(roomId);
+      const nowMs = Date.now();
+      const claimed = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) return false;
+        const lastMs = _epochOrNull(snap.data().lastNudgedAt);
+        if (lastMs !== null && nowMs - lastMs < STREAK_NUDGE_COOLDOWN_MS) return false;
+        tx.update(ref, { lastNudgedAt: new Date(nowMs) });
+        return true;
+      });
+      if (!claimed) {
+        res.status(200).json({ ok: true, skipped: "rate-limited" });
+        return;
+      }
+
+      const result = await streakState.reevaluate(
+        roomId,
+        streakState.EvaluationReason.nudge,
+        { serverNow: new Date(nowMs), participants }
+      );
+      const next = (result.evaluation && result.evaluation.next) || null;
+
+      res.status(200).json({
+        ok: true,
+        changed: result.changed === true,
+        rev: result.rev,
+        count: next === null ? null : next.count,
+        riskLevel: next === null ? null : next.riskLevel,
+        transitions: result.transitions || [],
+        serverNow: nowMs,
+      });
+    } catch (error) {
+      console.error("streakEvaluate error:", error && error.message);
+      res.status(500).json({ error: "Server error evaluating streak", detail: error.message });
+    }
+  }
+);
+
+// ─── 3. GET /streakRestoreQuote?roomId=… ──────────────────────────────────────
+// Everything `StreakRestoreDialog` needs to render, decided server-side: the cost
+// tier, whether the Pro weekly perk is actually available, the window end, and
+// server time so the countdown does not tick off the device clock.
+exports.streakRestoreQuote = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    if (req.method !== "GET") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const uid = await _streakAuthUid(req, res);
+    if (uid === null) return;
+
+    const roomId = req.query && req.query.roomId;
+    if (typeof roomId !== "string" || roomId.length === 0) {
+      res.status(400).json({ error: "roomId is required", reason: "bad-request" });
+      return;
+    }
+
+    try {
+      const { participants, state } = await _readStreakParticipants(roomId);
+      if (!participants.includes(uid)) {
+        res.status(403).json({ error: "Not a participant", reason: "not-participant" });
+        return;
+      }
+
+      const nowMs = Date.now();
+      const brokenAtMs = state === null ? null : _epochOrNull(state.brokenAt);
+      const previousCount = state === null ? 0 : state.previousCount;
+      if (brokenAtMs === null || previousCount <= 0) {
+        res.status(404).json({ error: "Nothing to restore", reason: "nothing-to-restore" });
+        return;
+      }
+
+      const deadlineMs = _epochOrNull(state.restoreDeadlineAt);
+      if (deadlineMs !== null && nowMs > deadlineMs) {
+        res.status(410).json({ error: "Restore window expired", reason: "window-expired" });
+        return;
+      }
+
+      const otherUid = participants.find((id) => id !== uid) || null;
+      const [userSnap, nameMap] = await Promise.all([
+        db.collection("users").doc(uid).get(),
+        getUserNames(otherUid === null ? [] : [otherUid]),
+      ]);
+      const userData = userSnap.exists ? userSnap.data() : null;
+      const weekKey = isoWeekKeyInCanonicalZone(nowMs);
+      const canUseFreePerk =
+        isProUser(userData, nowMs) && hasFreeRestoreAllowance(userData, weekKey);
+
+      res.status(200).json({
+        previousCount,
+        cost: streakEngine.restoreCost(previousCount),
+        canUseFreePerk,
+        restoreDeadlineAt: deadlineMs,
+        serverNow: nowMs,
+        contactName: otherUid === null ? null : nameMap[otherUid] || null,
+        weekKey,
+      });
+    } catch (error) {
+      console.error("streakRestoreQuote error:", error && error.message);
+      res.status(500).json({ error: "Server error building quote", detail: error.message });
+    }
+  }
+);
+
+// ─── 4. POST /streakRestore ───────────────────────────────────────────────────
+// The whole restore decision, in ONE transaction over `users/{uid}` and the state
+// document. Three defects die here:
+//
+//   1.18 — no mutual day is invented. `lastMutualDay` is left EXACTLY as it was;
+//          continuity comes from `bridgedThroughDay`, so the next increment still
+//          requires both participants to send on one canonical day.
+//   1.19 — the client writes nothing, so no later message can clobber the count.
+//   1.20 — the free perk lives in `users/{uid}.streakRestoreAllowance`, keyed by a
+//          real ISO week in the canonical zone, so it survives a reinstall and
+//          resets on a real weekly boundary.
+//
+// The window is checked against SERVER time (2.20). Awards and the notification
+// run AFTER the commit: the count JUMPS here (5 → 12), and `engine.evaluate` can
+// only ever report a single crossing, so `awardCrossedUpToSafely` is the only
+// thing that pays the thresholds the jump flew past.
+exports.streakRestore = onRequest(
+  { cors: true, invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const uid = await _streakAuthUid(req, res);
+    if (uid === null) return;
+
+    const roomId = req.body && req.body.roomId;
+    if (typeof roomId !== "string" || roomId.length === 0) {
+      res.status(400).json({ error: "roomId is required", reason: "bad-request" });
+      return;
+    }
+    const wantsFreePerk =
+      req.body.useFreePerk === true || req.body.useFreePerk === "true";
+
+    const stateDocRef = streakState.stateRef(roomId);
+    const userDocRef = db.collection("users").doc(uid);
+
+    try {
+      const outcome = await db.runTransaction(async (tx) => {
+        // ── reads ────────────────────────────────────────────────────────────
+        const stateSnap = await tx.get(stateDocRef);
+        if (!stateSnap.exists) {
+          return { refusal: { status: 404, reason: "nothing-to-restore" } };
+        }
+        const stored = streakEngine.normalizeState(stateSnap.data());
+        const userSnap = await tx.get(userDocRef);
+
+        // (a) the caller must be in the bond
+        if (!stored.participants.includes(uid)) {
+          return { refusal: { status: 403, reason: "not-participant" } };
+        }
+
+        // (b) a restorable break, judged by SERVER time
+        const nowMs = Date.now();
+        const brokenAtMs = _epochOrNull(stored.brokenAt);
+        const previousCount = stored.previousCount;
+        if (brokenAtMs === null || previousCount <= 0) {
+          return { refusal: { status: 404, reason: "nothing-to-restore" } };
+        }
+        const deadlineMs = _epochOrNull(stored.restoreDeadlineAt);
+        if (deadlineMs !== null && nowMs > deadlineMs) {
+          return { refusal: { status: 410, reason: "window-expired" } };
+        }
+
+        // (c) the tiered cost
+        const cost = streakEngine.restoreCost(previousCount);
+
+        // (d) the Pro weekly perk — server-verified, never the client's word
+        const userData = userSnap.exists ? userSnap.data() : null;
+        if (userData === null) {
+          return { refusal: { status: 404, reason: "user-not-found" } };
+        }
+        const weekKey = isoWeekKeyInCanonicalZone(nowMs);
+        const perkAvailable =
+          isProUser(userData, nowMs) && hasFreeRestoreAllowance(userData, weekKey);
+        const usedFreePerk = wantsFreePerk && perkAvailable;
+
+        // (e) otherwise the points must actually be there
+        const points = Number(userData.gupPoints) || 0;
+        if (!usedFreePerk && points < cost) {
+          return {
+            refusal: {
+              status: 402,
+              reason: "insufficient-points",
+              detail: { required: cost, available: points },
+            },
+          };
+        }
+
+        // ── writes ───────────────────────────────────────────────────────────
+        const serverNow = new Date(nowMs);
+        const today = streakDay.dayKeyFromInstant(serverNow, stored.dayZoneOffsetMinutes);
+        const deadlineAt = streakDay.dayStartUtc(
+          streakDay.plusDays(today, 2),
+          stored.dayZoneOffsetMinutes
+        );
+
+        const next = Object.assign({}, stored, {
+          count: previousCount,
+          previousCount: 0,
+          brokenAt: null,
+          restoreDeadlineAt: null,
+          // `lastMutualDay` is DELIBERATELY untouched (defect 1.18).
+          bridgedThroughDay: today,
+          deadlineAt,
+          riskLevel: streakEngine.riskLevelFor({
+            deadlineAt,
+            serverNow,
+            hasBrokenStamp: false,
+          }),
+          longestForRoom: Math.max(stored.longestForRoom || 0, previousCount),
+          restoredAt: serverNow,
+          restoredBy: uid,
+          restoreCostPaid: usedFreePerk ? 0 : cost,
+        });
+
+        tx.set(
+          stateDocRef,
+          streakState.toWire(next, {
+            rev: stored.rev + 1,
+            serverNow,
+            reason: streakState.EvaluationReason.restore,
+            recentApplied: streakState.pruneRecentApplied(stored.recentApplied, serverNow),
+          })
+        );
+
+        const userUpdates = {};
+        if (usedFreePerk) {
+          const sameWeek =
+            userData.streakRestoreAllowance &&
+            userData.streakRestoreAllowance.weekKey === weekKey;
+          const usedBefore = sameWeek
+            ? Number(userData.streakRestoreAllowance.used) || 0
+            : 0;
+          userUpdates.streakRestoreAllowance = {
+            weekKey,
+            used: usedBefore + 1,
+            lastUsedAt: serverNow,
+          };
+        } else {
+          userUpdates.gupPoints = admin.firestore.FieldValue.increment(-cost);
+        }
+        tx.update(userDocRef, userUpdates);
+
+        return {
+          ok: true,
+          restoredCount: previousCount,
+          costPaid: usedFreePerk ? 0 : cost,
+          usedFreePerk,
+          weekKey,
+          serverNow: nowMs,
+          state: next,
+        };
+      });
+
+      if (outcome.refusal) {
+        const { status, reason, detail } = outcome.refusal;
+        res
+          .status(status)
+          .json(Object.assign({ ok: false, error: reason, reason }, detail || {}));
+        return;
+      }
+
+      // ── post-commit side effects — never fail the restore over them ───────
+      try {
+        await streakAwards.awardCrossedUpToSafely(
+          roomId,
+          outcome.state,
+          outcome.restoredCount,
+          { serverNow: new Date(outcome.serverNow) }
+        );
+      } catch (awardError) {
+        console.error(
+          `streakRestore: award pass failed for ${roomId}:`,
+          awardError && awardError.message
+        );
+      }
+      try {
+        await streakNotify.notifyStreakRestored(roomId, outcome.state, uid, {
+          serverNow: new Date(outcome.serverNow),
+        });
+      } catch (notifyError) {
+        console.error(
+          `streakRestore: notification failed for ${roomId}:`,
+          notifyError && notifyError.message
+        );
+      }
+
+      console.log(
+        `streakRestore: ${roomId} restored to ${outcome.restoredCount} by ${uid} ` +
+        `cost=${outcome.costPaid} freePerk=${outcome.usedFreePerk}`
+      );
+
+      res.status(200).json({
+        ok: true,
+        restoredCount: outcome.restoredCount,
+        count: outcome.restoredCount,
+        costPaid: outcome.costPaid,
+        cost: outcome.costPaid,
+        usedFreePerk: outcome.usedFreePerk,
+        serverNow: outcome.serverNow,
+      });
+    } catch (error) {
+      console.error("streakRestore error:", error && error.stack ? error.stack : error);
+      res.status(500).json({
+        ok: false,
+        error: "Server error restoring streak",
+        detail: error.message,
+      });
     }
   }
 );
@@ -1853,9 +2981,9 @@ exports.weeklyDigestEmailJob = onSchedule(
                   .count()
                   .get();
                 messagesSent += msgCountSnap.data().count || 0;
-              } catch (_) {}
+              } catch (_) { }
             }
-          } catch (_) {}
+          } catch (_) { }
 
           const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
 
@@ -1874,7 +3002,7 @@ exports.weeklyDigestEmailJob = onSchedule(
             await userDoc.ref.update({
               "notifiedAt.weekly_digest_email": admin.firestore.FieldValue.serverTimestamp(),
               "lastWeekPoints": userData.gupPoints || 0,
-            }).catch(() => {});
+            }).catch(() => { });
             return true;
           }
           return false;
@@ -1936,7 +3064,7 @@ exports.inactivityReminderEmailJob = onSchedule(
           if (sent) {
             await userDoc.ref.update({
               "notifiedAt.inactivity_email": admin.firestore.FieldValue.serverTimestamp(),
-            }).catch(() => {});
+            }).catch(() => { });
             return true;
           }
           return false;

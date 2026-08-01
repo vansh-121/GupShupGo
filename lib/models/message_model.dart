@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:video_chat_app/services/streak/streak_state.dart';
 
 enum MessageType { text, image, audio, video, reaction }
 
@@ -375,15 +376,47 @@ class ChatRoom {
   final String? lastMessageSenderId;
   final MessageStatus? lastMessageStatus;
   final Map<String, int> unreadCount;
+  // ── LEGACY STREAK FIELDS — DEPRECATED, READ-ONLY ──────────────────────────
+  //
+  // These five mirror the pre-v2 room document, where the client computed and
+  // wrote the streak on every send. The authoritative state now lives at
+  // `chatRooms/{roomId}/streak/state` and is surfaced through [streakState]
+  // (stored) / `StreakRepository` + `StreakEngine` (derived, what you render).
+  //
+  // They are kept ONLY for the dual-read window, so rooms the repair job has
+  // not reached yet still render via `StreakState.fromLegacy(room)`. Treat them
+  // as read-only: nothing in the client may write them, and no display or
+  // restore decision may be made from them directly. Task 10.4 removes them
+  // together with the fields on the room document.
+
+  /// Legacy stored count. Deprecated — see [streakState].
   final int streakCount;
+
+  /// Legacy day anchor, device-local and client-stamped. Deprecated — see
+  /// [streakState]; the deadline comes from `StreakState.deadlineAt`.
   final DateTime? lastInteractionDate;
-  /// Per-participant last-send timestamps for mutual streak tracking.
+
+  /// Legacy per-participant last-send timestamps. Deprecated — the server keeps
+  /// `sendDays`/`sendInstants` on `chatRooms/{id}/streak/state`.
   final Map<String, DateTime> lastSentAt;
-  /// The streak count before it was broken — used for the restore flow.
+
+  /// Legacy pre-break count used by the old client restore flow. Deprecated —
+  /// use `StreakState.previousCount` / the server restore quote.
   final int previousStreakCount;
-  /// When the streak was broken. Non-null means the streak is in a
-  /// "broken but restorable" state (within a 24-hour restore window).
+
+  /// Legacy break stamp. Deprecated — use `StreakState.brokenAt` and
+  /// `restoreDeadlineAt` from `chatRooms/{id}/streak/state`.
   final DateTime? streakBrokenAt;
+
+  /// The authoritative streak state carried alongside the room, when one is
+  /// available (currently: hydrated by `ChatCacheService` from the disk cache).
+  ///
+  /// Optional and deliberately untyped as `Object?`-free: it holds a
+  /// [StreakState]. It is *stored* state only — the count that gets rendered
+  /// must still come from `StreakEngine`/`StreakRepository` derivation, never
+  /// straight off this field. Never written to Firestore (`toMap` ignores it);
+  /// the authoritative copy lives at `chatRooms/{roomId}/streak/state`.
+  final StreakState? streakState;
 
   ChatRoom({
     required this.id,
@@ -398,6 +431,7 @@ class ChatRoom {
     this.lastSentAt = const {},
     this.previousStreakCount = 0,
     this.streakBrokenAt,
+    this.streakState,
   });
 
   Map<String, dynamic> toMap() {

@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class UserModel {
   final String id;
   final String name;
+  final String? username;
+  final String? authProvider; // 'phone' or 'google'
   final String? phoneNumber;
   final String? email;
   final String? photoUrl;
@@ -25,15 +27,20 @@ class UserModel {
   final int nightMessages;
   final int longestStreak;
 
+  final bool isDiscoverable;
+
   UserModel({
     required this.id,
     required this.name,
+    this.username,
+    this.authProvider,
     this.phoneNumber,
     this.email,
     this.photoUrl,
     this.fcmToken,
     this.about,
     this.isOnline = false,
+    this.isDiscoverable = true,
     this.lastSeen,
     this.createdAt,
     this.subscriptionPlan = 'free',
@@ -63,12 +70,16 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'username': username,
+      'username_lowercase': username?.toLowerCase(),
+      'authProvider': authProvider,
       'phoneNumber': phoneNumber,
       'email': email,
       'photoUrl': photoUrl,
       'fcmToken': fcmToken,
       'about': about,
       'isOnline': isOnline,
+      'isDiscoverable': isDiscoverable,
       'lastSeen': lastSeen?.millisecondsSinceEpoch,
       'createdAt': createdAt?.millisecondsSinceEpoch,
       'subscriptionPlan': subscriptionPlan,
@@ -85,8 +96,16 @@ class UserModel {
 
   /// Convert UserModel to Map for client-side Firestore writes.
   /// Omits server-managed subscription fields to comply with Firestore security rules.
+  ///
+  /// Also omits `isDiscoverable`: it is owned exclusively by
+  /// `UserService.updateDiscoverableStatus`. Bulk profile writes (sign-in,
+  /// profile save) often start from a UserModel that was read before the user
+  /// toggled the setting, so including it here would silently flip an opted-out
+  /// user back to discoverable. Absence of the field is read as `true` by
+  /// [fromMap], which is the correct default for new accounts.
   Map<String, dynamic> toWritableMap() {
     final map = toMap();
+    map.remove('isDiscoverable');
     map.remove('subscriptionPlan');
     map.remove('subscriptionExpiresAt');
     map.remove('subscriptionProductId');
@@ -100,12 +119,15 @@ class UserModel {
     return UserModel(
       id: documentId,
       name: map['name'] ?? 'Unknown',
+      username: map['username'],
+      authProvider: map['authProvider'],
       phoneNumber: map['phoneNumber'],
       email: map['email'],
       photoUrl: map['photoUrl'],
       fcmToken: map['fcmToken'],
       about: map['about'],
       isOnline: map['isOnline'] ?? false,
+      isDiscoverable: map['isDiscoverable'] ?? true,
       lastSeen: map['lastSeen'] != null
           ? _parseDateTime(map['lastSeen'])
           : null,
@@ -145,12 +167,15 @@ class UserModel {
   UserModel copyWith({
     String? id,
     String? name,
+    String? username,
+    String? authProvider,
     String? phoneNumber,
     String? email,
     String? photoUrl,
     String? fcmToken,
     String? about,
     bool? isOnline,
+    bool? isDiscoverable,
     DateTime? lastSeen,
     DateTime? createdAt,
     String? subscriptionPlan,
@@ -166,12 +191,15 @@ class UserModel {
     return UserModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      username: username ?? this.username,
+      authProvider: authProvider ?? this.authProvider,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       email: email ?? this.email,
       photoUrl: photoUrl ?? this.photoUrl,
       fcmToken: fcmToken ?? this.fcmToken,
       about: about ?? this.about,
       isOnline: isOnline ?? this.isOnline,
+      isDiscoverable: isDiscoverable ?? this.isDiscoverable,
       lastSeen: lastSeen ?? this.lastSeen,
       createdAt: createdAt ?? this.createdAt,
       subscriptionPlan: subscriptionPlan ?? this.subscriptionPlan,

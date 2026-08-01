@@ -40,6 +40,14 @@ class SyncService {
   /// without interleaving or dropping updates.
   final _roomSyncQueues = <String, Future<void>>{};
 
+  /// Rooms with a background reconcile pass currently running, so bursts of
+  /// snapshots don't stack redundant full-window walks.
+  final _reconcilingRooms = <String>{};
+
+  /// Last time a reconcile ran per room, used to throttle it.
+  final _lastReconcile = <String, DateTime>{};
+  static const _reconcileInterval = Duration(seconds: 60);
+
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
   Future<void> init(String currentUserId, {bool force = false}) async {
@@ -100,6 +108,9 @@ class SyncService {
     _messageSubs.clear();
     _currentUserId = null;
     _inFlightDownloads.clear();
+    _roomSyncQueues.clear();
+    _reconcilingRooms.clear();
+    _lastReconcile.clear();
   }
 
   void _startSyncingRoom(String roomId, String currentUserId) {
@@ -176,38 +187,52 @@ class SyncService {
           debugPrint(
               '[SyncService] Found ${querySnap.docs.length} messages in background query for room $roomId');
         }
-        final toSave = <MessageModel>[];
-        // Process in reverse chronological so the oldest messages come
-        // first (matches the listener's order for dedup).
-        final docs = lastSavedTimestamp != null
-            ? querySnap.docs
-            : querySnap.docs.reversed;
+        // Used in query order: the backfill query is `descending: true`, so
+        // the newest messages — the bottom of the conversation, which is
+        // what the user actually looks at — land in SQLite first. The delta
+        // query is ascending, which is already correct for filling forward.
+        final docs = querySnap.docs;
 
-        // Chunked processing: decrypt 3 messages, then yield 4ms to the UI.
-        // On cold start with 5 rooms × 50 messages = 250 decrypts at
-        // ~20ms each, the old per-message Duration.zero yield meant the UI
-        // still froze for seconds. Chunking with a real delay gives the
-        // engine a reliable half-frame to render between batches.
-        int chunkIdx = 0;
+        // Progressive flush: write the first message on its own so the UI
+        // can render it immediately, then let the batch size double
+        // (1, 2, 4, 8, 16) so a large backfill still commits efficiently.
+        // The old code accumulated all 50 and wrote once at the very end,
+        // which meant nothing appeared until the whole pass finished.
+        final pending = <MessageModel>[];
+        var flushAt = 1;
+        var processed = 0;
+        final total = docs.length;
+
+        Future<void> flush() async {
+          if (pending.isEmpty) return;
+          await store.saveMessagesBatch(List.of(pending), roomId);
+          pending.clear();
+          if (flushAt < 16) flushAt *= 2;
+        }
+
         for (final doc in docs) {
-          if (++chunkIdx % 3 == 0) {
-            await Future.delayed(const Duration(milliseconds: 4));
-          }
           final serverMsg = MessageModel.fromFirestore(doc);
           final decrypted = await ChatService.instance
               .decryptForRendering(serverMsg, currentUserId);
           if (decrypted != null) {
-            toSave.add(decrypted);
+            pending.add(decrypted);
             if (decrypted.mediaUrl != null) {
               _triggerMediaDownload(decrypted, roomId);
             }
           } else if (VaultCipher.instance.isReady) {
-            toSave.add(_lockedPlaceholder(serverMsg));
+            pending.add(_lockedPlaceholder(serverMsg));
+          }
+
+          if (pending.length >= flushAt) await flush();
+
+          // Yield to the UI only when there is genuinely more heavy work
+          // queued behind us. Yielding on the last item just delays the
+          // write for no benefit.
+          if (++processed % 3 == 0 && processed < total) {
+            await Future.delayed(const Duration(milliseconds: 4));
           }
         }
-        if (toSave.isNotEmpty) {
-          await store.saveMessagesBatch(toSave, roomId);
-        }
+        await flush();
       } catch (e) {
         if (kDebugMode) {
           debugPrint(
@@ -217,9 +242,31 @@ class SyncService {
     }());
   }
 
+  /// True when a locally-stored message is still an undecryptable
+  /// placeholder (rendered as "🔒 …") and therefore worth retrying.
+  static bool _isLocked(MessageModel m) => m.text.startsWith('🔒');
+
   /// Processes a single Firestore snapshot for [roomId]: decrypts new
   /// messages, updates previews, triggers media downloads. Runs via the
   /// per-room sequential queue so snapshots are never dropped.
+  ///
+  /// Latency design (this is what makes an incoming message appear
+  /// instantly instead of after several seconds):
+  ///
+  ///  1. Only the documents Firestore reports as *changed* are inspected.
+  ///     A new message is one document, not the whole 50-doc window. The
+  ///     previous full-window walk meant every read receipt re-processed
+  ///     50 messages.
+  ///  2. Content (a message that needs decrypting — a new bubble the user
+  ///     is waiting for) is handled strictly before metadata (delivery /
+  ///     read ticks on messages already on screen). Opening a chat fires
+  ///     markDelivered + markRead, and that churn used to queue ahead of
+  ///     the very message being waited on.
+  ///  3. Decrypted messages are written to SQLite progressively — the
+  ///     first one on its own — so the chat screen's watch stream fires
+  ///     immediately rather than after the entire pass commits.
+  ///  4. The UI yield only happens when real work remains behind it, never
+  ///     before the first message has been persisted.
   Future<void> _processRoomSnapshot(
     String roomId,
     QuerySnapshot<Map<String, dynamic>> snapshot,
@@ -228,100 +275,226 @@ class SyncService {
     try {
       final store = await PlaintextStore.instance();
 
-      // Fetch only recent local messages corresponding to document IDs in snapshot
-      final messageIds = snapshot.docs.map((doc) => doc.id).toList();
-      final localMessages = await store.getMessagesByIds(messageIds);
+      // `removed` means the document slid out of the 50-doc window, not
+      // that it was deleted — never act on those locally.
+      final changed = snapshot.docChanges
+          .where((c) => c.type != DocumentChangeType.removed)
+          .map((c) => c.doc)
+          .toList();
+
+      if (changed.isEmpty) {
+        _scheduleReconcile(roomId, snapshot, currentUserId);
+        return;
+      }
+
+      final localMessages =
+          await store.getMessagesByIds(changed.map((d) => d.id).toList());
       final localMap = {for (final m in localMessages) m.id: m};
 
-      final toSave = <MessageModel>[];
-      bool hasChanges = false;
-      int decryptIndex = 0;
-
-      for (final doc in snapshot.docs) {
-        if (++decryptIndex % 3 == 0) {
-          await Future.delayed(const Duration(milliseconds: 4));
+      final content = <DocumentSnapshot<Map<String, dynamic>>>[];
+      final metadata = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final doc in changed) {
+        final localMsg = localMap[doc.id];
+        if (localMsg == null || _isLocked(localMsg)) {
+          content.add(doc);
+        } else {
+          metadata.add(doc);
         }
+      }
 
+      // Everything we persisted in this pass, for the preview update below.
+      final saved = <String, MessageModel>{};
+
+      // ── Pass 1: content ─────────────────────────────────────────────
+      final pending = <MessageModel>[];
+      var flushAt = 1;
+      var processed = 0;
+
+      Future<void> flush() async {
+        if (pending.isEmpty) return;
+        await store.saveMessagesBatch(List.of(pending), roomId);
+        for (final m in pending) {
+          saved[m.id] = m;
+        }
+        pending.clear();
+        if (flushAt < 16) flushAt *= 2;
+      }
+
+      for (final doc in content) {
         final serverMsg = MessageModel.fromFirestore(doc);
         final localMsg = localMap[serverMsg.id];
+        final wasLocked = localMsg != null && _isLocked(localMsg);
 
-        final isLockedPlaceholder =
-            localMsg != null && localMsg.text.startsWith('🔒');
-        if (localMsg == null || isLockedPlaceholder) {
-          final decrypted = await ChatService.instance
-              .decryptForRendering(serverMsg, currentUserId);
-          if (decrypted != null) {
-            final isStillPlaceholder =
-                isLockedPlaceholder && decrypted.text.startsWith('🔒');
-            if (!isStillPlaceholder) {
-              toSave.add(decrypted);
-              hasChanges = true;
-              if (decrypted.mediaUrl != null &&
-                  decrypted.localFilePath == null) {
-                _triggerMediaDownload(decrypted, roomId);
-              }
+        final decrypted = await ChatService.instance
+            .decryptForRendering(serverMsg, currentUserId);
+
+        if (decrypted != null) {
+          // Don't overwrite an existing placeholder with another
+          // placeholder — that's a pointless write and a pointless
+          // rebuild of the message list.
+          final stillLocked = wasLocked && _isLocked(decrypted);
+          if (!stillLocked) {
+            pending.add(decrypted);
+            if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
+              _triggerMediaDownload(decrypted, roomId);
             }
-          } else if (localMsg == null && VaultCipher.instance.isReady) {
-            toSave.add(_lockedPlaceholder(serverMsg));
-            hasChanges = true;
           }
-        } else {
-          if (localMsg.status != serverMsg.status ||
-              localMsg.syncPending != serverMsg.syncPending ||
-              localMsg.mediaUrl != serverMsg.mediaUrl) {
-            final updated = localMsg.copyWith(
-              status: serverMsg.status,
-              syncPending: serverMsg.syncPending,
-              mediaUrl: serverMsg.mediaUrl,
+        } else if (localMsg == null && VaultCipher.instance.isReady) {
+          pending.add(_lockedPlaceholder(serverMsg));
+        }
+
+        if (pending.length >= flushAt) await flush();
+
+        if (++processed % 3 == 0 && processed < content.length) {
+          await Future.delayed(const Duration(milliseconds: 4));
+        }
+      }
+      await flush();
+
+      // ── Pass 2: metadata ────────────────────────────────────────────
+      // Tick marks on messages already rendered. One batch, no yields —
+      // there is no decryption here, so there's nothing to throttle.
+      final statusUpdates = <MessageModel>[];
+      for (final doc in metadata) {
+        final serverMsg = MessageModel.fromFirestore(doc);
+        final localMsg = localMap[serverMsg.id];
+        if (localMsg == null) continue;
+
+        if (localMsg.status != serverMsg.status ||
+            localMsg.syncPending != serverMsg.syncPending ||
+            localMsg.mediaUrl != serverMsg.mediaUrl) {
+          final updated = localMsg.copyWith(
+            status: serverMsg.status,
+            syncPending: serverMsg.syncPending,
+            mediaUrl: serverMsg.mediaUrl,
+          );
+          statusUpdates.add(updated);
+          if (updated.mediaUrl != null && updated.localFilePath == null) {
+            _triggerMediaDownload(updated, roomId);
+          }
+        } else if (localMsg.mediaUrl != null &&
+            localMsg.localFilePath == null) {
+          _triggerMediaDownload(localMsg, roomId);
+        }
+      }
+      if (statusUpdates.isNotEmpty) {
+        await store.saveMessagesBatch(statusUpdates, roomId);
+        for (final m in statusUpdates) {
+          saved[m.id] = m;
+        }
+      }
+
+      // ── Chat-list preview ───────────────────────────────────────────
+      // Only the newest message drives the preview. If it wasn't part of
+      // this change set, the preview can't have changed — skip the write.
+      if (snapshot.docs.isNotEmpty) {
+        final latest = saved[snapshot.docs.first.id];
+        if (latest != null) {
+          final previewText = latest.text.isNotEmpty
+              ? latest.text
+              : (latest.mediaUrl != null ? 'Media' : '');
+          if (previewText.isNotEmpty) {
+            await store.saveRoomPreview(
+              chatRoomId: roomId,
+              messageId: latest.id,
+              text: previewText,
             );
-            toSave.add(updated);
-            hasChanges = true;
-            if (updated.mediaUrl != null && updated.localFilePath == null) {
-              _triggerMediaDownload(updated, roomId);
-            }
-          } else {
-            if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
-              _triggerMediaDownload(localMsg, roomId);
-            }
           }
         }
       }
 
-      if (hasChanges && toSave.isNotEmpty) {
-        await store.saveMessagesBatch(toSave, roomId);
-
-        final latestDoc =
-            snapshot.docs.isNotEmpty ? snapshot.docs.first : null;
-        if (latestDoc != null) {
-          final latestMsgId = latestDoc.id;
-          MessageModel? decryptedLatest;
-          for (final msg in toSave) {
-            if (msg.id == latestMsgId) {
-              decryptedLatest = msg;
-              break;
-            }
-          }
-          decryptedLatest ??= localMap[latestMsgId];
-
-          if (decryptedLatest != null) {
-            final previewText = decryptedLatest.text.isNotEmpty
-                ? decryptedLatest.text
-                : (decryptedLatest.mediaUrl != null ? 'Media' : '');
-            if (previewText.isNotEmpty) {
-              await store.saveRoomPreview(
-                chatRoomId: roomId,
-                messageId: decryptedLatest.id,
-                text: previewText,
-              );
-            }
-          }
-        }
+      // If this snapshot's change set already covered the entire window —
+      // which is the case for the first snapshot of a room, where every doc
+      // arrives as `added` — the fast path just did the reconcile's job.
+      // Don't walk all 50 documents a second time on cold start.
+      final wasFullPass = changed.length >= snapshot.docs.length;
+      if (wasFullPass) {
+        _lastReconcile[roomId] = DateTime.now();
+      } else {
+        _scheduleReconcile(roomId, snapshot, currentUserId);
       }
     } catch (e) {
       if (kDebugMode) {
         debugPrint('[SyncService] Error syncing messages in room $roomId: $e');
       }
     }
+  }
+
+  /// Background self-heal over the full 50-doc window.
+  ///
+  /// The fast path above only inspects changed documents, so on its own it
+  /// can't notice that an *older* message is still a 🔒 placeholder (the
+  /// vault was unlocked since it was stored) or that its media never
+  /// finished downloading. This walks the whole window to fix those, but
+  /// runs off the sync queue and is never awaited, so it can't delay a new
+  /// message. Throttled per room, and skipped while one is in flight.
+  void _scheduleReconcile(
+    String roomId,
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+    String currentUserId,
+  ) {
+    if (_reconcilingRooms.contains(roomId)) return;
+    final last = _lastReconcile[roomId];
+    final now = DateTime.now();
+    if (last != null && now.difference(last) < _reconcileInterval) return;
+
+    _reconcilingRooms.add(roomId);
+    _lastReconcile[roomId] = now;
+
+    unawaited(() async {
+      try {
+        final store = await PlaintextStore.instance();
+        final ids = snapshot.docs.map((d) => d.id).toList();
+        if (ids.isEmpty) return;
+        final localMessages = await store.getMessagesByIds(ids);
+        final localMap = {for (final m in localMessages) m.id: m};
+
+        final repaired = <MessageModel>[];
+        var processed = 0;
+
+        for (final doc in snapshot.docs) {
+          final localMsg = localMap[doc.id];
+
+          // Missing media on an otherwise-healthy message: just retry the
+          // download, no decryption needed.
+          if (localMsg != null && !_isLocked(localMsg)) {
+            if (localMsg.mediaUrl != null && localMsg.localFilePath == null) {
+              _triggerMediaDownload(localMsg, roomId);
+            }
+            continue;
+          }
+
+          // Locked placeholder, or a message the fast path never stored.
+          final serverMsg = MessageModel.fromFirestore(doc);
+          final decrypted = await ChatService.instance
+              .decryptForRendering(serverMsg, currentUserId);
+          if (decrypted != null && !_isLocked(decrypted)) {
+            repaired.add(decrypted);
+            if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
+              _triggerMediaDownload(decrypted, roomId);
+            }
+          }
+
+          if (++processed % 3 == 0) {
+            await Future.delayed(const Duration(milliseconds: 4));
+          }
+        }
+
+        if (repaired.isNotEmpty) {
+          await store.saveMessagesBatch(repaired, roomId);
+          if (kDebugMode) {
+            debugPrint(
+                '[SyncService] Reconcile repaired ${repaired.length} message(s) in room $roomId');
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SyncService] Reconcile failed for room $roomId: $e');
+        }
+      } finally {
+        _reconcilingRooms.remove(roomId);
+      }
+    }());
   }
 
   void _triggerMediaDownload(MessageModel message, String chatRoomId) {

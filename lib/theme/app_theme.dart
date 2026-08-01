@@ -178,7 +178,7 @@ class AppTheme {
       ),
 
       // ── TabBar ──────────────────────────────────────────────────
-      tabBarTheme: TabBarTheme(
+      tabBarTheme: TabBarThemeData(
         indicator: const UnderlineTabIndicator(
           borderSide: BorderSide(color: AppColors.primary, width: 3),
           borderRadius: BorderRadius.all(Radius.circular(3)),
@@ -319,7 +319,7 @@ class AppTheme {
       ),
 
       // ── Dialog ──────────────────────────────────────────────────
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         elevation: 8,
@@ -408,7 +408,7 @@ class AppTheme {
       ),
 
       // ── TabBar ──────────────────────────────────────────────────
-      tabBarTheme: TabBarTheme(
+      tabBarTheme: TabBarThemeData(
         indicator: const UnderlineTabIndicator(
           borderSide:
               BorderSide(color: AppColorsDark.primary, width: 3),
@@ -557,7 +557,7 @@ class AppTheme {
       ),
 
       // ── Dialog ──────────────────────────────────────────────────
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: AppColorsDark.surfaceAlt,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
