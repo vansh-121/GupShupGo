@@ -102,8 +102,14 @@ class ScreenShareSession extends ChangeNotifier {
 
     await AgoraService.startScreenShare(_engine!);
 
+    // The Agora project enforces token auth, so a token-less join is now
+    // rejected with errInvalidToken. Mint a short-lived token for this channel
+    // (built with uid 0, so it is valid for the uid: 0 join below). Falls back
+    // to '' only if enforcement is disabled or the server is unreachable.
+    final rtcToken = await AgoraService.generateToken(channelId);
+
     await _engine!.joinChannel(
-      token: '',
+      token: rtcToken ?? '',
       channelId: channelId,
       uid: 0,
       options: const ChannelMediaOptions(
@@ -158,8 +164,12 @@ class ScreenShareSession extends ChangeNotifier {
       ),
     );
 
+    // Same token requirement as the sharer side — the viewer must also present
+    // a valid token now that enforcement is on.
+    final rtcToken = await AgoraService.generateToken(channelId);
+
     await _engine!.joinChannel(
-      token: '',
+      token: rtcToken ?? '',
       channelId: channelId,
       uid: 0,
       options: const ChannelMediaOptions(
