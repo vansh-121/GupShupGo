@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
@@ -112,11 +116,55 @@ class AgoraService {
     );
   }
 
-  // For production use: implement token generation
-  static Future<String?> generateToken(String channelName, int uid) async {
-    // TODO: Implement server-side token generation
-    // For now, return null to use no-token mode (testing only)
-    return null;
+  static const String _tokenFunctionUrl =
+      'https://us-central1-videocallapp-81166.cloudfunctions.net/generateAgoraToken';
+
+  /// Fetches a short-lived Agora RTC token from the server for [channelName].
+  ///
+  /// The App Certificate that signs the token lives only in the Cloud Function
+  /// secret store — never in the client. Requires the user to be signed in
+  /// (the request carries their Firebase ID token).
+  ///
+  /// Returns null on any failure so callers can fall back to token-less join
+  /// (only works if the Agora project is still in "testing / no-certificate"
+  /// mode). Once the App Certificate is enabled on the Agora dashboard, a null
+  /// here means the join will fail — which is the intended, secure behaviour.
+  static Future<String?> generateToken(String channelName, {int uid = 0}) async {
+    try {
+      final idToken =
+          await FirebaseAuth.instance.currentUser?.getIdToken();
+      if (idToken == null) {
+        print('generateToken: no signed-in user; cannot mint Agora token');
+        return null;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse(_tokenFunctionUrl),
+            headers: {
+              'Authorization': 'Bearer $idToken',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'channelName': channelName, 'uid': uid}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null && token.isNotEmpty) return token;
+        print('generateToken: server returned empty token');
+        return null;
+      }
+
+      print('generateToken failed: ${response.statusCode} ${response.body}');
+      return null;
+    } catch (e, stack) {
+      print('generateToken error: $e');
+      CrashlyticsService.logError(e, stack,
+          reason: 'AgoraService.generateToken failed for $channelName');
+      return null;
+    }
   }
 
   /// Initialise the engine for screen sharing.

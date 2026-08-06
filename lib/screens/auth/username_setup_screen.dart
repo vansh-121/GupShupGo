@@ -12,6 +12,12 @@ class UsernameSetupScreen extends StatefulWidget {
 
   const UsernameSetupScreen({super.key, required this.user});
 
+  /// Set once the user chooses "Skip for now" on the forced setup screen.
+  /// HomeScreen checks this so it doesn't immediately re-prompt in a loop
+  /// after we route back. Resets when the app process restarts, so the user
+  /// is gently reminded on the next cold start — but never blocked.
+  static bool skippedThisSession = false;
+
   @override
   State<UsernameSetupScreen> createState() => _UsernameSetupScreenState();
 }
@@ -205,6 +211,20 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   void _selectSuggestion(String suggestion) {
     _usernameController.text = suggestion;
     _onUsernameChanged(suggestion);
+  }
+
+  /// Lets the user into the app without a handle. They can set one later from
+  /// Profile. We mark the session flag so HomeScreen doesn't re-force this.
+  void _skip() {
+    UsernameSetupScreen.skippedThisSession = true;
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context, null);
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    }
   }
 
   @override
@@ -613,6 +633,21 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                             color: canSubmit ? Colors.white : c.textLow,
                           ),
                         ),
+                ),
+              ),
+            ),
+            // ── Skip for now ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: TextButton(
+                onPressed: _isSaving ? null : _skip,
+                child: Text(
+                  'Skip for now',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.textMid,
+                  ),
                 ),
               ),
             ),

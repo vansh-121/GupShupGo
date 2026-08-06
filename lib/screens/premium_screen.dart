@@ -717,14 +717,35 @@ class _PremiumScreenState extends State<PremiumScreen>
                   );
                 }
               },
-        child: Text(
-          'Restore previous purchase',
-          style: GoogleFonts.poppins(
-            color: c.primary,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        child: sub.isLoading
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: c.primary),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Restoring…',
+                    style: GoogleFonts.poppins(
+                      color: c.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              )
+            : Text(
+                'Restore previous purchase',
+                style: GoogleFonts.poppins(
+                  color: c.primary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
       ),
     );
   }

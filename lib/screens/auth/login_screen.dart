@@ -174,6 +174,24 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
+  /// Stronger rules applied only at sign-up. Sign-in keeps the lenient check
+  /// above so existing accounts created before these rules aren't locked out.
+  String? _validateNewPassword(String password) {
+    if (password.isEmpty) {
+      return 'Please enter a password';
+    }
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters';
+    }
+    if (!RegExp(r'[A-Za-z]').hasMatch(password)) {
+      return 'Password must include a letter';
+    }
+    if (!RegExp(r'\d').hasMatch(password)) {
+      return 'Password must include a number';
+    }
+    return null;
+  }
+
   Future<void> _signInWithEmail() async {
     final emailError = _validateEmail(_emailController.text.trim());
     if (emailError != null) {
@@ -225,7 +243,7 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _errorMessage = emailError);
       return;
     }
-    final passwordError = _validatePassword(_passwordController.text);
+    final passwordError = _validateNewPassword(_passwordController.text);
     if (passwordError != null) {
       setState(() => _errorMessage = passwordError);
       return;
@@ -573,6 +591,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: InputDecoration(
                     hintText: 'Password',
                     hintStyle: TextStyle(color: c.textLow),
+                    helperText: _isSignUp
+                        ? 'At least 8 characters, with a letter and a number'
+                        : null,
+                    helperStyle:
+                        TextStyle(color: c.textLow, fontSize: 11),
+                    helperMaxLines: 2,
                     prefixIcon:
                         Icon(Icons.lock_outline, color: c.textMid),
                     suffixIcon: IconButton(

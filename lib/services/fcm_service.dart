@@ -336,6 +336,12 @@ class FCMService {
 
       await _secureStorage.delete(key: _lastRegisteredUserIdKey);
       await FirebaseMessaging.instance.deleteToken();
+
+      // Cancel the token-refresh listener so it doesn't fire (and re-store a
+      // token) after logout. Reset the flag so the next setupFCM re-registers.
+      await _tokenRefreshSubscription?.cancel();
+      _tokenRefreshSubscription = null;
+
       print('FCM token unregistered for user: $userId');
     } catch (e) {
       print('Error unregistering FCM token for user $userId: $e');
