@@ -3,15 +3,31 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.0';
+const String kCurrentVersion = '1.1.2';
 const String _prefKey = 'pref_whats_new_version';
 
-/// Call this once the home screen is mounted. Shows the dialog only when the
-/// stored version differs from [kCurrentVersion] (i.e. first launch after update).
+/// Call this once the home screen is mounted. Shows the dialog only for users
+/// who UPDATED from an older version — never for a first-time install.
+///
+/// A brand-new user has no stored version, so "What's New" would be meaningless
+/// (there is no "old" to compare against). On a fresh production launch every
+/// user is new, so without this guard the whole user base would see a changelog
+/// of internal fixes on their very first open. Instead we silently record the
+/// current version and only surface the dialog on a genuine future update.
 Future<void> maybeShowWhatsNew(BuildContext context) async {
   final seen = sharedPrefs.getString(_prefKey);
+
+  // Already saw this version's dialog.
   if (seen == kCurrentVersion) return;
 
+  // First install (nothing recorded yet): suppress the dialog, just remember
+  // the version so the NEXT update shows correctly.
+  if (seen == null) {
+    await sharedPrefs.setString(_prefKey, kCurrentVersion);
+    return;
+  }
+
+  // Existing user who updated from an older version → show what changed.
   if (!context.mounted) return;
 
   await showDialog<void>(
@@ -167,18 +183,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.notifications_active_rounded,
-    'Reliable Notifications',
-    'Tapping push notifications now instantly takes you directly to the correct chat screen or tab.',
+    Icons.videocam_rounded,
+    'HD Voice & Video Calling',
+    'Experience crystal-clear 720p HD video calls with active noise suppression and ultra-low latency.',
   ),
   _Feature(
-    Icons.star_rounded,
-    'Chat Header Layout Fix',
-    'Fixed an overflow issue in the chat header when a user with an active bond is online or typing.',
+    Icons.security_rounded,
+    'End-to-End Encryption',
+    'Your audio/video media streams and private chats are protected with Signal Protocol E2EE for maximum privacy.',
   ),
   _Feature(
-    Icons.emoji_emotions_rounded,
-    'Smoother Chat Reactions',
-    'Viewing message reaction details is now faster and more efficient, reducing unnecessary network load.',
+    Icons.screen_share_rounded,
+    'Screen Sharing & Anonymous Chat',
+    'Share live screen content during calls and meet new friends through random anonymous 1-on-1 chats.',
+  ),
+  _Feature(
+    Icons.bolt_rounded,
+    'Performance & Connection Fixes',
+    'Instant push notification routing, smoother chat reaction rendering, and enhanced network auto-reconnect.',
   ),
 ];

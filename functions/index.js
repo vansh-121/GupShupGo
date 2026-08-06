@@ -3198,8 +3198,9 @@ exports.generateAgoraToken = onRequest(
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
+    let decoded;
     try {
-      await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
     } catch (_) {
       res.status(401).json({ error: "Invalid or expired token" });
       return;
@@ -3208,6 +3209,23 @@ exports.generateAgoraToken = onRequest(
     const channelName = req.body && req.body.channelName;
     if (!channelName || typeof channelName !== "string") {
       res.status(400).json({ error: "Missing channelName" });
+      return;
+    }
+
+    // ── Authorization: requester must be a participant of THIS call ──────────
+    // Authentication alone is not enough — the channel name is caller-supplied,
+    // so without this check any signed-in user who learns a channel id could
+    // mint a publisher token and join a private call. The calls/{channelId}
+    // document records the two legitimate participants (written by both the
+    // call flow and the screen-share flow); require the caller to be one of them.
+    const callSnap = await db.collection("calls").doc(channelName).get();
+    if (!callSnap.exists) {
+      res.status(404).json({ error: "Call not found" });
+      return;
+    }
+    const call = callSnap.data();
+    if (decoded.uid !== call.callerId && decoded.uid !== call.calleeId) {
+      res.status(403).json({ error: "Not a participant of this call" });
       return;
     }
     // uid is optional; default 0 to match the client's joinChannel(uid: 0).
