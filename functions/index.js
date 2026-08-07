@@ -34,6 +34,14 @@ const streakRepair = require("./streak/repair");
 // endpoint is an operator tool, so no end user — Pro or otherwise — can reach it.
 const streakAdminToken = defineSecret("STREAK_ADMIN_TOKEN");
 
+// ─── Agora RTC token generation ──────────────────────────────────────────────
+// The App Certificate is the secret that authorises token minting; it must
+// NEVER ship in the client. Set both via:
+//   firebase functions:secrets:set AGORA_APP_ID
+//   firebase functions:secrets:set AGORA_APP_CERTIFICATE
+const agoraAppId = defineSecret("AGORA_APP_ID");
+const agoraAppCertificate = defineSecret("AGORA_APP_CERTIFICATE");
+
 admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
@@ -3163,3 +3171,91 @@ function unsubscribePage(nameOrError, success) {
 </body>
 </html>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Agora RTC token generation
+// ═══════════════════════════════════════════════════════════════════════════
+// Mints a short-lived RTC token so the client never holds the App Certificate.
+// The caller must present a valid Firebase ID token. The uid embedded in the
+// Agora token is 0 (the client joins with uid: 0), matching the app's
+// joinChannel call — Agora then assigns a real uid on join.
+const { RtcTokenBuilder, RtcRole } = require("agora-token");
+
+// Tokens are valid for 1 hour. Long enough for any single call; the client
+// requests a fresh one per call so expiry is never hit mid-call.
+const AGORA_TOKEN_TTL_SECONDS = 3600;
+
+exports.generateAgoraToken = onRequest(
+  { cors: true, invoker: "public", secrets: [agoraAppId, agoraAppCertificate] },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    let decoded;
+    try {
+      decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return;
+    }
+
+    const channelName = req.body && req.body.channelName;
+    if (!channelName || typeof channelName !== "string") {
+      res.status(400).json({ error: "Missing channelName" });
+      return;
+    }
+
+    // ── Authorization: requester must be a participant of THIS call ──────────
+    // Authentication alone is not enough — the channel name is caller-supplied,
+    // so without this check any signed-in user who learns a channel id could
+    // mint a publisher token and join a private call. The calls/{channelId}
+    // document records the two legitimate participants (written by both the
+    // call flow and the screen-share flow); require the caller to be one of them.
+    const callSnap = await db.collection("calls").doc(channelName).get();
+    if (!callSnap.exists) {
+      res.status(404).json({ error: "Call not found" });
+      return;
+    }
+    const call = callSnap.data();
+    if (decoded.uid !== call.callerId && decoded.uid !== call.calleeId) {
+      res.status(403).json({ error: "Not a participant of this call" });
+      return;
+    }
+    // uid is optional; default 0 to match the client's joinChannel(uid: 0).
+    const uid = Number.isInteger(req.body && req.body.uid) ? req.body.uid : 0;
+
+    try {
+      const appId = agoraAppId.value();
+      const appCertificate = agoraAppCertificate.value();
+      const now = Math.floor(Date.now() / 1000);
+      const privilegeExpireTs = now + AGORA_TOKEN_TTL_SECONDS;
+
+      const token = RtcTokenBuilder.buildTokenWithUid(
+        appId,
+        appCertificate,
+        channelName,
+        uid,
+        RtcRole.PUBLISHER,
+        privilegeExpireTs,
+        privilegeExpireTs
+      );
+
+      res.status(200).json({
+        token,
+        appId,
+        uid,
+        expiresAt: privilegeExpireTs,
+      });
+    } catch (error) {
+      console.error("generateAgoraToken error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);

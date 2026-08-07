@@ -195,6 +195,28 @@ void main() async {
 // CallKit event listener — handles Accept / Decline / Timeout / End
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// The channelId most recently handed off to a CallScreen, with the time it
+/// happened. Both the global CallKit listener here AND IncomingCallScreen
+/// listen to the same `onEvent` stream, so an `actionCallAccept` can reach
+/// both. `isIncomingCallScreenShowing` guards the common case, but that flag
+/// is reset asynchronously when the route pops — leaving a window where both
+/// paths could push CallScreen. This second guard makes navigation idempotent
+/// per channel regardless of listener ordering.
+String? _lastAcceptedChannelId;
+DateTime? _lastAcceptedAt;
+
+bool _alreadyNavigatedToCall(String channelId) {
+  final last = _lastAcceptedAt;
+  if (_lastAcceptedChannelId == channelId &&
+      last != null &&
+      DateTime.now().difference(last) < const Duration(seconds: 5)) {
+    return true;
+  }
+  _lastAcceptedChannelId = channelId;
+  _lastAcceptedAt = DateTime.now();
+  return false;
+}
+
 void _setupCallKitListener() {
   FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
     if (event == null) return;
@@ -269,6 +291,15 @@ void _handleCallAccepted(dynamic body) {
 
   if (channelId.isEmpty) {
     print('Cannot navigate to call: channelId is empty');
+    return;
+  }
+
+  // Idempotency: if we're already navigating to this channel (either because
+  // IncomingCallScreen accepted it first, or this handler fired twice), drop
+  // the duplicate immediately. Self-clears after 5s so a later, legitimate
+  // call on the same channel isn't blocked forever.
+  if (_alreadyNavigatedToCall(channelId)) {
+    print('Already navigating to call $channelId — skipping duplicate');
     return;
   }
 

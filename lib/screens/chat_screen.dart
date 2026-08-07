@@ -1953,12 +1953,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       );
                     }
                     // ── Offline: No-internet / mesh banner ──────────────
+                    final c3 = AppThemeColors.of(context);
                     return Consumer<MeshNetworkService>(
                       builder: (_, mesh, __) => Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 8),
-                        color: const Color(0xFF2D2D2D),
+                        color: c3.isDark
+                            ? const Color(0xFF1A1C28)
+                            : const Color(0xFFF0EFF8),
                         child: Row(
                           children: [
                             Icon(
@@ -1977,7 +1980,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                     ? 'Offline Chat  ·  ${mesh.connectedPeers} device${mesh.connectedPeers == 1 ? '' : 's'} nearby'
                                     : 'No internet?\nChat offline with nearby devices',
                                 style: GoogleFonts.poppins(
-                                  color: Colors.white,
+                                  color: c3.isDark
+                                      ? Colors.white
+                                      : const Color(0xFF1E293B),
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
                                 ),

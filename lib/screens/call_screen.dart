@@ -61,6 +61,7 @@ class _CallScreenState extends State<CallScreen> {
   StreamSubscription<CallSignalStatus?>? _signalingSubscription;
   Timer? _noAnswerTimer;
   bool _isEndingCall = false; // prevents double-close race conditions
+  bool _cleanupDone = false; // guards _cleanupAndPop against double execution
   String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
 
   // ── Performance: E2E call setup trace ────────────────────────────────────
@@ -218,7 +219,13 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   /// Centralised cleanup: create call log, update provider, pop navigator.
+  /// Reached from the end button and two delayed callbacks (auto-close,
+  /// no-answer). The [_cleanupDone] guard — set synchronously before the first
+  /// await — ensures the log, signaling delete, and Navigator.pop run once even
+  /// if two paths race into here.
   Future<void> _cleanupAndPop() async {
+    if (_cleanupDone) return;
+    _cleanupDone = true;
     await _createCallLog();
     _signalingSubscription?.cancel();
     _noAnswerTimer?.cancel();
@@ -372,9 +379,15 @@ class _CallScreenState extends State<CallScreen> {
         print('Call encryption setup failed (continuing unencrypted): $e');
       }
 
-      // Join channel with null token for testing
+      // Fetch a short-lived RTC token from the server. Returns null if the
+      // Agora project is still in token-less testing mode (or on failure), in
+      // which case we join with an empty token — matching the previous
+      // behaviour. Once the App Certificate is enabled server-side this becomes
+      // the authoritative credential.
+      final rtcToken = await AgoraService.generateToken(widget.channelId);
+
       await _engine!.joinChannel(
-        token: '', // Use empty string for testing without token server
+        token: rtcToken ?? '',
         channelId: widget.channelId,
         uid: 0,
         options: ChannelMediaOptions(
@@ -851,6 +864,9 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
+                    tooltip: _isSpeakerOn
+                        ? 'Turn off speaker'
+                        : 'Turn on speaker',
                     icon: Icon(
                       _isSpeakerOn ? Icons.volume_up : Icons.phone_in_talk_outlined,
                       color: _isSpeakerOn ? Colors.black : Colors.white,
@@ -873,6 +889,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
+                    tooltip: _isMuted ? 'Unmute microphone' : 'Mute microphone',
                     icon: Icon(
                       _isMuted ? Icons.mic_off : Icons.mic,
                       color: _isMuted ? Colors.black : Colors.white,
@@ -892,6 +909,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
+                    tooltip: 'End call',
                     icon: const Icon(
                       Icons.call_end,
                       color: Colors.white,
@@ -908,6 +926,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
+                    tooltip: 'Switch camera',
                     icon: const Icon(
                       Icons.switch_camera,
                       color: Colors.white,
@@ -929,6 +948,9 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
+                    tooltip: _localVideoEnabled
+                        ? 'Turn off camera'
+                        : 'Turn on camera',
                     icon: Icon(
                       _localVideoEnabled ? Icons.videocam : Icons.videocam_off,
                       color: !_localVideoEnabled ? Colors.black : Colors.white,

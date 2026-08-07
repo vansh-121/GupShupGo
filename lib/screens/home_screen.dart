@@ -244,6 +244,7 @@ class _HomeScreenState extends State<HomeScreen>
         // ── Check if user needs to choose a unique @username handle ─────
         if (_currentUser != null &&
             (_currentUser!.username == null || _currentUser!.username!.trim().isEmpty) &&
+            !UsernameSetupScreen.skippedThisSession &&
             mounted) {
           Navigator.pushReplacement(
             context,
@@ -1845,7 +1846,7 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
-            icon: _currentUser?.photoUrl != null
+            icon: (_currentUser?.photoUrl?.isNotEmpty ?? false)
                 ? CircleAvatar(
                     radius: 16,
                     backgroundImage: NetworkImage(_currentUser!.photoUrl!),
@@ -2018,15 +2019,22 @@ class _HomeScreenState extends State<HomeScreen>
                           width: 1.5,
                         ),
                       ),
-                      child: CircleAvatar(
-                        radius: 13,
-                        backgroundImage: _currentUser?.photoUrl != null
-                            ? NetworkImage(_currentUser!.photoUrl!)
-                            : null,
-                        backgroundColor: c.primaryLt,
-                        child: _currentUser?.photoUrl == null
-                            ? Icon(Icons.person, size: 14, color: c.textMid)
-                            : null,
+                      child: Builder(
+                        builder: (_) {
+                          final hasPhoto =
+                              _currentUser?.photoUrl?.isNotEmpty ?? false;
+                          return CircleAvatar(
+                            radius: 13,
+                            backgroundImage: hasPhoto
+                                ? NetworkImage(_currentUser!.photoUrl!)
+                                : null,
+                            backgroundColor: c.primaryLt,
+                            child: hasPhoto
+                                ? null
+                                : Icon(Icons.person,
+                                    size: 14, color: c.textMid),
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(height: 3),

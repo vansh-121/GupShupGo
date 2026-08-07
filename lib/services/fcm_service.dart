@@ -311,6 +311,15 @@ class FCMService {
   }
 
   Future<void> unregisterCurrentDevice({required String userId}) async {
+    // Cancel the token-refresh listener FIRST, before any operation that can
+    // throw or provoke a refresh. deleteToken() below triggers onTokenRefresh,
+    // and if the listener were still live (or if an earlier step threw and
+    // skipped a late cancel) it would re-store a fresh token for the departing
+    // user — leaving the device registered after logout. Cancelling up front
+    // makes logout deterministic regardless of what fails afterwards.
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+
     try {
       final deviceId = await _secureStorage.read(key: _deviceIdKey);
       if (deviceId != null && deviceId.isNotEmpty) {
@@ -336,6 +345,7 @@ class FCMService {
 
       await _secureStorage.delete(key: _lastRegisteredUserIdKey);
       await FirebaseMessaging.instance.deleteToken();
+
       print('FCM token unregistered for user: $userId');
     } catch (e) {
       print('Error unregistering FCM token for user $userId: $e');

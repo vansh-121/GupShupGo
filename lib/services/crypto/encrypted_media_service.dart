@@ -16,11 +16,11 @@
 //   4. AES-GCM decrypt → plaintext file bytes.
 
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart' as crypto;
 
@@ -131,6 +131,14 @@ class EncryptedMediaService {
 
   /// Downloads ciphertext from `bundle.url`, verifies SHA-256, decrypts,
   /// and returns plaintext bytes.
+  ///
+  /// The SHA-256 verify + AES-GCM decrypt are CPU-bound and scale with file
+  /// size. For anything but tiny payloads we run them in a background isolate
+  /// via [compute] so the UI thread never janks while a status image or chat
+  /// video is being opened. Small payloads stay inline — spawning an isolate
+  /// costs more than the work saved.
+  static const _isolateThresholdBytes = 32 * 1024; // 32 KB
+
   Future<Uint8List> downloadAndDecrypt(MediaKeyBundle bundle) async {
     final response = await http.get(Uri.parse(bundle.url));
     if (response.statusCode != 200) {
@@ -139,6 +147,19 @@ class EncryptedMediaService {
     }
     final wire = response.bodyBytes;
 
+    if (wire.length >= _isolateThresholdBytes) {
+      return compute(
+        _verifyAndDecryptIsolate,
+        _MediaDecryptRequest(
+          wire: wire,
+          key: Uint8List.fromList(bundle.key),
+          iv: Uint8List.fromList(bundle.iv),
+          expectedHash: Uint8List.fromList(bundle.hash),
+        ),
+      );
+    }
+
+    // Small payload: run inline.
     final actualHash = crypto.sha256.convert(wire).bytes;
     if (!_constTimeEq(actualHash, bundle.hash)) {
       throw StateError('media integrity check failed');
@@ -162,4 +183,59 @@ class EncryptedMediaService {
     }
     return diff == 0;
   }
+}
+
+// ─── Isolate-compatible top-level helpers ──────────────────────────────────
+// Everything below runs inside the isolate spawned by `compute()`. It must be
+// top-level (not a method) and take only sendable args, so we pass a plain
+// data holder and reconstruct the crypto primitives on the other side.
+
+/// Sendable payload for [_verifyAndDecryptIsolate]. All fields are TypedData,
+/// which transfers across the isolate boundary without a deep copy on most
+/// platforms.
+class _MediaDecryptRequest {
+  _MediaDecryptRequest({
+    required this.wire,
+    required this.key,
+    required this.iv,
+    required this.expectedHash,
+  });
+
+  final Uint8List wire;
+  final Uint8List key;
+  final Uint8List iv;
+  final Uint8List expectedHash;
+}
+
+/// Runs in a background isolate: verifies the ciphertext integrity hash in
+/// constant time, then AES-256-GCM decrypts and returns the plaintext bytes.
+/// Throws [StateError] on integrity failure — surfaced back on the caller's
+/// future by `compute`.
+Future<Uint8List> _verifyAndDecryptIsolate(_MediaDecryptRequest req) async {
+  final wire = req.wire;
+
+  final actualHash = crypto.sha256.convert(wire).bytes;
+  if (!_constTimeEqBytes(actualHash, req.expectedHash)) {
+    throw StateError('media integrity check failed');
+  }
+
+  const tagLen = 16;
+  final ct = wire.sublist(0, wire.length - tagLen);
+  final tag = wire.sublist(wire.length - tagLen);
+
+  final gcm = AesGcm.with256bits();
+  final secretKey = SecretKey(req.key);
+  final box = SecretBox(ct, nonce: req.iv, mac: Mac(tag));
+  final pt = await gcm.decrypt(box, secretKey: secretKey);
+  return Uint8List.fromList(pt);
+}
+
+/// Constant-time byte comparison, duplicated at top level for isolate use.
+bool _constTimeEqBytes(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff == 0;
 }
