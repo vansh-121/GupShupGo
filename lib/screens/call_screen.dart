@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
+import 'package:video_chat_app/services/pip_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -42,6 +43,7 @@ class _CallScreenState extends State<CallScreen> {
   bool _isInitialized = false;
   int? _remoteUid;
   bool _localVideoEnabled = true;
+  bool _isInPipMode = false; // true while collapsed into the PiP window
 
   // Call timer
   Timer? _callTimer;
@@ -101,6 +103,15 @@ class _CallScreenState extends State<CallScreen> {
     _initAgora();
     _listenToSignaling();
 
+    // ── Picture-in-Picture (video calls only) ───────────────────────────
+    // Watch native PiP mode changes so the UI can collapse to remote-video-
+    // only while in the floating window. Auto-enter is armed later, once the
+    // remote peer joins (see onUserJoined) — there's no point shrinking a
+    // "waiting for remote user" screen into PiP.
+    if (!widget.isAudioOnly) {
+      PipService.instance.isInPipMode.addListener(_onPipModeChanged);
+    }
+
     // Caller-only: auto-end if callee never answers within 60 seconds.
     if (widget.isCaller) {
       _noAnswerTimer = Timer(const Duration(seconds: 60), () {
@@ -109,6 +120,14 @@ class _CallScreenState extends State<CallScreen> {
         }
       });
     }
+  }
+
+  /// Called by [PipService] when Android enters or leaves the floating PiP
+  /// window. Collapsing to remote-video-only happens in [build] based on this
+  /// flag; here we just trigger the rebuild.
+  void _onPipModeChanged() {
+    if (!mounted) return;
+    setState(() => _isInPipMode = PipService.instance.isInPipMode.value);
   }
 
   Future<void> _initializeUserInfo() async {
@@ -322,6 +341,14 @@ class _CallScreenState extends State<CallScreen> {
             _noAnswerTimer?.cancel(); // Remote user joined — cancel no-answer timer
             _startCallTimer();
 
+            // Video calls: now that remote video exists, arm Picture-in-
+            // Picture so the call shrinks into a floating window when the user
+            // leaves the app (auto-enter on Android 12+, onUserLeaveHint on
+            // 8.0–11). No-op on audio calls and unsupported devices.
+            if (!widget.isAudioOnly) {
+              PipService.instance.enableAutoEnter();
+            }
+
             // Stop the E2E setup trace — remote peer is now in the channel.
             if (_callSetupTrace != null) {
               PerformanceService.stopTrace(_callSetupTrace!, attributes: {
@@ -424,6 +451,13 @@ class _CallScreenState extends State<CallScreen> {
     _callTimer?.cancel();
     _noAnswerTimer?.cancel();
     _signalingSubscription?.cancel();
+
+    // Tear down Picture-in-Picture: stop listening for mode changes and disarm
+    // auto-enter so a later non-call screen can't shrink into a PiP window.
+    if (!widget.isAudioOnly) {
+      PipService.instance.isInPipMode.removeListener(_onPipModeChanged);
+      PipService.instance.disable();
+    }
 
     // Create call log (fire and forget for cases like back button press)
     _createCallLog();
@@ -781,6 +815,16 @@ class _CallScreenState extends State<CallScreen> {
       return Scaffold(
         backgroundColor: const Color(0xFF111B21),
         body: _buildAudioCallUI(),
+      );
+    }
+
+    // In the PiP floating window, show ONLY the remote video — the window is
+    // too small for controls, the local preview, or call info. Everything
+    // returns automatically when the user expands back to full screen.
+    if (_isInPipMode) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildRemoteVideo(),
       );
     }
 
