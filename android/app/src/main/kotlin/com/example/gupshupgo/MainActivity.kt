@@ -114,6 +114,18 @@ class MainActivity : FlutterFragmentActivity() {
     // ── Phone number hint ──────────────────────────────────────────────
 
     private fun requestPhoneNumberHint(result: MethodChannel.Result) {
+        // Reject an overlapping request instead of overwriting a pending one.
+        // Overwriting would leave the first Dart Future hanging forever (its
+        // onActivityResult would resolve the wrong Result). The hint is a
+        // best-effort convenience, so failing the new call fast is fine.
+        if (pendingResult != null) {
+            result.error(
+                "IN_PROGRESS",
+                "A phone number hint request is already in progress.",
+                null
+            )
+            return
+        }
         pendingResult = result
 
         val request = GetPhoneNumberHintIntentRequest.builder().build()
