@@ -242,16 +242,30 @@ class _HomeScreenState extends State<HomeScreen>
         maybeShowWhatsNew(context);
 
         // ── Check if user needs to choose a unique @username handle ─────
+        // Push it ON TOP of HomeScreen (push, not pushReplacement) so that when
+        // the user saves or skips and the screen pops, it returns HERE to Home.
+        //
+        // Why this matters: the root route (_AuthGate) was still rendering
+        // LoginScreen at launch and is never removed after sign-in, so the auth
+        // screen sits at the base of the stack beneath Home. pushReplacement
+        // would drop Home and leave UsernameSetupScreen directly over that stale
+        // LoginScreen — so its Navigator.pop() (canPop == true) would land the
+        // user back on the auth screen. Keeping Home underneath fixes that and
+        // matches how ProfileScreen already launches this same screen.
         if (_currentUser != null &&
             (_currentUser!.username == null || _currentUser!.username!.trim().isEmpty) &&
             !UsernameSetupScreen.skippedThisSession &&
             mounted) {
-          Navigator.pushReplacement(
+          final updated = await Navigator.push<UserModel?>(
             context,
             MaterialPageRoute(
               builder: (_) => UsernameSetupScreen(user: _currentUser!),
             ),
           );
+          if (!mounted) return;
+          if (updated != null) {
+            setState(() => _currentUser = updated);
+          }
           return;
         }
 
