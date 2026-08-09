@@ -138,6 +138,17 @@ android {
 // Overriding the transitive versions here avoids bumping mobile_scanner, which
 // is pinned to 5.2.3 for AGP/CameraX-metadata reasons (see pubspec.yaml).
 configurations.all {
+    // ── Drop the deprecated SafetyNet App Check provider ────────────────────
+    // firebase_app_check transitively pulls firebase-appcheck-safetynet:16.1.2,
+    // which drags in play-services-safetynet:18.0.0. The SafetyNet Attestation
+    // API is deprecated (replaced by Play Integrity) and Google Play flags the
+    // artifact with a critical-note advisory. This app only uses the Play
+    // Integrity provider (AndroidProvider.playIntegrity) plus the debug provider
+    // in lib/main.dart — the SafetyNet provider is never referenced — so
+    // excluding it removes dead code and clears the Play Console note.
+    exclude group: 'com.google.firebase', module: 'firebase-appcheck-safetynet'
+    exclude group: 'com.google.android.gms', module: 'play-services-safetynet'
+
     resolutionStrategy {
         eachDependency { details ->
             if (details.requested.group == 'androidx.camera') {

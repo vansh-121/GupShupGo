@@ -9,6 +9,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -48,6 +49,21 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Edge-to-edge display (Android 15 / SDK 35+) ────────────────────────
+  // Apps targeting SDK 35+ render edge-to-edge by default on Android 15.
+  // Enabling it explicitly extends the same behaviour to Android 10–14 for a
+  // consistent look and makes the system bars transparent so scaffolds paint
+  // full-bleed. Per-screen SafeArea (used across the app) keeps content clear
+  // of the status/navigation bars; per-theme icon brightness is set in
+  // AppTheme's AppBarTheme. Addresses the Play Console edge-to-edge advisory.
+  unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
+  ));
 
   // ── Disable runtime font fetching — we bundle Poppins locally ──
   GoogleFonts.config.allowRuntimeFetching = false;
@@ -441,10 +457,17 @@ void _initAppCheck() async {
       print('   App Check → Apps → Manage debug tokens → Add');
       print('═══════════════════════════════════════════════════════');
     }
-  } catch (e) {
+  } catch (e, stackTrace) {
     if (kDebugMode) {
       print('⚠️ App Check initialization failed: $e');
       print('   Phone auth may fall back to reCAPTCHA flow.');
+    } else {
+      FirebaseCrashlytics.instance.recordError(
+        e,
+        stackTrace,
+        reason: 'Firebase App Check (Play Integrity) activation failed',
+        fatal: false,
+      );
     }
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// GupShupGo — Brand Design System
@@ -160,6 +161,16 @@ class AppTheme {
 
       // ── AppBar ──────────────────────────────────────────────────
       appBarTheme: AppBarTheme(
+        // Transparent, edge-to-edge system bars with dark icons for the
+        // light surface behind them (Android 15 / SDK 35+).
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark, // Android
+          statusBarBrightness: Brightness.light, // iOS
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarIconBrightness: Brightness.dark,
+          systemNavigationBarContrastEnforced: false,
+        ),
         elevation: 0,
         scrolledUnderElevation: 0.8,
         shadowColor: AppColors.border,
@@ -389,6 +400,16 @@ class AppTheme {
 
       // ── AppBar ──────────────────────────────────────────────────
       appBarTheme: AppBarTheme(
+        // Transparent, edge-to-edge system bars with light icons for the
+        // obsidian surface behind them (Android 15 / SDK 35+).
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light, // Android
+          statusBarBrightness: Brightness.dark, // iOS
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarIconBrightness: Brightness.light,
+          systemNavigationBarContrastEnforced: false,
+        ),
         elevation: 0,
         scrolledUnderElevation: 0.8,
         shadowColor: AppColorsDark.border,
