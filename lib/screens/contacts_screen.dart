@@ -16,6 +16,7 @@ import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/qr_scanner_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/screens/settings_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
@@ -1428,6 +1429,71 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             ),
           ),
         ),
+
+        // ── Discoverability OFF Banner ─────────────────────────────────────
+        if (_currentUserModel != null && !_currentUserModel!.isDiscoverable)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: c.error.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: c.error.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.visibility_off_rounded, color: c.error, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Turn on Discoverability to appear in search and suggestions.',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: c.textHigh,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: c.error.withOpacity(0.12),
+                      foregroundColor: c.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () async {
+                      if (_currentUserModel == null) return;
+                      final updated = await Navigator.push<UserModel>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SettingsScreen(
+                            currentUser: _currentUserModel!,
+                          ),
+                        ),
+                      );
+                      if (updated != null && mounted) {
+                        setState(() => _currentUserModel = updated);
+                      }
+                    },
+                    child: Text(
+                      'Settings',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
         Expanded(
           child: _searchController.text.isNotEmpty
               ? _buildSearchResults()
@@ -1561,32 +1627,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
           const SizedBox(height: 16),
 
-          if (_currentUserModel != null && !_currentUserModel!.isDiscoverable) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: c.primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: c.primary.withOpacity(0.2),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.visibility_off_rounded, color: c.primary, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Discoverability is OFF, so you won\'t appear in other people\'s search, suggestions, or contact sync. You can still find and add people here.',
-                      style: GoogleFonts.poppins(fontSize: 12, color: c.textHigh, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
+
 
           // Refined Sync Device Contacts Tile
           InkWell(
