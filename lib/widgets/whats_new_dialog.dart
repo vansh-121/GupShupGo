@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.2';
+const String kCurrentVersion = '1.1.3';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -183,23 +183,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.videocam_rounded,
-    'HD Voice & Video Calling',
-    'Experience crystal-clear 720p HD video calls with active noise suppression and ultra-low latency.',
+    Icons.picture_in_picture_alt_rounded,
+    'Picture-in-Picture Video Calls',
+    'Keep video calls active in a floating window while switching apps or navigating your device.',
   ),
   _Feature(
-    Icons.security_rounded,
-    'End-to-End Encryption',
-    'Your audio/video media streams and private chats are protected with Signal Protocol E2EE for maximum privacy.',
+    Icons.alternate_email_rounded,
+    'Username Handles & QR Sharing',
+    'Set up custom @username handles, scan QR codes to instantly add contacts, and sync device friends.',
   ),
   _Feature(
-    Icons.screen_share_rounded,
-    'Screen Sharing & Anonymous Chat',
-    'Share live screen content during calls and meet new friends through random anonymous 1-on-1 chats.',
+    Icons.local_fire_department_rounded,
+    'Bond Streaks & Restores',
+    'Track daily chat streaks with close friends and restore missed streaks with streak recovery.',
   ),
   _Feature(
     Icons.bolt_rounded,
-    'Performance & Connection Fixes',
-    'Instant push notification routing, smoother chat reaction rendering, and enhanced network auto-reconnect.',
+    'Performance & Android 16 KB Compliance',
+    'Optimized 16 KB page-size engine, Play Integrity security, and auto-verification phone authentication.',
   ),
 ];

@@ -20,6 +20,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.3] - 2026-08-10
+
+### Added
+- 📺 **Picture-in-Picture (PiP) Video Calling** — Support for background floating picture-in-picture window during active video calls, enabling uninterrupted multi-tasking.
+- 👤 **Username Handles & QR Profile Sharing** — Reserve unique `@username` handles, generate dynamic QR code profiles, scan QR codes to instantly add friends, and sync contacts.
+- 🔥 **Bond Streak System** — Interactive daily chat streaks with automated streak calculation, visual status badges, and streak restoration mechanism.
+- 📲 **Auto-Verification Phone Auth** — Seamless carrier phone verification with auto-retrieval and streamlined onboarding flow.
+
+### Changed
+- Updated version to 1.1.3 (build code 46).
+- 🚀 **Android 16 KB Page Size Alignment** — Native libraries (Agora RTC Engine, C++ binaries) built and aligned for 16 KB page-size compliance on Android 15+.
+- 📱 **Edge-to-Edge Display Optimization** — Enforced full edge-to-edge UI rendering for Android 10–14+.
+- 🛡️ **Play Integrity Provider** — Replaced deprecated SafetyNet provider with Google Play Integrity API for App Check verification.
+- ⚡ **Progressive Message Sync** — Progressive stream flushing and reconciliation throttling for ultra-low latency chat synchronization.
+
+### Fixed
+- Fixed stale authentication screen issues during username handle setup navigation.
+- Fixed reciprocal contact request privilege escalation in Firestore security rules.
+- Fixed offline connectivity banner color harmonization in dark/light themes.
+
+### Technical Details
+- **PiP Architecture:** Android Picture-in-Picture lifecycle handlers with video aspect ratio preservation.
+- **User Handles:** Firestore rules enforcement for handle uniqueness and sanitization regex.
+- **Streak Engine:** Cloud Functions background trigger with vector-validated streak state transitions.
+- **Target SDK:** Aligned targetSdk to Android API 36 (Android 16).
+
+---
+
 ## [1.0.6] - 2026-05-09
 
 ### Changed
@@ -197,6 +225,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.1.3 | August 2026 | Picture-in-Picture Video Calls, Username Handles & QR Sharing, Bond Streaks, Android 16 KB Page Size Alignment |
 | 1.0.6 | May 2026 | Video quality, call controls fixed, camera-off signalling, timer UI |
 | 1.0.5 | May 2026 | Device Session Mgmt, FCM Token Mgmt, Status Replies, Connectivity Monitoring, MIUI/HyperOS Optimization |
 | 1.0.4 | May 2026 | Voice Messaging, Mesh Networking, Dark Mode, Device Session Mgmt |

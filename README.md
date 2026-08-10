@@ -433,9 +433,12 @@ GupShupGo is built to meet strict performance requirements:
 * [x] **Signal Protocol Core integration:** Fully functional X3DH key exchanges and Double Ratchet pipelines.
 * [x] **Ad-Hoc Mesh Chat Engine:** Decoupled peer-to-peer message routing via Bluetooth and Wi-Fi.
 * [x] **Drift SQLite Caching:** Reactively bound local query caching.
-* [x] **Agora Voice/Video Call integration:** Low latency voice/video streams and native CallKit screens.
+* [x] **Agora Voice/Video Call integration:** Low latency voice/video streams, native CallKit screens, and Picture-in-Picture (PiP) floating window.
 * [x] **Argon2id PIN Vault:** Hidden chats stored behind memory-hard cryptographic keys.
-* [x] **Carrier Hint integration:** Rapid user phone verification without manual SMS entry.
+* [x] **Carrier Hint integration:** Rapid user phone verification with auto-verification OTP flow.
+* [x] **Username Handles & Profile QR Sharing:** Custom `@username` handle reservation, QR profile cards, and contact discovery.
+* [x] **Bond Streak Engine:** Interactive daily messaging streaks and streak restoration system.
+* [x] **Android 16 KB Page-Size & Play Integrity:** 16 KB page-size memory compliance for Android 15+ and Google Play Integrity protection.
 
 ### 📅 Phase 2: Future Pipeline
 * [ ] **E2EE Multi-Party Group Calling:** Extending the Double Ratchet protocol to support group calls.

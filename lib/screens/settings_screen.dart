@@ -666,7 +666,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchTile(
                 icon: Icons.info_outline_rounded,
                 title: 'App info',
-                trailingText: 'v1.1.0',
+                trailingText: 'v1.1.3',
                 onTap: _showAboutDialog,
               ),
             ],
@@ -1310,7 +1310,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.1.0',
+      applicationVersion: '1.1.3',
       applicationLegalese: '© 2026 GupShupGo',
     );
   }
