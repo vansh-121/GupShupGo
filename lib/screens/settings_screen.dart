@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
@@ -241,31 +240,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? bodyController.text.trim()
         : 'No details provided';
 
-    final mailUri = Uri(
-      scheme: 'mailto',
-      path: 'gupshupgo.support@gmail.com',
-      queryParameters: {
-        'subject': '[GupShupGo] $subject',
-        'body': '$body\n\n---\nUser: ${_user.name}\nID: ${_user.id}',
-      },
-    );
+    // Show a loading indicator while submitting
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     try {
-      if (await canLaunchUrl(mailUri)) {
-        await launchUrl(mailUri);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Report noted — no email app found to send it'),
-            ),
-          );
-        }
+      await FirebaseFirestore.instance.collection('problem_reports').add({
+        'userId': _user.id,
+        'userName': _user.name,
+        'userEmail': _user.email ?? '',
+        'subject': subject,
+        'body': body,
+        'platform': Theme.of(context).platform.name,
+        'createdAt': FieldValue.serverTimestamp(),
+        'emailSent': false,
+      });
+
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Report submitted — thanks for your feedback!'),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context); // dismiss loading
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open email app: $e')),
+          SnackBar(content: Text('Failed to submit report: $e')),
         );
       }
     }

@@ -474,5 +474,15 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.reporterUserId;
       allow read, update, delete: if false;
     }
+
+    // ==================== PROBLEM REPORTS ====================
+    // Users can submit bug reports from the app settings. Only the
+    // owning user can create; reads/updates are admin-only (Cloud
+    // Functions mark emailSent after dispatching the notification).
+    match /problem_reports/{reportId} {
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.userId;
+      allow read, update, delete: if false;
+    }
   }
 }

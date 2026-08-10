@@ -3259,3 +3259,53 @@ exports.generateAgoraToken = onRequest(
     }
   }
 );
+
+// ─── Firestore Trigger: Problem Report → Email to Support ─────────────────────
+// When a user submits a problem report from the app settings, this trigger
+// picks up the new document and sends a formatted email to the support inbox.
+exports.processProblemReportEmail = onDocumentCreated(
+  {
+    document: "problem_reports/{reportId}",
+    region: "us-central1",
+    secrets: emailService.secrets,
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data();
+    if (!data) return;
+
+    const supportEmail = "vansh.sethi98760@gmail.com";
+
+    try {
+      const createdAt = data.createdAt
+        ? data.createdAt.toDate().toISOString()
+        : null;
+
+      const tpl = emailTemplates.problemReportEmail({
+        userName: data.userName,
+        userId: data.userId,
+        userEmail: data.userEmail,
+        subject: data.subject,
+        body: data.body,
+        platform: data.platform,
+        createdAt,
+      });
+
+      const sent = await emailService.sendEmail(supportEmail, tpl.subject, tpl.html);
+
+      // Mark the document so we know the email was dispatched
+      await snap.ref.update({ emailSent: sent, emailSentAt: admin.firestore.FieldValue.serverTimestamp() });
+
+      if (sent) {
+        console.log(`processProblemReportEmail: report ${snap.id} emailed to ${supportEmail}`);
+      } else {
+        console.warn(`processProblemReportEmail: email dispatch failed for report ${snap.id}`);
+      }
+    } catch (error) {
+      console.error(`processProblemReportEmail error for report ${snap.id}:`, error.message);
+    }
+  },
+);
+
