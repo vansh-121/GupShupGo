@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.2+45
+version: 1.1.4+49
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
@@ -146,12 +146,12 @@ dependencies:
 
   # QR scanning for profile codes (Contacts → Scan).
   #
-  # Pinned to the 5.2.x line, NOT the latest. mobile_scanner 6.x/7.x depend on
-  # CameraX 1.6.x, whose AAR metadata demands Android Gradle Plugin 8.9.1+;
-  # this project builds with AGP 8.3.2, so those versions fail at
-  # :app:checkDebugAarMetadata. 5.2.3 uses a CameraX release compatible with
-  # the current AGP. Revisit when the AGP/Gradle upgrade Flutter is already
-  # warning about gets done.
+  # Pinned to the 5.2.x line, NOT the latest. The original reason (6.x/7.x need
+  # CameraX 1.6.x, whose AAR metadata demands AGP 8.9.1+) no longer applies now
+  # that android/settings.gradle is on AGP 8.12.0 — but there is still no reason
+  # to bump: the 16 KB alignment fix comes from the camera/MLKit version
+  # overrides in android/app/build.gradle, not from mobile_scanner itself.
+  # Bumping would mean reworking lib/screens/qr_scanner_screen.dart for no gain.
   mobile_scanner: 5.2.3
 
 dev_dependencies:

@@ -45,6 +45,14 @@
 -keep class com.google.android.play.core.** { *; }
 -dontwarn com.google.android.play.core.**
 
+# The deprecated SafetyNet App Check provider is excluded in build.gradle
+# (firebase-appcheck-safetynet / play-services-safetynet). The app_check plugin
+# still references SafetyNetAppCheckProviderFactory in an unreachable branch
+# (we only use Play Integrity), so tell R8 not to fail on the missing class.
+# Covered by the broad -dontwarn com.google.firebase.** above too; kept explicit
+# to document the exclusion.
+-dontwarn com.google.firebase.appcheck.safetynet.**
+
 # ─────────────────────────────────────────────
 # Google Sign-In
 # ─────────────────────────────────────────────

@@ -137,21 +137,42 @@ class AuthService {
     }
   }
 
-  // Sign in with phone number (Step 1: Send verification code)
+  // Sign in with phone number (Step 1: Send verification code).
+  //
+  // On Android [verificationCompleted] can fire when the SMS is auto-retrieved
+  // (or instantly verified). We finish the entire sign-in there — profile,
+  // local cache, device-session token, background tasks — via the shared
+  // [_completePhoneSignIn] path and hand the finished [UserModel] to
+  // [onAutoVerified], so an auto-verified user is never left stranded on the
+  // OTP screen. Otherwise [onCodeSent] delivers the verificationId for manual
+  // entry.
   Future<void> verifyPhoneNumber({
     required String phoneNumber,
+    required String name,
+    String? photoUrl,
     required Function(String verificationId) onCodeSent,
+    required Function(UserModel user) onAutoVerified,
     required Function(String error) onError,
+    Function(FirebaseAuthException e)? onVerificationFailed,
   }) async {
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (PhoneAuthCredential credential) async {
-          // Auto-verification (Android only)
-          await _auth.signInWithCredential(credential);
+          try {
+            final user = await _completePhoneSignIn(
+              credential,
+              name: name,
+              photoUrl: photoUrl,
+            );
+            onAutoVerified(user);
+          } catch (e) {
+            onError('Auto-verification failed: $e');
+          }
         },
         verificationFailed: (FirebaseAuthException e) {
+          onVerificationFailed?.call(e);
           onError(e.message ?? 'Verification failed');
         },
         codeSent: (String verificationId, int? resendToken) {
@@ -166,7 +187,109 @@ class AuthService {
     }
   }
 
-  // Sign in with phone number (Step 2: Verify OTP)
+  /// Single-flight latch so a racing auto-verify callback and a manual OTP
+  /// submit can't both call `signInWithCredential`. The first caller into
+  /// [_completePhoneSignIn] owns the completer; any concurrent caller awaits
+  /// the same future and gets the same [UserModel].
+  Completer<UserModel>? _phoneCompletion;
+
+  /// Shared completion path for BOTH phone entry points (auto-verify in
+  /// [verifyPhoneNumber] and manual code entry in [signInWithPhoneOTP]).
+  ///
+  /// Signs in (or links the phone to an already-active email/Google session),
+  /// creates/updates the Firestore profile, writes the local cache (the MIUI
+  /// source of truth), and kicks off the background setup tasks (which issue
+  /// the device-session token used by [attemptSilentReauth]).
+  Future<UserModel> _completePhoneSignIn(
+    PhoneAuthCredential credential, {
+    required String name,
+    String? photoUrl,
+  }) {
+    // Coalesce concurrent callers onto one in-flight sign-in.
+    final existing = _phoneCompletion;
+    if (existing != null) return existing.future;
+
+    final completer = Completer<UserModel>();
+    _phoneCompletion = completer;
+
+    () async {
+      try {
+        // If user is already signed in (email/Google session), link phone to
+        // that account so both providers share the same UID.
+        final User? currentUser = _auth.currentUser;
+        UserCredential userCredential;
+        if (currentUser != null && currentUser.phoneNumber == null) {
+          try {
+            userCredential = await currentUser.linkWithCredential(credential);
+          } on FirebaseAuthException catch (e) {
+            if (e.code == 'credential-already-in-use' ||
+                e.code == 'account-exists-with-different-credential') {
+              // Phone already tied to its own account – sign into that one.
+              userCredential = await _auth.signInWithCredential(credential);
+            } else {
+              rethrow;
+            }
+          }
+        } else {
+          userCredential = await _auth.signInWithCredential(credential);
+        }
+        String userId = userCredential.user!.uid;
+        String? phoneNumber = userCredential.user!.phoneNumber;
+
+        // Check if user already exists
+        UserModel? existingUser = await _userService.getUserById(userId);
+
+        UserModel user;
+        if (existingUser != null) {
+          // Update existing user
+          user = existingUser.copyWith(
+            isOnline: true,
+            lastSeen: DateTime.now(),
+            authProvider: existingUser.authProvider ?? 'phone',
+          );
+        } else {
+          // Create new user
+          user = UserModel(
+            id: userId,
+            name: name,
+            phoneNumber: phoneNumber,
+            photoUrl: photoUrl,
+            isOnline: true,
+            createdAt: DateTime.now(),
+            authProvider: 'phone',
+          );
+        }
+
+        await Future.wait([
+          _userService.createOrUpdateUser(user),
+          _saveUserIdLocally(userId),
+          _saveUserLocally(user),
+        ]);
+
+        // Run remaining setup concurrently in the background.
+        _runPostSignInTasks(
+          userId: userId,
+          displayName: user.name,
+          phone: user.phoneNumber,
+        );
+
+        completer.complete(user);
+      } catch (e) {
+        completer.completeError(e);
+      } finally {
+        _phoneCompletion = null;
+      }
+    }();
+
+    return completer.future;
+  }
+
+  // Sign in with phone number (Step 2: Verify OTP).
+  //
+  // Delegates the actual sign-in to [_completePhoneSignIn] so it shares the
+  // race-guard latch with the auto-verify path. Returns null on error, but
+  // rethrows [FirebaseAuthException] first so the UI can map specific codes
+  // (invalid-verification-code / session-expired / too-many-requests).
   Future<UserModel?> signInWithPhoneOTP({
     required String verificationId,
     required String otp,
@@ -181,67 +304,14 @@ class AuthService {
             verificationId: verificationId,
             smsCode: otp,
           );
-
-          // If user is already signed in (email/Google session), link phone to
-          // that account so both providers share the same UID.
-          final User? currentUser = _auth.currentUser;
-          UserCredential userCredential;
-          if (currentUser != null && currentUser.phoneNumber == null) {
-            try {
-              userCredential = await currentUser.linkWithCredential(credential);
-            } on FirebaseAuthException catch (e) {
-              if (e.code == 'credential-already-in-use' ||
-                  e.code == 'account-exists-with-different-credential') {
-                // Phone already tied to its own account – sign into that one.
-                userCredential = await _auth.signInWithCredential(credential);
-              } else {
-                rethrow;
-              }
-            }
-          } else {
-            userCredential = await _auth.signInWithCredential(credential);
-          }
-          String userId = userCredential.user!.uid;
-          String? phoneNumber = userCredential.user!.phoneNumber;
-
-          // Check if user already exists
-          UserModel? existingUser = await _userService.getUserById(userId);
-
-          UserModel user;
-          if (existingUser != null) {
-            // Update existing user
-            user = existingUser.copyWith(
-              isOnline: true,
-              lastSeen: DateTime.now(),
-              authProvider: existingUser.authProvider ?? 'phone',
-            );
-          } else {
-            // Create new user
-            user = UserModel(
-              id: userId,
-              name: name,
-              phoneNumber: phoneNumber,
-              photoUrl: photoUrl,
-              isOnline: true,
-              createdAt: DateTime.now(),
-              authProvider: 'phone',
-            );
-          }
-
-          await Future.wait([
-            _userService.createOrUpdateUser(user),
-            _saveUserIdLocally(userId),
-            _saveUserLocally(user),
-          ]);
-
-          // Run remaining setup concurrently in the background.
-          _runPostSignInTasks(
-            userId: userId,
-            displayName: user.name,
-            phone: user.phoneNumber,
+          return await _completePhoneSignIn(
+            credential,
+            name: name,
+            photoUrl: photoUrl,
           );
-
-          return user;
+        } on FirebaseAuthException {
+          // Let the UI distinguish invalid-code vs. session issues.
+          rethrow;
         } catch (e) {
           print('Error verifying OTP: $e');
           return null;
@@ -250,108 +320,19 @@ class AuthService {
     );
   }
 
-  // Sign in with carrier-verified phone number (Firebase Phone Number Verification)
-  // This uses the new carrier-based verification — no SMS OTP needed.
+  // ─── Optional SIM-number autofill (NOT verification) ────────────────────────
+  // Uses Android's Phone Number Hint API to prefill the phone field with a SIM
+  // number the user picks. It performs zero verification — the SMS OTP flow
+  // above is what actually proves ownership.
   final PhoneVerificationService _phoneVerificationService =
       PhoneVerificationService();
 
-  /// Step 1: Request phone number from system (carrier-based verification).
-  /// Returns the verified phone number string.
-  Future<String> requestCarrierVerification() async {
+  /// Shows the system SIM-number picker and returns the chosen number as a
+  /// convenience prefill for the phone field. Throws [PhoneVerificationException]
+  /// if the user cancels or the hint is unavailable — callers should treat that
+  /// as a harmless no-op and leave the field editable.
+  Future<String> requestPhoneNumberHint() async {
     return await _phoneVerificationService.requestPhoneNumberHint();
-  }
-
-  /// Step 2: Sign in using the carrier-verified phone number.
-  /// Uses Firebase Auth's phone flow internally, but auto-completes via carrier.
-  Future<UserModel?> signInWithVerifiedPhone({
-    required String verifiedPhoneNumber,
-    required String name,
-    String? photoUrl,
-    required Function(String verificationId) onCodeSent,
-    required Function(String error) onError,
-    required Function(UserModel user) onAutoVerified,
-  }) async {
-    try {
-      await _auth.verifyPhoneNumber(
-        phoneNumber: verifiedPhoneNumber,
-        timeout: const Duration(seconds: 60),
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          // Auto-verification completed (carrier/SMS auto-read)
-          try {
-            final User? currentUser = _auth.currentUser;
-            UserCredential userCredential;
-            if (currentUser != null && currentUser.phoneNumber == null) {
-              try {
-                userCredential =
-                    await currentUser.linkWithCredential(credential);
-              } on FirebaseAuthException catch (e) {
-                if (e.code == 'credential-already-in-use' ||
-                    e.code == 'account-exists-with-different-credential') {
-                  userCredential = await _auth.signInWithCredential(credential);
-                } else {
-                  rethrow;
-                }
-              }
-            } else {
-              userCredential = await _auth.signInWithCredential(credential);
-            }
-            String userId = userCredential.user!.uid;
-
-            UserModel? existingUser = await _userService.getUserById(userId);
-
-            UserModel user;
-            if (existingUser != null) {
-              user = existingUser.copyWith(
-                isOnline: true,
-                lastSeen: DateTime.now(),
-                authProvider: existingUser.authProvider ?? 'phone',
-              );
-            } else {
-              user = UserModel(
-                id: userId,
-                name: name,
-                phoneNumber: verifiedPhoneNumber,
-                photoUrl: photoUrl,
-                isOnline: true,
-                createdAt: DateTime.now(),
-                authProvider: 'phone',
-              );
-            }
-
-            await Future.wait([
-              _userService.createOrUpdateUser(user),
-              _saveUserIdLocally(userId),
-              _saveUserLocally(user),
-            ]);
-
-            // Run remaining setup concurrently in the background.
-            _runPostSignInTasks(
-              userId: userId,
-              displayName: user.name,
-              phone: verifiedPhoneNumber,
-            );
-
-            onAutoVerified(user);
-          } catch (e) {
-            onError('Auto-verification sign-in failed: $e');
-          }
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          onError(e.message ?? 'Phone verification failed');
-        },
-        codeSent: (String verificationId, int? resendToken) {
-          // Fallback: if carrier verification doesn't auto-complete,
-          // an SMS OTP is sent. Pass the verificationId to the UI.
-          onCodeSent(verificationId);
-        },
-        codeAutoRetrievalTimeout: (String verificationId) {
-          print('Auto retrieval timeout for carrier verification');
-        },
-      );
-    } catch (e) {
-      onError(e.toString());
-    }
-    return null;
   }
 
   // Sign in with Google

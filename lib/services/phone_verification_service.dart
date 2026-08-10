@@ -1,16 +1,21 @@
 import 'package:flutter/services.dart';
 
-/// Service that uses Firebase Phone Number Verification (carrier-based).
-/// This verifies phone numbers directly via the carrier — no SMS OTP needed.
-/// Uses Android's Phone Number Hint API to show a system dialog where the user
-/// shares their SIM phone number, then verifies it with the carrier.
+/// Thin wrapper over Android's **Phone Number Hint API** (Play Services
+/// Identity). This is a SIM-number *autofill hint* only — it shows a system
+/// picker so the user can drop their SIM number into the phone field. It does
+/// **not** verify anything and performs no carrier check; proving ownership is
+/// entirely the job of the SMS OTP flow in [AuthService.verifyPhoneNumber].
+///
+/// Treat every failure (cancel / unavailable) as a harmless no-op: the user can
+/// always type the number manually.
 class PhoneVerificationService {
   static const MethodChannel _channel =
       MethodChannel('com.gupshupgo.app/phone_verification');
 
-  /// Requests the phone number hint from the Android system.
-  /// Shows a bottom sheet dialog: "Share your phone number with GupShupGo"
-  /// Returns the verified phone number (e.g., "+919876543210") or throws.
+  /// Shows the Android SIM-number picker ("Choose a number") and returns the
+  /// selected number (e.g. "+919876543210") for use as a field prefill, or
+  /// throws [PhoneVerificationException] if the user cancels / it's unavailable.
+  /// No verification is performed on the returned number.
   Future<String> requestPhoneNumberHint() async {
     try {
       final String phoneNumber =
@@ -25,41 +30,40 @@ class PhoneVerificationService {
           );
         case 'HINT_ERROR':
           throw PhoneVerificationException(
-            'Phone number hint is not available on this device. '
-            'Please use OTP verification instead.',
+            'SIM number autofill is not available on this device. '
+            'Please type your phone number.',
             PhoneVerificationError.notAvailable,
           );
         case 'LAUNCH_ERROR':
           throw PhoneVerificationException(
-            'Could not launch phone number picker.',
+            'Could not open the phone number picker.',
             PhoneVerificationError.launchFailed,
           );
         case 'PARSE_ERROR':
           throw PhoneVerificationException(
-            'Failed to read phone number from the system.',
+            'Failed to read the phone number from the system.',
             PhoneVerificationError.parseFailed,
           );
         default:
           throw PhoneVerificationException(
-            e.message ?? 'Unknown error during phone verification.',
+            e.message ?? 'Unknown error while reading the SIM number.',
             PhoneVerificationError.unknown,
           );
       }
     } catch (e) {
       throw PhoneVerificationException(
-        'Phone verification failed: $e',
+        'SIM number autofill failed: $e',
         PhoneVerificationError.unknown,
       );
     }
   }
 
-  /// Check if carrier-based phone verification is likely supported.
-  /// This is a heuristic — Play Services Identity API requires Android 6+
-  /// and Google Play Services.
+  /// Whether the SIM-number autofill hint is likely available. The Phone Number
+  /// Hint API requires Android 6+ and Google Play Services; we attempt it and
+  /// handle failure gracefully, so this is only a coarse capability flag.
   bool get isSupported {
-    // Method channels only work on Android in this implementation.
-    // iOS doesn't support carrier-based phone verification.
-    return true; // On Android, we attempt and handle failure gracefully.
+    // Method channel is Android-only; iOS has no equivalent hint picker.
+    return true;
   }
 }
 

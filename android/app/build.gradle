@@ -17,17 +17,21 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.gupshupgo.app"
     compileSdk = 36
-    ndkVersion = "25.1.8937393"
+    // NDK 29.0.14033849 — latest stable. This project compiles no native
+    // code of its own, so the NDK version is near-irrelevant to 16 KB
+    // page-size alignment; it only repackages Flutter's own libflutter.so /
+    // libapp.so, which are already 16 KB-aligned.
+    ndkVersion = "29.0.14033849"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         // Required by flutter_local_notifications (and any lib using Java 8 time APIs)
         coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = JavaVersion.VERSION_17
     }
 
     signingConfigs {
@@ -46,8 +50,8 @@ android {
         // by August 31, 2026. compileSdk is already 36, so this just aligns
         // targetSdk to match — see Play Console policy warning.
         targetSdk = 36
-        versionCode = 45
-        versionName = "1.1.2"
+        versionCode = 49
+        versionName = "1.1.4"
         minSdkVersion = 24
         multiDexEnabled true
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
@@ -107,9 +111,12 @@ android {
 
     // Generate per-ABI APKs. x86 is emulator-only — no real device needs it.
     // Run: flutter build apk --split-per-abi
+    // Disabled for bundle builds — AAB handles ABI splitting natively,
+    // and AGP 8.12.0+ rejects splits in bundleRelease (issuetracker.google.com/402800800).
+    def isBundleBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('bundle') }
     splits {
         abi {
-            enable true
+            enable !isBundleBuild
             reset()
             include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
             universalApk true
@@ -120,6 +127,49 @@ android {
     // are fully deobfuscated in the Firebase console.
     buildTypes.each {
         it.ndk { debugSymbolLevel = 'FULL' }
+    }
+}
+
+// ── 16 KB page-size compliance (Google Play requirement) ────────────────────
+// Play rejects native libs whose ELF LOAD segments are 4 KB-aligned (p_align
+// 0x1000) instead of 16 KB (0x4000).
+//
+// Verify any build before uploading:
+//     python tools/check_16kb_alignment.py build/app/outputs/bundle/release/app-release.aab
+//
+// These two overrides fix the libs pulled by mobile_scanner 5.2.3's default
+// transitive deps, and are still required:
+//   • libimage_processing_util_jni.so — androidx.camera:camera-core 1.3.3 → 1.4.2
+//       1.4.2 is 16 KB-aligned on ALL ABIs, armeabi-v7a included.
+//   • libbarhopper_v3.so — com.google.mlkit:barcode-scanning 17.2.0 → 17.3.0
+//       17.3.0 aligns arm64-v8a + x86_64 only; its armeabi-v7a copy is still
+//       4 KB and upstream has not fixed it (googlesamples/mlkit#989), so do
+//       not expect a further bump to help 32-bit.
+//
+// mobile_scanner stays on 5.2.3 deliberately. The old blocker (6.x/7.x needing
+// AGP 8.9.1+) is gone now that this project is on AGP 8.12.0, but bumping it
+// buys no alignment benefit — 17.3.0 is already the fixed MLKit release — so
+// it would be churn and API-breakage risk for nothing.
+configurations.all {
+    // ── Drop the deprecated SafetyNet App Check provider ────────────────────
+    // firebase_app_check transitively pulls firebase-appcheck-safetynet:16.1.2,
+    // which drags in play-services-safetynet:18.0.0. The SafetyNet Attestation
+    // API is deprecated (replaced by Play Integrity) and Google Play flags the
+    // artifact with a critical-note advisory. This app only uses the Play
+    // Integrity provider (AndroidProvider.playIntegrity) plus the debug provider
+    // in lib/main.dart — the SafetyNet provider is never referenced — so
+    // excluding it removes dead code and clears the Play Console note.
+    exclude group: 'com.google.firebase', module: 'firebase-appcheck-safetynet'
+    exclude group: 'com.google.android.gms', module: 'play-services-safetynet'
+
+    resolutionStrategy {
+        eachDependency { details ->
+            if (details.requested.group == 'androidx.camera') {
+                details.useVersion '1.4.2'
+                details.because '16 KB page-size alignment (libimage_processing_util_jni.so)'
+            }
+        }
+        force 'com.google.mlkit:barcode-scanning:17.3.0'
     }
 }
 
