@@ -534,48 +534,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildStitchCard(
             title: 'Privacy',
             children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                secondary: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: _user.isDiscoverable ? c.primaryLt : c.cardBg,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _user.isDiscoverable ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                    color: _user.isDiscoverable ? c.primary : c.textMid,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  'Allow others to discover me',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: c.textHigh,
-                  ),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    _user.isDiscoverable
-                        ? 'You can be found in search, suggestions, and contact sync.'
-                        : 'You won\'t appear in search, suggestions, or contact sync. People who already have your chat or profile link can still reach you.',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: _user.isDiscoverable ? c.primary : c.textMid,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
+              _buildStitchSwitchRow(
+                icon: Icons.person_search_rounded,
+                title: 'Discoverability',
                 value: _user.isDiscoverable,
-                activeThumbColor: c.primary,
                 onChanged: _setDiscoverable,
               ),
-              Divider(color: c.border, height: 20),
+              const SizedBox(height: 10),
               _buildStitchSwitchRow(
                 icon: Icons.access_time_rounded,
                 title: 'Last seen',
