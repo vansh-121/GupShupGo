@@ -12,6 +12,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/friend_request_service.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/screens/connecting_call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/qr_scanner_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -204,31 +205,15 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     });
   }
 
-  void _initiateCall(UserModel user) async {
-    final channelId = CallSignalingService.generateChannelId();
-
-    await CallSignalingService.createCallDocument(
-      channelId: channelId,
-      callerId: widget.currentUserId,
-      calleeId: user.id,
-    );
-
-    await _fcmService.sendCallNotification(
-      user.id,
-      widget.currentUserId,
-      channelId,
-    );
-
-    if (!mounted) return;
-
+  void _initiateCall(UserModel user) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => CallScreen(
-          channelId: channelId,
-          isCaller: true,
+        builder: (_) => ConnectingCallScreen(
+          currentUserId: widget.currentUserId,
           calleeId: user.id,
           calleeName: user.name,
+          calleePhotoUrl: user.photoUrl,
         ),
       ),
     );

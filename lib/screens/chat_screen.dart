@@ -12,6 +12,7 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/screens/connecting_call_screen.dart';
 import 'package:video_chat_app/screens/screen_share_screen.dart';
 import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
@@ -763,41 +764,17 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    try {
-      final channelId = CallSignalingService.generateChannelId();
-      final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      callState.updateState(CallState.Calling);
-
-      print(
-          'Initiating video call to ${widget.contact.name} on channel $channelId');
-
-      // Create the Firestore signaling document BEFORE sending the push.
-      await CallSignalingService.createCallDocument(
-        channelId: channelId,
-        callerId: widget.currentUserId,
-        calleeId: widget.contact.id,
-      );
-
-      await FCMService().sendCallNotification(
-          widget.contact.id, widget.currentUserId, channelId);
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CallScreen(
-            channelId: channelId,
-            isCaller: true,
-            calleeId: widget.contact.id,
-            calleeName: widget.contact.name,
-          ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ConnectingCallScreen(
+          currentUserId: widget.currentUserId,
+          calleeId: widget.contact.id,
+          calleeName: widget.contact.name,
+          calleePhotoUrl: widget.contact.avatarUrl,
         ),
-      );
-    } catch (e) {
-      print('Error initiating video call: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to start video call: $e')),
-      );
-    }
+      ),
+    );
   }
 
   Future<void> _initiateAudioCall() async {
@@ -814,43 +791,18 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    try {
-      final channelId = CallSignalingService.generateChannelId();
-      final callState = Provider.of<CallStateNotifier>(context, listen: false);
-      callState.updateState(CallState.Calling);
-
-      print(
-          'Initiating audio call to ${widget.contact.name} on channel $channelId');
-
-      // Create the Firestore signaling document BEFORE sending the push.
-      await CallSignalingService.createCallDocument(
-        channelId: channelId,
-        callerId: widget.currentUserId,
-        calleeId: widget.contact.id,
-      );
-
-      await FCMService().sendCallNotification(
-          widget.contact.id, widget.currentUserId, channelId,
-          isAudioOnly: true);
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CallScreen(
-            channelId: channelId,
-            isCaller: true,
-            calleeId: widget.contact.id,
-            calleeName: widget.contact.name,
-            isAudioOnly: true,
-          ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ConnectingCallScreen(
+          currentUserId: widget.currentUserId,
+          calleeId: widget.contact.id,
+          calleeName: widget.contact.name,
+          calleePhotoUrl: widget.contact.avatarUrl,
+          isAudioOnly: true,
         ),
-      );
-    } catch (e) {
-      print('Error initiating audio call: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to start audio call: $e')),
-      );
-    }
+      ),
+    );
   }
 
   Future<void> _initiateScreenShare() async {

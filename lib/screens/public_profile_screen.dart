@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
+import 'package:video_chat_app/screens/connecting_call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart' show UserDiscoverTile;
 import 'package:video_chat_app/services/call_signaling_service.dart';
@@ -76,31 +77,15 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  Future<void> _initiateCall(UserModel user) async {
-    final channelId = CallSignalingService.generateChannelId();
-
-    await CallSignalingService.createCallDocument(
-      channelId: channelId,
-      callerId: widget.currentUserId,
-      calleeId: user.id,
-    );
-
-    await _fcmService.sendCallNotification(
-      user.id,
-      widget.currentUserId,
-      channelId,
-    );
-
-    if (!mounted) return;
-
+  void _initiateCall(UserModel user) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => CallScreen(
-          channelId: channelId,
-          isCaller: true,
+        builder: (_) => ConnectingCallScreen(
+          currentUserId: widget.currentUserId,
           calleeId: user.id,
           calleeName: user.name,
+          calleePhotoUrl: user.photoUrl,
         ),
       ),
     );
