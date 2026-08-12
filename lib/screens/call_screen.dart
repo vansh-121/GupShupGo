@@ -68,6 +68,7 @@ class _CallScreenState extends State<CallScreen> {
 
   // ── E2EE state tracking ─────────────────────────────────────────────────
   bool _encryptionApplied = false;
+  bool _isRecoveringEncryption = false;
   Timer? _mediaWatchdogTimer;
   bool _remoteMediaReceived = false;
   StreamSubscription<DocumentSnapshot>? _e2eeSubscription;
@@ -89,6 +90,13 @@ class _CallScreenState extends State<CallScreen> {
   // time.
   Future<CallEncryptionKey?>? _callKeyFuture;
 
+  // ── Agora RTC token pre-fetch ───────────────────────────────────────────
+  // The token request hits a Cloud Function (~1–3s). By kicking it off in
+  // initState we overlap the network round-trip with engine init, permission
+  // prompts, and E2EE key exchange — so the token is usually ready by the
+  // time we reach joinChannel.
+  Future<String?>? _tokenFuture;
+
   @override
   void initState() {
     super.initState();
@@ -103,10 +111,13 @@ class _CallScreenState extends State<CallScreen> {
       },
     ).then((t) => _callSetupTrace = t);
 
-    // Kick off the Signal key exchange immediately, in parallel with the
-    // Agora engine init below. _initAgora awaits this future just before
-    // joinChannel — the only step that needs the key.
+    // Kick off the Signal key exchange AND the Agora token fetch
+    // immediately, in parallel with the engine init below. _initAgora
+    // awaits both futures just before joinChannel — the only step that
+    // needs them. This hides ~1–3s of network latency under the engine
+    // init + permission-prompt time.
     _callKeyFuture = _exchangeCallKey();
+    _tokenFuture = AgoraService.generateToken(widget.channelId);
     _initAgora();
     _listenToSignaling();
     _listenToE2eeNegotiation();
@@ -427,7 +438,10 @@ class _CallScreenState extends State<CallScreen> {
           },
           onError: (ErrorCodeType err, String msg) {
             print("Agora Error: $err - $msg");
-            if (err == ErrorCodeType.errInvalidToken) {
+            if (err == ErrorCodeType.errDecryptionFailed) {
+              print('⚠️ Agora reported errDecryptionFailed — triggering immediate E2EE fallback');
+              _handleEncryptionMismatchRecovery();
+            } else if (err == ErrorCodeType.errInvalidToken) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text(
@@ -461,14 +475,15 @@ class _CallScreenState extends State<CallScreen> {
       // whether to bother polling for the key (or whether to also encrypt).
       if (widget.isCaller) {
         await CallSignalingService.setE2eeStatus(widget.channelId, e2eeEnabled);
+      } else if (!e2eeEnabled) {
+        // Callee failed to get/apply key — immediately inform the caller to disable encryption too
+        await CallSignalingService.setE2eeStatus(widget.channelId, false);
       }
 
-      // Fetch a short-lived RTC token from the server. Returns null if the
-      // Agora project is still in token-less testing mode (or on failure), in
-      // which case we join with an empty token — matching the previous
-      // behaviour. Once the App Certificate is enabled server-side this becomes
-      // the authoritative credential.
-      final rtcToken = await AgoraService.generateToken(widget.channelId);
+      // Await the pre-fetched token (kicked off in initState in parallel
+      // with engine init and E2EE key exchange). By now the Cloud Function
+      // round-trip has usually completed, so this resolves instantly.
+      final rtcToken = await _tokenFuture;
 
       await _engine!.joinChannel(
         token: rtcToken ?? '',
@@ -523,10 +538,13 @@ class _CallScreenState extends State<CallScreen> {
     });
   }
 
-  /// Triggered when the 5-second watchdog fires and no remote video frame
-  /// has been decoded — strongly suggests an E2EE key mismatch.
+  /// Triggered when Agora reports errDecryptionFailed or when the 5-second
+  /// watchdog fires — strongly suggests an E2EE key mismatch.
   Future<void> _handleEncryptionMismatchRecovery() async {
-    print('⚠️ Remote media not received after 5s — likely E2EE mismatch, disabling encryption');
+    if (_isRecoveringEncryption) return;
+    _isRecoveringEncryption = true;
+
+    print('⚠️ Media decryption mismatch detected — disabling local encryption & notifying peer');
     CrashlyticsService.log('E2EE mismatch recovery triggered');
 
     try {
