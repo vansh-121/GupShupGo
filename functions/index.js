@@ -3259,3 +3259,106 @@ exports.generateAgoraToken = onRequest(
     }
   }
 );
+
+// ─── Firestore Trigger: Problem Report → Email to Support ─────────────────────
+// When a user submits a problem report from the app settings, this trigger
+// picks up the new document and sends a formatted email to the support inbox.
+exports.processProblemReportEmail = onDocumentCreated(
+  {
+    document: "problem_reports/{reportId}",
+    region: "us-central1",
+    secrets: emailService.secrets,
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data();
+    if (!data) return;
+
+    const supportEmail = "vansh.sethi98760@gmail.com";
+
+    // ── Per-user rate limit ──────────────────────────────────────────────
+    // Every created report triggers a support email, so cap how many a single
+    // user can dispatch per rolling window. This prevents a malicious client
+    // from looping writes to flood (and run up the bill on) the support inbox.
+    // The check fails OPEN on limiter errors, so a transient Firestore fault
+    // never silently drops a legitimate bug report.
+    const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+    const MAX_REPORTS_PER_WINDOW = 5;
+    const userId = data.userId;
+
+    if (userId) {
+      const limitRef = admin
+        .firestore()
+        .collection("problem_report_limits")
+        .doc(userId);
+      let withinLimit = true;
+      try {
+        withinLimit = await admin.firestore().runTransaction(async (tx) => {
+          const limitSnap = await tx.get(limitRef);
+          const now = Date.now();
+          const prev = limitSnap.exists ? limitSnap.data() : null;
+          const windowStart = (prev && prev.windowStart) || 0;
+          const count = (prev && prev.count) || 0;
+
+          // Window elapsed (or first ever report) → start a fresh window.
+          if (now - windowStart >= RATE_LIMIT_WINDOW_MS) {
+            tx.set(limitRef, { windowStart: now, count: 1 });
+            return true;
+          }
+          // Still inside the window and already at the cap → reject.
+          if (count >= MAX_REPORTS_PER_WINDOW) {
+            return false;
+          }
+          tx.set(limitRef, { count: count + 1 }, { merge: true });
+          return true;
+        });
+      } catch (error) {
+        console.error(
+          `processProblemReportEmail: rate-limit check failed for ${userId} (failing open):`,
+          error.message,
+        );
+        withinLimit = true;
+      }
+
+      if (!withinLimit) {
+        console.warn(
+          `processProblemReportEmail: rate limit exceeded for user ${userId}; skipping email for report ${snap.id}`,
+        );
+        await snap.ref.update({ emailSent: false, rateLimited: true });
+        return;
+      }
+    }
+
+    try {
+      const createdAt = data.createdAt
+        ? data.createdAt.toDate().toISOString()
+        : null;
+
+      const tpl = emailTemplates.problemReportEmail({
+        userName: data.userName,
+        userId: data.userId,
+        userEmail: data.userEmail,
+        subject: data.subject,
+        body: data.body,
+        platform: data.platform,
+        createdAt,
+      });
+
+      const sent = await emailService.sendEmail(supportEmail, tpl.subject, tpl.html);
+
+      // Mark the document so we know the email was dispatched
+      await snap.ref.update({ emailSent: sent, emailSentAt: admin.firestore.FieldValue.serverTimestamp() });
+
+      if (sent) {
+        console.log(`processProblemReportEmail: report ${snap.id} emailed to ${supportEmail}`);
+      } else {
+        console.warn(`processProblemReportEmail: email dispatch failed for report ${snap.id}`);
+      }
+    } catch (error) {
+      console.error(`processProblemReportEmail error for report ${snap.id}:`, error.message);
+    }
+  },
+);
+

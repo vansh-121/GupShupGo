@@ -128,6 +128,46 @@ class CallSignalingService {
     });
   }
 
+  // ─── E2EE negotiation ──────────────────────────────────────────────────
+
+  /// Write the negotiated E2EE status to the call document.
+  ///
+  /// The **caller** writes `e2ee: true` after successfully publishing the
+  /// key envelope, or `e2ee: false` if encryption setup failed. The callee
+  /// reads this field before polling for the key envelope — if `false`, it
+  /// skips the poll entirely and joins unencrypted.
+  ///
+  /// Either peer can also flip it to `false` mid-call to trigger the
+  /// black-screen recovery path (see `_handleEncryptionMismatchRecovery`
+  /// in CallScreen).
+  static Future<void> setE2eeStatus(String channelId, bool enabled) async {
+    try {
+      await _firestore.collection(_collection).doc(channelId).update({
+        'e2ee': enabled,
+      });
+    } catch (e, stack) {
+      print('CallSignaling: error setting e2ee status: $e');
+      CrashlyticsService.logError(e, stack,
+          reason: 'CallSignaling.setE2eeStatus failed');
+    }
+  }
+
+  /// One-shot read of the `e2ee` field on the call document.
+  ///
+  /// Returns `null` if the document doesn't exist yet or the field hasn't
+  /// been written (caller hasn't finished key exchange yet).
+  static Future<bool?> getE2eeStatus(String channelId) async {
+    try {
+      final snap =
+          await _firestore.collection(_collection).doc(channelId).get();
+      if (!snap.exists) return null;
+      return snap.data()?['e2ee'] as bool?;
+    } catch (e) {
+      print('CallSignaling: error reading e2ee status: $e');
+      return null;
+    }
+  }
+
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
   /// Deletes a call document. Called after both parties have left the call

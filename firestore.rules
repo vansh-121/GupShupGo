@@ -474,5 +474,47 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.reporterUserId;
       allow read, update, delete: if false;
     }
+
+    // ==================== PROBLEM REPORTS ====================
+    // Users can submit bug reports from the app settings. Only the
+    // owning user can create; reads/updates are admin-only (Cloud
+    // Functions mark emailSent after dispatching the notification).
+    //
+    // Each created doc triggers a support email (processProblemReportEmail),
+    // so the payload is tightly validated here as defence-in-depth: exact
+    // field set, correct types, and capped string lengths so a malicious
+    // client can't write oversized docs or inject extra fields. Per-user
+    // volume/rate limiting lives in the Cloud Function.
+    match /problem_reports/{reportId} {
+      function isValidProblemReport() {
+        let data = request.resource.data;
+        return data.keys().hasOnly([
+              'userId', 'userName', 'userEmail', 'subject',
+              'body', 'platform', 'createdAt', 'emailSent'
+            ])
+          && data.userId is string
+          && data.userName is string && data.userName.size() <= 100
+          && data.userEmail is string && data.userEmail.size() <= 200
+          && data.subject is string
+            && data.subject.size() >= 1 && data.subject.size() <= 200
+          && data.body is string
+            && data.body.size() >= 1 && data.body.size() <= 5000
+          && data.platform is string && data.platform.size() <= 50
+          && data.emailSent == false
+          && data.createdAt == request.time;
+      }
+
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.userId
+        && isValidProblemReport();
+      allow read, update, delete: if false;
+    }
+
+    // Server-only sliding-window counters backing the problem-report email
+    // rate limit (written by the processProblemReportEmail Cloud Function via
+    // the Admin SDK, which bypasses these rules). No client access.
+    match /problem_report_limits/{userId} {
+      allow read, write: if false;
+    }
   }
 }

@@ -555,6 +555,83 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEMPLATE: Problem Report (sent to support inbox)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function problemReportEmail({ userName, userId, userEmail, subject, body, platform, createdAt }) {
+  const safeUser = escHtml(userName || "Unknown");
+  const safeSubject = escHtml(subject || "Bug Report");
+  const safeBody = escHtml(body || "No details provided").replace(/\n/g, "<br>");
+  const safePlatform = escHtml(platform || "unknown");
+  const safeEmail = escHtml(userEmail || "N/A");
+  const timeStr = createdAt
+    ? new Date(createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+    : new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+  const bodyHtml = `
+    <h1 style="margin:0 0 8px 0;font-size:22px;font-weight:700;color:${BRAND.error};line-height:1.3;">
+      &#128680; New Problem Report
+    </h1>
+    <p style="margin:0 0 20px 0;font-size:15px;color:${BRAND.textMid};line-height:1.7;">
+      A user submitted a problem report from the app.
+    </p>
+
+    <!-- Report details card -->
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:20px;">
+      <tr>
+        <td style="padding:16px;background-color:${BRAND.bgOuter};border-radius:12px;border-left:4px solid ${BRAND.error};">
+          <div style="font-size:16px;font-weight:700;color:${BRAND.textHigh};margin-bottom:12px;">
+            ${safeSubject}
+          </div>
+          <div style="font-size:14px;color:${BRAND.textMid};line-height:1.7;">
+            ${safeBody}
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <!-- User metadata -->
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:16px;">
+      <tr>
+        <td style="padding:12px 16px;background-color:${BRAND.bgOuter};border-radius:12px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textLow};width:90px;">User</td>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textHigh};font-weight:600;">${safeUser}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textLow};width:90px;">User ID</td>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textHigh};font-family:monospace;">${escHtml(userId || "N/A")}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textLow};width:90px;">Email</td>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textHigh};">${safeEmail}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textLow};width:90px;">Platform</td>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textHigh};">${safePlatform}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textLow};width:90px;">Reported</td>
+              <td style="padding:4px 0;font-size:13px;color:${BRAND.textHigh};">${timeStr}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `;
+
+  return {
+    subject: `[Bug Report] ${subject || "Bug Report"} — ${safeUser}`,
+    html: emailWrapper(
+      `New problem report from ${safeUser}: ${safeSubject}`,
+      bodyHtml,
+      null, // no unsubscribe link for internal support emails
+    ),
+  };
+}
+
 module.exports = {
   escHtml,
   welcomeEmail,
@@ -564,5 +641,6 @@ module.exports = {
   weeklyDigestEmail,
   inactivityReminderEmail,
   gupPointsEarnedEmail,
+  problemReportEmail,
   BRAND,
 };

@@ -37,6 +37,11 @@ class FCMService {
   /// multiple times (e.g., hot restart, re-login, screen rebuild).
   static bool _listenersRegistered = false;
 
+  /// Guards the one-time CallKit permission prompts (notification +
+  /// full-screen intent). setupFCM runs on every app resume, so without this
+  /// the plugin channel would be pinged on each foregrounding.
+  static bool _callKitPermissionsRequested = false;
+
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
 
@@ -122,6 +127,30 @@ class FCMService {
         }
       } catch (e) {
         print('Android notification permission request error (non-fatal): $e');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 1c: CallKit permissions for incoming-call UI (once per process)
+    // Requested here — after sign-in, when we wire up call receiving — rather
+    // than on the login screen, so we never prompt before the user is in.
+    //   • requestNotificationPermission → CallKit's heads-up notification
+    //     (shares Android 13+ POST_NOTIFICATIONS, already handled above)
+    //   • requestFullIntentPermission   → USE_FULL_SCREEN_INTENT (Android 14+),
+    //     needed to show the full-screen incoming-call screen over the lock UI
+    // ═══════════════════════════════════════════════════════════════════════
+    if (!_callKitPermissionsRequested) {
+      _callKitPermissionsRequested = true;
+      try {
+        await FlutterCallkitIncoming.requestNotificationPermission({
+          "rationaleMessagePermission":
+              "Notification permission is required to receive incoming calls.",
+          "postNotificationMessageRequired":
+              "Please allow notification permission from settings to receive calls.",
+        });
+        await FlutterCallkitIncoming.requestFullIntentPermission();
+      } catch (e) {
+        print('CallKit permission request error (non-fatal): $e');
       }
     }
 

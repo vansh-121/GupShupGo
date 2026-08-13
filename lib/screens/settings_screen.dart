@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
@@ -241,31 +240,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? bodyController.text.trim()
         : 'No details provided';
 
-    final mailUri = Uri(
-      scheme: 'mailto',
-      path: 'gupshupgo.support@gmail.com',
-      queryParameters: {
-        'subject': '[GupShupGo] $subject',
-        'body': '$body\n\n---\nUser: ${_user.name}\nID: ${_user.id}',
-      },
-    );
+    // Show a loading indicator while submitting
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     try {
-      if (await canLaunchUrl(mailUri)) {
-        await launchUrl(mailUri);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Report noted — no email app found to send it'),
-            ),
-          );
-        }
+      await FirebaseFirestore.instance.collection('problem_reports').add({
+        'userId': _user.id,
+        'userName': _user.name,
+        'userEmail': _user.email ?? '',
+        'subject': subject,
+        'body': body,
+        'platform': Theme.of(context).platform.name,
+        'createdAt': FieldValue.serverTimestamp(),
+        'emailSent': false,
+      });
+
+      if (mounted) {
+        Navigator.pop(context); // dismiss loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Report submitted — thanks for your feedback!'),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context); // dismiss loading
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open email app: $e')),
+          SnackBar(content: Text('Failed to submit report: $e')),
         );
       }
     }
@@ -526,48 +534,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildStitchCard(
             title: 'Privacy',
             children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                secondary: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: _user.isDiscoverable ? c.primaryLt : c.cardBg,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _user.isDiscoverable ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                    color: _user.isDiscoverable ? c.primary : c.textMid,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  'Allow others to discover me',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: c.textHigh,
-                  ),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    _user.isDiscoverable
-                        ? 'You can be found in search, suggestions, and contact sync.'
-                        : 'You won\'t appear in search, suggestions, or contact sync. People who already have your chat or profile link can still reach you.',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: _user.isDiscoverable ? c.primary : c.textMid,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
+              _buildStitchSwitchRow(
+                icon: Icons.person_search_rounded,
+                title: 'Discoverability',
                 value: _user.isDiscoverable,
-                activeThumbColor: c.primary,
                 onChanged: _setDiscoverable,
               ),
-              Divider(color: c.border, height: 20),
+              const SizedBox(height: 10),
               _buildStitchSwitchRow(
                 icon: Icons.access_time_rounded,
                 title: 'Last seen',

@@ -10,6 +10,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
@@ -64,6 +65,17 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _noAnswerTimer;
   bool _isEndingCall = false; // prevents double-close race conditions
   bool _cleanupDone = false; // guards _cleanupAndPop against double execution
+
+  // ── E2EE state tracking ─────────────────────────────────────────────────
+  bool _encryptionApplied = false;
+  // False until the initial encryption attempt has resolved (succeeded or
+  // failed). Lets the badge show "Securing call…" during setup instead of
+  // briefly claiming the call is unencrypted before E2EE is applied.
+  bool _encryptionResolved = false;
+  bool _isRecoveringEncryption = false;
+  Timer? _mediaWatchdogTimer;
+  bool _remoteMediaReceived = false;
+  StreamSubscription<DocumentSnapshot>? _e2eeSubscription;
   String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
 
   // ── Performance: E2E call setup trace ────────────────────────────────────
@@ -82,6 +94,13 @@ class _CallScreenState extends State<CallScreen> {
   // time.
   Future<CallEncryptionKey?>? _callKeyFuture;
 
+  // ── Agora RTC token pre-fetch ───────────────────────────────────────────
+  // The token request hits a Cloud Function (~1–3s). By kicking it off in
+  // initState we overlap the network round-trip with engine init, permission
+  // prompts, and E2EE key exchange — so the token is usually ready by the
+  // time we reach joinChannel.
+  Future<String?>? _tokenFuture;
+
   @override
   void initState() {
     super.initState();
@@ -96,12 +115,16 @@ class _CallScreenState extends State<CallScreen> {
       },
     ).then((t) => _callSetupTrace = t);
 
-    // Kick off the Signal key exchange immediately, in parallel with the
-    // Agora engine init below. _initAgora awaits this future just before
-    // joinChannel — the only step that needs the key.
+    // Kick off the Signal key exchange AND the Agora token fetch
+    // immediately, in parallel with the engine init below. _initAgora
+    // awaits both futures just before joinChannel — the only step that
+    // needs them. This hides ~1–3s of network latency under the engine
+    // init + permission-prompt time.
     _callKeyFuture = _exchangeCallKey();
+    _tokenFuture = AgoraService.generateToken(widget.channelId);
     _initAgora();
     _listenToSignaling();
+    _listenToE2eeNegotiation();
 
     // ── Picture-in-Picture (video calls only) ───────────────────────────
     // Watch native PiP mode changes so the UI can collapse to remote-video-
@@ -248,6 +271,8 @@ class _CallScreenState extends State<CallScreen> {
     await _createCallLog();
     _signalingSubscription?.cancel();
     _noAnswerTimer?.cancel();
+    _mediaWatchdogTimer?.cancel();
+    _e2eeSubscription?.cancel();
 
     // Fire-and-forget: delete the signaling document so it can't interfere
     // with future calls (especially important when channelId is reused).
@@ -279,8 +304,17 @@ class _CallScreenState extends State<CallScreen> {
         calleeUid: peerUid,
       );
     }
-    // Callee: poll for the caller's envelope. The 150ms cadence + 20 tries
-    // (~3s budget) matches the previous behaviour but the poll now happens
+
+    // Callee: check the caller's e2ee flag before wasting time polling.
+    // If the caller already wrote e2ee: false, skip the poll entirely.
+    final callerE2ee = await CallSignalingService.getE2eeStatus(widget.channelId);
+    if (callerE2ee == false) {
+      print('Caller set e2ee=false — skipping key poll, joining unencrypted');
+      return null;
+    }
+
+    // Poll for the caller's envelope. The 150ms cadence + 20 tries (~3s
+    // budget) matches the previous behaviour but the poll now happens
     // concurrently with engine init, so its latency is hidden under Agora's
     // init cost in the common case.
     for (var i = 0; i < 20; i++) {
@@ -299,14 +333,17 @@ class _CallScreenState extends State<CallScreen> {
   /// Applies the prefetched call key to the Agora engine. Must run before
   /// joinChannel — Agora silently drops frames if encryption is configured
   /// after the channel join.
-  Future<void> _applyCallEncryption() async {
-    if (_engine == null) return;
+  ///
+  /// Returns `true` if encryption was successfully applied, `false` otherwise.
+  Future<bool> _applyCallEncryption() async {
+    if (_engine == null) return false;
     final key = await _callKeyFuture;
     if (key == null) {
       print('No call encryption key available — call will be unencrypted');
-      return;
+      return false;
     }
     await AgoraService.enableMediaEncryption(_engine!, key);
+    return true;
   }
 
   Future<void> _initAgora() async {
@@ -349,6 +386,17 @@ class _CallScreenState extends State<CallScreen> {
               PipService.instance.enableAutoEnter();
             }
 
+            // ── Media watchdog: if the remote peer joined but no audio
+            // or video frames are decoded within 5 seconds, assume an
+            // encryption mismatch and trigger recovery. Applies to BOTH
+            // audio and video calls — Agora silently drops encrypted
+            // audio frames the same way it drops video frames.
+            _mediaWatchdogTimer = Timer(const Duration(seconds: 5), () {
+              if (!_remoteMediaReceived && mounted) {
+                _handleEncryptionMismatchRecovery();
+              }
+            });
+
             // Stop the E2E setup trace — remote peer is now in the channel.
             if (_callSetupTrace != null) {
               PerformanceService.stopTrace(_callSetupTrace!, attributes: {
@@ -356,6 +404,22 @@ class _CallScreenState extends State<CallScreen> {
                 'elapsed_ms': elapsed.toString(),
               });
               _callSetupTrace = null;
+            }
+          },
+          onRemoteAudioStateChanged: (RtcConnection connection, int remoteUid,
+              RemoteAudioState state, RemoteAudioStateReason reason, int elapsed) {
+            if (state == RemoteAudioState.remoteAudioStateDecoding ||
+                state == RemoteAudioState.remoteAudioStateStarting) {
+              _remoteMediaReceived = true;
+              _mediaWatchdogTimer?.cancel();
+            }
+          },
+          onRemoteVideoStateChanged: (RtcConnection connection, int remoteUid,
+              RemoteVideoState state, RemoteVideoStateReason reason, int elapsed) {
+            if (state == RemoteVideoState.remoteVideoStateDecoding ||
+                state == RemoteVideoState.remoteVideoStateStarting) {
+              _remoteMediaReceived = true;
+              _mediaWatchdogTimer?.cancel();
             }
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
@@ -378,7 +442,10 @@ class _CallScreenState extends State<CallScreen> {
           },
           onError: (ErrorCodeType err, String msg) {
             print("Agora Error: $err - $msg");
-            if (err == ErrorCodeType.errInvalidToken) {
+            if (err == ErrorCodeType.errDecryptionFailed) {
+              print('⚠️ Agora reported errDecryptionFailed — triggering immediate E2EE fallback');
+              _handleEncryptionMismatchRecovery();
+            } else if (err == ErrorCodeType.errInvalidToken) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text(
@@ -400,18 +467,30 @@ class _CallScreenState extends State<CallScreen> {
       // back to an unencrypted call rather than blocking the user — this
       // matches WhatsApp's "best effort" call encryption behaviour for
       // cross-version compatibility.
+      bool e2eeEnabled = false;
       try {
-        await _applyCallEncryption();
+        e2eeEnabled = await _applyCallEncryption();
       } catch (e) {
         print('Call encryption setup failed (continuing unencrypted): $e');
       }
+      // Encryption attempt has resolved — reflect the real result in the badge.
+      _encryptionApplied = e2eeEnabled;
+      _encryptionResolved = true;
+      if (mounted) setState(() {});
 
-      // Fetch a short-lived RTC token from the server. Returns null if the
-      // Agora project is still in token-less testing mode (or on failure), in
-      // which case we join with an empty token — matching the previous
-      // behaviour. Once the App Certificate is enabled server-side this becomes
-      // the authoritative credential.
-      final rtcToken = await AgoraService.generateToken(widget.channelId);
+      // Write the negotiated E2EE status to Firestore so the peer knows
+      // whether to bother polling for the key (or whether to also encrypt).
+      if (widget.isCaller) {
+        await CallSignalingService.setE2eeStatus(widget.channelId, e2eeEnabled);
+      } else if (!e2eeEnabled) {
+        // Callee failed to get/apply key — immediately inform the caller to disable encryption too
+        await CallSignalingService.setE2eeStatus(widget.channelId, false);
+      }
+
+      // Await the pre-fetched token (kicked off in initState in parallel
+      // with engine init and E2EE key exchange). By now the Cloud Function
+      // round-trip has usually completed, so this resolves instantly.
+      final rtcToken = await _tokenFuture;
 
       await _engine!.joinChannel(
         token: rtcToken ?? '',
@@ -446,11 +525,80 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  // ── E2EE mid-call recovery ───────────────────────────────────────────────
+
+  /// Listens for changes to the `e2ee` field on the call document. When a
+  /// peer writes `e2ee: false` mid-call (either via the watchdog or explicit
+  /// negotiation), this side disables encryption to match.
+  void _listenToE2eeNegotiation() {
+    _e2eeSubscription = FirebaseFirestore.instance
+        .collection('calls')
+        .doc(widget.channelId)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || snap.data() == null) return;
+      final e2ee = snap.data()!['e2ee'] as bool?;
+      if (e2ee == false && _encryptionApplied) {
+        // Peer disabled encryption — match them
+        _disableEncryption();
+      }
+    });
+  }
+
+  /// Triggered when Agora reports errDecryptionFailed or when the 5-second
+  /// watchdog fires — strongly suggests an E2EE key mismatch.
+  Future<void> _handleEncryptionMismatchRecovery() async {
+    if (_isRecoveringEncryption) return;
+    _isRecoveringEncryption = true;
+
+    print('⚠️ Media decryption mismatch detected — disabling local encryption & notifying peer');
+    CrashlyticsService.log('E2EE mismatch recovery triggered');
+
+    try {
+      // Disable local encryption
+      await _engine?.enableEncryption(
+        enabled: false,
+        config: const EncryptionConfig(
+          encryptionMode: EncryptionMode.aes256Gcm2,
+          encryptionKey: '',
+        ),
+      );
+      _encryptionApplied = false;
+      if (mounted) setState(() {});
+      // Signal peer to also disable
+      await CallSignalingService.setE2eeStatus(widget.channelId, false);
+    } catch (e) {
+      print('Encryption recovery failed: $e');
+    }
+  }
+
+  /// Disables encryption on this side. Called when the peer writes
+  /// `e2ee: false` mid-call.
+  Future<void> _disableEncryption() async {
+    if (!_encryptionApplied) return;
+    print('Peer disabled E2EE — matching on this side');
+    try {
+      await _engine?.enableEncryption(
+        enabled: false,
+        config: const EncryptionConfig(
+          encryptionMode: EncryptionMode.aes256Gcm2,
+          encryptionKey: '',
+        ),
+      );
+      _encryptionApplied = false;
+      if (mounted) setState(() {});
+    } catch (e) {
+      print('Error disabling encryption: $e');
+    }
+  }
+
   @override
   void dispose() {
     _callTimer?.cancel();
     _noAnswerTimer?.cancel();
+    _mediaWatchdogTimer?.cancel();
     _signalingSubscription?.cancel();
+    _e2eeSubscription?.cancel();
 
     // Tear down Picture-in-Picture: stop listening for mode changes and disarm
     // auto-enter so a later non-call screen can't shrink into a PiP window.
@@ -616,6 +764,39 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
+  /// Encryption status badge for the audio-call UI. Reflects the *actual*
+  /// E2EE state rather than a hard-coded label, so it can't claim the call is
+  /// encrypted after the mismatch watchdog (or the peer) has torn E2EE down:
+  ///   • not yet resolved → "Securing call…"        (setup still in flight)
+  ///   • encryption on     → "End-to-end encrypted"
+  ///   • encryption off    → "Not encrypted"         (setup failed or dropped)
+  Widget _buildEncryptionBadge() {
+    final IconData icon;
+    final String text;
+    final Color color;
+    if (!_encryptionResolved) {
+      icon = Icons.lock_outline;
+      text = 'Securing call…';
+      color = Colors.white60;
+    } else if (_encryptionApplied) {
+      icon = Icons.lock;
+      text = 'End-to-end encrypted';
+      color = Colors.white60;
+    } else {
+      icon = Icons.lock_open;
+      text = 'Not encrypted';
+      color = const Color(0xFFFFB74D); // amber — degraded, not a hard error
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(text, style: TextStyle(color: color, fontSize: 12)),
+      ],
+    );
+  }
+
   Widget _buildAudioCallUI() {
     return Container(
       decoration: const BoxDecoration(
@@ -635,21 +816,8 @@ class _CallScreenState extends State<CallScreen> {
         child: Column(
           children: [
             const SizedBox(height: 16),
-            // Encrypted label
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.lock, color: Colors.white60, size: 12),
-                SizedBox(width: 4),
-                Text(
-                  'End-to-end encrypted',
-                  style: TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+            // Encryption status badge — reflects the real E2EE state.
+            _buildEncryptionBadge(),
             const SizedBox(height: 40),
             // User name
             Text(
