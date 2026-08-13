@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.4] - 2026-08-14
+
+### Added
+- 🔐 **Real-Time E2EE Status Indicators** — Dynamic status badges in audio and video calls accurately displaying setup (`Securing call…`), active encryption (`End-to-end encrypted`), or fallback state (`Not encrypted`).
+- ⚡ **Instant Call Teardown & Cancellation** — Aborting outbound calls while connecting immediately retracts signaling documents and stops notifications to prevent ghost ringing.
+- 🛡️ **Support & Problem Report Protection** — Strict Firestore security schema validation (`isValidProblemReport()`) and sliding-window Cloud Function rate-limiting (5 reports / hr / user).
+
+---
+
 ## [1.1.3] - 2026-08-10
 
 ### Added

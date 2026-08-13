@@ -68,6 +68,10 @@ class _CallScreenState extends State<CallScreen> {
 
   // ── E2EE state tracking ─────────────────────────────────────────────────
   bool _encryptionApplied = false;
+  // False until the initial encryption attempt has resolved (succeeded or
+  // failed). Lets the badge show "Securing call…" during setup instead of
+  // briefly claiming the call is unencrypted before E2EE is applied.
+  bool _encryptionResolved = false;
   bool _isRecoveringEncryption = false;
   Timer? _mediaWatchdogTimer;
   bool _remoteMediaReceived = false;
@@ -466,10 +470,13 @@ class _CallScreenState extends State<CallScreen> {
       bool e2eeEnabled = false;
       try {
         e2eeEnabled = await _applyCallEncryption();
-        _encryptionApplied = e2eeEnabled;
       } catch (e) {
         print('Call encryption setup failed (continuing unencrypted): $e');
       }
+      // Encryption attempt has resolved — reflect the real result in the badge.
+      _encryptionApplied = e2eeEnabled;
+      _encryptionResolved = true;
+      if (mounted) setState(() {});
 
       // Write the negotiated E2EE status to Firestore so the peer knows
       // whether to bother polling for the key (or whether to also encrypt).
@@ -557,6 +564,7 @@ class _CallScreenState extends State<CallScreen> {
         ),
       );
       _encryptionApplied = false;
+      if (mounted) setState(() {});
       // Signal peer to also disable
       await CallSignalingService.setE2eeStatus(widget.channelId, false);
     } catch (e) {
@@ -578,6 +586,7 @@ class _CallScreenState extends State<CallScreen> {
         ),
       );
       _encryptionApplied = false;
+      if (mounted) setState(() {});
     } catch (e) {
       print('Error disabling encryption: $e');
     }
@@ -755,6 +764,39 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
+  /// Encryption status badge for the audio-call UI. Reflects the *actual*
+  /// E2EE state rather than a hard-coded label, so it can't claim the call is
+  /// encrypted after the mismatch watchdog (or the peer) has torn E2EE down:
+  ///   • not yet resolved → "Securing call…"        (setup still in flight)
+  ///   • encryption on     → "End-to-end encrypted"
+  ///   • encryption off    → "Not encrypted"         (setup failed or dropped)
+  Widget _buildEncryptionBadge() {
+    final IconData icon;
+    final String text;
+    final Color color;
+    if (!_encryptionResolved) {
+      icon = Icons.lock_outline;
+      text = 'Securing call…';
+      color = Colors.white60;
+    } else if (_encryptionApplied) {
+      icon = Icons.lock;
+      text = 'End-to-end encrypted';
+      color = Colors.white60;
+    } else {
+      icon = Icons.lock_open;
+      text = 'Not encrypted';
+      color = const Color(0xFFFFB74D); // amber — degraded, not a hard error
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(text, style: TextStyle(color: color, fontSize: 12)),
+      ],
+    );
+  }
+
   Widget _buildAudioCallUI() {
     return Container(
       decoration: const BoxDecoration(
@@ -774,21 +816,8 @@ class _CallScreenState extends State<CallScreen> {
         child: Column(
           children: [
             const SizedBox(height: 16),
-            // Encrypted label
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.lock, color: Colors.white60, size: 12),
-                SizedBox(width: 4),
-                Text(
-                  'End-to-end encrypted',
-                  style: TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+            // Encryption status badge — reflects the real E2EE state.
+            _buildEncryptionBadge(),
             const SizedBox(height: 40),
             // User name
             Text(

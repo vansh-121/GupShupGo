@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.3';
+const String kCurrentVersion = '1.1.4';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -183,23 +183,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
+    Icons.lock_reset_rounded,
+    'Real-Time End-to-End Encryption Status',
+    'Dynamic status badges accurately reflect call security states during setup and active calls.',
+  ),
+  // _Feature(
+  //   Icons.phone_missed_rounded,
+  //   'Instant Call Teardown & Cancellation',
+  //   'Cancelling outbound calls immediately stops signaling to prevent phantom rings on target devices.',
+  // ),
+  _Feature(
+    Icons.mark_email_read_rounded,
+    'Enhanced Support & Bug Reporting',
+    'Seamless problem reporting with protected rate limiting and payload validation.',
+  ),
+  _Feature(
     Icons.picture_in_picture_alt_rounded,
-    'Picture-in-Picture Video Calls',
-    'Keep video calls active in a floating window while switching apps or navigating your device.',
-  ),
-  _Feature(
-    Icons.alternate_email_rounded,
-    'Username Handles & QR Sharing',
-    'Set up custom @username handles, scan QR codes to instantly add contacts, and sync device friends.',
-  ),
-  _Feature(
-    Icons.local_fire_department_rounded,
-    'Bond Streaks & Restores',
-    'Track daily chat streaks with close friends and restore missed streaks with streak recovery.',
-  ),
-  _Feature(
-    Icons.bolt_rounded,
-    'Performance & Android 16 KB Compliance',
-    'Optimized 16 KB page-size engine, Play Integrity security, and auto-verification phone authentication.',
+    'Picture-in-Picture & Call Controls',
+    'Keep video calls active in a floating window while navigating your phone with smooth call controls.',
   ),
 ];
