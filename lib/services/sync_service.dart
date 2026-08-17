@@ -15,11 +15,15 @@
 //  • Update chat room previews when new messages arrive.
 
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
+import 'package:video_chat_app/services/crypto/signal_service.dart';
 
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 
@@ -242,9 +246,18 @@ class SyncService {
     }());
   }
 
-  /// True when a locally-stored message is still an undecryptable
-  /// placeholder (rendered as "🔒 …") and therefore worth retrying.
-  static bool _isLocked(MessageModel m) => m.text.startsWith('🔒');
+  /// True when a locally-stored message is still a placeholder rather than
+  /// real content, and is therefore worth retrying.
+  ///
+  /// Delegates to [VaultCipher.isPlaceholderText] rather than testing for a
+  /// leading 🔒, which matters now that a pending retry renders as ⏳: a
+  /// prefix test would read the waiting bubble as real content, so the
+  /// snapshot carrying the sender's answer would be classified as metadata
+  /// and the repaired message would never be decrypted. That helper also
+  /// covers placeholder strings written by earlier builds, which is what lets
+  /// already-broken bubbles heal.
+  static bool _isLocked(MessageModel m) =>
+      VaultCipher.isPlaceholderText(m.text);
 
   /// Processes a single Firestore snapshot for [roomId]: decrypts new
   /// messages, updates previews, triggers media downloads. Runs via the
@@ -286,6 +299,13 @@ class SyncService {
         _scheduleReconcile(roomId, snapshot, currentUserId);
         return;
       }
+
+      // Answer any recipient who told us they couldn't decrypt one of our
+      // messages. Deliberately before the content/metadata split below: our
+      // own outgoing message reads fine locally, so it always lands in
+      // `metadata`, where nothing would ever look at it again. Fire-and-forget
+      // — re-encrypting must never delay an incoming bubble.
+      _maybeServeResendRequests(roomId, changed, currentUserId);
 
       final localMessages =
           await store.getMessagesByIds(changed.map((d) => d.id).toList());
@@ -329,11 +349,17 @@ class SyncService {
             .decryptForRendering(serverMsg, currentUserId);
 
         if (decrypted != null) {
-          // Don't overwrite an existing placeholder with another
-          // placeholder — that's a pointless write and a pointless
-          // rebuild of the message list.
-          final stillLocked = wasLocked && _isLocked(decrypted);
-          if (!stillLocked) {
+          // Don't rewrite a placeholder with the *same* placeholder — that's a
+          // pointless write and a pointless rebuild of the message list.
+          //
+          // A placeholder whose text changed is a different matter: 🔒 turning
+          // into ⏳ is the user-visible signal that a repair is under way, and
+          // suppressing it would leave them staring at "ask sender to resend"
+          // while we are in fact already asking.
+          final unchanged = wasLocked &&
+              _isLocked(decrypted) &&
+              decrypted.text == localMsg.text;
+          if (!unchanged) {
             pending.add(decrypted);
             if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
               _triggerMediaDownload(decrypted, roomId);
@@ -420,14 +446,253 @@ class SyncService {
     }
   }
 
+  // ─── Resend protocol (sender side) ──────────────────────────────────────
+  //
+  // A recipient that can't decrypt one of our messages publishes
+  //
+  //   retryRequests: ["<uid>:<deviceId>#<attempt>", …]
+  //
+  // onto that message's document (see ChatService._requestResend). We are the
+  // only party who can answer: the server stores ciphertext and nothing else,
+  // so no Cloud Function could re-encrypt this even if we put one there.
+  //
+  // The answer is to tear down our session with that specific device and
+  // encrypt the stored plaintext again. With the session gone, libsignal runs
+  // a fresh X3DH and produces a PreKeySignalMessage — which decrypts on the
+  // other end no matter how far its ratchet had drifted, because
+  // SessionBuilder.processV3 archives whatever state it was holding instead of
+  // requiring the two chains to line up. That is what makes this a genuine
+  // repair rather than another roll of the dice.
+
+  /// Synchronous filter over a snapshot's change set.
+  ///
+  /// Almost every snapshot contains no requests at all, and the real work — a
+  /// device-id lookup, a plaintext read, an X3DH handshake and a write per
+  /// requester — must never sit on the path of an ordinary incoming message.
+  void _maybeServeResendRequests(
+    String roomId,
+    List<DocumentSnapshot<Map<String, dynamic>>> docs,
+    String currentUserId,
+  ) {
+    final withRequests = <DocumentSnapshot<Map<String, dynamic>>>[];
+    for (final doc in docs) {
+      final data = doc.data();
+      if (data == null) continue;
+      if (data['senderId'] != currentUserId) continue;
+      final reqs = data['retryRequests'];
+      if (reqs is List && reqs.isNotEmpty) withRequests.add(doc);
+    }
+    if (withRequests.isEmpty) return;
+    unawaited(_serveResendRequests(roomId, withRequests, currentUserId));
+  }
+
+  Future<void> _serveResendRequests(
+    String roomId,
+    List<DocumentSnapshot<Map<String, dynamic>>> docs,
+    String currentUserId,
+  ) async {
+    try {
+      final myDeviceId = await DeviceIdentityService().getDeviceId();
+      if (myDeviceId == null) return;
+      final store = await PlaintextStore.instance();
+
+      for (final doc in docs) {
+        final data = doc.data();
+        if (data == null) continue;
+
+        // Only the device that produced the original ciphertext holds the
+        // plaintext and the identity the requester was addressing. Our other
+        // devices see the same request and correctly ignore it.
+        if ((data['senderDeviceId'] as int?) != myDeviceId) continue;
+
+        // Group by requester, keeping the highest attempt. Earlier attempts
+        // stay in the array — arrayUnion only ever adds — and honouring each
+        // one separately would mean three handshakes to deliver one message.
+        final byAddress = <String, List<String>>{};
+        final highest = <String, int>{};
+        for (final tag in (data['retryRequests'] as List).whereType<String>()) {
+          final hash = tag.lastIndexOf('#');
+          if (hash <= 0) continue;
+          final address = tag.substring(0, hash);
+          final n = int.tryParse(tag.substring(hash + 1));
+          if (n == null) continue;
+          (byAddress[address] ??= <String>[]).add(tag);
+          if (n > (highest[address] ?? 0)) highest[address] = n;
+        }
+
+        for (final address in highest.keys) {
+          await _serveOneResend(
+            roomId: roomId,
+            doc: doc,
+            address: address,
+            attempt: highest[address]!,
+            tags: byAddress[address]!,
+            selfUid: currentUserId,
+            myDeviceId: myDeviceId,
+            store: store,
+          );
+        }
+      }
+    } catch (e) {
+      // Best-effort by design. The requester keeps its own attempt cap, so a
+      // failure here costs at most a retry, never a loop.
+      if (kDebugMode) {
+        debugPrint('[SyncService] Serving resend requests failed: $e');
+      }
+    }
+  }
+
+  Future<void> _serveOneResend({
+    required String roomId,
+    required DocumentSnapshot<Map<String, dynamic>> doc,
+    required String address,
+    required int attempt,
+    required List<String> tags,
+    required String selfUid,
+    required int myDeviceId,
+    required PlaintextStore store,
+  }) async {
+    final colon = address.lastIndexOf(':');
+    if (colon <= 0) return;
+    final requesterUid = address.substring(0, colon);
+    final requesterDeviceId = int.tryParse(address.substring(colon + 1));
+    if (requesterDeviceId == null || requesterDeviceId <= 0) return;
+
+    // Firestore's rules let any participant write to a message document —
+    // that is what read receipts need — so the guarantee that a request can't
+    // make us encrypt our plaintext for some arbitrary uid has to be enforced
+    // here. Only the message's recipient, or one of our own other devices,
+    // may ask.
+    final receiverId = doc.data()?['receiverId'] as String?;
+    if (requesterUid != receiverId && requesterUid != selfUid) {
+      if (kDebugMode) {
+        debugPrint('[SyncService] Ignoring resend request from non-participant '
+            '$requesterUid on ${doc.id}');
+      }
+      return;
+    }
+    // This device asking itself. Can't happen through ChatService, but a
+    // handshake with our own address would corrupt our own session state, so
+    // it is worth one line to make it impossible.
+    if (requesterUid == selfUid && requesterDeviceId == myDeviceId) return;
+
+    // Idempotency. Firestore re-emits a document on every change — including
+    // the change we are about to make — so without this the arrival of our own
+    // answer would kick off another identical round.
+    if (attempt <= await store.servedRetryAttempt(doc.id, address)) return;
+
+    final payload = await ChatService.instance.ownPayloadFor(selfUid, doc.id);
+    if (payload == null) {
+      // Plaintext is gone from the memo, SQLite and the vault. Leave the
+      // request in place rather than clearing it: a future install that
+      // restores the vault with the user's PIN can still answer it.
+      if (kDebugMode) {
+        debugPrint('[SyncService] No plaintext to resend for ${doc.id}');
+      }
+      return;
+    }
+
+    final signal = SignalService.instance;
+    final serverMsg = MessageModel.fromFirestore(doc);
+
+    // Rebuild the wire payload the receive path expects rather than shipping
+    // the stored one as-is. They are not the same shape: the stored copy has
+    // no `type` (so a resent reaction would render as a message instead of
+    // being applied) and does carry `localFilePath`, which is a path on *this*
+    // device and meaningless on the other end.
+    final wire = <String, dynamic>{
+      'type': serverMsg.type.name,
+      'text': (payload['text'] as String?) ?? '',
+      if (payload['mediaUrl'] != null) 'mediaUrl': payload['mediaUrl'],
+      if (payload['audioDuration'] != null)
+        'audioDuration': payload['audioDuration'],
+      if (payload['reactionTargetMessageId'] != null)
+        'reactionTargetMessageId': payload['reactionTargetMessageId'],
+      if (payload['statusReplyOwnerId'] != null) ...{
+        'statusReplyOwnerId': payload['statusReplyOwnerId'],
+        'statusReplyItemId': payload['statusReplyItemId'],
+        'statusReplyOwnerName': payload['statusReplyOwnerName'],
+        'statusReplyOwnerPhotoUrl': payload['statusReplyOwnerPhotoUrl'],
+        'statusReplyType': payload['statusReplyType'],
+        'statusReplyText': payload['statusReplyText'],
+        'statusReplyMediaUrl': payload['statusReplyMediaUrl'],
+        'statusReplyCaption': payload['statusReplyCaption'],
+        'statusReplyBackgroundColor': payload['statusReplyBackgroundColor'],
+      },
+    };
+
+    try {
+      // Force a fresh look at the requester's published keys before we
+      // handshake. This is the hook that detects a peer reinstall: the
+      // identity-change check lives in the device-id fetch, and it is what
+      // clears our pinned trust so the new identity key is accepted instead of
+      // throwing UntrustedIdentityException below.
+      SignalService.invalidateDeviceCache(requesterUid);
+      await signal.listDeviceIdsCached(requesterUid);
+
+      // Tear down, then encrypt: `encrypt` calls `ensureSession`, which with
+      // no session present performs the X3DH that makes this a prekey message.
+      await signal.resetSessionFor(requesterUid, requesterDeviceId);
+      final env = await signal.encrypt(
+        requesterUid,
+        requesterDeviceId,
+        Uint8List.fromList(utf8.encode(jsonEncode(wire))),
+      );
+      // One Keystore write covering both the teardown and the new session. If
+      // this were left to the debounce, a kill in the next three seconds would
+      // strand us with a session the requester has already ratcheted.
+      await signal.stores.flush();
+
+      if (!env.isPreKeyMessage && kDebugMode) {
+        // Not fatal — it still decrypts if their chain happens to line up —
+        // but it means the reset didn't take, so the repair is no longer
+        // guaranteed and that is worth seeing in the logs.
+        debugPrint('[SyncService] Resend for ${doc.id} is not a prekey message');
+      }
+
+      // Publish the new envelope and retire the request in a single write.
+      // `merge: true` deep-merges nested maps, so this adds our entry under
+      // `envelopes` without disturbing the ones addressed to other devices —
+      // an overwrite would strip every other recipient's copy.
+      await _firestore
+          .collection('chatRooms')
+          .doc(roomId)
+          .collection('messages')
+          .doc(doc.id)
+          .set({
+        'envelopes': {address: env.toMap()},
+        'retryRequests': FieldValue.arrayRemove(tags),
+      }, SetOptions(merge: true));
+
+      await store.markRetryServed(doc.id, address, attempt);
+      if (kDebugMode) {
+        debugPrint('[SyncService] Served resend #$attempt for ${doc.id} '
+            'to $address');
+      }
+    } catch (e) {
+      // Includes UntrustedIdentityException, which can still fire if the
+      // requester's key rotated between the fetch above and the handshake.
+      // Swallowed: their next attempt gets a fresh look at the new key.
+      if (kDebugMode) {
+        debugPrint('[SyncService] Resend for ${doc.id} to $address failed: $e');
+      }
+    }
+  }
+
   /// Background self-heal over the full 50-doc window.
   ///
   /// The fast path above only inspects changed documents, so on its own it
-  /// can't notice that an *older* message is still a 🔒 placeholder (the
-  /// vault was unlocked since it was stored) or that its media never
-  /// finished downloading. This walks the whole window to fix those, but
-  /// runs off the sync queue and is never awaited, so it can't delay a new
-  /// message. Throttled per room, and skipped while one is in flight.
+  /// can't notice that an *older* message is still a placeholder (the vault was
+  /// unlocked since it was stored) or that its media never finished
+  /// downloading. This walks the whole window to fix those, but runs off the
+  /// sync queue and is never awaited, so it can't delay a new message.
+  /// Throttled per room, and skipped while one is in flight.
+  ///
+  /// This is also what heals bubbles that were already broken before the
+  /// resend protocol existed. It needs no resend logic of its own: retrying a
+  /// locked message means calling [ChatService.decryptForRendering], and that
+  /// is where the request is published, under its own attempt cap and backoff.
+  /// The 60-second throttle here doubles as the sweep's rate limit.
   void _scheduleReconcile(
     String roomId,
     QuerySnapshot<Map<String, dynamic>> snapshot,
@@ -468,7 +733,14 @@ class SyncService {
           final serverMsg = MessageModel.fromFirestore(doc);
           final decrypted = await ChatService.instance
               .decryptForRendering(serverMsg, currentUserId);
-          if (decrypted != null && !_isLocked(decrypted)) {
+
+          // Store a placeholder whose text differs from what's on disk, not
+          // just a successful decrypt. Two cases need it: a legacy 🔒 row
+          // whose repair is now in flight should show ⏳, and a message the
+          // fast path never stored at all should get a bubble rather than
+          // silently not existing.
+          if (decrypted != null &&
+              (!_isLocked(decrypted) || decrypted.text != localMsg?.text)) {
             repaired.add(decrypted);
             if (decrypted.mediaUrl != null && decrypted.localFilePath == null) {
               _triggerMediaDownload(decrypted, roomId);
@@ -519,9 +791,15 @@ class SyncService {
     }());
   }
 
+  /// The bubble shown for a message this device can't read yet.
+  ///
+  /// Uses the shared constant so it can't drift from what ChatService writes —
+  /// it did drift once, and the copy here was invisible to
+  /// [VaultCipher.isPlaceholderText], so any bubble stamped by this path was
+  /// treated as real content and never retried.
   MessageModel _lockedPlaceholder(MessageModel msg) {
     return msg.copyWith(
-      text: '🔒 can\'t decrypt — ask sender to resend',
+      text: VaultCipher.undecryptablePlaceholderText,
     );
   }
 }

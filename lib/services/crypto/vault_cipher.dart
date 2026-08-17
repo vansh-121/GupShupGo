@@ -78,8 +78,48 @@ class VaultCipher {
   static const _localKeyKey = 'gsg_vault_key_v1';
   static const _localUidKey = 'gsg_vault_uid_v1';
   static const _verifierConstant = 'gsg-vault-v1';
+  // ─── Undecryptable-message placeholders ────────────────────────────────
+  //
+  // Two states, in this order:
+  //
+  //  1. [pendingRetryPlaceholderText] — decryption failed but an automatic
+  //     resend request is in flight. The sender's device re-encrypts on a
+  //     fresh session and the bubble fills itself in, usually within one
+  //     Firestore round-trip. This is WhatsApp's wording, and it's the
+  //     honest one: the app *is* already doing the thing that fixes it.
+  //  2. [undecryptablePlaceholderText] — retries exhausted (peer offline,
+  //     or running a build that predates the resend protocol). Only now is
+  //     manual intervention actually the user's best move.
+  //
+  // Both live here rather than in ChatService so SyncService, the chat list
+  // preview and the reconcile pass all agree on what a placeholder looks
+  // like — see [isPlaceholderText]. A locally-stored message whose text
+  // matches either one is still considered *unresolved* and gets retried.
+  static const String pendingRetryPlaceholderText =
+      '⏳ Waiting for this message. Check back later.';
   static const String undecryptablePlaceholderText =
       '🔒 This message can\'t be decrypted on this device. Ask sender to resend.';
+
+  /// Placeholder strings written by earlier builds. Rows persisted in
+  /// `localMessages` still carry these, and without them [isPlaceholderText]
+  /// would read an old placeholder as real content and never retry it — so
+  /// every bubble broken before this build would stay broken forever.
+  /// Append here rather than editing; never remove an entry.
+  static const List<String> _legacyPlaceholderTexts = <String>[
+    '🔒 can\'t decrypt — ask sender to resend',
+  ];
+
+  /// True when [text] is one of our undecryptable-message placeholders and
+  /// therefore does NOT represent real decrypted content.
+  ///
+  /// This is the single retry signal across the codebase. Matching is exact
+  /// (not a `startsWith('🔒')` prefix test) so a message whose real content
+  /// happens to begin with a lock emoji is never mistaken for a placeholder
+  /// and retried in a loop.
+  static bool isPlaceholderText(String text) =>
+      text == pendingRetryPlaceholderText ||
+      text == undecryptablePlaceholderText ||
+      _legacyPlaceholderTexts.contains(text);
   // SharedPreferences is wiped on app uninstall on both Android and iOS,
   // which lets us detect a fresh install even when iOS Keychain survives.
   // If this marker is missing on launch we treat any cached vault key as

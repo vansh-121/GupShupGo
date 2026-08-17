@@ -30,22 +30,35 @@ class ChatService {
   // visible to the server, so we never put plaintext there.
   static const String _encryptedPreviewPlaceholder = '🔒 Encrypted message';
 
-  // What we render in place of an E2EE message that this install can't
-  // decrypt. Happens after reinstall: messages encrypted to the old
-  // deviceId can't be decrypted with the new device's Signal keys, and if
-  // we hadn't decrypted them before reinstall they aren't in the vault
-  // either. Showing a placeholder bubble (rather than silently dropping
-  // them) tells the user "something arrived here" — so they can ask the
-  // sender to resend rather than wondering why blue ticks went up without
-  // them seeing anything.
+  // What we render in place of an E2EE message this install can't decrypt.
+  //
+  // Two states, because most failures are recoverable and it would be wrong
+  // to tell the user to go chase the sender while we are still repairing it
+  // ourselves:
+  //
+  //  • [_pendingRetryPlaceholderText] — a resend request is in flight.
+  //  • [_undecryptablePlaceholderText] — the sender never answered, after
+  //    [_maxResendAttempts]. Now it genuinely is on the user to ask.
+  //
+  // Either way we render a bubble instead of dropping the message, so the
+  // user knows something arrived rather than watching read receipts climb
+  // against messages they never saw.
   static const String _undecryptablePlaceholderText =
       VaultCipher.undecryptablePlaceholderText;
+  static const String _pendingRetryPlaceholderText =
+      VaultCipher.pendingRetryPlaceholderText;
 
   /// Build a placeholder MessageModel for E2EE messages we can't decrypt.
-  /// Marks schemaVersion=1 so downstream code skips re-decrypt attempts.
+  ///
+  /// Keeps the message's real schemaVersion. It used to force 1 so that
+  /// downstream code would skip re-decrypt attempts — but that also made the
+  /// placeholder permanent, because a v1 message returns early from
+  /// [decryptForRendering] and can therefore never be retried. Suppressing
+  /// *pointless* retries is [_decryptFailures]' job, and unlike a schema
+  /// downgrade it expires; [VaultCipher.isPlaceholderText] is what tells
+  /// callers this text is a placeholder rather than real content.
   MessageModel _lockedPlaceholder(MessageModel raw) => raw.copyWith(
         text: _undecryptablePlaceholderText,
-        schemaVersion: 1,
       );
 
   // ─── Local send outbox (WhatsApp-style optimistic UI) ───────────────────
@@ -180,6 +193,11 @@ class ChatService {
     _preWarmSqliteCache.remove(uid);
     _preWarmVaultCache.remove(uid);
     _payloadMemo.clear();
+    // Also drop the failure cooldowns. Unlocking the vault is exactly the
+    // event that can turn a previous failure into a success, so keeping the
+    // 20-second gate would make the re-emit below a no-op for the bubbles
+    // that most need it.
+    _decryptFailures.clear();
     // Notify any active chat / chat-list stream subscribers so they can
     // re-decrypt their currently-displayed snapshot without waiting for
     // the next Firestore change. Without this, the home screen card and
@@ -203,6 +221,10 @@ class ChatService {
       final store = await PlaintextStore.instance();
       final all = await store.getAllMessagePayloads();
       for (final e in all.entries) {
+        // Skip anything an older build persisted as a placeholder — see
+        // [_addToMemo]. This is the path where it would matter most, because a
+        // poisoned row survives every restart.
+        if (isPlaceholderPayload(e.value)) continue;
         _payloadMemo.putIfAbsent(e.key, () => e.value);
       }
     } catch (_) {}
@@ -232,6 +254,7 @@ class ChatService {
       }
       if (pending.isNotEmpty) {
         final results = await VaultCipher.instance.decryptDocsBatch(pending);
+        results.removeWhere((_, v) => isPlaceholderPayload(v));
         _payloadMemo.addAll(results);
       }
     } catch (_) {}
@@ -248,6 +271,10 @@ class ChatService {
 
   Future<void> _saveToVault(
       String uid, String messageId, Map<String, dynamic> payload) async {
+    // Never vault a placeholder. The vault is the last line of recovery and
+    // survives reinstalls, so a placeholder in it would outlive every other
+    // copy and keep answering "can't decrypt" long after a repair was possible.
+    if (isPlaceholderPayload(payload)) return;
     // Drop the write rather than leak plaintext if the vault key isn't
     // available yet. PlaintextStore still has the message locally; the
     // post-unlock migration in HomeScreen flushes anything missing.
@@ -263,11 +290,40 @@ class ChatService {
     } catch (_) {}
   }
 
+  /// Recovers a payload **we** produced, for a message we sent, from whichever
+  /// tier still has it: the in-memory memo, SQLite, then the cross-install
+  /// vault.
+  ///
+  /// This is what lets SyncService answer a recipient's resend request. Only
+  /// meaningful for our own outgoing messages — for a received message the
+  /// caller wants [decryptForRendering], which also advances the ratchet.
+  Future<Map<String, dynamic>?> ownPayloadFor(
+      String selfUid, String messageId) async {
+    final memo = _payloadMemo[messageId];
+    if (memo != null) return memo;
+
+    final store = await PlaintextStore.instance();
+    final cached = await store.get(messageId);
+    if (cached != null) {
+      _addToMemo(messageId, cached);
+      return cached;
+    }
+
+    // Reinstalled since sending, or the send-path SQLite write was lost.
+    final vaulted = await _loadFromVault(selfUid, messageId);
+    if (vaulted != null) {
+      _addToMemo(messageId, vaulted);
+      unawaited(store.save(messageId, vaulted));
+    }
+    return vaulted;
+  }
+
   Future<Map<String, dynamic>?> _loadFromVault(
       String uid, String messageId) async {
-    // Await any in-flight bulk prewarm first. If it's already completed, this returns instantly.
-    // This prevents firing 100+ concurrent individual Firestore reads when the bulk load
-    // is already fetching them or has completed.
+    // Await any in-flight bulk prewarm first. If it's already completed, this
+    // returns instantly. This prevents firing 100+ concurrent individual
+    // Firestore reads when the bulk load is already fetching them or has
+    // completed.
     final prewarm = _preWarmVaultCache[uid];
     if (prewarm != null) {
       await prewarm;
@@ -283,7 +339,14 @@ class ChatService {
           .doc(messageId)
           .get();
       if (!doc.exists) return null;
-      return VaultCipher.instance.decryptDoc(doc.data()!);
+      final payload = await VaultCipher.instance.decryptDoc(doc.data()!);
+      // Treat a vaulted placeholder as a miss. Nothing should write one — only
+      // successful decrypts and our own outgoing messages are vaulted — but a
+      // placeholder here would be worse than elsewhere: the vault outlives
+      // reinstalls, so it would suppress the repair on every future install
+      // too, not just this one.
+      if (payload != null && isPlaceholderPayload(payload)) return null;
+      return payload;
     } catch (_) {
       return null;
     }
@@ -314,12 +377,31 @@ class ChatService {
   // — each entry is a Map<String, dynamic> that can be several KB for media
   // messages.
   static const _memoMaxSize = 500;
+
+  /// Decrypted payloads keyed by message id. **Successes only.**
+  ///
+  /// A failure must never be memoized here. This map is consulted before
+  /// everything else in [decryptForRendering], so an entry holding the
+  /// placeholder text is indistinguishable from real content: it survives for
+  /// the life of the process and short-circuits every mechanism that exists to
+  /// repair the message — the reconcile sweep, the post-unlock vault re-emit,
+  /// and the resend protocol's own follow-up decrypt. That is what turned a
+  /// single transient failure into a bubble that stayed broken for hours.
+  /// Rate-limiting retries is [_decryptFailures]' job.
   static final Map<String, Map<String, dynamic>> _payloadMemo = {};
 
   /// Adds an entry to [_payloadMemo] with automatic LRU eviction.
   /// When the cache exceeds [_memoMaxSize], the oldest 100 entries are
   /// removed (FIFO order via LinkedHashMap insertion ordering).
+  ///
+  /// Placeholders are rejected outright. The memo is consulted before every
+  /// other source in [decryptForRendering] and is never invalidated by a
+  /// resend, so one placeholder in here is a message that can never be
+  /// repaired for the rest of the session. Nothing is *supposed* to offer one —
+  /// the failure path deliberately doesn't memoize — but this is the single
+  /// chokepoint where that assumption can be enforced instead of assumed.
   static void _addToMemo(String key, Map<String, dynamic> value) {
+    if (isPlaceholderPayload(value)) return;
     _payloadMemo[key] = value;
     if (_payloadMemo.length > _memoMaxSize) {
       final keysToRemove = _payloadMemo.keys.take(100).toList();
@@ -328,6 +410,59 @@ class ChatService {
       }
     }
   }
+
+  /// True if [payload] holds one of our placeholder strings rather than real
+  /// content — i.e. it was written by a build that persisted failures, and
+  /// treating it as content would make the message permanently unreadable.
+  @visibleForTesting
+  static bool isPlaceholderPayload(Map<String, dynamic> payload) =>
+      VaultCipher.isPlaceholderText((payload['text'] as String?) ?? '');
+
+  /// Test seams for the [_payloadMemo] chokepoint. The no-negative-caching
+  /// invariant is the one that turned a transient failure into an all-day
+  /// broken bubble, so it is worth asserting directly rather than trusting the
+  /// call sites to keep honouring it.
+  @visibleForTesting
+  static void memoizeForTest(String key, Map<String, dynamic> value) =>
+      _addToMemo(key, value);
+
+  @visibleForTesting
+  static Map<String, dynamic>? memoEntryForTest(String key) =>
+      _payloadMemo[key];
+
+  // ─── Decrypt-failure throttling ─────────────────────────────────────────
+  //
+  // Firestore re-emits every message in a room on any change to it — a
+  // typing indicator, a read receipt, a delivery tick. Re-running libsignal
+  // for a message we just failed to decrypt is expensive (a failed decrypt
+  // walks up to 40 archived ratchet states) and floods the log, so we skip
+  // it for a short cooldown and render the placeholder we last chose.
+  //
+  // The critical difference from the negative memo this replaces: the entry
+  // is keyed on the *ciphertext we failed on* and it expires. The instant a
+  // resend lands, `envFingerprint` no longer matches and we decrypt
+  // immediately instead of sitting on a stale placeholder; and even with no
+  // resend, the cooldown lapses so reconcile passes and vault unlocks still
+  // get a genuine retry.
+  static const Duration _decryptCooldown = Duration(seconds: 20);
+  static final Map<String, ({DateTime at, int envFingerprint, String text})>
+      _decryptFailures = {};
+
+  static void _noteDecryptFailure(
+      String messageId, int envFingerprint, String text) {
+    _decryptFailures[messageId] =
+        (at: DateTime.now(), envFingerprint: envFingerprint, text: text);
+    if (_decryptFailures.length > _memoMaxSize) {
+      for (final k in _decryptFailures.keys.take(100).toList()) {
+        _decryptFailures.remove(k);
+      }
+    }
+  }
+
+  /// Cheap identity for an envelope's ciphertext, so we can tell "the same
+  /// message failed again" from "the sender re-encrypted it for us".
+  static int _envFingerprint(Map<String, dynamic> env) =>
+      Object.hash(env['ct'], env['pk']);
 
   // Dedup set for decrypt-skip log messages. Without this, the same
   // message ID would log every time a Firestore emission re-triggers
@@ -345,7 +480,10 @@ class ChatService {
     final store = await PlaintextStore.instance();
 
     final cachedPayload = await store.get(msg.id);
-    if (cachedPayload != null) {
+    // A placeholder on disk is not an answer. `save()` uses insertOrIgnore, so
+    // one persisted by an older build would otherwise be returned here forever
+    // and shadow every repair — fall through and try to decrypt properly.
+    if (cachedPayload != null && !isPlaceholderPayload(cachedPayload)) {
       _addToMemo(msg.id, cachedPayload);
       return _applyPayload(msg, cachedPayload);
     }
@@ -371,6 +509,17 @@ class ChatService {
         unawaited(store.save(msg.id, vaultPayload));
       }
       return vaultPayload != null ? _applyPayload(msg, vaultPayload) : null;
+    }
+
+    // Recently failed on this exact ciphertext — don't re-run libsignal for
+    // every read receipt in the room, just re-render what we showed last
+    // time. A resend changes the ciphertext, so this never delays a repair.
+    final envFingerprint = _envFingerprint(env);
+    final lastFailure = _decryptFailures[msg.id];
+    if (lastFailure != null &&
+        lastFailure.envFingerprint == envFingerprint &&
+        DateTime.now().difference(lastFailure.at) < _decryptCooldown) {
+      return _applyPayload(msg, <String, dynamic>{'text': lastFailure.text});
     }
 
     try {
@@ -405,63 +554,251 @@ class ChatService {
         }
       }
 
-      // Fire-and-forget all persistence
-      unawaited(Future.wait([
-        store.save(msg.id, payload),
-        if (payload['type'] != 'reaction')
-          store.saveRoomPreview(
-            chatRoomId: chatRoomId,
-            messageId: msg.id,
-            text: (payload['text'] as String?) ?? '',
-          ),
-      ]));
+      // ── Durability barrier ────────────────────────────────────────────
+      // Two things must be on disk before this bubble is allowed on screen:
+      // the plaintext we just recovered, and the ratchet advance that
+      // consuming this ciphertext caused. Neither used to be awaited — the
+      // save was fire-and-forget and the ratchet only got a 3-second
+      // debounce — so for ~3s after every received message a force-stop,
+      // low-memory kill or crash lost both.
+      //
+      // Losing the ratchet advance is the worse half: our receive chain
+      // falls behind the sender's, so every *subsequent* message from them
+      // fails verifyMac too. One kill in that window is what produces a
+      // whole run of undecryptable bubbles rather than a single one.
+      //
+      // Order matters. Plaintext first means a crash between the two writes
+      // can only cost us a ratchet advance, which the resend protocol
+      // repairs automatically. Flushing first and crashing would lose the
+      // message itself, permanently — nothing can rebuild a plaintext that
+      // was never written and whose ciphertext is now spent.
+      await store.save(msg.id, payload);
+      await SignalService.instance.stores.flush();
+
+      // Cosmetic / cross-install only — safe to leave in the background.
+      if (payload['type'] != 'reaction') {
+        unawaited(store.saveRoomPreview(
+          chatRoomId: chatRoomId,
+          messageId: msg.id,
+          text: (payload['text'] as String?) ?? '',
+        ));
+      }
       unawaited(_saveToVault(selfUid, msg.id, payload));
+      _decryptFailures.remove(msg.id);
       return _applyPayload(msg, payload);
     } catch (e) {
-      final errStr = e.toString();
-      // If the session is broken (missing, stale signed prekey after
-      // reinstall, identity mismatch), drop it so the next PreKey message
-      // from this peer can rebuild from scratch. This is invisible to the
-      // user. InvalidKeyId covers the "No such signedprekeyrecord" error
-      // that fires when the sender's cached keyBundle references a signed
-      // prekey the receiver lost on reinstall.
-      if (errStr.contains('NoSession') ||
-          errStr.contains('No session') ||
-          errStr.contains('InvalidMessage') ||
-          errStr.contains('InvalidKeyId') ||
-          errStr.contains('UntrustedIdentity')) {
+      // NOTE: this used to delete the Signal session for anything that
+      // smelled like a broken session. That made things strictly worse. A
+      // deleted session cannot decrypt any of the messages already in flight
+      // from that peer either, and the peer is never told, so they keep
+      // ratcheting forward from a state we just threw away — one bad message
+      // became a permanently dead conversation. The receive path now never
+      // destroys session state; recovery is the sender's job, via the resend
+      // request below. See SignalService.resetSessionFor.
+      final failure = classifyDecryptFailure(e);
+
+      if (failure.clearTrust) {
+        // The one exception: the peer's identity key genuinely changed, so
+        // the pin we hold can never verify anything they send again. Drop it
+        // (not the session) so the resend's handshake is accepted.
         try {
           final addr =
               SignalProtocolAddress(msg.senderId, msg.senderDeviceId ?? 1);
-          await SignalService.instance.stores.sessionStore.deleteSession(addr);
-          if (errStr.contains('UntrustedIdentity')) {
-            SignalService.instance.stores.identityStore.trustedKeys
-                .remove(addr);
-          }
+          SignalService.instance.stores.identityStore.trustedKeys.remove(addr);
           SignalService.instance.stores.markDirty();
         } catch (_) {}
       }
+
       // Libsignal couldn't decrypt — try the vault before giving up.
       final vaultPayload = await _loadFromVault(selfUid, msg.id);
       if (vaultPayload != null) {
         _addToMemo(msg.id, vaultPayload);
         unawaited(store.save(msg.id, vaultPayload));
+        _decryptFailures.remove(msg.id);
         return _applyPayload(msg, vaultPayload);
       }
-      // Cache the failure so we don't re-attempt on every Firestore
-      // stream emission (typing indicator, read receipt, delivery status,
-      // etc.). Without this, the same decrypt error fires and logs every
-      // few seconds — visible as Crashlytics spam.
-      final lockedPayload = <String, dynamic>{
-        'text': _undecryptablePlaceholderText,
-      };
-      _addToMemo(msg.id, lockedPayload);
+
       // Log once per message to avoid flooding the console on every
       // Firestore re-emission (typing, read receipt, etc.).
       if (kDebugMode && _loggedDecryptSkips.add(msg.id)) {
-        debugPrint('decrypt skipped for ${msg.id} (${e.runtimeType}): $e');
+        debugPrint('decrypt failed for ${msg.id} (${e.runtimeType}): $e');
       }
+
+      // Ask the sender to re-encrypt, and tell the user we're on it rather
+      // than telling them to go chase the sender themselves. The bubble only
+      // hardens into "ask sender to resend" once the requests go unanswered.
+      final pending = failure.requestResend
+          ? await _requestResend(
+              msg: msg,
+              selfUid: selfUid,
+              selfDeviceId: deviceId,
+              store: store,
+            )
+          : false;
+
+      final lockedPayload = <String, dynamic>{
+        'text': pending
+            ? _pendingRetryPlaceholderText
+            : _undecryptablePlaceholderText,
+      };
+      // Deliberately NOT _addToMemo — see [_payloadMemo].
+      _noteDecryptFailure(
+          msg.id, envFingerprint, lockedPayload['text'] as String);
       return _applyPayload(msg, lockedPayload);
+    }
+  }
+
+  /// What to do about a decrypt failure.
+  ///
+  /// `requestResend` — ask the sender to re-encrypt over a fresh session.
+  /// `clearTrust` — drop the pinned identity key for this peer device.
+  ///
+  /// Only reached once the plaintext store *and* the vault have both missed,
+  /// so "we already have this message" is never a possibility here.
+  ///
+  /// Note what this function deliberately cannot express: deleting the session.
+  /// An earlier build tore down the ratchet on `InvalidMessageException`, which
+  /// escalated one unreadable message into a permanently dead conversation —
+  /// the peer was never told, so they kept ratcheting forward against a session
+  /// we had thrown away. Recovery is the sender's job now; see [_requestResend].
+  @visibleForTesting
+  static ({bool requestResend, bool clearTrust}) classifyDecryptFailure(
+      Object e) {
+    // Already decrypted once — the ratchet consumed this counter and will
+    // never accept this ciphertext again.
+    //
+    // The intuitive reading is "we've seen it, don't ask again", and that is
+    // correct for the ordinary case: Firestore re-emits every message on every
+    // room change, and those re-emissions return from the plaintext store at
+    // the top of decryptForRendering without ever reaching libsignal.
+    //
+    // Getting here instead means the ratchet moved past this message while no
+    // copy of the plaintext survives anywhere — retention pruning, a failed
+    // SQLite write. A resend still repairs that, because the answer arrives as
+    // a PreKeySignalMessage on a brand-new session and never touches the
+    // exhausted counter. It also can't storm: this branch is unreachable
+    // whenever the plaintext exists, and the attempt cap bounds it regardless.
+    if (e is DuplicateMessageException) {
+      return (requestResend: true, clearTrust: false);
+    }
+
+    // The peer's identity key changed — a reinstall, or an attack. Either
+    // way nothing they send verifies against the key we pinned, so clear the
+    // pin and let their fresh handshake establish a new one.
+    //
+    // Matched with `is` rather than by message: this exception has no
+    // toString() override, so it stringifies to "Instance of '…'" and a
+    // text match would silently never fire.
+    if (e is UntrustedIdentityException) {
+      return (requestResend: true, clearTrust: true);
+    }
+
+    // Everything else is a resend candidate:
+    //  • InvalidMessageException — MAC mismatch / no matching ratchet state.
+    //    Usually our chain fell behind the sender's. libsignal already tried
+    //    all 40 archived states before throwing, so there is nothing local
+    //    left to attempt.
+    //  • NoSessionException — no session at all; only the sender can start
+    //    one that decrypts (a PreKeySignalMessage).
+    //  • InvalidKeyIdException — the prekey the sender used is gone from our
+    //    store. They must re-handshake against a key we still hold.
+    //  • AssertionError / ArgumentError / TypeError / RangeError — corrupt or
+    //    truncated ciphertext. Same remedy: get a fresh copy.
+    //
+    // InvalidMessageException is not exported from the package barrel, so it
+    // has to be matched by runtime type name rather than `is` — but it lands
+    // in this default branch anyway, which is why the check is a comment and
+    // not code.
+    return (requestResend: true, clearTrust: false);
+  }
+
+  // ─── Resend protocol (receiver side) ────────────────────────────────────
+  //
+  // When a message won't decrypt, the only party that can repair it is the
+  // sender: they hold the plaintext and can re-encrypt it over a brand-new
+  // session. So we publish a request onto the message document itself —
+  //
+  //   retryRequests: ["<ourUid>:<ourDeviceId>#<attempt>", …]
+  //
+  // — which the sender sees immediately, because SyncService already keeps a
+  // live listener on the last 50 messages of every room. They answer by
+  // adding an envelope addressed to us; because they tear their session down
+  // first, it arrives as a PreKeySignalMessage, and those decrypt no matter
+  // how far our ratchet had drifted (SessionBuilder archives our old state
+  // instead of requiring it to line up).
+  //
+  // Deliberately not a Cloud Function and not a new collection. The server
+  // holds only ciphertext, so it could not re-encrypt anything even if asked;
+  // and message docs are already writable by both participants — that is what
+  // read receipts use — so this needs no security-rules change.
+  static const int _maxResendAttempts = 3;
+  static const Duration _resendBackoff = Duration(seconds: 30);
+
+  /// How long after the final attempt we keep saying "waiting" before
+  /// admitting defeat and telling the user to ask the sender.
+  static const Duration _resendGrace = Duration(minutes: 2);
+
+  // Requests mid-write, so a burst of snapshot re-emissions can't fire the
+  // same one several times before the first write lands.
+  static final Set<String> _resendInFlight = <String>{};
+
+  /// Publishes a resend request for [msg], subject to an attempt cap and
+  /// backoff.
+  ///
+  /// Returns true while the bubble should still render as "waiting" — either
+  /// we just asked, or the last ask is recent enough that the answer could
+  /// still be in flight.
+  Future<bool> _requestResend({
+    required MessageModel msg,
+    required String selfUid,
+    required int? selfDeviceId,
+    required PlaintextStore store,
+  }) async {
+    // Without a device id we can't tell the sender who to encrypt for.
+    if (selfDeviceId == null) return false;
+
+    final now = DateTime.now();
+    final state = await store.getRetryState(msg.id);
+    final attempts = state?.attempts ?? 0;
+    final last =
+        state == null ? null : DateTime.fromMillisecondsSinceEpoch(state.atMs);
+
+    if (attempts >= _maxResendAttempts) {
+      // Out of attempts. Keep the "waiting" text briefly so the final
+      // request has a fair chance to be answered, then let it harden.
+      return last != null && now.difference(last) < _resendGrace;
+    }
+    if (last != null && now.difference(last) < _resendBackoff) {
+      return true; // an ask is already outstanding
+    }
+    if (!_resendInFlight.add(msg.id)) return true;
+
+    final attempt = attempts + 1;
+    try {
+      await _firestore
+          .collection(_chatRoomsCollection)
+          .doc(getChatRoomId(msg.senderId, msg.receiverId))
+          .collection(_messagesCollection)
+          .doc(msg.id)
+          .update({
+        'retryRequests':
+            FieldValue.arrayUnion(['$selfUid:$selfDeviceId#$attempt']),
+      });
+      await store.saveRetryState(msg.id,
+          attempts: attempt, atMs: now.millisecondsSinceEpoch);
+      if (kDebugMode) {
+        debugPrint('[E2EE] resend request $attempt/$_maxResendAttempts for '
+            '${msg.id} → ${msg.senderId}');
+      }
+      return true;
+    } catch (e) {
+      // Offline, or the message was deleted. Nothing to show but the hard
+      // failure; the reconcile sweep will try again later. Note that no
+      // attempt was recorded, so this costs us nothing from the cap.
+      if (kDebugMode) debugPrint('[E2EE] resend request failed: $e');
+      return false;
+    } finally {
+      _resendInFlight.remove(msg.id);
     }
   }
 
@@ -725,6 +1062,21 @@ class ChatService {
         );
         if (kDebugMode)
           debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
+
+        // A v2 message with no envelopes is the one shape we must never
+        // commit: the receiver's `env == null` branch cannot tell it apart
+        // from a genuine decrypt failure, so it renders as a permanent
+        // placeholder with no error to classify and nothing to retry — the
+        // sender did encrypt successfully, so no resend request would ever
+        // repair it. Reachable if every one of the recipient's devices got
+        // capped out or had an unusable bundle, and (before Fix 7) if a
+        // self-chat resolved to only our own device. Throwing routes it into
+        // the plaintext fallback below, which at least delivers the message.
+        if (encs.isEmpty) {
+          throw StateError(
+              'encryptForUser produced no envelopes for $receiverId');
+        }
+
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
         storedText = '';
         schemaVersion = 2;
@@ -770,8 +1122,13 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        if (kDebugMode)
-          debugPrint('E2EE encrypt failed, falling back to plaintext: $e');
+        // Logged in release too, not just debug. This is the one branch that
+        // silently downgrades a message out of E2EE, so if it ever starts
+        // firing in the field we need it in the logs — a quiet fallback that
+        // nobody can see is how "encryption is on" becomes untrue without
+        // anyone noticing.
+        // ignore: avoid_print
+        print('E2EE encrypt failed, falling back to plaintext: $e');
       }
     }
 
@@ -1516,6 +1873,8 @@ class ChatService {
   /// is cleared separately on the sign-out path via `clearAll()`.
   static void clearCaches() {
     _payloadMemo.clear();
+    _decryptFailures.clear();
+    _resendInFlight.clear();
     _loggedDecryptSkips.clear();
     _peerBundleCache.clear();
     _peerBundleRefreshInFlight.clear();

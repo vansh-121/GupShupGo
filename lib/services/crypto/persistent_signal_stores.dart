@@ -15,15 +15,26 @@
 //   tens of KB). When it grows beyond ~256 KB we'll migrate sessions to an
 //   encrypted Drift database with a Keystore-held key.
 //
-// Concurrency: all mutations route through `markDirty()` which debounces
-// writes by 1500ms. `flush()` forces an immediate write — called before app
-// background and on signOut. The 1.5s window
-// coalesces a burst of encrypts/decrypts (typing, reading a chat) into a
-// single snapshot write; the previous 250ms window was rewriting the entire
-// store ~4× per second during active chat which dominated end-to-end
-// message latency. The flush-on-pause guarantee in main()/AuthService keeps
-// the durability story unchanged: nothing committed to memory is lost
-// across an app background.
+// Concurrency & durability: all mutations route through `markDirty()`, which
+// debounces writes by 3000ms to coalesce bursts of encrypt/decrypt activity.
+// `flush()` forces an immediate, awaited write and is what the receive path
+// uses after every successful decrypt — the debounce alone is NOT a
+// durability guarantee, because a crash or low-memory kill inside the window
+// loses the ratchet advance, which desyncs the receive chain and makes every
+// *subsequent* message from that peer fail to decrypt too.
+//
+// `flush()` is strictly serialized behind `_inFlight`. That matters more than
+// it looks: an earlier version snapshotted the four stores, then awaited an
+// isolate hop and the write, so two overlapping flushes could each snapshot at
+// their own start time and the *older* snapshot could land last — silently
+// rolling the ratchet backwards with no crash involved at all. Serializing the
+// writes and taking the snapshot synchronously closes that window.
+//
+// Flushing after every single decrypt is affordable because `flush()` compares
+// the fresh snapshot against the last one it wrote and skips the Keystore
+// write when they match — the encode is sub-millisecond, the Keystore write is
+// the expensive part. See [_lastWrittenJson] for why this is content-based
+// rather than a dirty counter.
 
 import 'dart:async';
 import 'dart:convert';
@@ -53,11 +64,38 @@ class PersistentSignalStores {
   final InMemoryIdentityKeyStore identityStore;
   final SafePreKeyStore preKeyStore;
   final SafeSignedPreKeyStore signedPreKeyStore;
+
+  /// Do **not** put a `SessionRecord` cache in front of this store.
+  ///
+  /// It looks like free performance — `loadSession` re-parses the protobuf on
+  /// every call — but libsignal 0.7.1's `SessionState.fromSessionState` shares
+  /// the underlying protobuf instead of deep-copying it, so a *failed* decrypt
+  /// mutates the record in memory. That is harmless today only because
+  /// `InMemorySessionStore` holds bytes and re-parses on every load, letting
+  /// the mutation get collected when `storeSession` is never reached. Handing
+  /// out cached instances would make that corruption permanent, which presents
+  /// as a peer whose messages stop decrypting for no visible reason.
   final InMemorySessionStore sessionStore;
   final _Persistor _persistor;
 
   Timer? _debounce;
-  int _dirtyCount = 0;
+
+  /// The exact JSON last written to secure storage, or null if we haven't
+  /// written yet this session. [flush] compares a fresh snapshot against this
+  /// and skips the Keystore write when they're identical.
+  ///
+  /// Deliberately content-based rather than a dirty counter: several call
+  /// sites (DeviceIdentityService's bundle publish, prekey replenish and
+  /// signed-prekey rotation) mutate the stores directly and then call
+  /// `flush()` without going through [markDirty]. A counter would treat those
+  /// as clean and silently drop freshly generated prekeys — after which every
+  /// peer's PreKeySignalMessage fails with InvalidKeyIdException. Comparing
+  /// content can't be fooled by a missing markDirty call.
+  String? _lastWrittenJson;
+
+  /// The currently-running (or last-completed) flush. New flushes chain onto
+  /// this so writes never overlap and can never land out of order.
+  Future<void>? _inFlight;
 
   static const _identityKey = 'gsg_e2ee_identity_v1';
   static const _registrationIdKey = 'gsg_e2ee_registration_id_v1';
@@ -104,6 +142,13 @@ class PersistentSignalStores {
       if (snapshot != null) {
         try {
           await stores._persistor.hydrate(snapshot, stores);
+          // Baseline for flush()'s unchanged-content check. Re-derive it from
+          // the freshly hydrated stores rather than reusing `snapshot`: key
+          // ordering and legacy-format entries can differ, and a mismatched
+          // baseline would just cost one redundant write on the next flush —
+          // but a *matching* one that didn't reflect memory would skip a
+          // needed write, which is the failure mode that loses ratchet state.
+          stores._lastWrittenJson = stores._persistor.snapshotSync(stores);
         } catch (e) {
           // A corrupted snapshot would otherwise brick E2EE forever. The
           // identity keypair is preserved (different storage key), so peers
@@ -114,6 +159,7 @@ class PersistentSignalStores {
           // ignore: avoid_print
           print('PersistentSignalStores hydrate failed — wiping snapshot: $e');
           await _ss.delete(key: _storesKey);
+          stores._lastWrittenJson = null;
         }
       }
     }
@@ -122,70 +168,57 @@ class PersistentSignalStores {
 
   /// Schedules a debounced flush. Call after every mutating store operation.
   ///
-  /// The 3000ms debounce window coalesces bursts of encrypt/decrypt activity
-  /// (sending 5 rapid messages, opening a chat with 20 sessions) into a single
-  /// snapshot write instead of 5-20 individual writes, significantly reducing
-  /// main-thread JSON serialization and disk I/O on low-end devices.
+  /// The 3000ms window coalesces bursts of encrypt/decrypt activity (sending
+  /// 5 rapid messages, opening a chat with 20 sessions) into a single
+  /// snapshot write instead of 5-20 individual writes, keeping Keystore
+  /// stress low on devices with slow secure storage (Xiaomi, OPPO, etc.).
   ///
-  /// Every 20th dirty call flushes immediately as a safety net — guarantees
-  /// session state is persisted during active chat even if the debounce keeps
-  /// resetting. This threshold was raised from 5 to reduce Keystore stress on
-  /// devices with slow secure storage (Xiaomi, OPPO, etc.).
+  /// This is a latency optimization, NOT a durability guarantee. Anything
+  /// that must survive a crash — every receive-side ratchet advance — has to
+  /// `await flush()` instead. See [flush].
   void markDirty() {
-    if (++_dirtyCount >= 20) {
-      _dirtyCount = 0;
-      _debounce?.cancel();
-      unawaited(flush());
-      return;
-    }
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 3000), flush);
+    _debounce = Timer(const Duration(milliseconds: 3000), () {
+      unawaited(flush());
+    });
   }
 
-  /// Forces an immediate snapshot of all stores to secure storage. Call on
-  /// app pause/detach.
+  /// Writes a snapshot of all four stores to secure storage and does not
+  /// return until it is durably on disk.
   ///
-  /// The CPU-heavy JSON serialization is moved to a background isolate via
-  /// [compute] so the main thread stays responsive during active messaging.
-  Future<void> flush() async {
+  /// Safe and cheap to call on every received message:
+  ///  • Serializes behind any in-flight write rather than racing it, so two
+  ///    concurrent callers can never land snapshots out of order.
+  ///  • Skips the Keystore write entirely when the snapshot is unchanged,
+  ///    which is the common case for repeated calls.
+  Future<void> flush() {
+    final chained = (_inFlight ?? Future<void>.value()).then((_) => _write());
+    // Swallow errors on the chain itself so one failed write doesn't poison
+    // every subsequent flush. The returned future still surfaces the error
+    // to this caller.
+    _inFlight = chained.catchError((_) {});
+    return chained;
+  }
+
+  Future<void> _write() async {
     _debounce?.cancel();
 
-    // Collect serialized store data (in-memory ops, fast — map copies + base64)
-    final preKeys = await _persistor._dumpPreKeys(preKeyStore);
-    final signedPreKeys = await _persistor._dumpSignedPreKeys(signedPreKeyStore);
-    final sessions = await _persistor._dumpSessions(sessionStore);
-    final trusted = await _persistor._dumpTrustedIdentities(identityStore);
+    // Snapshot synchronously. All four stores keep already-serialized bytes
+    // in a plain map, so this is a map copy plus base64 — no awaits, which
+    // means no mutation can interleave between reading the stores and
+    // encoding them. jsonEncode on tens of KB is sub-millisecond, so there
+    // is nothing here worth an isolate hop — and that hop was itself the
+    // window that let two flushes land their snapshots out of order.
+    final json = _persistor.snapshotSync(this);
 
-    // JSON encode on a background isolate (fast path).
-    // Falls back to main-thread encoding if the isolate can't spawn
-    // (e.g. on low-end devices with tight isolate limits).
-    String json;
-    try {
-      json = await compute(_encodeSnapshot, <String, Map<String, String>>{
-        'preKeys': preKeys,
-        'signedPreKeys': signedPreKeys,
-        'sessions': sessions,
-        'trustedIdentities': trusted,
-      });
-    } catch (_) {
-      // Fallback: encode on the main thread. Slightly slower but
-      // guaranteed to work — critical for the lifecycle flush that
-      // prevents session state loss on app background.
-      json = jsonEncode(<String, Map<String, String>>{
-        'preKeys': preKeys,
-        'signedPreKeys': signedPreKeys,
-        'sessions': sessions,
-        'trustedIdentities': trusted,
-      });
-    }
+    // Unchanged since the last write — the ratchet hasn't moved, so there is
+    // nothing to persist. This is what makes flushing after every decrypt
+    // affordable: the Keystore write is the expensive part, not the encode.
+    if (json == _lastWrittenJson) return;
 
     await _ss.write(key: _storesKey, value: json);
+    _lastWrittenJson = json;
   }
-
-  /// JSON-serializes the stores snapshot on a background isolate.
-  /// This is a top-level function so it can be invoked via [compute].
-  static String _encodeSnapshot(Map<String, Map<String, String>> data) =>
-      jsonEncode(data);
 
   /// Wipes all key material. Use on signOut + on "Reset encryption" UI action.
   static Future<void> wipe() async {
@@ -198,14 +231,21 @@ class PersistentSignalStores {
 
 /// Serializes the four stores to / from a single JSON blob. Each entry uses
 /// libsignal's own `.serialize()` byte format, base64-encoded for transport.
+///
+/// Every dump below reads the backing map directly. libsignal's InMemory*
+/// stores all keep *already-serialized* bytes (`HashMap<int, Uint8List>` /
+/// `HashMap<SignalProtocolAddress, Uint8List>`), so a dump is a map walk plus
+/// base64 — no deserialize/reserialize round trip, and crucially no awaits.
+/// [snapshotSync] depends on that: it must be impossible for a store mutation
+/// to interleave partway through a snapshot.
 class _Persistor {
-  Future<String> snapshot(PersistentSignalStores s) async {
-    return jsonEncode({
-      'preKeys': await _dumpPreKeys(s.preKeyStore),
-      'signedPreKeys': await _dumpSignedPreKeys(s.signedPreKeyStore),
-      'sessions': await _dumpSessions(s.sessionStore),
-      'trustedIdentities':
-          await _dumpTrustedIdentities(s.identityStore),
+  /// Builds the complete snapshot JSON without yielding to the event loop.
+  String snapshotSync(PersistentSignalStores s) {
+    return jsonEncode(<String, Map<String, String>>{
+      'preKeys': _dumpPreKeys(s.preKeyStore),
+      'signedPreKeys': _dumpSignedPreKeys(s.signedPreKeyStore),
+      'sessions': _dumpSessions(s.sessionStore),
+      'trustedIdentities': _dumpTrustedIdentities(s.identityStore),
     });
   }
 
@@ -220,17 +260,16 @@ class _Persistor {
   }
 
   // ── PreKeys ────────────────────────────────────────────────────────────
-  Future<Map<String, String>> _dumpPreKeys(InMemoryPreKeyStore store) async {
+  // Enumerates the store's actual key set. The previous implementation
+  // scanned ids 0..199, which silently dropped every prekey outside that
+  // range — and DeviceIdentityService.replenishOneTimePreKeysIfLow allocates
+  // ids from `millisecondsSinceEpoch % 1000000`, so every replenished batch
+  // was lost on the next app launch.
+  Map<String, String> _dumpPreKeys(InMemoryPreKeyStore store) {
     final out = <String, String>{};
-    // Simple sequential loop — avoids creating 200 parallel microtasks via
-    // Future.wait, which was causing scheduling overhead on every flush().
-    // Each containsPreKey / loadPreKey call is a synchronous HashMap lookup
-    // wrapped in an async API, so this loop runs in <1ms total.
-    for (int id = 0; id < 200; id++) {
-      if (!await store.containsPreKey(id)) continue;
-      final rec = await store.loadPreKey(id);
-      out['$id'] = base64Encode(rec.serialize());
-    }
+    store.store.forEach((id, bytes) {
+      out['$id'] = base64Encode(bytes);
+    });
     return out;
   }
 
@@ -244,12 +283,13 @@ class _Persistor {
   }
 
   // ── SignedPreKeys ──────────────────────────────────────────────────────
-  Future<Map<String, String>> _dumpSignedPreKeys(
-      InMemorySignedPreKeyStore store) async {
+  // Reads the backing map rather than loadSignedPreKeys(), which returns the
+  // records without their ids and would need a deserialize per entry.
+  Map<String, String> _dumpSignedPreKeys(InMemorySignedPreKeyStore store) {
     final out = <String, String>{};
-    for (final rec in await store.loadSignedPreKeys()) {
-      out['${rec.id}'] = base64Encode(rec.serialize());
-    }
+    store.store.forEach((id, bytes) {
+      out['$id'] = base64Encode(bytes);
+    });
     return out;
   }
 
@@ -265,12 +305,7 @@ class _Persistor {
 
   // ── Sessions ───────────────────────────────────────────────────────────
   // Key format: "<uid>|<deviceId>" → base64(SessionRecord serialized bytes).
-  // libsignal_protocol_dart's InMemorySessionStore stores already-serialized
-  // bytes in a public `sessions` HashMap<SignalProtocolAddress, Uint8List>,
-  // so we can dump them directly without round-tripping through
-  // SessionRecord.serialize().
-  Future<Map<String, String>> _dumpSessions(
-      InMemorySessionStore store) async {
+  Map<String, String> _dumpSessions(InMemorySessionStore store) {
     final out = <String, String>{};
     store.sessions.forEach((addr, bytes) {
       out['${addr.getName()}|${addr.getDeviceId()}'] = base64Encode(bytes);
@@ -291,8 +326,8 @@ class _Persistor {
 
   // ── Trusted identities ─────────────────────────────────────────────────
   // store.trustedKeys is the public HashMap<SignalProtocolAddress, IdentityKey>.
-  Future<Map<String, String>> _dumpTrustedIdentities(
-      InMemoryIdentityKeyStore store) async {
+  // Unlike the other three stores this one holds live objects, so serialize().
+  Map<String, String> _dumpTrustedIdentities(InMemoryIdentityKeyStore store) {
     final out = <String, String>{};
     store.trustedKeys.forEach((addr, key) {
       out['${addr.getName()}|${addr.getDeviceId()}'] =
