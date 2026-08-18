@@ -563,7 +563,13 @@ class SyncService {
   /// Safe to call spuriously. Everything past this point is the same code the
   /// listener uses, including the participant guard and the `served:`
   /// idempotency check, so a duplicate or stale push does no work.
-  Future<void> serveResendNow(String roomId, String messageId) async {
+  ///
+  /// [deferFlush] leaves the session write in memory instead of committing it to
+  /// secure storage. Only the FCM background isolate passes it, and only because
+  /// it cannot decide here whether committing is safe — see
+  /// `mayPersistSessionAfterServing`. It must then flush itself.
+  Future<void> serveResendNow(String roomId, String messageId,
+      {bool deferFlush = false}) async {
     final uid = _currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || roomId.isEmpty || messageId.isEmpty) return;
     try {
@@ -578,7 +584,7 @@ class SyncService {
       if (data['senderId'] != uid) return;
       final reqs = data['retryRequests'];
       if (reqs is! List || reqs.isEmpty) return;
-      await _serveResendRequests(roomId, [doc], uid);
+      await _serveResendRequests(roomId, [doc], uid, deferFlush: deferFlush);
     } catch (e) {
       if (kDebugMode) {
         debugPrint('[SyncService] serveResendNow($messageId) failed: $e');
@@ -611,8 +617,9 @@ class SyncService {
   Future<void> _serveResendRequests(
     String roomId,
     List<DocumentSnapshot<Map<String, dynamic>>> docs,
-    String currentUserId,
-  ) async {
+    String currentUserId, {
+    bool deferFlush = false,
+  }) async {
     try {
       final myDeviceId = await DeviceIdentityService().getDeviceId();
       if (myDeviceId == null) return;
@@ -652,6 +659,7 @@ class SyncService {
             selfUid: currentUserId,
             myDeviceId: myDeviceId,
             store: store,
+            deferFlush: deferFlush,
           );
         }
       }
@@ -673,6 +681,7 @@ class SyncService {
     required String selfUid,
     required int myDeviceId,
     required PlaintextStore store,
+    bool deferFlush = false,
   }) async {
     final colon = address.lastIndexOf(':');
     if (colon <= 0) return;
@@ -763,7 +772,17 @@ class SyncService {
       // One Keystore write covering both the teardown and the new session. If
       // this were left to the debounce, a kill in the next three seconds would
       // strand us with a session the requester has already ratcheted.
-      await signal.stores.flush();
+      //
+      // Unless the caller reserved that decision. `PersistentSignalStores.flush`
+      // writes all four stores into a single secure-storage key against a
+      // per-instance in-memory baseline, so a flush from the FCM background
+      // isolate while the main isolate is also live does not merge — it
+      // overwrites, rolling every unrelated peer back to this isolate's
+      // hydrate-time snapshot. Whether that is safe depends on whether the app
+      // has started, which is knowable at the entry point and not here, so the
+      // background isolate keeps the write in memory and re-checks before
+      // committing it. See `mayPersistSessionAfterServing`.
+      if (!deferFlush) await signal.stores.flush();
 
       if (!env.isPreKeyMessage && kDebugMode) {
         // Not fatal — it still decrypts if their chain happens to line up —

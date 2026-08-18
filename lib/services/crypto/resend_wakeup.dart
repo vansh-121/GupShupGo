@@ -186,17 +186,35 @@ Future<void> _serveFromBackgroundIsolate(
   // deleted and write them back on the next flush.
   await SignalService.reloadFromDisk();
 
-  await SyncService.instance.serveResendNow(roomId, messageId);
+  // `deferFlush` is what makes the gate below the only decision. The serve path
+  // normally commits its session write immediately — correct in the main isolate,
+  // where a kill seconds later would otherwise strand a session the requester has
+  // already ratcheted past. From here that same write is the dangerous one, and it
+  // used to land before this function got to vote on it: the app can launch at any
+  // point during the serve, and a flush from a second live instance overwrites
+  // rather than merges. Holding it in memory means the check below governs whether
+  // it is ever persisted at all.
+  await SyncService.instance
+      .serveResendNow(roomId, messageId, deferFlush: true);
 
-  // The one write that can hurt anyone. `_serveOneResend` already flushes, so if
-  // the app appeared mid-serve that flush may have landed — see
-  // [mayPersistSessionAfterServing] for why that is still the acceptable
-  // direction to fail in. This second check keeps us from *adding* to the damage.
+  // The one write that can hurt anyone.
   if (mayPersistSessionAfterServing(mainIsolateAliveNow: mainIsolateIsAlive())) {
     await SignalService.instance.stores.flush();
     if (kDebugMode) debugPrint('[Resend] served $messageId and flushed');
-  } else if (kDebugMode) {
-    debugPrint('[Resend] app launched mid-serve — skipping flush for $messageId');
+  } else {
+    // Not merely "don't flush": the serve's own `markDirty` armed a debounced
+    // write, and letting it expire would land this isolate's snapshot three
+    // seconds from now — exactly the decision we just declined to make. Outside
+    // the kDebugMode guard on purpose; this one has to happen in release.
+    SignalService.instance.stores.cancelPendingFlush();
+    // The session we just built for this one peer is lost, which costs the
+    // requester one more resend round. The prekey message is already published,
+    // and they archive their old state on processing it, so the repair itself
+    // still lands — see [mayPersistSessionAfterServing] for why that is the
+    // acceptable direction to fail in.
+    if (kDebugMode) {
+      debugPrint('[Resend] app launched mid-serve — skipping flush for $messageId');
+    }
   }
 }
 

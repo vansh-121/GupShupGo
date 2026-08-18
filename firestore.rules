@@ -381,8 +381,8 @@ service cloud.firestore {
     // read receipt and delivery tick, so a Function watching them would be
     // invoked several times per message and do nothing almost every time.
     match /resendWakeups/{wakeupId} {
-      // Nothing ever reads these back, and the Function deletes them with the
-      // Admin SDK, which bypasses rules entirely.
+      // Nothing ever reads these back. The Function consumes them with the Admin
+      // SDK, which bypasses rules entirely.
       allow read, update, delete: if false;
 
       // Bind the wakeup to a real message that `senderId` actually wrote and
@@ -406,6 +406,17 @@ service cloud.firestore {
           && m.get('retryRequests', []).size() > 0;
       }
 
+      // The document id, derived entirely from fields this rule has already
+      // validated. Nothing here can be forged: `roomId`, `messageId` and the
+      // caller's uid are each checked below, so the id is fully determined.
+      function expectedId() {
+        return request.resource.data.roomId + '_'
+          + request.resource.data.messageId + '_'
+          + request.auth.uid + '_'
+          + string(request.resource.data.deviceId) + '_'
+          + string(request.resource.data.attempt);
+      }
+
       allow create: if request.auth != null
         && request.resource.data.requesterId == request.auth.uid
         && request.resource.data.senderId is string
@@ -415,6 +426,29 @@ service cloud.firestore {
         // Server-stamped, so the Function's five-minute staleness drop is a real
         // gate and not one the client opts out of by omitting the field.
         && request.resource.data.at == request.time
+        // ── The write-once ceiling ──────────────────────────────────────────
+        //
+        // A pending `retryRequests` entry bounds *which* messages can be woken
+        // but not how many times, and an auto-id let a client re-create a wakeup
+        // for the same request as fast as it could write — every one of them
+        // authorized, every one another high-priority push and another Function
+        // invocation. Pinning the id to (message, requester device, attempt)
+        // turns that into a create-once: the second write to a live id is an
+        // update, and updates are denied above. `notifyResendRequest`
+        // deliberately no longer deletes these documents, because deleting one
+        // would hand the id straight back.
+        //
+        // `attempt` is lifetime-monotonic per message (see `_requestResend`), so
+        // legitimate retries never collide, and the protocol's own total cap
+        // keeps it well under this ceiling. Should it ever exceed it, the write
+        // is denied and the accelerator is simply lost — the request is already
+        // on the message document, which is what actually drives the repair.
+        && request.resource.data.deviceId is int
+        && request.resource.data.deviceId > 0
+        && request.resource.data.attempt is int
+        && request.resource.data.attempt > 0
+        && request.resource.data.attempt <= 20
+        && wakeupId == expectedId()
         // Both uids must be participants of the named room. Requiring it of
         // `senderId` too — not just the caller — is what stops this being a
         // "deliver a silent push to any uid" primitive: you can only wake

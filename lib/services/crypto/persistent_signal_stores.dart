@@ -183,6 +183,26 @@ class PersistentSignalStores {
     });
   }
 
+  /// Abandons a pending debounced write, leaving the in-memory changes
+  /// unpersisted.
+  ///
+  /// For the FCM background isolate, which is the one caller that can decide
+  /// *not* to persist. Its mutations are safe only while it is alone in the
+  /// process, and the app can launch at any moment during them: a snapshot
+  /// written by a second live instance overwrites rather than merges, rolling
+  /// every unrelated peer back to this instance's hydrate time. When it finds the
+  /// app has appeared it deliberately drops the session it just built — see
+  /// `mayPersistSessionAfterServing` — and without this the debounce armed by
+  /// [markDirty] would write that snapshot three seconds later anyway, which is
+  /// precisely the damage the decision was avoiding.
+  ///
+  /// Does not roll back in-memory state; there is nothing to roll back to, and
+  /// the isolate holding it is about to be reclaimed.
+  void cancelPendingFlush() {
+    _debounce?.cancel();
+    _debounce = null;
+  }
+
   /// Writes a snapshot of all four stores to secure storage and does not
   /// return until it is durably on disk.
   ///

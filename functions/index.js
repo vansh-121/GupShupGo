@@ -1427,12 +1427,21 @@ exports.notifyResendRequest = onDocumentCreated(
     } catch (error) {
       console.error(`notifyResendRequest failed for ${event.params.wakeupId}:`, error);
       return null;
-    } finally {
-      // Always, including on the malformed and stale paths. Nothing reads these
-      // documents, so leaving them behind would grow a collection that only ever
-      // costs storage.
-      await snap.ref.delete().catch(() => {});
     }
+    // Deliberately no delete, on any path — including the malformed and stale
+    // ones. The document id is what rate-limits this Function: it is derived from
+    // (room, message, requester device, attempt), and `firestore.rules` denies
+    // updates, so a spent id is a permanently spent push. Deleting the document
+    // would hand that id back and let a modified client re-trigger the same
+    // wakeup as fast as it could write.
+    //
+    // Growth is bounded operationally instead, by a Firestore TTL policy on the
+    // `at` field. Any retention over a few hours is safe: a legitimate client
+    // never reissues an attempt number (it is lifetime-monotonic per message), so
+    // recycling an id after expiry caps a modified client at one push per attempt
+    // per retention window, and a create still has to satisfy the live
+    // `retryRequests` check. Forgetting to configure the policy fails safe — a
+    // stricter bound, at the cost of some very small documents.
   }
 );
 

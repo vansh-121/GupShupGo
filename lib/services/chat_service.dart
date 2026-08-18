@@ -953,6 +953,8 @@ class ChatService {
         messageId: msg.id,
         senderId: msg.senderId,
         selfUid: selfUid,
+        selfDeviceId: selfDeviceId,
+        attempt: attempt,
       ));
       await store.saveRetryState(
         msg.id,
@@ -992,24 +994,39 @@ class ChatService {
   /// watching them would invoke a Function a few times per message to do nothing
   /// almost every time. This one fires only on a real request.
   ///
-  /// The Function deletes the doc once it has sent, so the collection stays
-  /// empty. Nothing reads it back — see `firestore.rules`, where reads are
-  /// denied outright.
+  /// Nothing reads it back — see `firestore.rules`, where reads are denied
+  /// outright.
   Future<void> _publishResendWakeup({
     required String roomId,
     required String messageId,
     required String senderId,
     required String selfUid,
+    required int selfDeviceId,
+    required int attempt,
   }) async {
     // Both guards are also enforced in firestore.rules, so a write that trips
     // one would be rejected anyway. Checking here saves the round trip.
     if (senderId.isEmpty || senderId == selfUid) return;
     try {
-      await _firestore.collection('resendWakeups').add({
+      // A deterministic id, not `add()`, so one request can mint at most one
+      // push. With an auto id every write succeeded, which made the rules'
+      // "is a retry actually pending" check a bound on *which* messages could be
+      // woken but not on how many times — a modified client could have spun that
+      // one legitimately-pending request into unlimited high-priority pushes.
+      // Here the second write to the same id is an update, and updates are
+      // denied. `attempt` is lifetime-monotonic (see above), so genuine retries
+      // never collide with a spent id.
+      //
+      // The Function deliberately leaves these documents in place after sending:
+      // deleting one would hand its id straight back and reopen the hole.
+      final id = '${roomId}_${messageId}_${selfUid}_${selfDeviceId}_$attempt';
+      await _firestore.collection('resendWakeups').doc(id).set({
         'roomId': roomId,
         'messageId': messageId,
         'senderId': senderId,
         'requesterId': selfUid,
+        'deviceId': selfDeviceId,
+        'attempt': attempt,
         'at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
