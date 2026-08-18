@@ -8,6 +8,7 @@
 
 **The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
+[![Release: 1.1.5](https://img.shields.io/badge/Release-v1.1.5-blue.svg?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
 [![Flutter SDK](https://img.shields.io/badge/Flutter-%E2%89%A53.2.0-02569B.svg?style=flat-square&logo=flutter)](https://flutter.dev)
 [![Signal Protocol E2EE](https://img.shields.io/badge/Security-Signal%20E2EE-10B981.svg?style=flat-square&logo=signal)](https://signal.org)
@@ -439,6 +440,7 @@ GupShupGo is built to meet strict performance requirements:
 * [x] **Username Handles & Profile QR Sharing:** Custom `@username` handle reservation, QR profile cards, and contact discovery.
 * [x] **Bond Streak Engine:** Interactive daily messaging streaks and streak restoration system.
 * [x] **Android 16 KB Page-Size & Play Integrity:** 16 KB page-size memory compliance for Android 15+ and Google Play Integrity protection.
+* [x] **Self-Healing Message Recovery & Silent Sync:** Automatic background re-encryption and silent FCM sync for 100% reliable, zero-drop messaging.
 
 ### 📅 Phase 2: Future Pipeline
 * [ ] **E2EE Multi-Party Group Calling:** Extending the Double Ratchet protocol to support group calls.

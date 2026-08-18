@@ -50,8 +50,8 @@ android {
         // by August 31, 2026. compileSdk is already 36, so this just aligns
         // targetSdk to match — see Play Console policy warning.
         targetSdk = 36
-        versionCode = 50
-        versionName = "1.1.4"
+        versionCode = 51
+        versionName = "1.1.5"
         minSdkVersion = 24
         multiDexEnabled true
         // Strip unused locale resources from all SDKs (Firebase, GMS, Agora, etc.)
