@@ -37,8 +37,11 @@ class ChatService {
   // ourselves:
   //
   //  • [_pendingRetryPlaceholderText] — a resend request is in flight.
-  //  • [_undecryptablePlaceholderText] — the sender never answered, after
-  //    [_maxResendAttempts]. Now it genuinely is on the user to ask.
+  //  • [_undecryptablePlaceholderText] — a round of [_maxResendAttempts] went
+  //    unanswered and nothing suggests the sender is reachable. The bubble can
+  //    still go back to "waiting" later: see [evaluateResendRound], which opens
+  //    a fresh round when they relaunch, when the peer shows signs of life, or
+  //    after [_resendRoundCooldown].
   //
   // Either way we render a bubble instead of dropping the message, so the
   // user knows something arrived rather than watching read receipts climb
@@ -734,15 +737,135 @@ class ChatService {
   static const int _maxResendAttempts = 3;
   static const Duration _resendBackoff = Duration(seconds: 30);
 
-  /// How long after the final attempt we keep saying "waiting" before
-  /// admitting defeat and telling the user to ask the sender.
+  /// How long after the final attempt of a round we keep saying "waiting"
+  /// before admitting defeat and telling the user to ask the sender.
   static const Duration _resendGrace = Duration(minutes: 2);
+
+  /// A round of [_maxResendAttempts] runs its course in about a minute, and it
+  /// can only be answered by a sender whose app is running. An earlier build
+  /// applied the cap to the *lifetime* of the message, so if the sender simply
+  /// wasn't running during that one minute the bubble was broken forever — even
+  /// with both people online and chatting minutes later, nothing ever asked
+  /// again. The cap now applies per round, and an exhausted round reopens on any
+  /// evidence that asking again could work: a new app session, the peer showing
+  /// signs of life ([notePeerActivity]), or simply enough time passing.
+  static const Duration _resendRoundCooldown = Duration(minutes: 20);
+
+  /// Minimum gap between rounds opened because the peer showed signs of life.
+  ///
+  /// Their activity counter advances on every message they send, so a burst of
+  /// ten messages while our bubble is still broken would otherwise reopen ten
+  /// rounds in as many seconds and spend the whole [_maxResendTotalAttempts]
+  /// ceiling in under a minute. A relaunch is exempt — the user paces that
+  /// themselves — and the cooldown path is already twenty minutes.
+  static const Duration _resendRoundFloor = Duration(minutes: 2);
+
+  /// Absolute ceiling across every round. Rounds only open on a real signal, so
+  /// this is not what normally stops us — it exists so a message whose sender is
+  /// gone for good cannot grow `retryRequests` without bound across hundreds of
+  /// launches. Reaching it is the one case that still hardens permanently, and
+  /// by then the message has been asked for across at least five separate
+  /// rounds, which in practice means the sender no longer holds the plaintext.
+  static const int _maxResendTotalAttempts = 15;
+
+  /// Identifies this launch. A round recorded under a different value belongs to
+  /// a previous process and never blocks a new one — reopening on relaunch is
+  /// the highest-yield signal available, because a sender who was away during
+  /// the original 60-second round is far more likely to be reachable now.
+  static final int _appSessionId = DateTime.now().microsecondsSinceEpoch;
+
+  /// Per-peer liveness counter, bumped by [notePeerActivity]. Deliberately in
+  /// memory only: a restart resets it to zero, but a restart already reopens
+  /// every round through [_appSessionId], so nothing is lost by not persisting.
+  static final Map<String, int> _peerActivity = <String, int>{};
 
   // Requests mid-write, so a burst of snapshot re-emissions can't fire the
   // same one several times before the first write lands.
   static final Set<String> _resendInFlight = <String>{};
 
-  /// Publishes a resend request for [msg], subject to an attempt cap and
+  /// Records that [uid]'s app has shown signs of life — they sent something, or
+  /// they marked something of ours delivered/read. Called from
+  /// `SyncService._notePeerLiveness`.
+  ///
+  /// This is the signal the old lifetime cap had no way to express. A resend
+  /// request can only be answered by a running app, so "the peer is running
+  /// right now" is precisely the moment it becomes worth asking again.
+  static void notePeerActivity(String uid) {
+    if (uid.isEmpty) return;
+    _peerActivity[uid] = (_peerActivity[uid] ?? 0) + 1;
+  }
+
+  @visibleForTesting
+  static int peerActivityForTest(String uid) => _peerActivity[uid] ?? 0;
+
+  /// Whether a fresh resend request may go out now, given the recorded state.
+  ///
+  /// Pure, and separated from the Firestore write, because this is the decision
+  /// that determines whether a broken bubble ever repairs itself at all.
+  ///
+  /// `allow` — publish a request now. `waiting` — only meaningful when `allow`
+  /// is false; true means keep the "⏳ waiting" wording because an answer could
+  /// still arrive, false means let the bubble harden into "ask sender to
+  /// resend". `roundStart` — what to record as the current round's origin,
+  /// which is [state]'s own value mid-round and its total attempt count when a
+  /// new round is being opened.
+  @visibleForTesting
+  static ({bool allow, bool waiting, int roundStart}) evaluateResendRound({
+    required ({
+      int attempts,
+      int atMs,
+      int roundStart,
+      int sessionId,
+      int generation
+    })? state,
+    required int sessionId,
+    required int generation,
+    required DateTime now,
+  }) {
+    if (state == null) return (allow: true, waiting: false, roundStart: 0);
+
+    if (state.attempts >= _maxResendTotalAttempts) {
+      return (allow: false, waiting: false, roundStart: state.roundStart);
+    }
+
+    final last = DateTime.fromMillisecondsSinceEpoch(state.atMs);
+    final sinceLast = now.difference(last);
+    final inRound = state.attempts - state.roundStart;
+
+    if (inRound < _maxResendAttempts) {
+      // Mid-round. Honour the backoff so a burst of snapshot re-emissions
+      // can't turn one broken bubble into three writes a second.
+      if (sinceLast < _resendBackoff) {
+        return (allow: false, waiting: true, roundStart: state.roundStart);
+      }
+      return (allow: true, waiting: false, roundStart: state.roundStart);
+    }
+
+    // Round exhausted. Reopen only on evidence that asking again could work.
+    final newSession = state.sessionId != sessionId;
+    final peerSeen =
+        state.generation != generation && sinceLast >= _resendRoundFloor;
+    final cooledDown = sinceLast >= _resendRoundCooldown;
+    if (newSession || peerSeen || cooledDown) {
+      // The new round starts where the lifetime count currently stands, so the
+      // next wire tag is strictly greater than every tag already published.
+      return (allow: true, waiting: false, roundStart: state.attempts);
+    }
+
+    // Nothing new to go on. Keep the "waiting" wording briefly so the round's
+    // final request has a fair chance to be answered, then let it harden.
+    //
+    // Note that [_resendRoundFloor] and [_resendGrace] are both two minutes, so
+    // a peer who *has* shown signs of life crosses the floor at the same moment
+    // the grace expires: the round reopens rather than the bubble hardening.
+    return (
+      allow: false,
+      waiting: sinceLast < _resendGrace,
+      roundStart: state.roundStart,
+    );
+  }
+
+  /// Publishes a resend request for [msg], subject to the round cap and
   /// backoff.
   ///
   /// Returns true while the bubble should still render as "waiting" — either
@@ -759,21 +882,21 @@ class ChatService {
 
     final now = DateTime.now();
     final state = await store.getRetryState(msg.id);
-    final attempts = state?.attempts ?? 0;
-    final last =
-        state == null ? null : DateTime.fromMillisecondsSinceEpoch(state.atMs);
-
-    if (attempts >= _maxResendAttempts) {
-      // Out of attempts. Keep the "waiting" text briefly so the final
-      // request has a fair chance to be answered, then let it harden.
-      return last != null && now.difference(last) < _resendGrace;
-    }
-    if (last != null && now.difference(last) < _resendBackoff) {
-      return true; // an ask is already outstanding
-    }
+    final generation = _peerActivity[msg.senderId] ?? 0;
+    final round = evaluateResendRound(
+      state: state,
+      sessionId: _appSessionId,
+      generation: generation,
+      now: now,
+    );
+    if (!round.allow) return round.waiting;
     if (!_resendInFlight.add(msg.id)) return true;
 
-    final attempt = attempts + 1;
+    // Lifetime-monotonic, not per-round. The sender skips any tag number it has
+    // already answered, and `arrayUnion` silently drops a duplicate string, so
+    // restarting a new round at #1 would produce a request that never appears
+    // on the document and would never be served if it did.
+    final attempt = (state?.attempts ?? 0) + 1;
     try {
       await _firestore
           .collection(_chatRoomsCollection)
@@ -784,11 +907,18 @@ class ChatService {
         'retryRequests':
             FieldValue.arrayUnion(['$selfUid:$selfDeviceId#$attempt']),
       });
-      await store.saveRetryState(msg.id,
-          attempts: attempt, atMs: now.millisecondsSinceEpoch);
+      await store.saveRetryState(
+        msg.id,
+        attempts: attempt,
+        atMs: now.millisecondsSinceEpoch,
+        roundStart: round.roundStart,
+        sessionId: _appSessionId,
+        generation: generation,
+      );
       if (kDebugMode) {
-        debugPrint('[E2EE] resend request $attempt/$_maxResendAttempts for '
-            '${msg.id} → ${msg.senderId}');
+        debugPrint('[E2EE] resend request #$attempt for ${msg.id} '
+            '(${attempt - round.roundStart}/$_maxResendAttempts this round) '
+            '→ ${msg.senderId}');
       }
       return true;
     } catch (e) {

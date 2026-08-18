@@ -52,6 +52,16 @@ class SyncService {
   final _lastReconcile = <String, DateTime>{};
   static const _reconcileInterval = Duration(seconds: 60);
 
+  /// Rooms known to hold at least one message this device can't read.
+  ///
+  /// Gates the peer-liveness throttle drop in [_processRoomSnapshot]. Repairing
+  /// a broken bubble the moment the peer reappears is worth a sweep; doing it in
+  /// a healthy room is not, and without this gate every incoming message in an
+  /// active conversation would trigger a 50-row read that finds nothing to fix.
+  /// [_scheduleReconcile] walks the whole window, so it both sets and clears
+  /// this — a room drops out of the set as soon as its messages heal.
+  final _roomsWithLockedMessages = <String>{};
+
   /// Starts listening to the user's active chat rooms and synchronizes
   /// their messages into the local database in the background.
   Future<void> init(String currentUserId, {bool force = false}) async {
@@ -115,6 +125,7 @@ class SyncService {
     _roomSyncQueues.clear();
     _reconcilingRooms.clear();
     _lastReconcile.clear();
+    _roomsWithLockedMessages.clear();
   }
 
   void _startSyncingRoom(String roomId, String currentUserId) {
@@ -295,6 +306,23 @@ class SyncService {
           .map((c) => c.doc)
           .toList();
 
+      // Note any sign that the other participant's app is actually running. A
+      // resend request can only be answered by a live app, so this is what lets
+      // an exhausted retry round reopen the moment they come back. Without it, a
+      // sender who happened to be away for the round's ~60 seconds left the
+      // bubble broken until the next app launch.
+      final peerSeen = _notePeerLiveness(snapshot, currentUserId);
+      if (peerSeen && _roomsWithLockedMessages.contains(roomId)) {
+        // Drop the reconcile throttle for this room. The sweep is where an
+        // *older* locked message gets another chance, and making the user wait
+        // out the remainder of a 60-second window is the difference between the
+        // bubble filling in while they watch and it looking broken still.
+        //
+        // Only for rooms that actually have something to repair: an ordinary
+        // back-and-forth would otherwise pay a full-window sweep per message.
+        _lastReconcile.remove(roomId);
+      }
+
       if (changed.isEmpty) {
         _scheduleReconcile(roomId, snapshot, currentUserId);
         return;
@@ -317,6 +345,7 @@ class SyncService {
         final localMsg = localMap[doc.id];
         if (localMsg == null || _isLocked(localMsg)) {
           content.add(doc);
+          if (localMsg != null) _roomsWithLockedMessages.add(roomId);
         } else {
           metadata.add(doc);
         }
@@ -463,6 +492,60 @@ class SyncService {
   // SessionBuilder.processV3 archives whatever state it was holding instead of
   // requiring the two chains to line up. That is what makes this a genuine
   // repair rather than another roll of the dice.
+
+  /// Feeds [ChatService.notePeerActivity], which reopens an exhausted resend
+  /// round. Returns true if anything was noted.
+  ///
+  /// Two signals, both meaning "their app was running seconds ago":
+  ///  • a message of theirs arriving for the first time;
+  ///  • one of ours turning delivered or read — those fields are written by the
+  ///    recipient and nobody else.
+  ///
+  /// Over-triggering is cheap (an extra round of up to three requests, bounded
+  /// by ChatService's lifetime ceiling, and only ever for a message that is
+  /// genuinely unreadable). Under-triggering is not: it is what left the
+  /// reported bubbles broken. So these conditions are deliberately generous.
+  bool _notePeerLiveness(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+    String currentUserId,
+  ) {
+    var noted = false;
+    for (final change in snapshot.docChanges) {
+      if (change.type == DocumentChangeType.removed) continue;
+      final data = change.doc.data();
+      if (data == null) continue;
+      // Type-tested rather than cast. This method runs before everything else
+      // in _processRoomSnapshot, so a `as String?` throwing on a malformed
+      // document would abort the entire pass and sync no messages at all.
+      final senderId = data['senderId'];
+      if (senderId is! String || senderId.isEmpty) continue;
+
+      if (senderId != currentUserId) {
+        // Their message. Only `added` counts: a `modified` on a document they
+        // authored is normally *our* write — a read receipt, or the retry
+        // request itself — and treating that as their liveness would let one
+        // request reopen the next round immediately and defeat the cap.
+        if (change.type == DocumentChangeType.added) {
+          ChatService.notePeerActivity(senderId);
+          noted = true;
+        }
+        continue;
+      }
+
+      // Our own message, changed by someone. `added` here is just the cold-start
+      // backfill of our own history, which says nothing about them.
+      if (change.type != DocumentChangeType.modified) continue;
+      final status = data['status'];
+      final isReceipt = status == 'delivered' || status == 'read' ||
+          status is bool; // legacy isRead payloads
+      if (!isReceipt) continue;
+      final receiverId = data['receiverId'];
+      if (receiverId is! String || receiverId.isEmpty) continue;
+      ChatService.notePeerActivity(receiverId);
+      noted = true;
+    }
+    return noted;
+  }
 
   /// Synchronous filter over a snapshot's change set.
   ///
@@ -716,6 +799,7 @@ class SyncService {
 
         final repaired = <MessageModel>[];
         var processed = 0;
+        var stillLocked = false;
 
         for (final doc in snapshot.docs) {
           final localMsg = localMap[doc.id];
@@ -734,6 +818,11 @@ class SyncService {
           final decrypted = await ChatService.instance
               .decryptForRendering(serverMsg, currentUserId);
 
+          // This sweep is the only place that sees the whole window, so it is
+          // also where [_roomsWithLockedMessages] gets its answer. A null
+          // decrypt means the fast path would store a placeholder too.
+          if (decrypted == null || _isLocked(decrypted)) stillLocked = true;
+
           // Store a placeholder whose text differs from what's on disk, not
           // just a successful decrypt. Two cases need it: a legacy 🔒 row
           // whose repair is now in flight should show ⏳, and a message the
@@ -750,6 +839,14 @@ class SyncService {
           if (++processed % 3 == 0) {
             await Future.delayed(const Duration(milliseconds: 4));
           }
+        }
+
+        // Self-correcting: a room leaves the set as soon as everything in its
+        // window reads, so it stops costing a sweep on every peer message.
+        if (stillLocked) {
+          _roomsWithLockedMessages.add(roomId);
+        } else {
+          _roomsWithLockedMessages.remove(roomId);
         }
 
         if (repaired.isNotEmpty) {

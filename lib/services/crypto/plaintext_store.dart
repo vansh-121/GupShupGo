@@ -209,31 +209,69 @@ class PlaintextStore {
   // prefix here, or the bookkeeping rows will be loaded into ChatService's
   // payload memo and evict real messages from it.
 
-  /// Receiver side: how many resend requests we have published for
-  /// [messageId], and when the most recent one went out (ms since epoch).
+  /// Receiver side: resend bookkeeping for [messageId].
+  ///
+  /// [attempts] is the **lifetime** count and only ever increases. It numbers
+  /// the request tag on the wire, and the sender ignores any number it has
+  /// already answered, so restarting the numbering would make a request
+  /// invisible — `arrayUnion` would also treat the repeated tag as a no-op, so
+  /// the request would never even reach the document.
+  ///
+  /// The attempt *cap* therefore applies to the current round rather than to
+  /// [attempts]: [roundStart] is what [attempts] was when the round opened, and
+  /// [sessionId] / [generation] record the conditions it opened under, so a
+  /// later app launch or a peer coming back online can start a fresh one. See
+  /// `ChatService.evaluateResendRound`.
   Future<void> saveRetryState(
     String messageId, {
     required int attempts,
     required int atMs,
+    required int roundStart,
+    required int sessionId,
+    required int generation,
   }) async {
     await _db.into(_db.messagePlaintexts).insert(
       MessagePlaintextsCompanion.insert(
         id: 'retry:$messageId',
-        payload: jsonEncode({'n': attempts, 'at': atMs}),
+        payload: jsonEncode({
+          'n': attempts,
+          'at': atMs,
+          'rs': roundStart,
+          's': sessionId,
+          'g': generation,
+        }),
         savedAt: DateTime.now().millisecondsSinceEpoch,
       ),
       mode: InsertMode.insertOrReplace,
     );
   }
 
-  Future<({int attempts, int atMs})?> getRetryState(String messageId) async {
+  /// Rows written before rounds existed carry only `n` and `at`. They read back
+  /// with `roundStart: 0` — so the round looks exhausted — and `sessionId: -1`,
+  /// which can never match a real session id, so the next launch opens a fresh
+  /// round. That is exactly the migration a bubble wants if it hardened under
+  /// the old lifetime cap.
+  Future<
+      ({
+        int attempts,
+        int atMs,
+        int roundStart,
+        int sessionId,
+        int generation
+      })?> getRetryState(String messageId) async {
     final query = _db.select(_db.messagePlaintexts)
       ..where((tbl) => tbl.id.equals('retry:$messageId'));
     final row = await query.getSingleOrNull();
     if (row == null) return null;
     try {
       final map = jsonDecode(row.payload) as Map<String, dynamic>;
-      return (attempts: map['n'] as int, atMs: map['at'] as int);
+      return (
+        attempts: map['n'] as int,
+        atMs: map['at'] as int,
+        roundStart: (map['rs'] as int?) ?? 0,
+        sessionId: (map['s'] as int?) ?? -1,
+        generation: (map['g'] as int?) ?? -1,
+      );
     } catch (_) {
       return null;
     }
