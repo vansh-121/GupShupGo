@@ -7,13 +7,20 @@
 // separate bounds hold it in place, and both are asserted here:
 //
 //   • WHICH messages can be woken — the named message must exist, must have been
-//     written by the uid being woken, and must be carrying an outstanding retry
-//     request. Both uids must share the room.
+//     written by the uid being woken, and must be carrying the exact retry tag
+//     this wakeup claims to be accelerating. Both uids must share the room.
 //   • HOW MANY TIMES — the document id is derived from (room, message, requester
 //     device, attempt), and updates are denied, so an attempt buys exactly one
 //     push. An auto id used to make every write succeed, which left the first
 //     bound governing the set of legitimate targets but nothing at all governing
 //     the rate at which one of them could be hit.
+//
+// The two are load-bearing together, which is the part easy to get wrong. An id
+// only bounds anything if every field in it is answerable to something else: two
+// of them, `deviceId` and `attempt`, are free-form ints, so while the message
+// check was merely "some request is pending" they were a way to enumerate fresh
+// authorized ids rather than a limit on them. Hence the tag match, and hence the
+// `rejects walking …` cases below.
 //
 // Run:  firebase emulators:exec --only firestore \
 //         "npx mocha functions/test/resend_wakeups_rules.test.js"
@@ -88,6 +95,12 @@ after(async () => {
 // The legitimate precondition for a wakeup: Bob wrote the message, and Alice has
 // already published a retry request against it. `_requestResend` awaits that
 // update before writing the wakeup, so this is the real on-the-wire state.
+//
+// The tag format is the protocol's own: `<uid>:<deviceId>#<attempt>`. The rules
+// require the wakeup to name a tag that is actually in this array, so what is
+// seeded here decides what is authorized.
+const tag = (uid, deviceId, attempt) => `${uid}:${deviceId}#${attempt}`;
+
 const seedMessage = (overrides = {}) =>
   testEnv.withSecurityRulesDisabled(async (ctx) => {
     await ctx
@@ -99,7 +112,7 @@ const seedMessage = (overrides = {}) =>
       .set({
         senderId: BOB,
         receiverId: ALICE,
-        retryRequests: [`${ALICE}:1#1`],
+        retryRequests: [tag(ALICE, 1, 1)],
         ...overrides,
       });
   });
@@ -288,6 +301,9 @@ describe("resendWakeups", () => {
     // The ceiling must not cost the protocol its retries. `attempt` is
     // lifetime-monotonic per message, so each real retry lands on an id of its
     // own and is unaffected by the previous one being spent.
+    await seedMessage({
+      retryRequests: [tag(ALICE, 1, 1), tag(ALICE, 1, 2), tag(ALICE, 1, 3)],
+    });
     await assertSucceeds(create(ALICE, wakeup({ attempt: 1 })));
     await assertSucceeds(create(ALICE, wakeup({ attempt: 2 })));
     await assertSucceeds(create(ALICE, wakeup({ attempt: 3 })));
@@ -298,6 +314,9 @@ describe("resendWakeups", () => {
     // and each needs its own session rebuilt, so they must not contend for one
     // id — the second would be denied and that device would never be repaired
     // by the fast path.
+    await seedMessage({
+      retryRequests: [tag(ALICE, 1, 1), tag(ALICE, 2, 1)],
+    });
     await assertSucceeds(create(ALICE, wakeup({ deviceId: 1 })));
     await assertSucceeds(create(ALICE, wakeup({ deviceId: 2 })));
   });
@@ -353,14 +372,63 @@ describe("resendWakeups", () => {
 
   it("caps attempt at a ceiling above anything the protocol produces", async () => {
     // `_maxResendTotalAttempts` is 15, so a real attempt never approaches 20.
-    // The ceiling exists so the id space cannot be walked: without it a client
-    // could mint a fresh id per integer forever. Denying an over-cap write costs
+    // Every one of these has a matching tag seeded, so the only thing that can
+    // deny the last two is the ceiling itself. Denying an over-cap write costs
     // only the accelerator — the request is already on the message document,
     // which is what actually drives the repair.
+    await seedMessage({
+      retryRequests: [
+        tag(ALICE, 1, 15),
+        tag(ALICE, 1, 20),
+        tag(ALICE, 1, 21),
+        tag(ALICE, 1, 100000),
+      ],
+    });
     await assertSucceeds(create(ALICE, wakeup({ attempt: 15 })));
     await assertSucceeds(create(ALICE, wakeup({ attempt: 20 })));
     await assertFails(create(ALICE, wakeup({ attempt: 21 })));
     await assertFails(create(ALICE, wakeup({ attempt: 100000 })));
+  });
+
+  // ── Binding every id field to a tag the client had to write first ─────────
+
+  it("rejects walking deviceId", async () => {
+    // The id contains `deviceId`, and no rule constrains it beyond being a
+    // positive int — so on its own it is a way to *walk* the id space rather
+    // than a bound on it. One pending request would have yielded an unlimited
+    // supply of distinct authorized documents, each one a Function invocation
+    // and a high-priority silent push, which is the whole hole the id was meant
+    // to close wearing a different field's clothes.
+    await seedMessage({ retryRequests: [tag(ALICE, 1, 1)] });
+    await assertSucceeds(create(ALICE, wakeup({ deviceId: 1 })));
+    for (const deviceId of [2, 3, 4, 17, 999999]) {
+      await assertFails(create(ALICE, wakeup({ deviceId })));
+    }
+  });
+
+  it("rejects walking attempt", async () => {
+    // Same walk through the other free-form field, and bounded the same way.
+    await seedMessage({ retryRequests: [tag(ALICE, 1, 1)] });
+    for (const attempt of [2, 3, 7, 20]) {
+      await assertFails(create(ALICE, wakeup({ attempt })));
+    }
+  });
+
+  it("rejects riding on somebody else's pending request", async () => {
+    // A non-empty array is not enough: the tag has to be *Alice's*, for the
+    // device and attempt she is naming. Here a request is genuinely pending on
+    // the message, just not hers — and the tag is built from `request.auth.uid`,
+    // so there is no way for her to claim it.
+    await seedMessage({ retryRequests: [tag(CAROL, 1, 1), tag(BOB, 1, 1)] });
+    await assertFails(create(ALICE));
+  });
+
+  it("rejects a wakeup whose tag was already served and removed", async () => {
+    // The sender retires a tag with arrayRemove once it has answered it. A
+    // wakeup minted after that has nothing left to accelerate, and denying it
+    // means a replay cannot re-trigger the push either.
+    await seedMessage({ retryRequests: [tag(ALICE, 1, 2)] });
+    await assertFails(create(ALICE, wakeup({ attempt: 1 })));
   });
 
   it("denies reads to everyone, including the author", async () => {

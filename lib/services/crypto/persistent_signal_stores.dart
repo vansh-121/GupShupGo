@@ -80,6 +80,9 @@ class PersistentSignalStores {
 
   Timer? _debounce;
 
+  /// Set by [suspendAutoFlush]. Never reset — see that method.
+  bool _autoFlushSuspended = false;
+
   /// The exact JSON last written to secure storage, or null if we haven't
   /// written yet this session. [flush] compares a fresh snapshot against this
   /// and skips the Keystore write when they're identical.
@@ -176,29 +179,39 @@ class PersistentSignalStores {
   /// This is a latency optimization, NOT a durability guarantee. Anything
   /// that must survive a crash — every receive-side ratchet advance — has to
   /// `await flush()` instead. See [flush].
+  ///
+  /// Does nothing once [suspendAutoFlush] has been called.
   void markDirty() {
+    if (_autoFlushSuspended) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 3000), () {
       unawaited(flush());
     });
   }
 
-  /// Abandons a pending debounced write, leaving the in-memory changes
-  /// unpersisted.
+  /// Stops [markDirty] from ever scheduling a write, and drops any already
+  /// scheduled. [flush] still works — this suppresses only the automatic path.
   ///
-  /// For the FCM background isolate, which is the one caller that can decide
-  /// *not* to persist. Its mutations are safe only while it is alone in the
-  /// process, and the app can launch at any moment during them: a snapshot
-  /// written by a second live instance overwrites rather than merges, rolling
-  /// every unrelated peer back to this instance's hydrate time. When it finds the
-  /// app has appeared it deliberately drops the session it just built — see
-  /// `mayPersistSessionAfterServing` — and without this the debounce armed by
-  /// [markDirty] would write that snapshot three seconds later anyway, which is
-  /// precisely the damage the decision was avoiding.
+  /// For the FCM background isolate, which is the one owner that may have to
+  /// decide *not* to persist what it built. Its mutations are safe only while it
+  /// is alone in the process, and the app can launch at any moment during them: a
+  /// snapshot written by a second live instance overwrites rather than merges,
+  /// rolling every unrelated peer back to this instance's hydrate time. So it
+  /// serves, re-checks whether the app appeared, and flushes only if it did not —
+  /// see `mayPersistSessionAfterServing`.
   ///
-  /// Does not roll back in-memory state; there is nothing to roll back to, and
-  /// the isolate holding it is about to be reclaimed.
-  void cancelPendingFlush() {
+  /// That decision is only real if no write can happen without it, which is why
+  /// this suspends the debounce up front rather than cancelling it at the end.
+  /// Cancelling cannot help: the serve does Firestore round trips after the
+  /// encrypt that marked the stores dirty, and on a radio that just woke from
+  /// Doze those routinely outlast the 3000ms window — so the timer fires
+  /// mid-serve, [flush] is already awaiting the Keystore, and there is no longer
+  /// a timer to cancel. Never arming it is the only version of this that holds.
+  ///
+  /// Deliberately one-way. The isolate does a single serve and is reclaimed, so
+  /// there is no point at which resuming would be correct.
+  void suspendAutoFlush() {
+    _autoFlushSuspended = true;
     _debounce?.cancel();
     _debounce = null;
   }

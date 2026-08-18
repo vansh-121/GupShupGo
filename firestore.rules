@@ -385,8 +385,8 @@ service cloud.firestore {
       // SDK, which bypasses rules entirely.
       allow read, update, delete: if false;
 
-      // Bind the wakeup to a real message that `senderId` actually wrote and
-      // that is genuinely waiting on a resend.
+      // Bind the wakeup to a real message that `senderId` actually wrote and to
+      // the specific retry request it claims to be accelerating.
       //
       // Room participation alone is not a sufficient bound. A participant could
       // otherwise mint unlimited wakeups for invented messageIds and use the
@@ -394,16 +394,31 @@ service cloud.firestore {
       // with — worse than the message spam that is the only comparable thing a
       // participant can already do, because these pushes leave no tray entry,
       // no bubble and no unread count, and each one wakes the peer's process to
-      // do Signal work. Tying a wakeup to an outstanding `retryRequests` entry
-      // caps it at the volume the protocol actually generates.
+      // do Signal work.
       //
-      // `_requestResend` awaits the `retryRequests` update before writing this
-      // doc, so the message exists, its author is `senderId`, and the array is
-      // non-empty on every legitimate call.
+      // Nor is "some request is pending" sufficient, which is what this checked
+      // first. That bounded which messages were wakeable but nothing else: the
+      // document id also contains `deviceId`, which no rule constrained beyond
+      // being positive, so walking it produced an unlimited supply of distinct
+      // ids that each passed. Matching the *exact* tag closes that, because it
+      // makes every field in the id answerable to something already on the
+      // message document.
+      //
+      // `_requestResend` writes the tag and awaits it before writing this doc, so
+      // the match holds on every legitimate call. A sender fast enough to serve
+      // and `arrayRemove` the tag first will deny the wakeup, which is correct —
+      // there is nothing left to accelerate.
+      function retryTag() {
+        // The wire format from `_requestResend`: `<uid>:<deviceId>#<attempt>`.
+        return request.auth.uid + ':'
+          + string(request.resource.data.deviceId) + '#'
+          + string(request.resource.data.attempt);
+      }
+
       function awaitingResend(roomId, messageId, senderId) {
         let m = get(/databases/$(database)/documents/chatRooms/$(roomId)/messages/$(messageId)).data;
         return m.senderId == senderId
-          && m.get('retryRequests', []).size() > 0;
+          && m.get('retryRequests', []).hasAny([retryTag()]);
       }
 
       // The document id, derived entirely from fields this rule has already
@@ -428,21 +443,26 @@ service cloud.firestore {
         && request.resource.data.at == request.time
         // ── The write-once ceiling ──────────────────────────────────────────
         //
-        // A pending `retryRequests` entry bounds *which* messages can be woken
-        // but not how many times, and an auto-id let a client re-create a wakeup
-        // for the same request as fast as it could write — every one of them
-        // authorized, every one another high-priority push and another Function
-        // invocation. Pinning the id to (message, requester device, attempt)
-        // turns that into a create-once: the second write to a live id is an
-        // update, and updates are denied above. `notifyResendRequest`
-        // deliberately no longer deletes these documents, because deleting one
-        // would hand the id straight back.
+        // An auto-id let a client re-create a wakeup for the same request as fast
+        // as it could write — every one of them authorized, every one another
+        // high-priority push and another Function invocation. Pinning the id to
+        // (message, requester device, attempt) turns that into a create-once: the
+        // second write to a live id is an update, and updates are denied above.
+        // `notifyResendRequest` deliberately no longer deletes these documents,
+        // because deleting one would hand the id straight back.
         //
-        // `attempt` is lifetime-monotonic per message (see `_requestResend`), so
-        // legitimate retries never collide, and the protocol's own total cap
-        // keeps it well under this ceiling. Should it ever exceed it, the write
-        // is denied and the accelerator is simply lost — the request is already
-        // on the message document, which is what actually drives the repair.
+        // The id is only a ceiling because every field in it is pinned to
+        // something else. `deviceId` and `attempt` are free-form ints, so on their
+        // own they are a way to walk the id space rather than a bound on it — the
+        // `hasAny` check in `awaitingResend` is what ties both to a tag the client
+        // had to write onto the message document first. The checks here just keep
+        // the pairing honest: `is int` so `string()` renders the same value the
+        // tag does, and positivity because no real device or attempt is zero.
+        //
+        // `attempt <= 20` is a sanity bound rather than the rate limit — the
+        // protocol's own lifetime cap is 15. Denying an over-cap write costs only
+        // the accelerator; the request is already on the message document, which
+        // is what actually drives the repair.
         && request.resource.data.deviceId is int
         && request.resource.data.deviceId > 0
         && request.resource.data.attempt is int

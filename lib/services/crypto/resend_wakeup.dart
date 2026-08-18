@@ -186,35 +186,34 @@ Future<void> _serveFromBackgroundIsolate(
   // deleted and write them back on the next flush.
   await SignalService.reloadFromDisk();
 
-  // `deferFlush` is what makes the gate below the only decision. The serve path
-  // normally commits its session write immediately — correct in the main isolate,
-  // where a kill seconds later would otherwise strand a session the requester has
-  // already ratcheted past. From here that same write is the dangerous one, and it
-  // used to land before this function got to vote on it: the app can launch at any
-  // point during the serve, and a flush from a second live instance overwrites
-  // rather than merges. Holding it in memory means the check below governs whether
-  // it is ever persisted at all.
+  // Before any crypto, so that no store mutation from here on can schedule its
+  // own write. Every path to secure storage now runs through the single decision
+  // at the bottom of this function — which is the only thing that makes that
+  // decision meaningful. Late is not good enough: the serve does Firestore round
+  // trips after the encrypt that marks the stores dirty, and the debounce is only
+  // three seconds, so cancelling afterwards would routinely be cancelling a timer
+  // that had already fired.
+  SignalService.instance.stores.suspendAutoFlush();
+
+  // `deferFlush` covers the other way a write could escape: the serve path
+  // normally commits its session immediately, which is correct in the main
+  // isolate, where a kill seconds later would otherwise strand a session the
+  // requester has already ratcheted past. From here that same write is the
+  // dangerous one, and it used to land before this function got to vote on it.
   await SyncService.instance
       .serveResendNow(roomId, messageId, deferFlush: true);
 
-  // The one write that can hurt anyone.
+  // The one write that can hurt anyone, and now the only one that can happen.
   if (mayPersistSessionAfterServing(mainIsolateAliveNow: mainIsolateIsAlive())) {
     await SignalService.instance.stores.flush();
     if (kDebugMode) debugPrint('[Resend] served $messageId and flushed');
-  } else {
-    // Not merely "don't flush": the serve's own `markDirty` armed a debounced
-    // write, and letting it expire would land this isolate's snapshot three
-    // seconds from now — exactly the decision we just declined to make. Outside
-    // the kDebugMode guard on purpose; this one has to happen in release.
-    SignalService.instance.stores.cancelPendingFlush();
+  } else if (kDebugMode) {
     // The session we just built for this one peer is lost, which costs the
     // requester one more resend round. The prekey message is already published,
     // and they archive their old state on processing it, so the repair itself
     // still lands — see [mayPersistSessionAfterServing] for why that is the
     // acceptable direction to fail in.
-    if (kDebugMode) {
-      debugPrint('[Resend] app launched mid-serve — skipping flush for $messageId');
-    }
+    debugPrint('[Resend] app launched mid-serve — skipping flush for $messageId');
   }
 }
 
