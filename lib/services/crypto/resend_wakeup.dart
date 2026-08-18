@@ -91,6 +91,10 @@ ResendRoute decideResendRoute({required bool mainIsolateAlive}) =>
 /// our own record for that one peer, costing at most one more resend round —
 /// whereas flushing would roll back every peer the main isolate has been talking
 /// to since it started.
+///
+/// This is a check, not a lock, so a launch can still slip between it and the
+/// write it guards. See the call site for why that gap only ever costs the
+/// former and never the latter.
 @visibleForTesting
 bool mayPersistSessionAfterServing({required bool mainIsolateAliveNow}) =>
     !mainIsolateAliveNow;
@@ -204,6 +208,27 @@ Future<void> _serveFromBackgroundIsolate(
       .serveResendNow(roomId, messageId, deferFlush: true);
 
   // The one write that can hurt anyone, and now the only one that can happen.
+  //
+  // A gap between this check and the write survives by construction — the two
+  // cannot be made atomic across isolates without a lock in the hot path of
+  // every decrypt — but it is bounded to the harmless direction, which is why it
+  // is left alone. The check sits at the *end* of the serve, so it already covers
+  // the whole interval in which our snapshot went stale: everything from
+  // `reloadFromDisk` to here. What is left uncovered is one `snapshotSync` plus
+  // one Keystore write.
+  //
+  // A main isolate appearing inside that cannot have persisted anything yet.
+  // `PersistentSignalStores.load` does three secure-storage reads before it
+  // returns, nothing flushes until crypto has actually happened, and an early
+  // `flush` writes nothing because `load` seeds the unchanged-content baseline.
+  // So it would have to finish a Keystore read plus a network round trip in less
+  // time than the Keystore write below takes. The cross-peer rollback this gap
+  // looks like it should allow needs an isolate that has already written newer
+  // state, and every such isolate was visible to the check above.
+  //
+  // The reachable outcome is the mild one: a main isolate that hydrated just
+  // before our write lands erases the session we built for this one peer, which
+  // costs the requester one more round — the same price the else branch pays.
   if (mayPersistSessionAfterServing(mainIsolateAliveNow: mainIsolateIsAlive())) {
     await SignalService.instance.stores.flush();
     if (kDebugMode) debugPrint('[Resend] served $messageId and flushed');
