@@ -45,6 +45,14 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Lets a silent data push start the app so it can answer an E2EE resend
+	     request without the user opening it (see resend_wakeup.dart). Apple
+	     throttles these and never wakes an app the user force-quit from the app
+	     switcher, so this is best-effort on iOS in a way it isn't on Android. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
 	<key>NSCameraUsageDescription</key>

@@ -370,6 +370,36 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ==================== RESEND WAKEUPS ====================
+    // Write-only signal that fires the notifyResendRequest Cloud Function, which
+    // sends the message's sender a silent data push so their app can answer an
+    // E2EE resend request even when it isn't running. Only the sender's own
+    // device holds the plaintext, so no server-side repair is possible — waking
+    // them is the whole mechanism.
+    //
+    // Not a trigger on the message document itself: those are updated on every
+    // read receipt and delivery tick, so a Function watching them would be
+    // invoked several times per message and do nothing almost every time.
+    match /resendWakeups/{wakeupId} {
+      // Nothing ever reads these back, and the Function deletes them with the
+      // Admin SDK, which bypasses rules entirely.
+      allow read, update, delete: if false;
+
+      // Both uids must be participants of the named room. Requiring it of
+      // `senderId` too — not just the caller — is what stops this being a
+      // "deliver a silent push to any uid" primitive: you can only wake someone
+      // you already share a chat with, which sending them a message does anyway.
+      allow create: if request.auth != null
+        && request.resource.data.requesterId == request.auth.uid
+        && request.resource.data.senderId is string
+        && request.resource.data.senderId != request.auth.uid
+        && request.resource.data.roomId is string
+        && request.resource.data.messageId is string
+        && get(/databases/$(database)/documents/chatRooms/$(request.resource.data.roomId))
+             .data.participants.hasAll([request.auth.uid,
+                                        request.resource.data.senderId]);
+    }
+
     // ==================== ANONYMOUS MATCHMAKING QUEUE ====================
     match /match_queue/{userId} {
       allow read: if request.auth != null;

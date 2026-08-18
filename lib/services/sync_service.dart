@@ -18,6 +18,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
@@ -547,6 +548,44 @@ class SyncService {
     return noted;
   }
 
+  /// Serves any outstanding resend requests on exactly one message, now.
+  ///
+  /// The push-driven entry point. [_maybeServeResendRequests] only ever runs
+  /// while this device has a live room listener, so a sender whose app is closed
+  /// — or open on an unrelated screen — used to leave the requester's bubble
+  /// broken until they next launched. A silent FCM data message now names the
+  /// one document to look at, and this fetches it directly.
+  ///
+  /// Deliberately one document, never a sweep: the background isolate that calls
+  /// this has roughly ten seconds before Android reclaims it, and a wider scan
+  /// would also widen the blast radius of the session write that follows.
+  ///
+  /// Safe to call spuriously. Everything past this point is the same code the
+  /// listener uses, including the participant guard and the `served:`
+  /// idempotency check, so a duplicate or stale push does no work.
+  Future<void> serveResendNow(String roomId, String messageId) async {
+    final uid = _currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || roomId.isEmpty || messageId.isEmpty) return;
+    try {
+      final doc = await _firestore
+          .collection('chatRooms')
+          .doc(roomId)
+          .collection('messages')
+          .doc(messageId)
+          .get();
+      final data = doc.data();
+      if (data == null) return;
+      if (data['senderId'] != uid) return;
+      final reqs = data['retryRequests'];
+      if (reqs is! List || reqs.isEmpty) return;
+      await _serveResendRequests(roomId, [doc], uid);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[SyncService] serveResendNow($messageId) failed: $e');
+      }
+    }
+  }
+
   /// Synchronous filter over a snapshot's change set.
   ///
   /// Almost every snapshot contains no requests at all, and the real work — a
@@ -747,7 +786,23 @@ class SyncService {
         'retryRequests': FieldValue.arrayRemove(tags),
       }, SetOptions(merge: true));
 
-      await store.markRetryServed(doc.id, address, attempt);
+      // Past this point the repair has already happened — the envelope is on the
+      // document and the requester's next snapshot decrypts it. The bookkeeping
+      // row below is pure optimization, so its failure must not be reported as a
+      // failed serve.
+      //
+      // It can genuinely fail: the FCM background isolate opens a second
+      // connection to `gsg_plaintext.db`, which is not in WAL mode, so a write
+      // racing the main isolate can come back SQLITE_BUSY. Losing the row costs
+      // one duplicate serve on a later snapshot, and a second prekey message is
+      // harmless to the requester.
+      try {
+        await store.markRetryServed(doc.id, address, attempt);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SyncService] Served ${doc.id} but could not record it: $e');
+        }
+      }
       if (kDebugMode) {
         debugPrint('[SyncService] Served resend #$attempt for ${doc.id} '
             'to $address');

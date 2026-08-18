@@ -21,6 +21,7 @@ import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
 import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
+import 'package:video_chat_app/services/crypto/resend_wakeup.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 
@@ -239,6 +240,14 @@ class FCMService {
           // Show a local notification for the chat message. Suppressed if the
           // user is currently viewing the same chat (via activeChatRoomId).
           await NotificationService.instance.handleChatMessage(message);
+        } else if (messageType == 'resend_request') {
+          // Silent: nothing for the user to see or do. A peer can't decrypt
+          // something we sent, and only this device holds the plaintext needed
+          // to re-encrypt it. Handled here as well as in the background handler
+          // so an app that's already open answers on the push rather than
+          // waiting for its room listener's next snapshot.
+          if (!await _isMessageForCurrentUser(message.data)) return;
+          await handleForegroundResendWakeup(message.data);
         }
       });
     }
@@ -653,6 +662,12 @@ class FCMService {
 
       // Show native full-screen call UI via CallKit
       await _showCallKitNotification(message.data);
+    } else if (messageType == 'resend_request') {
+      // A peer can't decrypt something we sent, and only this device holds the
+      // plaintext to re-encrypt it. Awaited: the handler's isolate is torn down
+      // as soon as this returns.
+      if (!await _isMessageForCurrentUser(message.data)) return;
+      await handleBackgroundResendWakeup(message.data);
     }
   }
 

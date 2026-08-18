@@ -1345,6 +1345,97 @@ async function applyStreakSideEffects(roomId, result, serverNow, opts = {}) {
 //
 // Reads only the cleartext fields `senderId`, `type` and `timestamp` — present
 // even at `schemaVersion: 2` (MessageModel.toMap) — so E2EE is untouched.
+// ─── E2EE Resend Wakeup ────────────────────────────────────────────────────
+// Wakes a message's *sender* so their app can answer a resend request.
+//
+// When a recipient can't decrypt a message, the only party who can repair it is
+// the sender: they hold the plaintext and can re-encrypt it over a fresh Signal
+// session. We hold nothing but ciphertext, so there is no server-side fix — the
+// entire job here is delivery of a silent nudge.
+//
+// The recipient writes a `resendWakeups` doc alongside the request it puts on the
+// message document (see ChatService._publishResendWakeup). A trigger on the
+// message document would have worked without any client change, but those are
+// updated on every read receipt and delivery tick — a few needless invocations
+// per message forever. This fires only on a real request.
+//
+// Data-only push, no `notification` block: a notification would land in the tray
+// and pull the sender's attention to something they never need to see. The point
+// is to start their process, not to tell them anything.
+exports.notifyResendRequest = onDocumentCreated(
+  { document: "resendWakeups/{wakeupId}", region: "us-central1" },
+  async (event) => {
+    const snap = event.data;
+    if (!snap || !snap.exists) return null;
+    const d = snap.data() || {};
+
+    try {
+      const { senderId, requesterId, roomId, messageId } = d;
+      if (
+        typeof senderId !== "string" || senderId.length === 0 ||
+        typeof roomId !== "string" || roomId.length === 0 ||
+        typeof messageId !== "string" || messageId.length === 0 ||
+        senderId === requesterId
+      ) {
+        console.warn(`notifyResendRequest: malformed doc ${event.params.wakeupId}, dropping`);
+        return null;
+      }
+
+      // Drop a backlog or a replay. The requester gives up on a round after a
+      // couple of minutes, so waking a phone for a request nobody is waiting on
+      // any more costs battery for nothing.
+      const atMs = d.at && typeof d.at.toMillis === "function" ? d.at.toMillis() : 0;
+      if (atMs > 0 && Date.now() - atMs > 5 * 60 * 1000) {
+        console.log(`notifyResendRequest: ${messageId} is stale, dropping`);
+        return null;
+      }
+
+      const result = await sendToUserDevices(senderId, (token) => ({
+        token,
+        data: {
+          type: "resend_request",
+          roomId,
+          messageId,
+          // Keyed `receiverId` so the client can reuse
+          // FCMService._isMessageForCurrentUser unchanged. The sender of the
+          // message is the receiver of this push.
+          receiverId: senderId,
+        },
+        android: {
+          // Required for delivery to a Doze-mode or idle device. Without it the
+          // push waits for the next maintenance window, which can be hours —
+          // long past the point the recipient stopped waiting.
+          priority: "high",
+        },
+        apns: {
+          headers: {
+            // Apple rejects priority 10 on a background push.
+            "apns-priority": "5",
+            "apns-push-type": "background",
+          },
+          payload: { aps: { "content-available": 1 } },
+        },
+      }));
+
+      if (!result.ok) {
+        // Expected whenever the sender has no live token. Not an error worth
+        // retrying: the request is already on the message document, so their app
+        // repairs the bubble the next time it opens.
+        console.log(`notifyResendRequest: ${messageId} not delivered — ${JSON.stringify(result.body)}`);
+      }
+      return null;
+    } catch (error) {
+      console.error(`notifyResendRequest failed for ${event.params.wakeupId}:`, error);
+      return null;
+    } finally {
+      // Always, including on the malformed and stale paths. Nothing reads these
+      // documents, so leaving them behind would grow a collection that only ever
+      // costs storage.
+      await snap.ref.delete().catch(() => {});
+    }
+  }
+);
+
 exports.streakOnMessageCreate = onDocumentCreated(
   { document: "chatRooms/{roomId}/messages/{messageId}", region: "us-central1" },
   async (event) => {

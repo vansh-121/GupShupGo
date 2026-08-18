@@ -26,6 +26,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/crypto/crypto_worker.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
+import 'package:video_chat_app/services/crypto/resend_wakeup.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
@@ -123,6 +124,12 @@ void main() async {
   //         is initialized, causing errors + rebuild storms.
   try {
     await SignalService.init();
+    // Claim ownership of the Signal stores for this isolate. Must come *after*
+    // init(): the FCM background isolate treats this registration as "the main
+    // isolate holds live stores, don't touch them", and it would be lying if the
+    // stores didn't exist yet. See resend_wakeup.dart for why two isolates
+    // writing them is unrecoverable.
+    registerMainIsolateForResendWakeups();
   } catch (e) {
     debugPrint('SignalService.init failed at startup (non-fatal): $e');
   }

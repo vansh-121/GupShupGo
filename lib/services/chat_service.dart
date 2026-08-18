@@ -898,15 +898,27 @@ class ChatService {
     // on the document and would never be served if it did.
     final attempt = (state?.attempts ?? 0) + 1;
     try {
+      final roomId = getChatRoomId(msg.senderId, msg.receiverId);
       await _firestore
           .collection(_chatRoomsCollection)
-          .doc(getChatRoomId(msg.senderId, msg.receiverId))
+          .doc(roomId)
           .collection(_messagesCollection)
           .doc(msg.id)
           .update({
         'retryRequests':
             FieldValue.arrayUnion(['$selfUid:$selfDeviceId#$attempt']),
       });
+      // Wake the sender's app if it isn't running. Strictly after the write
+      // above — a sender woken before the request exists would find nothing to
+      // serve — and strictly fire-and-forget, because the tag on the document is
+      // the protocol and this is only an accelerator. A failure here must not
+      // cost an attempt from the cap or take down the path that already works.
+      unawaited(_publishResendWakeup(
+        roomId: roomId,
+        messageId: msg.id,
+        senderId: msg.senderId,
+        selfUid: selfUid,
+      ));
       await store.saveRetryState(
         msg.id,
         attempts: attempt,
@@ -929,6 +941,47 @@ class ChatService {
       return false;
     } finally {
       _resendInFlight.remove(msg.id);
+    }
+  }
+
+  /// Asks the server to wake [senderId]'s app so it can serve the request we
+  /// just published.
+  ///
+  /// A resend can only be answered by the sender's own device — the server holds
+  /// no plaintext — so if their app isn't running, nothing happens until they
+  /// next launch it. This doc triggers the `notifyResendRequest` Cloud Function,
+  /// which sends them a silent data push.
+  ///
+  /// A collection of its own rather than a trigger on the message document:
+  /// message docs are updated constantly by read receipts and delivery ticks, so
+  /// watching them would invoke a Function a few times per message to do nothing
+  /// almost every time. This one fires only on a real request.
+  ///
+  /// The Function deletes the doc once it has sent, so the collection stays
+  /// empty. Nothing reads it back — see `firestore.rules`, where reads are
+  /// denied outright.
+  Future<void> _publishResendWakeup({
+    required String roomId,
+    required String messageId,
+    required String senderId,
+    required String selfUid,
+  }) async {
+    // Both guards are also enforced in firestore.rules, so a write that trips
+    // one would be rejected anyway. Checking here saves the round trip.
+    if (senderId.isEmpty || senderId == selfUid) return;
+    try {
+      await _firestore.collection('resendWakeups').add({
+        'roomId': roomId,
+        'messageId': messageId,
+        'senderId': senderId,
+        'requesterId': selfUid,
+        'at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      // Swallowed on purpose. The request itself is already on the message
+      // document, so the sender still repairs the bubble the moment they open
+      // the app — this only makes it sooner.
+      if (kDebugMode) debugPrint('[E2EE] resend wakeup failed: $e');
     }
   }
 
@@ -1478,12 +1531,23 @@ class ChatService {
         .toList()
         .reversed
         .toList();
-    final resolved = await Future.wait(
-      raw.map((m) async {
-        final r = await decryptForRendering(m, currentUserId);
-        return r ?? _lockedPlaceholder(m);
-      }),
-    );
+    // Sequential, NOT Future.wait. Every message in this page shares one Signal
+    // session per peer, and a decrypt is load → parse → mutate → store with no
+    // lock anywhere in libsignal 0.7.1. Run them concurrently and they all load
+    // the same pre-advance state, then the last store() wins — every other
+    // message's ratchet advance and skipped-message-keys are silently lost, so
+    // the session ends up at a position the sender never sent from and the rest
+    // of the page fails to decrypt.
+    //
+    // It only shows up when a backlog exists, which is why it looked like "the
+    // app was killed" caused it: a page of 20 fresh ciphertexts is the only time
+    // this runs more than one real decrypt at once. The two sibling call sites
+    // (fetchOlderMessages, SyncService._processRoomSnapshot) were already loops.
+    final resolved = <MessageModel>[];
+    for (final m in raw) {
+      final r = await decryptForRendering(m, currentUserId);
+      resolved.add(r ?? _lockedPlaceholder(m));
+    }
     return resolved;
   }
 

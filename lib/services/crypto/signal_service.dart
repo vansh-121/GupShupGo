@@ -74,6 +74,24 @@ class SignalService {
     return _instance!;
   }
 
+  /// Drops the cached instance so the next [init] builds a genuinely fresh set
+  /// of stores from what is on disk right now.
+  ///
+  /// **For the FCM background isolate only.** Android reuses that isolate across
+  /// pushes, so a second push would otherwise keep serving from stores hydrated
+  /// at the first push — by which time the main isolate may have started and
+  /// written a newer blob. Re-hydrating the existing instance is not a
+  /// substitute: [PersistentSignalStores.hydrate] *merges* into whatever is
+  /// already in memory, so a session the main isolate deliberately deleted would
+  /// survive here and be written back on the next flush.
+  ///
+  /// Never call this from the main isolate. Everything holding a reference to
+  /// the old instance would keep mutating stores that no longer get persisted.
+  static Future<SignalService> reloadFromDisk() async {
+    _instance = null;
+    return init();
+  }
+
   PersistentSignalStores get stores => _stores;
 
   IdentityKey get publicIdentityKey => _stores.identityKeyPair.getPublicKey();
