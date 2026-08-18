@@ -472,14 +472,49 @@ class ChatService {
   // decryptForRendering (typing, read receipts, etc.).
   static final Set<String> _loggedDecryptSkips = {};
 
-  Future<MessageModel?> decryptForRendering(
-      MessageModel msg, String selfUid) async {
-    if (msg.schemaVersion < 2) return msg;
+  /// Decrypts already in flight, keyed by message id.
+  ///
+  /// Two callers racing the same document is routine on launch: SyncService's
+  /// fast path walks the backlog while the chat screen's own
+  /// [getMessagesPaginated] walks the same documents. Neither has written
+  /// anything yet, so both miss the memo *and* the plaintext store, and both
+  /// reach libsignal.
+  ///
+  /// The per-address lock in [SignalService] stops that from corrupting the
+  /// ratchet, but on its own it would still be user-visible: the loser arrives
+  /// after the winner's decrypt has consumed the counter, gets
+  /// DuplicateMessageException, and [classifyDecryptFailure] reads that as "ask
+  /// the sender to resend". The bubble shows ⏳ and a resend goes out for a
+  /// message we just decrypted and stored. Sharing one Future makes the
+  /// duplicate free instead of a false failure.
+  static final Map<String, Future<MessageModel?>> _inFlightDecrypts = {};
 
-    // In-memory hot path — no awaits, synchronous return.
+  Future<MessageModel?> decryptForRendering(MessageModel msg, String selfUid) {
+    if (msg.schemaVersion < 2) return Future.value(msg);
+
+    // In-memory hot path — no I/O, resolves on the next microtask.
     final memo = _payloadMemo[msg.id];
-    if (memo != null) return _applyPayload(msg, memo);
+    if (memo != null) return Future.value(_applyPayload(msg, memo));
 
+    // A caller that joins an in-flight decrypt gets the model built from the
+    // *other* caller's snapshot of this document. Those differ only in
+    // transport metadata (delivery ticks, read receipts), both callers persist
+    // what they receive, and the next snapshot corrects it — a much better
+    // trade than decrypting one ciphertext twice.
+    final joined = _inFlightDecrypts[msg.id];
+    if (joined != null) return joined;
+
+    final work = _decryptForRenderingUncached(msg, selfUid);
+    _inFlightDecrypts[msg.id] = work;
+    return work.whenComplete(() {
+      // Identity-checked: `whenComplete` runs as a microtask, so a fresh call
+      // for this id could already have installed its own entry.
+      if (_inFlightDecrypts[msg.id] == work) _inFlightDecrypts.remove(msg.id);
+    });
+  }
+
+  Future<MessageModel?> _decryptForRenderingUncached(
+      MessageModel msg, String selfUid) async {
     final store = await PlaintextStore.instance();
 
     final cachedPayload = await store.get(msg.id);
@@ -1246,18 +1281,23 @@ class ChatService {
         if (kDebugMode)
           debugPrint('[SEND] encrypt: ${sw.elapsedMilliseconds}ms');
 
-        // A v2 message with no envelopes is the one shape we must never
-        // commit: the receiver's `env == null` branch cannot tell it apart
+        // A v2 message the recipient has no envelope for is the one shape we
+        // must never commit: their `env == null` branch cannot tell it apart
         // from a genuine decrypt failure, so it renders as a permanent
-        // placeholder with no error to classify and nothing to retry — the
-        // sender did encrypt successfully, so no resend request would ever
-        // repair it. Reachable if every one of the recipient's devices got
-        // capped out or had an unusable bundle, and (before Fix 7) if a
-        // self-chat resolved to only our own device. Throwing routes it into
-        // the plaintext fallback below, which at least delivers the message.
-        if (encs.isEmpty) {
+        // placeholder with no error to classify and nothing to retry — we did
+        // encrypt successfully, so no resend request would ever repair it.
+        //
+        // Tested against the recipient's own address rather than `encs.isEmpty`.
+        // encryptForUser also fans out to the sender's other devices, so a
+        // self-sync envelope on its own would satisfy an emptiness check while
+        // leaving the recipient with nothing to open — reachable now that a
+        // per-device encrypt failure is skipped instead of fatal. In a self-chat
+        // the recipient *is* one of those other devices and the prefix still
+        // matches, so the check is correct in both shapes.
+        final reachable = encs.keys.any((k) => k.startsWith('$receiverId:'));
+        if (!reachable) {
           throw StateError(
-              'encryptForUser produced no envelopes for $receiverId');
+              'no envelope addressed to $receiverId (${encs.length} written)');
         }
 
         envelopes = encs.map((k, v) => MapEntry(k, v.toMap()));
@@ -1305,13 +1345,32 @@ class ChatService {
         // but can recover from the vault).
         unawaited(_saveToVault(senderId, messageRef.id, outgoingPayload));
       } catch (e) {
-        // Logged in release too, not just debug. This is the one branch that
-        // silently downgrades a message out of E2EE, so if it ever starts
-        // firing in the field we need it in the logs — a quiet fallback that
-        // nobody can see is how "encryption is on" becomes untrue without
-        // anyone noticing.
+        // Fail the send rather than fall back to plaintext.
+        //
+        // `canEncrypt` is true here: the peer has published a key bundle, so
+        // both sides believe this conversation is end-to-end encrypted. Falling
+        // through would commit `storedText` — still the original body, because
+        // the assignments above never ran — along with a plaintext room
+        // preview, to Firestore in the clear. That is a downgrade the sender
+        // never consented to and cannot see, and one an attacker can induce by
+        // arranging for our encrypt to fail.
+        //
+        // Nothing is committed at this point: the memo, SQLite and vault writes
+        // all sit after the envelopes exist, and the Firestore batch is built
+        // below. sendMessage's catch marks the optimistic bubble
+        // MessageStatus.failed and rethrows, so this surfaces as the same
+        // visible failed send as a network error — bubble with a failed marker,
+        // snackbar, text restored to the composer — instead of a message that
+        // looks sent and went out unencrypted.
+        //
+        // Plaintext remains the path for a peer with no key bundle at all
+        // (`canEncrypt == false`). Never encrypting to someone who cannot
+        // decrypt is a different situation from declining to use encryption we
+        // know they support.
         // ignore: avoid_print
-        print('E2EE encrypt failed, falling back to plaintext: $e');
+        print('E2EE encrypt failed for $receiverId, refusing plaintext '
+            'downgrade: $e');
+        rethrow;
       }
     }
 

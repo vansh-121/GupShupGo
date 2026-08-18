@@ -34,6 +34,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
+import 'address_lock.dart';
 import 'persistent_signal_stores.dart';
 
 class SignalService {
@@ -56,6 +57,44 @@ class SignalService {
     });
     return completer.future;
   }
+
+  // ── Per-address serialization ───────────────────────────────────────────
+  //
+  // A libsignal decrypt is an unlocked read-modify-write: SessionCipher loads
+  // the SessionRecord, parses it, advances the ratchet, and stores it back.
+  // Two overlapping operations on one address both start from the same state,
+  // so whichever stores last silently discards the other's advance. Our receive
+  // chain then trails the sender's and *every subsequent* message from them
+  // fails verifyMac — one race produces a run of undecryptable bubbles, not a
+  // single one.
+  //
+  // Making each caller's own loop sequential was not enough, because the
+  // callers are not aware of each other. `ChatService.decryptForRendering` has
+  // six independent entry points — SyncService's fast path and its reconcile
+  // sweep, getMessagesPaginated, fetchOlderMessages, the vault backfill, and
+  // the notification-preview read — and nothing serialized them. Opening a chat
+  // that accumulated a backlog runs at least two of them across the same
+  // documents at the same moment, which is exactly why this reproduced when
+  // launching an app that had been backgrounded or killed and never during a
+  // live foreground conversation, where each message arrives alone through one
+  // path and is already in the plaintext store before anything else looks.
+  //
+  // Keyed per address, not globally: distinct peers hold distinct
+  // SessionRecords, so a global lock would serialize unrelated conversations
+  // for no benefit. The lock also cannot live inside [_runSignalAction] —
+  // [encrypt] calls [ensureSession], which is itself a session mutation, so a
+  // lock at that level would wait on itself.
+  final AddressLock _addressLock = AddressLock();
+
+  /// Runs [action] with exclusive access to one peer address' session state.
+  ///
+  /// Deadlock-free by construction: nothing reachable from an [action] here
+  /// re-enters [encrypt] or [decrypt]. [ensureSession] is *inside* the lock on
+  /// purpose — `SessionBuilder.processPreKeyBundle` rewrites the same
+  /// SessionRecord a concurrent decrypt would be walking.
+  Future<T> _lockedForAddress<T>(
+          String peerUid, int peerDeviceId, Future<T> Function() action) =>
+      _addressLock.run('$peerUid:$peerDeviceId', action);
 
   static SignalService? _instance;
   static SignalService get instance {
@@ -240,49 +279,51 @@ class SignalService {
   /// Encrypt for a single peer device.
   Future<EncryptedEnvelope> encrypt(
       String peerUid, int peerDeviceId, Uint8List plaintext) {
-    return _runSignalAction(() async {
-      await ensureSession(peerUid, peerDeviceId);
-      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-      final cipher = SessionCipher(
-        _stores.sessionStore,
-        _stores.preKeyStore,
-        _stores.signedPreKeyStore,
-        _stores.identityStore,
-        addr,
-      );
-      final ct = await cipher.encrypt(plaintext);
-      _stores.markDirty();
-      return EncryptedEnvelope(
-        bytes: ct.serialize(),
-        isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
-      );
-    });
+    return _runSignalAction(
+        () => _lockedForAddress(peerUid, peerDeviceId, () async {
+              await ensureSession(peerUid, peerDeviceId);
+              final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+              final cipher = SessionCipher(
+                _stores.sessionStore,
+                _stores.preKeyStore,
+                _stores.signedPreKeyStore,
+                _stores.identityStore,
+                addr,
+              );
+              final ct = await cipher.encrypt(plaintext);
+              _stores.markDirty();
+              return EncryptedEnvelope(
+                bytes: ct.serialize(),
+                isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
+              );
+            }));
   }
 
   /// Decrypt from a single peer device.
   Future<Uint8List> decrypt(
       String peerUid, int peerDeviceId, EncryptedEnvelope env) {
-    return _runSignalAction(() async {
-      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-      final cipher = SessionCipher(
-        _stores.sessionStore,
-        _stores.preKeyStore,
-        _stores.signedPreKeyStore,
-        _stores.identityStore,
-        addr,
-      );
+    return _runSignalAction(
+        () => _lockedForAddress(peerUid, peerDeviceId, () async {
+              final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+              final cipher = SessionCipher(
+                _stores.sessionStore,
+                _stores.preKeyStore,
+                _stores.signedPreKeyStore,
+                _stores.identityStore,
+                addr,
+              );
 
-      Uint8List plaintext;
-      if (env.isPreKeyMessage) {
-        final msg = PreKeySignalMessage(env.bytes);
-        plaintext = await cipher.decrypt(msg);
-      } else {
-        final msg = SignalMessage.fromSerialized(env.bytes);
-        plaintext = await cipher.decryptFromSignal(msg);
-      }
-      _stores.markDirty();
-      return plaintext;
-    });
+              Uint8List plaintext;
+              if (env.isPreKeyMessage) {
+                final msg = PreKeySignalMessage(env.bytes);
+                plaintext = await cipher.decrypt(msg);
+              } else {
+                final msg = SignalMessage.fromSerialized(env.bytes);
+                plaintext = await cipher.decryptFromSignal(msg);
+              }
+              _stores.markDirty();
+              return plaintext;
+            }));
   }
 
   /// Fan-out encrypt for every device the recipient (and the sender's other
@@ -362,15 +403,44 @@ class SignalService {
     // Future.delayed(Duration.zero). This allows Flutter's engine to process
     // pending microtasks (stream subscriptions, frame callbacks) between
     // CPU-bound encrypts, keeping the UI responsive.
+    //
+    // Per-device failures are tolerated rather than fatal. These loops used to
+    // let an exception escape, which meant one unusable device row took the
+    // whole fan-out with it — and the caller's only recovery is to send the
+    // message in plaintext. Stale device entries from reinstalls are common
+    // enough that the cap above exists to absorb them (see _maxDevicesPerUser),
+    // so a single dead registration on either account was silently downgrading
+    // every message to that conversation out of E2EE. Encrypt to whoever we
+    // can; the caller decides whether what came back is enough to send.
+    var recipientFailures = 0;
     for (final d in recipientDevices) {
       await Future.delayed(Duration.zero);
-      final env = await encrypt(recipientUid, d, plaintext);
-      out['$recipientUid:$d'] = env;
+      try {
+        final env = await encrypt(recipientUid, d, plaintext);
+        out['$recipientUid:$d'] = env;
+      } catch (e) {
+        recipientFailures++;
+        if (kDebugMode) {
+          debugPrint('[E2EE] ⚠ encrypt failed for $recipientUid:$d — $e');
+        }
+      }
     }
     for (final d in senderOtherDevices) {
       await Future.delayed(Duration.zero);
-      final env = await encrypt(senderUid, d, plaintext);
-      out['$senderUid:$d'] = env;
+      try {
+        final env = await encrypt(senderUid, d, plaintext);
+        out['$senderUid:$d'] = env;
+      } catch (e) {
+        // Self-sync only. A device of ours we can't reach costs us history on
+        // that device — it must never affect delivery to the recipient.
+        if (kDebugMode) {
+          debugPrint('[E2EE] ⚠ self-sync encrypt failed for $senderUid:$d — $e');
+        }
+      }
+    }
+    if (recipientFailures > 0 && kDebugMode) {
+      debugPrint('[E2EE] $recipientFailures/${recipientDevices.length} '
+          'recipient devices failed for $recipientUid');
     }
     if (kDebugMode)
       debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');

@@ -385,19 +385,47 @@ service cloud.firestore {
       // Admin SDK, which bypasses rules entirely.
       allow read, update, delete: if false;
 
-      // Both uids must be participants of the named room. Requiring it of
-      // `senderId` too — not just the caller — is what stops this being a
-      // "deliver a silent push to any uid" primitive: you can only wake someone
-      // you already share a chat with, which sending them a message does anyway.
+      // Bind the wakeup to a real message that `senderId` actually wrote and
+      // that is genuinely waiting on a resend.
+      //
+      // Room participation alone is not a sufficient bound. A participant could
+      // otherwise mint unlimited wakeups for invented messageIds and use the
+      // Function as a silent-push amplifier against someone they share a chat
+      // with — worse than the message spam that is the only comparable thing a
+      // participant can already do, because these pushes leave no tray entry,
+      // no bubble and no unread count, and each one wakes the peer's process to
+      // do Signal work. Tying a wakeup to an outstanding `retryRequests` entry
+      // caps it at the volume the protocol actually generates.
+      //
+      // `_requestResend` awaits the `retryRequests` update before writing this
+      // doc, so the message exists, its author is `senderId`, and the array is
+      // non-empty on every legitimate call.
+      function awaitingResend(roomId, messageId, senderId) {
+        let m = get(/databases/$(database)/documents/chatRooms/$(roomId)/messages/$(messageId)).data;
+        return m.senderId == senderId
+          && m.get('retryRequests', []).size() > 0;
+      }
+
       allow create: if request.auth != null
         && request.resource.data.requesterId == request.auth.uid
         && request.resource.data.senderId is string
         && request.resource.data.senderId != request.auth.uid
         && request.resource.data.roomId is string
         && request.resource.data.messageId is string
+        // Server-stamped, so the Function's five-minute staleness drop is a real
+        // gate and not one the client opts out of by omitting the field.
+        && request.resource.data.at == request.time
+        // Both uids must be participants of the named room. Requiring it of
+        // `senderId` too — not just the caller — is what stops this being a
+        // "deliver a silent push to any uid" primitive: you can only wake
+        // someone you already share a chat with, which sending them a message
+        // does anyway.
         && get(/databases/$(database)/documents/chatRooms/$(request.resource.data.roomId))
              .data.participants.hasAll([request.auth.uid,
-                                        request.resource.data.senderId]);
+                                        request.resource.data.senderId])
+        && awaitingResend(request.resource.data.roomId,
+                          request.resource.data.messageId,
+                          request.resource.data.senderId);
     }
 
     // ==================== ANONYMOUS MATCHMAKING QUEUE ====================

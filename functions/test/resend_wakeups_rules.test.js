@@ -19,20 +19,29 @@ const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
 
+// `ctx.firestore()` hands back a compat instance, so the sentinel has to come
+// from the compat namespace to be recognised. The `.default` dance is because
+// the CJS build of a package compiled from ESM may or may not wrap it.
+const firebaseCompat = require("firebase/compat/app");
+require("firebase/compat/firestore");
+const fb = firebaseCompat.default || firebaseCompat;
+const serverTimestamp = () => fb.firestore.FieldValue.serverTimestamp();
+
 const ALICE = "uid-alice";
 const BOB = "uid-bob";
 const CAROL = "uid-carol";
 const ROOM = "uid-alice_uid-bob";
+const MSG = "msg-1";
 
 let testEnv;
 
 // Alice can't decrypt something Bob sent, so she asks for Bob to be woken.
 const wakeup = (overrides = {}) => ({
   roomId: ROOM,
-  messageId: "msg-1",
+  messageId: MSG,
   senderId: BOB,
   requesterId: ALICE,
-  at: new Date(),
+  at: serverTimestamp(),
   ...overrides,
 });
 
@@ -59,6 +68,25 @@ after(async () => {
   if (testEnv) await testEnv.cleanup();
 });
 
+// The legitimate precondition for a wakeup: Bob wrote the message, and Alice has
+// already published a retry request against it. `_requestResend` awaits that
+// update before writing the wakeup, so this is the real on-the-wire state.
+const seedMessage = (overrides = {}) =>
+  testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx
+      .firestore()
+      .collection("chatRooms")
+      .doc(ROOM)
+      .collection("messages")
+      .doc(MSG)
+      .set({
+        senderId: BOB,
+        receiverId: ALICE,
+        retryRequests: [`${ALICE}:1#1`],
+        ...overrides,
+      });
+  });
+
 beforeEach(async () => {
   await testEnv.clearFirestore();
   // The rules read `participants` off the parent room, so it has to exist.
@@ -69,6 +97,7 @@ beforeEach(async () => {
       .doc(ROOM)
       .set({ participants: [ALICE, BOB] });
   });
+  await seedMessage();
 });
 
 const as = (uid) => testEnv.authenticatedContext(uid).firestore();
@@ -135,6 +164,72 @@ describe("resendWakeups", () => {
     await assertFails(
       as(ALICE).collection("resendWakeups").add(wakeup({ roomId: "no-such-room" }))
     );
+  });
+
+  it("rejects a wakeup for a message that does not exist", async () => {
+    // Room participation alone used to be the whole bound, which let a
+    // participant mint a wakeup per invented messageId — an unbounded silent
+    // push generator aimed at someone they share a chat with.
+    await assertFails(
+      as(ALICE)
+        .collection("resendWakeups")
+        .add(wakeup({ messageId: "never-sent" }))
+    );
+  });
+
+  it("rejects naming a sender who did not write the message", async () => {
+    // Carol is a participant of nothing here, but the case that matters is the
+    // shape: the uid being woken has to be the message's actual author, or a
+    // real message becomes a launchpad for waking an arbitrary room member.
+    await seedMessage({ senderId: ALICE });
+    await assertFails(
+      as(ALICE).collection("resendWakeups").add(wakeup({ senderId: BOB }))
+    );
+  });
+
+  it("rejects a wakeup with no outstanding retry request", async () => {
+    // This is the rate limit. A wakeup is only legitimate while a request is
+    // actually pending on the document, so the ceiling is the volume the resend
+    // protocol itself produces rather than however fast a client can loop.
+    await seedMessage({ retryRequests: [] });
+    await assertFails(
+      as(ALICE).collection("resendWakeups").add(wakeup())
+    );
+  });
+
+  it("rejects a wakeup whose message has no retryRequests field at all", async () => {
+    // Absent, not empty — the map accessor has to default rather than error,
+    // because an error and a denial look the same from here but not in the logs.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection("chatRooms")
+        .doc(ROOM)
+        .collection("messages")
+        .doc(MSG)
+        .set({ senderId: BOB, receiverId: ALICE });
+    });
+    await assertFails(as(ALICE).collection("resendWakeups").add(wakeup()));
+  });
+
+  it("rejects a client-chosen timestamp", async () => {
+    // The Function drops anything older than five minutes. If the client picked
+    // the value, that gate would be advisory: backdate it and a replayed wakeup
+    // sails through, or omit it and the staleness check is skipped entirely.
+    await assertFails(
+      as(ALICE).collection("resendWakeups").add(wakeup({ at: new Date() }))
+    );
+    await assertFails(
+      as(ALICE)
+        .collection("resendWakeups")
+        .add(wakeup({ at: new Date(Date.now() - 60 * 60 * 1000) }))
+    );
+  });
+
+  it("rejects an omitted timestamp", async () => {
+    const noAt = wakeup();
+    delete noAt.at;
+    await assertFails(as(ALICE).collection("resendWakeups").add(noAt));
   });
 
   it("rejects unauthenticated writes", async () => {
