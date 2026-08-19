@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ↩️ **Swipe to Reply** — Swipe any message to the right to reply to it directly. Your reply shows the quoted message above it, so nobody loses track of what you're answering.
 - 👆 **Tap a Quote to Jump** — Tapping the quoted message in a reply scrolls you back to the original and briefly highlights it.
 - 👆 **Fingerprint Unlock, On Your Terms** — Vault settings now has an "Unlock with fingerprint" switch you can turn on or off any time. Turning it on asks for your PIN once; turning it off just means you type your PIN again.
+- 👤 **Tap Anyone to See Their Profile** — People listed in Contacts, in Discover search results and suggestions, in the "You might know" cards, and in your matched device contacts are all tappable now. Tapping opens their profile; the call, message, and add-friend buttons on each row still do exactly what they did before.
+- ✨ **Profiles Actually Tell You Something** — A profile now shows whether they're online or when they were last seen, their level with progress to the next one, their Gup Points, the badges they've earned, and when they joined — instead of just a photo and a name.
 
 ### Changed
 - Updated version to 1.1.6 (build code 52).
@@ -48,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One-Time Re-Key:** `classifyPinCustody` (pure, exhaustively tested over all 8 input combinations) resolves to exactly one state that may interrupt the user at launch — config present, custody unproven, old PIN still readable. That case re-keys the whole vault via the existing `changePin`, which validates the old PIN against the verifier, re-encrypts in 150-doc pages, and flips the verifier **last**, so an interrupted run leaves the old PIN valid and can simply be repeated. The window closes permanently once an affected install is removed.
 - **No New Crypto Primitive:** The "confirm you know your PIN" path reuses `unlock`, which returns `false` *before* caching the derived key, so a wrong guess cannot disturb an already-open vault.
 - **Known Limitation:** `flutter_secure_storage` has no biometric binding, so a successful `local_auth` scan is a UI gate rather than a cryptographic one — the stored PIN rests on `encryptedSharedPreferences` / Keychain `first_unlock`. Real binding needs an Android Keystore key with `setUserAuthenticationRequired(true)` behind a platform channel, and is not claimed by the opt-in copy.
+- **Preloaded Profile Entry Point:** `PublicProfileScreen` now takes *either* a `username` to resolve or an already-loaded `UserModel` (`initialUser`). List rows pass the model they already hold, which skips a redundant Firestore read and — more importantly — works for users who never set a handle, since `UserModel.username` is nullable and the handle lookup could never have found them. The `@handle` line is rendered conditionally as a result.
+- **Non-Recursive Row Callback:** `onOpenProfile` on `UserDiscoverTile` is deliberately nullable. `PublicProfileScreen` embeds that same tile as its own action row, so a required callback would navigate from a profile to the identical profile without limit; leaving it unset there keeps the row body inert while its buttons still work. The "You might know" card switched from `Container` to `Ink` so the tap ripple paints above the card background rather than behind it.
 
 ---
 
