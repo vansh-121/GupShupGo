@@ -750,6 +750,20 @@ class SyncService {
         'statusReplyCaption': payload['statusReplyCaption'],
         'statusReplyBackgroundColor': payload['statusReplyBackgroundColor'],
       },
+      if (payload['linkPreviewUrl'] != null) ...{
+        'linkPreviewUrl': payload['linkPreviewUrl'],
+        'linkPreviewTitle': payload['linkPreviewTitle'],
+        'linkPreviewDescription': payload['linkPreviewDescription'],
+        'linkPreviewSiteName': payload['linkPreviewSiteName'],
+        'linkPreviewImageBase64': payload['linkPreviewImageBase64'],
+      },
+      if (payload['replyToMessageId'] != null) ...{
+        'replyToMessageId': payload['replyToMessageId'],
+        'replyToSenderId': payload['replyToSenderId'],
+        'replyToSenderName': payload['replyToSenderName'],
+        'replyToType': payload['replyToType'],
+        'replyToText': payload['replyToText'],
+      },
     };
 
     try {

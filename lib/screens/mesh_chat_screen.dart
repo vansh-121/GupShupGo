@@ -11,6 +11,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 /// Direct peer-to-peer chat over the mesh network.
@@ -359,8 +360,9 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 ),
               )
             else
-              Text(
+              LinkifiedText(
                 msg.text,
+                linkColor: isMe ? Colors.white : c.primary,
                 style: GoogleFonts.poppins(
                   color: isMe ? Colors.white : c.textHigh,
                   fontSize: 14.5,

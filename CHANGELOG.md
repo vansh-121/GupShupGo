@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Custom themes and color palettes
 
+## [1.1.6] - 2026-08-19
+
+### Added
+- 🔗 **Tappable Links in Chats** — Web links in any conversation are now underlined and open straight in your browser with a single tap, in normal chats, offline mesh chats, and anonymous rooms.
+- 🖼️ **Link Previews** — Share a link and both of you see a neat card with the page's title, description, and thumbnail, so you know what you're opening before you tap it.
+- ↩️ **Swipe to Reply** — Swipe any message to the right to reply to it directly. Your reply shows the quoted message above it, so nobody loses track of what you're answering.
+- 👆 **Tap a Quote to Jump** — Tapping the quoted message in a reply scrolls you back to the original and briefly highlights it.
+
+### Changed
+- Updated version to 1.1.6 (build code 52).
+- 🔒 **Previews Never Phone Home** — Link cards are prepared entirely on the sender's device, so opening a chat never contacts the linked website. Your IP address is never exposed to a link someone sent you, and cards still appear with no internet connection.
+- 💬 **Replies Survive Deletions** — Each reply carries its own copy of the quoted text, so the quote keeps showing even if the original message was deleted or cleared from your device.
+
+### Technical Details
+- **Sender-Side Unfurl:** OpenGraph metadata is fetched by the sending device and travels *inside* the encrypted Signal payload (`linkPreview*` fields), so nothing about the link is ever readable by the server and the receiving client makes no outbound request. Thumbnails are re-encoded to a ≤6 KB base64 JPEG to stay well within the 1 MiB Firestore document ceiling after per-device envelope fan-out.
+- **Snapshot Quotes:** `replyTo*` fields carry a self-contained copy of the quoted sender, type, and a 160-character snippet rather than a server-resolvable pointer, which is what makes quotes render for undecryptable, deleted, or never-synced originals.
+- **Content Key Registry:** `kMessageContentKeys` now declares every key that may appear in an encrypted payload, covered by a serializer test asserting `ChatService.applyPayload` consumes all of them — the previously-silent failure mode when adding an encrypted field.
+- **Package Visibility:** Added `android.intent.action.VIEW` `http`/`https` entries to the manifest `<queries>` block, required for link launching on Android 11+.
+
+---
+
 ## [1.1.5] - 2026-08-18
 
 ### Added

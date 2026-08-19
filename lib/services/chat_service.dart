@@ -1037,7 +1037,17 @@ class ChatService {
     }
   }
 
-  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) {
+  /// Lifts the decrypted inner payload back onto a message whose Firestore doc
+  /// carries nothing but ciphertext.
+  ///
+  /// Static and `@visibleForTesting` on purpose: it is pure (only `copyWith`),
+  /// and every key it must consume is listed in [kMessageContentKeys]. A test
+  /// asserts the two stay in sync, because a key that reaches here unread
+  /// decrypts fine and then simply never renders — the quietest of the seven
+  /// failure modes described on that constant.
+  @visibleForTesting
+  static MessageModel applyPayload(
+      MessageModel msg, Map<String, dynamic> payload) {
     return msg.copyWith(
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
@@ -1053,8 +1063,21 @@ class ChatService {
       statusReplyCaption: payload['statusReplyCaption'] as String?,
       statusReplyBackgroundColor:
           payload['statusReplyBackgroundColor'] as String?,
+      linkPreviewUrl: payload['linkPreviewUrl'] as String?,
+      linkPreviewTitle: payload['linkPreviewTitle'] as String?,
+      linkPreviewDescription: payload['linkPreviewDescription'] as String?,
+      linkPreviewSiteName: payload['linkPreviewSiteName'] as String?,
+      linkPreviewImageBase64: payload['linkPreviewImageBase64'] as String?,
+      replyToMessageId: payload['replyToMessageId'] as String?,
+      replyToSenderId: payload['replyToSenderId'] as String?,
+      replyToSenderName: payload['replyToSenderName'] as String?,
+      replyToType: payload['replyToType'] as String?,
+      replyToText: payload['replyToText'] as String?,
     );
   }
+
+  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) =>
+      applyPayload(msg, payload);
 
   // Generate a unique chat room ID from two user IDs
   String getChatRoomId(String userId1, String userId2) {
@@ -1112,6 +1135,18 @@ class ChatService {
     int? audioDuration,
     String? localFilePath,
     String? reactionTargetMessageId,
+    // ── Link preview (resolved by the SENDER, see LinkPreviewService) ────
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    // ── Reply quote (a self-contained snapshot, not a pointer) ───────────
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -1144,6 +1179,16 @@ class ChatService {
       statusReplyBackgroundColor: statusReplyBackgroundColor,
       localFilePath: localFilePath,
       reactionTargetMessageId: reactionTargetMessageId,
+      linkPreviewUrl: linkPreviewUrl,
+      linkPreviewTitle: linkPreviewTitle,
+      linkPreviewDescription: linkPreviewDescription,
+      linkPreviewSiteName: linkPreviewSiteName,
+      linkPreviewImageBase64: linkPreviewImageBase64,
+      replyToMessageId: replyToMessageId,
+      replyToSenderId: replyToSenderId,
+      replyToSenderName: replyToSenderName,
+      replyToType: replyToType,
+      replyToText: replyToText,
     );
     final ps = await PlaintextStore.instance();
 
@@ -1194,6 +1239,16 @@ class ChatService {
           statusReplyBackgroundColor: statusReplyBackgroundColor,
           localFilePath: localFilePath,
           reactionTargetMessageId: reactionTargetMessageId,
+          linkPreviewUrl: linkPreviewUrl,
+          linkPreviewTitle: linkPreviewTitle,
+          linkPreviewDescription: linkPreviewDescription,
+          linkPreviewSiteName: linkPreviewSiteName,
+          linkPreviewImageBase64: linkPreviewImageBase64,
+          replyToMessageId: replyToMessageId,
+          replyToSenderId: replyToSenderId,
+          replyToSenderName: replyToSenderName,
+          replyToType: replyToType,
+          replyToText: replyToText,
         ).timeout(_sendTimeout, onTimeout: () {
           throw TimeoutException(
               'Send timed out after ${_sendTimeout.inSeconds}s');
@@ -1240,6 +1295,16 @@ class ChatService {
     String? statusReplyBackgroundColor,
     String? localFilePath,
     String? reactionTargetMessageId,
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -1285,6 +1350,23 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+        },
+        // Sender-resolved OpenGraph metadata. It rides inside the envelope so
+        // the receiver renders the card without ever contacting the link host —
+        // no IP leak to whoever sent the link, and it still works offline.
+        if (linkPreviewUrl != null) ...{
+          'linkPreviewUrl': linkPreviewUrl,
+          'linkPreviewTitle': linkPreviewTitle,
+          'linkPreviewDescription': linkPreviewDescription,
+          'linkPreviewSiteName': linkPreviewSiteName,
+          'linkPreviewImageBase64': linkPreviewImageBase64,
+        },
+        if (replyToMessageId != null) ...{
+          'replyToMessageId': replyToMessageId,
+          'replyToSenderId': replyToSenderId,
+          'replyToSenderName': replyToSenderName,
+          'replyToType': replyToType,
+          'replyToText': replyToText,
         },
       });
 
@@ -1336,6 +1418,20 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+          if (linkPreviewUrl != null) ...{
+            'linkPreviewUrl': linkPreviewUrl,
+            'linkPreviewTitle': linkPreviewTitle,
+            'linkPreviewDescription': linkPreviewDescription,
+            'linkPreviewImageBase64': linkPreviewImageBase64,
+            'linkPreviewSiteName': linkPreviewSiteName,
+          },
+          if (replyToMessageId != null) ...{
+            'replyToMessageId': replyToMessageId,
+            'replyToSenderId': replyToSenderId,
+            'replyToSenderName': replyToSenderName,
+            'replyToType': replyToType,
+            'replyToText': replyToText,
+          },
           if (localFilePath != null) 'localFilePath': localFilePath,
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
@@ -1417,6 +1513,22 @@ class ChatService {
       envelopes: envelopes,
       localFilePath: localFilePath,
       reactionTargetMessageId: reactionTargetMessageId,
+      // Same rule as every other content field: on v2 these are committed as
+      // null so nothing but ciphertext reaches Firestore. A link preview would
+      // otherwise hand the server the page title, and a reply quote a verbatim
+      // snippet of the message being answered — both plaintext.
+      linkPreviewUrl: schemaVersion == 2 ? null : linkPreviewUrl,
+      linkPreviewTitle: schemaVersion == 2 ? null : linkPreviewTitle,
+      linkPreviewDescription:
+          schemaVersion == 2 ? null : linkPreviewDescription,
+      linkPreviewSiteName: schemaVersion == 2 ? null : linkPreviewSiteName,
+      linkPreviewImageBase64:
+          schemaVersion == 2 ? null : linkPreviewImageBase64,
+      replyToMessageId: schemaVersion == 2 ? null : replyToMessageId,
+      replyToSenderId: schemaVersion == 2 ? null : replyToSenderId,
+      replyToSenderName: schemaVersion == 2 ? null : replyToSenderName,
+      replyToType: schemaVersion == 2 ? null : replyToType,
+      replyToText: schemaVersion == 2 ? null : replyToText,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder

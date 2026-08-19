@@ -7,6 +7,7 @@
 // quality drop on a phone screen.
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path/path.dart' as p;
@@ -42,6 +43,36 @@ class ImageCompressor {
       return File(result.path);
     } catch (_) {
       return src;
+    }
+  }
+
+  /// Byte-in/byte-out variant for the link-preview micro-thumbnail.
+  ///
+  /// Unlike the file-based helpers above this returns **null** rather than the
+  /// input on failure: the caller's fallback is a text-only preview card, and
+  /// handing back a multi-megabyte original would be far worse than no
+  /// thumbnail at all — every byte here is duplicated once per recipient device
+  /// inside the encrypted payload.
+  ///
+  /// Bytes rather than a file because the source arrives straight off an HTTP
+  /// response and never needs to touch disk. Returns null for anything the
+  /// platform codec can't read (SVG favicons, for instance).
+  static Future<Uint8List?> compressThumbnailBytes(
+    Uint8List src, {
+    int maxEdge = 200,
+    int quality = 55,
+  }) async {
+    try {
+      final out = await FlutterImageCompress.compressWithList(
+        src,
+        minWidth: maxEdge,
+        minHeight: maxEdge,
+        quality: quality,
+        format: CompressFormat.jpeg,
+      );
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
     }
   }
 }

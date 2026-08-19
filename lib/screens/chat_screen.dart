@@ -20,8 +20,10 @@ import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
+import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/image_compressor.dart';
+import 'package:video_chat_app/services/link_preview_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -30,9 +32,14 @@ import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/link_extractor.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/link_preview_card.dart';
+import 'package:video_chat_app/widgets/linkified_text.dart';
+import 'package:video_chat_app/widgets/reply_quote_card.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
+import 'package:video_chat_app/widgets/swipe_to_reply.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
@@ -149,6 +156,33 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _hasMoreOlder = true;
   List<MessageModel> _currentMessages = [];
 
+  // ─── Reply state ──────────────────────────────────────────────────
+  // The message the composer is currently answering, set by a swipe. Cleared
+  // synchronously in _sendMessage, before any crypto runs.
+  MessageModel? _replyTo;
+
+  /// Focus for the composer field, so a swipe-to-reply can raise the keyboard.
+  final FocusNode _composerFocus = FocusNode();
+
+  // Per-message keys, so tapping a quote can scroll to the original. Populated
+  // as bubbles build, so it only ever holds what is in the loaded window —
+  // which is exactly the set we can scroll to.
+  final Map<String, GlobalKey> _messageKeys = {};
+  String? _highlightedMessageId;
+  Timer? _highlightTimer;
+
+  // ─── Link preview state ───────────────────────────────────────────
+  // Resolved while the user types (debounced), never on send: attaching only
+  // what is already cached keeps send latency at zero. A message whose preview
+  // hasn't landed yet just goes without a card — its text is still linkified.
+  Timer? _previewDebounce;
+  String? _previewUrl;
+  LinkPreview? _pendingPreview;
+
+  /// Set when the user dismisses the composer card, so the debounce doesn't
+  /// helpfully put it straight back.
+  bool _linkPreviewSuppressed = false;
+
   @override
   void initState() {
     super.initState();
@@ -209,9 +243,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _meshMessageSubscription?.cancel();
     _messageController.removeListener(_onTextChanged);
     _typingTimer?.cancel();
+    _previewDebounce?.cancel();
+    _highlightTimer?.cancel();
     _voiceRecorder.dispose();
     _scrollController.dispose();
     _messageController.dispose();
+    _composerFocus.dispose();
     _searchController.dispose();
     _searchQuery = '';
     // Re-enable global mesh banners when leaving this conversation.
@@ -631,7 +668,56 @@ class _ChatScreenState extends State<ChatScreen> {
     // Reset the stop-typing debounce timer on every keystroke
     _typingTimer?.cancel();
     _typingTimer = Timer(const Duration(seconds: 3), _stopTyping);
+
+    _scheduleLinkPreview();
   }
+
+  /// Watches the composer for a URL and resolves its preview in the background.
+  ///
+  /// Debounced because this fires on every keystroke and a fetch is a network
+  /// round-trip. Nothing here is on the send path — [_sendMessage] attaches
+  /// whatever has already landed and never waits.
+  void _scheduleLinkPreview() {
+    final url = firstLinkIn(_messageController.text);
+
+    if (url == null) {
+      // The URL was edited away or the composer was emptied. Drop the card and
+      // re-arm suppression so a *new* link gets a fresh chance.
+      _previewDebounce?.cancel();
+      if (_previewUrl != null || _pendingPreview != null) {
+        setState(() {
+          _previewUrl = null;
+          _pendingPreview = null;
+          _linkPreviewSuppressed = false;
+        });
+      }
+      return;
+    }
+
+    if (url == _previewUrl) return; // same link, still typing around it
+
+    _previewDebounce?.cancel();
+    setState(() {
+      _previewUrl = url;
+      // A different link than the one that was dismissed deserves its own card.
+      _linkPreviewSuppressed = false;
+      _pendingPreview = LinkPreviewService.instance.cached(url);
+    });
+    if (_pendingPreview != null) return;
+
+    _previewDebounce = Timer(const Duration(milliseconds: 600), () async {
+      final preview = await LinkPreviewService.instance.fetch(url);
+      // The user may have typed past this link while the fetch was in flight.
+      if (!mounted || _previewUrl != url) return;
+      setState(() => _pendingPreview = preview);
+    });
+  }
+
+  /// True when there is a resolved preview the composer should be showing.
+  bool get _showComposerPreview =>
+      !_linkPreviewSuppressed &&
+      _pendingPreview != null &&
+      _pendingPreview!.isRenderable;
 
   void _stopTyping() {
     if (_isTyping) {
@@ -879,6 +965,13 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // Snapshot the reply target and the preview *now*, in the same synchronous
+    // block that clears the composer below. Reading them after the clear would
+    // race a fast second send: the user can start typing the next message
+    // immediately, and this send's crypto runs long after.
+    final replyTo = _replyTo;
+    final preview = _showComposerPreview ? _pendingPreview : null;
+
     // ── Optimistic UI: WhatsApp-style ────────────────────────────────────
     // Clear the input field, stop the typing indicator, and scroll to the
     // bottom IMMEDIATELY — before encryption or any Firestore work runs.
@@ -891,6 +984,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.clear();
     _stopTyping();
     _scrollToBottom();
+    _clearReplyAndPreview();
 
     final connectivity =
         Provider.of<ConnectivityProvider>(context, listen: false);
@@ -906,6 +1000,16 @@ class _ChatScreenState extends State<ChatScreen> {
           receiverId: widget.contact.id,
           text: text,
           senderName: widget.currentUserName,
+          linkPreviewUrl: preview?.url,
+          linkPreviewTitle: preview?.title,
+          linkPreviewDescription: preview?.description,
+          linkPreviewSiteName: preview?.siteName,
+          linkPreviewImageBase64: preview?.imageBase64,
+          replyToMessageId: replyTo?.id,
+          replyToSenderId: replyTo?.senderId,
+          replyToSenderName: _replyDisplayName(replyTo),
+          replyToType: replyTo?.type.name,
+          replyToText: _replySnippet(replyTo),
         );
         if (mounted) setState(() => _meshMessages.add(meshMsg));
         _scrollToBottom();
@@ -932,6 +1036,16 @@ class _ChatScreenState extends State<ChatScreen> {
           receiverId: widget.contact.id,
           text: text,
           senderName: widget.currentUserName,
+          linkPreviewUrl: preview?.url,
+          linkPreviewTitle: preview?.title,
+          linkPreviewDescription: preview?.description,
+          linkPreviewSiteName: preview?.siteName,
+          linkPreviewImageBase64: preview?.imageBase64,
+          replyToMessageId: replyTo?.id,
+          replyToSenderId: replyTo?.senderId,
+          replyToSenderName: _replyDisplayName(replyTo),
+          replyToType: replyTo?.type.name,
+          replyToText: _replySnippet(replyTo),
         );
       } catch (e) {
         print('Error sending message: $e');
@@ -944,6 +1058,80 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
     }());
+  }
+
+  // ─── Reply plumbing ──────────────────────────────────────────────────
+
+  /// The name stored *in* the reply, so the quote reads correctly on both ends.
+  ///
+  /// Deliberately the author's real name rather than "You": the receiver would
+  /// otherwise see their own message quoted as "You" when it was in fact
+  /// attributed to the sender. Rendering resolves "You" locally instead, by
+  /// comparing `replyToSenderId` against the current user.
+  String? _replyDisplayName(MessageModel? original) {
+    if (original == null) return null;
+    return original.senderId == widget.currentUserId
+        ? (widget.currentUserName ?? 'You')
+        : widget.contact.name;
+  }
+
+  /// The snapshot snippet, capped so a quoted essay doesn't bloat every reply
+  /// in the thread (and, ×9 envelopes, the Firestore document).
+  String? _replySnippet(MessageModel? original) {
+    if (original == null) return null;
+    final raw = original.text.trim();
+    if (raw.isEmpty) return '';
+    return raw.length <= kReplySnippetMaxLength
+        ? raw
+        : '${raw.substring(0, kReplySnippetMaxLength).trimRight()}…';
+  }
+
+  void _startReply(MessageModel message) {
+    setState(() => _replyTo = message);
+    // Bring the keyboard up: a swipe that shows a strip but doesn't let you
+    // type is a half-finished gesture.
+    _composerFocus.requestFocus();
+  }
+
+  void _clearReplyAndPreview() {
+    _previewDebounce?.cancel();
+    setState(() {
+      _replyTo = null;
+      _previewUrl = null;
+      _pendingPreview = null;
+      _linkPreviewSuppressed = false;
+    });
+  }
+
+  /// Scrolls to the message a quote points at, and flashes it.
+  ///
+  /// Only works within the loaded window — `_messageKeys` holds exactly the
+  /// bubbles that have been built, which is the honest bound on where we can
+  /// scroll. Older than that and we say so rather than silently doing nothing.
+  Future<void> _jumpToMessage(String messageId) async {
+    final key = _messageKeys[messageId];
+    final ctx = key?.currentContext;
+    if (ctx == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Original message not loaded')),
+      );
+      return;
+    }
+
+    await Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      alignment: 0.35,
+    );
+    if (!mounted) return;
+
+    _highlightTimer?.cancel();
+    setState(() => _highlightedMessageId = messageId);
+    _highlightTimer = Timer(const Duration(milliseconds: 1100), () {
+      if (mounted) setState(() => _highlightedMessageId = null);
+    });
   }
 
   String _formatTime(DateTime dateTime) {
@@ -1068,6 +1256,10 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (message.hasStatusReply) _buildStatusReplyPreview(message, isMe),
+          if (message.hasReplyQuote) _buildReplyQuote(message, isMe),
+          // Above the text, WhatsApp-style — the card is the headline and the
+          // message body is the comment on it.
+          if (message.hasLinkPreview) _buildLinkPreviewCard(message, isMe),
           // ── Audio / voice message ─────────────────────────────
           if (message.type == MessageType.audio) ...[
             ConstrainedBox(
@@ -1098,8 +1290,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(height: 4),
           ] else
-            Text(
+            LinkifiedText(
               message.text,
+              linkColor: isMe ? Colors.white : c.primary,
               style: GoogleFonts.poppins(
                 color: isMe ? Colors.white : c.textHigh,
                 fontSize: 14.5,
@@ -1198,13 +1391,105 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    // Flash when a quote tap scrolls here, so the eye can find the message it
+    // just jumped to.
+    if (_highlightedMessageId == message.id) {
+      bubble = DecoratedBox(
+        decoration: BoxDecoration(
+          color: c.primary.withOpacity(0.16),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: bubble,
+      );
+    }
+
+    // A GlobalKey per built bubble is what makes Scrollable.ensureVisible
+    // possible without pulling in scrollable_positioned_list.
+    final anchor =
+        _messageKeys.putIfAbsent(message.id, () => GlobalKey(debugLabel: message.id));
+
     return Align(
       key: ValueKey('msg-${message.id}'),
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onLongPress: () => _showReactionOverlay(message),
-        child: bubble,
+      // Swipe sits OUTSIDE the long-press detector: long-press (reactions) and
+      // horizontal drag (reply) are different recognizers and share the arena
+      // fine, but nesting the drag inside a detector that already owns the
+      // pointer does not work.
+      child: SwipeToReply(
+        // Reactions are not messages you can answer, and a bubble we cannot
+        // decrypt has no text to snapshot into the quote.
+        enabled: message.type != MessageType.reaction &&
+            !_isUndecryptable(message),
+        onReply: () => _startReply(message),
+        child: GestureDetector(
+          key: anchor,
+          onLongPress: () => _showReactionOverlay(message),
+          child: bubble,
+        ),
       ),
+    );
+  }
+
+  /// True for a bubble whose payload never decrypted on this device.
+  ///
+  /// Uses [VaultCipher.isPlaceholderText] rather than an emptiness or prefix
+  /// test — that predicate is the codebase's single agreed definition of "not
+  /// real content", shared with SyncService and the chat-list preview, and it
+  /// matches exactly so a message that legitimately opens with a lock emoji is
+  /// never mistaken for one.
+  bool _isUndecryptable(MessageModel message) =>
+      VaultCipher.isPlaceholderText(message.text);
+
+  Widget _buildReplyQuote(MessageModel message, bool isMe) {
+    final previewWidth = (MediaQuery.of(context).size.width - 116)
+        .clamp(188.0, 246.0)
+        .toDouble();
+
+    // "You" is resolved here rather than stored, so the same reply reads
+    // correctly on both devices — see _replyDisplayName.
+    final name = message.replyToSenderId == widget.currentUserId
+        ? 'You'
+        : (message.replyToSenderName ?? widget.contact.name);
+
+    // Best-effort thumbnail: only from a file this device already has, because
+    // the original's mediaUrl is ciphertext without the media key.
+    final original = _findLoadedMessage(message.replyToMessageId);
+
+    return ReplyQuoteCard(
+      senderName: name,
+      text: message.replyToText,
+      type: message.replyToType,
+      localThumbPath: original?.localFilePath,
+      isMe: isMe,
+      width: previewWidth,
+      onTap: message.replyToMessageId == null
+          ? null
+          : () => _jumpToMessage(message.replyToMessageId!),
+    );
+  }
+
+  MessageModel? _findLoadedMessage(String? id) {
+    if (id == null) return null;
+    for (final m in _currentMessages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  Widget _buildLinkPreviewCard(MessageModel message, bool isMe) {
+    final previewWidth = (MediaQuery.of(context).size.width - 116)
+        .clamp(188.0, 246.0)
+        .toDouble();
+
+    return LinkPreviewCard(
+      url: message.linkPreviewUrl!,
+      cacheKey: message.id,
+      title: message.linkPreviewTitle,
+      description: message.linkPreviewDescription,
+      siteName: message.linkPreviewSiteName,
+      imageBase64: message.linkPreviewImageBase64,
+      isMe: isMe,
+      width: previewWidth,
     );
   }
 
@@ -1580,6 +1865,15 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _currentMessages = messages;
+
+    // Drop jump-anchors for messages that have left the loaded window. Without
+    // this the map grows for the life of the screen, and a stale GlobalKey
+    // whose element is gone would make _jumpToMessage look like it silently
+    // failed instead of reporting "not loaded".
+    if (_messageKeys.length > messages.length + 32) {
+      final live = messages.map((m) => m.id).toSet();
+      _messageKeys.removeWhere((id, _) => !live.contains(id));
+    }
 
     // ── Filter by search query when in search mode ────────────────────
     final displayMessages = _isSearchMode && _searchQuery.isNotEmpty
@@ -2124,6 +2418,50 @@ class _ChatScreenState extends State<ChatScreen> {
     const darkPillBg = Color(0xFF141624);
     const darkPillBorder = Color(0xFF24273D);
 
+    // The bar was a bare Padding > Row with no slot for anything above it. The
+    // Column adds one for the reply strip and the composer preview card, both
+    // of which sit between the divider and the pill.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_replyTo != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8, top: 6),
+            child: ReplyQuoteCard(
+              senderName: _replyTo!.senderId == widget.currentUserId
+                  ? 'You'
+                  : widget.contact.name,
+              text: _replySnippet(_replyTo),
+              type: _replyTo!.type.name,
+              localThumbPath: _replyTo!.localFilePath,
+              isMe: false,
+              onClose: () => setState(() => _replyTo = null),
+            ),
+          ),
+        if (_showComposerPreview)
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8, top: 6),
+            child: LinkPreviewCard(
+              url: _pendingPreview!.url,
+              // Keyed by URL, not just "composer": the cache returns whatever
+              // is stored under the key, so a fixed key would redraw the
+              // previous link's thumbnail when the user edits the URL.
+              cacheKey: 'composer:${_pendingPreview!.url}',
+              title: _pendingPreview!.title,
+              description: _pendingPreview!.description,
+              siteName: _pendingPreview!.siteName,
+              imageBase64: _pendingPreview!.imageBase64,
+              isMe: false,
+              onClose: () => setState(() => _linkPreviewSuppressed = true),
+            ),
+          ),
+        _buildComposerRow(c, darkPillBg, darkPillBorder),
+      ],
+    );
+  }
+
+  Widget _buildComposerRow(
+      AppThemeColors c, Color darkPillBg, Color darkPillBorder) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
@@ -2163,6 +2501,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      focusNode: _composerFocus,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.isDark ? Colors.white : c.textHigh,
