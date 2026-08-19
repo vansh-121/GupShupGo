@@ -103,9 +103,25 @@ class UserModel {
   /// toggled the setting, so including it here would silently flip an opted-out
   /// user back to discoverable. Absence of the field is read as `true` by
   /// [fromMap], which is the correct default for new accounts.
+  ///
+  /// `isOnline` and `lastSeen` are omitted for the same reason, and the stakes
+  /// are higher. They are owned by `PresenceService` and the `presenceMirror`
+  /// function, which write them alongside an RTDB `onDisconnect` handler — the
+  /// thing that retracts an "online" claim when the app dies. A bulk profile
+  /// write arms nothing, so shipping `isOnline: true` through here creates a
+  /// claim with no retraction path: sign-in sites build models with
+  /// `isOnline: true` and a client-clock `lastSeen`, and a profile save carries
+  /// whatever presence the model was *read* with. Both then show the user
+  /// online to everyone else with nothing left to correct it. Omitting the
+  /// fields is safe under `SetOptions(merge: true)` — existing values are left
+  /// alone, and a new account gets both within seconds from
+  /// `PresenceService.setupPresence`. Absence reads as `isOnline: false` in
+  /// [fromMap], the correct default.
   Map<String, dynamic> toWritableMap() {
     final map = toMap();
     map.remove('isDiscoverable');
+    map.remove('isOnline');
+    map.remove('lastSeen');
     map.remove('subscriptionPlan');
     map.remove('subscriptionExpiresAt');
     map.remove('subscriptionProductId');

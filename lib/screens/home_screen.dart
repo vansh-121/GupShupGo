@@ -107,6 +107,14 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, StreakView> _streakViews = const <String, StreakView>{};
   List<String> _watchedStreakRoomIds = const <String>[];
 
+  // ─── Presence decay ──────────────────────────────────────────────────
+  // The chat-list dot is rendered from ChatCacheService, whose presence check
+  // is against the clock — so the verdict changes with time, not just with new
+  // data. Without a tick, a contact who stopped heartbeating would keep a green
+  // dot until something else happened to rebuild the list.
+  Timer? _presenceDecayTimer;
+  static const _presenceDecayInterval = Duration(seconds: 20);
+
   @override
   void initState() {
     super.initState();
@@ -121,7 +129,24 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() => _hasFirebaseSession = has);
       }
     });
+    _startPresenceDecayTimer();
     _initializeApp();
+  }
+
+  /// Rebuilds the list on an interval so cached presence can go stale on
+  /// screen, and pulls fresh profiles so it can also come back online.
+  /// Paused while backgrounded — nobody is looking at the dots then.
+  void _startPresenceDecayTimer() {
+    _presenceDecayTimer?.cancel();
+    _presenceDecayTimer = Timer.periodic(_presenceDecayInterval, (_) {
+      if (!mounted) return;
+      setState(() {}); // re-evaluates getCachedUser against the clock
+      final rooms = _lastCachedRooms;
+      if (rooms != null && rooms.isNotEmpty) {
+        // Debounced internally by _isRefreshingUsers.
+        _refreshChatUsersInBackground(rooms);
+      }
+    });
   }
 
   @override
@@ -130,11 +155,12 @@ class _HomeScreenState extends State<HomeScreen>
     _recentContactsSub?.cancel();
     _currentUserSubscription?.cancel();
     _streakViewsSub?.cancel();
+    _presenceDecayTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
-    // No manual updateOnlineStatus(false) needed here — the RTDB
-    // onDisconnect handler will fire server-side when the connection
-    // drops, ensuring the user is marked offline even on force-kill.
+    // No manual Firestore presence write needed here — PresenceService owns
+    // those fields, and the RTDB onDisconnect handler fires server-side when
+    // the connection drops, marking the user offline even on force-kill.
     if (_currentUserId != null) {
       // Best-effort explicit offline write; non-critical if it fails.
       PresenceService.instance
@@ -147,6 +173,19 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    // Presence decay only matters while someone can see the list.
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _startPresenceDecayTimer();
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        _presenceDecayTimer?.cancel();
+        _presenceDecayTimer = null;
+        break;
+    }
     if (_currentUserId != null) {
       switch (state) {
         case AppLifecycleState.resumed:
