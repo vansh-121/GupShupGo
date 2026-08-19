@@ -18,6 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Custom themes and color palettes
 
+## [1.1.5] - 2026-08-18
+
+### Added
+- ⚡ **Ultra-Fast & Reliable Messaging** — Rapid back-to-back messages now send and deliver instantly with zero dropped chats or stutter.
+- 🔄 **Smart Chat Auto-Recovery** — If a message ever gets stuck or your connection drops, the app quietly fixes and restores it in the background without needing manual retries.
+- 🌙 **Background Chat Sync** — New silent sync ensures your friends' devices automatically receive and process missing messages even when their phone is locked or in sleep mode.
+- 🛡️ **Enhanced Protection & Spam Prevention** — Advanced security protections to prevent server spam and ensure safe, uninterrupted communication.
+
+### Changed
+- Updated version to 1.1.5 (build code 51).
+- 💾 **Reliable Chat History Storage** — Chat sessions and keys are stored more securely so messages stay available even after phone restarts or app updates.
+- 💬 **Clear Message Statuses** — Improved indicators like "Waiting for this message…" while the app automatically syncs missing conversations.
+
+### Fixed
+- Fixed rapid messages sometimes getting delayed or stuck when sent quickly in a row.
+- Fixed chat sync issues occurring after restarting the device.
+- Fixed unnecessary retry alerts when friends are offline.
+
+### Technical Details
+- **AddressLock Engine:** FIFO async lock per `(uid, deviceId)` tuple protecting libsignal session ratchets against concurrent race conditions.
+- **Wakeup Protocol:** Cloud Function trigger bridging `resendWakeups` collection to high-priority FCM data messages for background recovery.
+- **Store Architecture:** Re-entrant SQLite persistence layer for Double Ratchet sessions and PreKeys.
+
 ---
 
 ## [1.1.4] - 2026-08-14

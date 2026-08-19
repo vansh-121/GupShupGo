@@ -6,7 +6,8 @@
     "shell": "firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test:rules": "firebase emulators:exec --only firestore --project gsg-rules-test \"mocha --timeout 20000 test/*.test.js\""
   },
   "engines": {
     "node": "22"

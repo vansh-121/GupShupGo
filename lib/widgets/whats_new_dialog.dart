@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.4';
+const String kCurrentVersion = '1.1.5';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -183,23 +183,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.lock_reset_rounded,
-    'Real-Time End-to-End Encryption Status',
-    'Dynamic status badges accurately reflect call security states during setup and active calls.',
+    Icons.mark_chat_read_rounded,
+    'Instant & Reliable Messaging',
+    'Send messages rapidly back-to-back with zero lag. Chats now deliver smoothly even on slow connections.',
+  ),
+  _Feature(
+    Icons.sync_lock_rounded,
+    'Seamless Chat Recovery',
+    'Messages automatically fix and restore themselves in the background if your phone was offline or restarting.',
   ),
   // _Feature(
-  //   Icons.phone_missed_rounded,
-  //   'Instant Call Teardown & Cancellation',
-  //   'Cancelling outbound calls immediately stops signaling to prevent phantom rings on target devices.',
+  //   Icons.lock_outline_rounded,
+  //   'Private & Secure Calling',
+  //   'Clear lock badges let you know instantly when your voice and video calls are 100% private and protected.',
   // ),
   _Feature(
-    Icons.mark_email_read_rounded,
-    'Enhanced Support & Bug Reporting',
-    'Seamless problem reporting with protected rate limiting and payload validation.',
-  ),
-  _Feature(
     Icons.picture_in_picture_alt_rounded,
-    'Picture-in-Picture & Call Controls',
-    'Keep video calls active in a floating window while navigating your phone with smooth call controls.',
+    'Multitask While Calling',
+    'Keep your video calls in a floating mini-window while browsing photos, checking chats, or using other apps.',
   ),
 ];

@@ -34,6 +34,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
+import 'address_lock.dart';
 import 'persistent_signal_stores.dart';
 
 class SignalService {
@@ -57,6 +58,44 @@ class SignalService {
     return completer.future;
   }
 
+  // ── Per-address serialization ───────────────────────────────────────────
+  //
+  // A libsignal decrypt is an unlocked read-modify-write: SessionCipher loads
+  // the SessionRecord, parses it, advances the ratchet, and stores it back.
+  // Two overlapping operations on one address both start from the same state,
+  // so whichever stores last silently discards the other's advance. Our receive
+  // chain then trails the sender's and *every subsequent* message from them
+  // fails verifyMac — one race produces a run of undecryptable bubbles, not a
+  // single one.
+  //
+  // Making each caller's own loop sequential was not enough, because the
+  // callers are not aware of each other. `ChatService.decryptForRendering` has
+  // six independent entry points — SyncService's fast path and its reconcile
+  // sweep, getMessagesPaginated, fetchOlderMessages, the vault backfill, and
+  // the notification-preview read — and nothing serialized them. Opening a chat
+  // that accumulated a backlog runs at least two of them across the same
+  // documents at the same moment, which is exactly why this reproduced when
+  // launching an app that had been backgrounded or killed and never during a
+  // live foreground conversation, where each message arrives alone through one
+  // path and is already in the plaintext store before anything else looks.
+  //
+  // Keyed per address, not globally: distinct peers hold distinct
+  // SessionRecords, so a global lock would serialize unrelated conversations
+  // for no benefit. The lock also cannot live inside [_runSignalAction] —
+  // [encrypt] calls [ensureSession], which is itself a session mutation, so a
+  // lock at that level would wait on itself.
+  final AddressLock _addressLock = AddressLock();
+
+  /// Runs [action] with exclusive access to one peer address' session state.
+  ///
+  /// Deadlock-free by construction: nothing reachable from an [action] here
+  /// re-enters [encrypt] or [decrypt]. [ensureSession] is *inside* the lock on
+  /// purpose — `SessionBuilder.processPreKeyBundle` rewrites the same
+  /// SessionRecord a concurrent decrypt would be walking.
+  Future<T> _lockedForAddress<T>(
+          String peerUid, int peerDeviceId, Future<T> Function() action) =>
+      _addressLock.run('$peerUid:$peerDeviceId', action);
+
   static SignalService? _instance;
   static SignalService get instance {
     final i = _instance;
@@ -72,6 +111,24 @@ class SignalService {
     final stores = await PersistentSignalStores.load();
     _instance = SignalService._(stores);
     return _instance!;
+  }
+
+  /// Drops the cached instance so the next [init] builds a genuinely fresh set
+  /// of stores from what is on disk right now.
+  ///
+  /// **For the FCM background isolate only.** Android reuses that isolate across
+  /// pushes, so a second push would otherwise keep serving from stores hydrated
+  /// at the first push — by which time the main isolate may have started and
+  /// written a newer blob. Re-hydrating the existing instance is not a
+  /// substitute: [PersistentSignalStores.hydrate] *merges* into whatever is
+  /// already in memory, so a session the main isolate deliberately deleted would
+  /// survive here and be written back on the next flush.
+  ///
+  /// Never call this from the main isolate. Everything holding a reference to
+  /// the old instance would keep mutating stores that no longer get persisted.
+  static Future<SignalService> reloadFromDisk() async {
+    _instance = null;
+    return init();
   }
 
   PersistentSignalStores get stores => _stores;
@@ -107,6 +164,42 @@ class SignalService {
         addr,
       );
       await builder.processPreKeyBundle(bundle);
+      _stores.markDirty();
+    });
+  }
+
+  /// Tears down our session with (peerUid, peerDeviceId) so the next
+  /// [encrypt] performs a fresh X3DH handshake and produces a
+  /// `PreKeySignalMessage`.
+  ///
+  /// This is the **sender-side** recovery primitive, used when a recipient
+  /// reports it could not decrypt. A prekey message is self-healing on the
+  /// receiving end: `SessionBuilder.processV3` archives whatever ratchet state
+  /// the receiver had before installing the new session, so it decrypts no
+  /// matter how far the two chains had drifted apart.
+  ///
+  /// The receive path must NEVER call this. Deleting a session because a
+  /// message failed to decrypt only guarantees that every message already in
+  /// flight from that peer fails too — the peer doesn't know and keeps
+  /// ratcheting forward from a state we just threw away.
+  ///
+  /// Deliberately leaves `identityStore.trustedKeys[addr]` intact. Dropping
+  /// the pinned identity here would make us silently accept any substituted
+  /// identity key on the next handshake. A genuine identity change is
+  /// detected — and trust cleared — in [_fetchAndCacheDeviceIds], which
+  /// compares the published `identityPub` against what we pinned.
+  ///
+  /// Does not flush; the caller is expected to `await stores.flush()` after
+  /// the subsequent encrypt so the teardown and the new session persist
+  /// together in one Keystore write.
+  Future<void> resetSessionFor(String peerUid, int peerDeviceId) {
+    return _runSignalAction(() async {
+      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+      await _stores.sessionStore.deleteSession(addr);
+      // Drop the cached bundle too: a deliberate reset means we want the
+      // handshake built from freshly fetched keys, not from a copy that may
+      // be up to 10 minutes stale (or pre-date a signed-prekey rotation).
+      _bundleDataCache.remove('$peerUid:$peerDeviceId');
       _stores.markDirty();
     });
   }
@@ -186,49 +279,51 @@ class SignalService {
   /// Encrypt for a single peer device.
   Future<EncryptedEnvelope> encrypt(
       String peerUid, int peerDeviceId, Uint8List plaintext) {
-    return _runSignalAction(() async {
-      await ensureSession(peerUid, peerDeviceId);
-      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-      final cipher = SessionCipher(
-        _stores.sessionStore,
-        _stores.preKeyStore,
-        _stores.signedPreKeyStore,
-        _stores.identityStore,
-        addr,
-      );
-      final ct = await cipher.encrypt(plaintext);
-      _stores.markDirty();
-      return EncryptedEnvelope(
-        bytes: ct.serialize(),
-        isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
-      );
-    });
+    return _runSignalAction(
+        () => _lockedForAddress(peerUid, peerDeviceId, () async {
+              await ensureSession(peerUid, peerDeviceId);
+              final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+              final cipher = SessionCipher(
+                _stores.sessionStore,
+                _stores.preKeyStore,
+                _stores.signedPreKeyStore,
+                _stores.identityStore,
+                addr,
+              );
+              final ct = await cipher.encrypt(plaintext);
+              _stores.markDirty();
+              return EncryptedEnvelope(
+                bytes: ct.serialize(),
+                isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
+              );
+            }));
   }
 
   /// Decrypt from a single peer device.
   Future<Uint8List> decrypt(
       String peerUid, int peerDeviceId, EncryptedEnvelope env) {
-    return _runSignalAction(() async {
-      final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-      final cipher = SessionCipher(
-        _stores.sessionStore,
-        _stores.preKeyStore,
-        _stores.signedPreKeyStore,
-        _stores.identityStore,
-        addr,
-      );
+    return _runSignalAction(
+        () => _lockedForAddress(peerUid, peerDeviceId, () async {
+              final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+              final cipher = SessionCipher(
+                _stores.sessionStore,
+                _stores.preKeyStore,
+                _stores.signedPreKeyStore,
+                _stores.identityStore,
+                addr,
+              );
 
-      Uint8List plaintext;
-      if (env.isPreKeyMessage) {
-        final msg = PreKeySignalMessage(env.bytes);
-        plaintext = await cipher.decrypt(msg);
-      } else {
-        final msg = SignalMessage.fromSerialized(env.bytes);
-        plaintext = await cipher.decryptFromSignal(msg);
-      }
-      _stores.markDirty();
-      return plaintext;
-    });
+              Uint8List plaintext;
+              if (env.isPreKeyMessage) {
+                final msg = PreKeySignalMessage(env.bytes);
+                plaintext = await cipher.decrypt(msg);
+              } else {
+                final msg = SignalMessage.fromSerialized(env.bytes);
+                plaintext = await cipher.decryptFromSignal(msg);
+              }
+              _stores.markDirty();
+              return plaintext;
+            }));
   }
 
   /// Fan-out encrypt for every device the recipient (and the sender's other
@@ -267,21 +362,24 @@ class SignalService {
       recipientDevices.removeWhere((d) => d == senderDeviceId);
     }
 
-    // ── Safety cap: keep only the N highest (= most recent) device IDs ──
+    // ── Safety cap: keep the N most recently active devices ─────────────
     // Stale device entries from reinstalls accumulate in Firestore. Until
     // every user's DeviceIdentityService prunes them on next registration,
     // this cap prevents the 50+ envelope bloat that makes every message doc
-    // huge. Highest IDs are kept because _allocateDeviceId picks the
-    // smallest unused, so the latest install always has the highest ID.
+    // huge.
+    //
+    // _listDeviceIds already returns ids newest-first (see _sortByRecency),
+    // so the cap is a plain head-take. It used to sort by id and keep the
+    // HIGHEST, on the assumption that the latest install has the highest id —
+    // the opposite of what _allocateDeviceId does. See _sortByRecency for why
+    // that silently dropped fresh installs.
     if (recipientDevices.length > _maxDevicesPerUser) {
       if (kDebugMode) {
         debugPrint(
             '[E2EE] ⚠ $recipientUid has ${recipientDevices.length} devices — '
             'capping to $_maxDevicesPerUser (stale entries from reinstalls)');
       }
-      recipientDevices.sort();
-      recipientDevices = recipientDevices
-          .sublist(recipientDevices.length - _maxDevicesPerUser);
+      recipientDevices = recipientDevices.sublist(0, _maxDevicesPerUser);
     }
     if (senderOtherDevices.length > _maxDevicesPerUser) {
       if (kDebugMode) {
@@ -289,9 +387,8 @@ class SignalService {
             '[E2EE] ⚠ $senderUid has ${senderOtherDevices.length + 1} devices — '
             'capping other-device fan-out to $_maxDevicesPerUser');
       }
-      senderOtherDevices.sort();
       senderOtherDevices.removeRange(
-          0, senderOtherDevices.length - _maxDevicesPerUser);
+          _maxDevicesPerUser, senderOtherDevices.length);
     }
 
     if (kDebugMode) {
@@ -306,15 +403,44 @@ class SignalService {
     // Future.delayed(Duration.zero). This allows Flutter's engine to process
     // pending microtasks (stream subscriptions, frame callbacks) between
     // CPU-bound encrypts, keeping the UI responsive.
+    //
+    // Per-device failures are tolerated rather than fatal. These loops used to
+    // let an exception escape, which meant one unusable device row took the
+    // whole fan-out with it — and the caller's only recovery is to send the
+    // message in plaintext. Stale device entries from reinstalls are common
+    // enough that the cap above exists to absorb them (see _maxDevicesPerUser),
+    // so a single dead registration on either account was silently downgrading
+    // every message to that conversation out of E2EE. Encrypt to whoever we
+    // can; the caller decides whether what came back is enough to send.
+    var recipientFailures = 0;
     for (final d in recipientDevices) {
       await Future.delayed(Duration.zero);
-      final env = await encrypt(recipientUid, d, plaintext);
-      out['$recipientUid:$d'] = env;
+      try {
+        final env = await encrypt(recipientUid, d, plaintext);
+        out['$recipientUid:$d'] = env;
+      } catch (e) {
+        recipientFailures++;
+        if (kDebugMode) {
+          debugPrint('[E2EE] ⚠ encrypt failed for $recipientUid:$d — $e');
+        }
+      }
     }
     for (final d in senderOtherDevices) {
       await Future.delayed(Duration.zero);
-      final env = await encrypt(senderUid, d, plaintext);
-      out['$senderUid:$d'] = env;
+      try {
+        final env = await encrypt(senderUid, d, plaintext);
+        out['$senderUid:$d'] = env;
+      } catch (e) {
+        // Self-sync only. A device of ours we can't reach costs us history on
+        // that device — it must never affect delivery to the recipient.
+        if (kDebugMode) {
+          debugPrint('[E2EE] ⚠ self-sync encrypt failed for $senderUid:$d — $e');
+        }
+      }
+    }
+    if (recipientFailures > 0 && kDebugMode) {
+      debugPrint('[E2EE] $recipientFailures/${recipientDevices.length} '
+          'recipient devices failed for $recipientUid');
     }
     if (kDebugMode)
       debugPrint('[E2EE] encryptForUser total: ${sw.elapsedMilliseconds}ms');
@@ -375,6 +501,12 @@ class SignalService {
     }();
   }
 
+  /// Device ids for [uid], **ordered newest-first** (see [_sortByRecency]).
+  ///
+  /// That ordering is a contract, not incidental: every caller that caps the
+  /// fan-out takes the head of this list. The cache is only ever populated by
+  /// [_fetchAndCacheDeviceIds], which sorts before storing, so cache hits are
+  /// ordered too.
   Future<List<int>> _listDeviceIds(String uid) async {
     final hit = _deviceIdCache[uid];
     if (hit != null) {
@@ -411,6 +543,9 @@ class SignalService {
             .where('keyBundle', isNull: false)
             .get();
         final ids = <int>[];
+        // Publication time per device, for the newest-first ordering applied
+        // once the walk finishes.
+        final recency = <int, DateTime>{};
 
         // ── Populate bundle-data cache from the bulk query ──────────────────
         // We're already downloading every device doc (including its full
@@ -428,6 +563,8 @@ class SignalService {
           final bundle = data['keyBundle'] as Map<String, dynamic>?;
           if (bundle != null) {
             _bundleDataCache['$uid:$deviceId'] = (at: now, bundle: bundle);
+            final ts = _bundleRecency(bundle);
+            if (ts != null) recency[deviceId] = ts;
 
             // Check if identity key changed (indicating a reinstall on the same deviceId)
             final identityPubStr = bundle['identityPub'] as String?;
@@ -483,6 +620,7 @@ class SignalService {
           }
         }
 
+        _sortByRecency(ids, recency);
         _deviceIdCache[uid] = (at: now, ids: ids);
         // LRU eviction: cap cache size to prevent unbounded growth
         // for users who message hundreds of unique peers.
@@ -500,6 +638,56 @@ class SignalService {
 
     _deviceIdsQueries[uid] = future;
     return future;
+  }
+
+  /// Newest key-material timestamp a device has published: its registration
+  /// (`createdAt`) or its last signed-prekey rotation (`rotatedAt`), both
+  /// written by DeviceIdentityService. Null for devices registered before
+  /// either field existed.
+  static DateTime? _bundleRecency(Map<String, dynamic> bundle) {
+    DateTime? best;
+    for (final field in const ['createdAt', 'rotatedAt']) {
+      final v = bundle[field];
+      if (v is Timestamp) {
+        final d = v.toDate();
+        if (best == null || d.isAfter(best)) best = d;
+      }
+    }
+    return best;
+  }
+
+  /// Orders device ids newest-first, so anything that has to cap the list
+  /// keeps the devices most likely to be alive.
+  ///
+  /// The cap used to rank by device id and keep the highest, on the stated
+  /// assumption that the newest install always has the highest id. But
+  /// `DeviceIdentityService._allocateDeviceId` hands out the *smallest unused*
+  /// id — so after a reinstall left a gap, the fresh install took a LOW id and
+  /// a highest-wins cap discarded it in favour of the dead registrations above
+  /// it. Peers then encrypted only to devices that no longer exist: the live
+  /// device received no envelope of its own, which surfaces as a permanent
+  /// undecryptable bubble with no error for the retry path to act on.
+  ///
+  /// `rotatedAt` is what makes this a liveness signal rather than an install
+  /// clock — the signed prekey rotates weekly, so an active device keeps
+  /// refreshing its timestamp while an uninstalled one freezes in the past.
+  ///
+  /// Devices with no timestamp sort last, highest id first. That is the old
+  /// heuristic, kept only as a tiebreak among entries where we know nothing
+  /// better; a device that has published a timestamp always outranks one that
+  /// hasn't.
+  static void _sortByRecency(List<int> ids, Map<int, DateTime> recency) {
+    ids.sort((a, b) {
+      final ra = recency[a];
+      final rb = recency[b];
+      if (ra != null && rb != null) {
+        final byTime = rb.compareTo(ra);
+        return byTime != 0 ? byTime : b.compareTo(a);
+      }
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return b.compareTo(a);
+    });
   }
 
   void _refreshDeviceIds(String uid) {
@@ -572,11 +760,11 @@ class SignalService {
       if (uid == currentUid) return;
 
       // Apply the same cap as encryptForUser so we don't build sessions
-      // for stale devices that will never be used.
+      // for stale devices that will never be used. Already newest-first out
+      // of _listDeviceIds, so this is a head-take.
       var capped = devices.toList();
       if (capped.length > _maxDevicesPerUser) {
-        capped.sort();
-        capped = capped.sublist(capped.length - _maxDevicesPerUser);
+        capped = capped.sublist(0, _maxDevicesPerUser);
       }
       for (final d in capped) {
         await Future.delayed(Duration.zero);

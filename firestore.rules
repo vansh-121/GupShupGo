@@ -370,6 +370,118 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ==================== RESEND WAKEUPS ====================
+    // Write-only signal that fires the notifyResendRequest Cloud Function, which
+    // sends the message's sender a silent data push so their app can answer an
+    // E2EE resend request even when it isn't running. Only the sender's own
+    // device holds the plaintext, so no server-side repair is possible — waking
+    // them is the whole mechanism.
+    //
+    // Not a trigger on the message document itself: those are updated on every
+    // read receipt and delivery tick, so a Function watching them would be
+    // invoked several times per message and do nothing almost every time.
+    match /resendWakeups/{wakeupId} {
+      // Nothing ever reads these back. The Function consumes them with the Admin
+      // SDK, which bypasses rules entirely.
+      allow read, update, delete: if false;
+
+      // Bind the wakeup to a real message that `senderId` actually wrote and to
+      // the specific retry request it claims to be accelerating.
+      //
+      // Room participation alone is not a sufficient bound. A participant could
+      // otherwise mint unlimited wakeups for invented messageIds and use the
+      // Function as a silent-push amplifier against someone they share a chat
+      // with — worse than the message spam that is the only comparable thing a
+      // participant can already do, because these pushes leave no tray entry,
+      // no bubble and no unread count, and each one wakes the peer's process to
+      // do Signal work.
+      //
+      // Nor is "some request is pending" sufficient, which is what this checked
+      // first. That bounded which messages were wakeable but nothing else: the
+      // document id also contains `deviceId`, which no rule constrained beyond
+      // being positive, so walking it produced an unlimited supply of distinct
+      // ids that each passed. Matching the *exact* tag closes that, because it
+      // makes every field in the id answerable to something already on the
+      // message document.
+      //
+      // `_requestResend` writes the tag and awaits it before writing this doc, so
+      // the match holds on every legitimate call. A sender fast enough to serve
+      // and `arrayRemove` the tag first will deny the wakeup, which is correct —
+      // there is nothing left to accelerate.
+      function retryTag() {
+        // The wire format from `_requestResend`: `<uid>:<deviceId>#<attempt>`.
+        return request.auth.uid + ':'
+          + string(request.resource.data.deviceId) + '#'
+          + string(request.resource.data.attempt);
+      }
+
+      function awaitingResend(roomId, messageId, senderId) {
+        let m = get(/databases/$(database)/documents/chatRooms/$(roomId)/messages/$(messageId)).data;
+        return m.senderId == senderId
+          && m.get('retryRequests', []).hasAny([retryTag()]);
+      }
+
+      // The document id, derived entirely from fields this rule has already
+      // validated. Nothing here can be forged: `roomId`, `messageId` and the
+      // caller's uid are each checked below, so the id is fully determined.
+      function expectedId() {
+        return request.resource.data.roomId + '_'
+          + request.resource.data.messageId + '_'
+          + request.auth.uid + '_'
+          + string(request.resource.data.deviceId) + '_'
+          + string(request.resource.data.attempt);
+      }
+
+      allow create: if request.auth != null
+        && request.resource.data.requesterId == request.auth.uid
+        && request.resource.data.senderId is string
+        && request.resource.data.senderId != request.auth.uid
+        && request.resource.data.roomId is string
+        && request.resource.data.messageId is string
+        // Server-stamped, so the Function's five-minute staleness drop is a real
+        // gate and not one the client opts out of by omitting the field.
+        && request.resource.data.at == request.time
+        // ── The write-once ceiling ──────────────────────────────────────────
+        //
+        // An auto-id let a client re-create a wakeup for the same request as fast
+        // as it could write — every one of them authorized, every one another
+        // high-priority push and another Function invocation. Pinning the id to
+        // (message, requester device, attempt) turns that into a create-once: the
+        // second write to a live id is an update, and updates are denied above.
+        // `notifyResendRequest` deliberately no longer deletes these documents,
+        // because deleting one would hand the id straight back.
+        //
+        // The id is only a ceiling because every field in it is pinned to
+        // something else. `deviceId` and `attempt` are free-form ints, so on their
+        // own they are a way to walk the id space rather than a bound on it — the
+        // `hasAny` check in `awaitingResend` is what ties both to a tag the client
+        // had to write onto the message document first. The checks here just keep
+        // the pairing honest: `is int` so `string()` renders the same value the
+        // tag does, and positivity because no real device or attempt is zero.
+        //
+        // `attempt <= 20` is a sanity bound rather than the rate limit — the
+        // protocol's own lifetime cap is 15. Denying an over-cap write costs only
+        // the accelerator; the request is already on the message document, which
+        // is what actually drives the repair.
+        && request.resource.data.deviceId is int
+        && request.resource.data.deviceId > 0
+        && request.resource.data.attempt is int
+        && request.resource.data.attempt > 0
+        && request.resource.data.attempt <= 20
+        && wakeupId == expectedId()
+        // Both uids must be participants of the named room. Requiring it of
+        // `senderId` too — not just the caller — is what stops this being a
+        // "deliver a silent push to any uid" primitive: you can only wake
+        // someone you already share a chat with, which sending them a message
+        // does anyway.
+        && get(/databases/$(database)/documents/chatRooms/$(request.resource.data.roomId))
+             .data.participants.hasAll([request.auth.uid,
+                                        request.resource.data.senderId])
+        && awaitingResend(request.resource.data.roomId,
+                          request.resource.data.messageId,
+                          request.resource.data.senderId);
+    }
+
     // ==================== ANONYMOUS MATCHMAKING QUEUE ====================
     match /match_queue/{userId} {
       allow read: if request.auth != null;
