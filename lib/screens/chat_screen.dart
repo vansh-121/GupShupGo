@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
@@ -160,6 +161,12 @@ class _ChatScreenState extends State<ChatScreen> {
   // The message the composer is currently answering, set by a swipe. Cleared
   // synchronously in _sendMessage, before any crypto runs.
   MessageModel? _replyTo;
+
+  // ─── Edit state ───────────────────────────────────────────────────
+  // The message the composer is currently rewriting. Mutually exclusive with
+  // [_replyTo]: the composer can only mean one thing at a time, and a send
+  // while this is non-null commits an edit instead of a new message.
+  MessageModel? _editing;
 
   /// Focus for the composer field, so a swipe-to-reply can raise the keyboard.
   final FocusNode _composerFocus = FocusNode();
@@ -715,6 +722,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// True when there is a resolved preview the composer should be showing.
   bool get _showComposerPreview =>
+      // Never while editing. An edit preserves the original's preview and does
+      // not resolve a new one, so showing a card here would promise a change the
+      // commit will not make.
+      _editing == null &&
       !_linkPreviewSuppressed &&
       _pendingPreview != null &&
       _pendingPreview!.isRenderable;
@@ -956,6 +967,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage() async {
+    // The composer is in edit mode — same button, different commit. Checked
+    // before the empty-text guard below so an emptied edit gets its own
+    // explanation instead of silently doing nothing.
+    if (_editing != null) return _commitEdit();
+
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
     if (_isBlocked || _isBlockedByContact) {
@@ -1223,8 +1239,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildMessage(MessageModel message) {
     final c = AppThemeColors.of(context);
     final isMe = message.senderId == widget.currentUserId;
-    final hasReactions =
-        message.reactions != null && message.reactions!.isNotEmpty;
+    final isTombstone = message.deletedForEveryone;
+    // A deleted message has nothing left to react to, and its reactions left
+    // the document along with its ciphertext. Belt-and-braces: a row written by
+    // an older build could still be carrying them locally.
+    final hasReactions = !isTombstone &&
+        message.reactions != null &&
+        message.reactions!.isNotEmpty;
 
     Widget bubble = Container(
       margin: EdgeInsets.only(
@@ -1260,8 +1281,33 @@ class _ChatScreenState extends State<ChatScreen> {
           // Above the text, WhatsApp-style — the card is the headline and the
           // message body is the comment on it.
           if (message.hasLinkPreview) _buildLinkPreviewCard(message, isMe),
+          // ── Deleted for everyone ──────────────────────────────
+          // First in the chain, and not merely an empty-text case: `type`
+          // survives a tombstone, so a deleted voice note would otherwise reach
+          // VoiceMessageBubble with nothing to play.
+          if (isTombstone) ...[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.block_rounded,
+                  size: 14,
+                  color: isMe ? Colors.white.withOpacity(0.7) : c.textLow,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  ChatService.deletedMessageText,
+                  style: GoogleFonts.poppins(
+                    color: isMe ? Colors.white.withOpacity(0.85) : c.textLow,
+                    fontSize: 13.5,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ]
           // ── Audio / voice message ─────────────────────────────
-          if (message.type == MessageType.audio) ...[
+          else if (message.type == MessageType.audio) ...[
             ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 200),
               child: VoiceMessageBubble(
@@ -1310,6 +1356,19 @@ class _ChatScreenState extends State<ChatScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Before the time, as WhatsApp has it — the timestamp stays the
+              // last thing before the tick marks.
+              if (message.isEdited && !isTombstone) ...[
+                Text(
+                  'edited',
+                  style: GoogleFonts.poppins(
+                    color: isMe ? Colors.white.withOpacity(0.75) : c.textLow,
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
               Text(
                 _formatTime(message.timestamp),
                 style: GoogleFonts.poppins(
@@ -1411,10 +1470,10 @@ class _ChatScreenState extends State<ChatScreen> {
     return Align(
       key: ValueKey('msg-${message.id}'),
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      // Swipe sits OUTSIDE the long-press detector: long-press (reactions) and
-      // horizontal drag (reply) are different recognizers and share the arena
-      // fine, but nesting the drag inside a detector that already owns the
-      // pointer does not work.
+      // Swipe sits OUTSIDE the long-press detector: long-press (the action
+      // menu) and horizontal drag (reply) are different recognizers and share
+      // the arena fine, but nesting the drag inside a detector that already owns
+      // the pointer does not work.
       child: SwipeToReply(
         // Reactions are not messages you can answer, and a bubble we cannot
         // decrypt has no text to snapshot into the quote.
@@ -1423,7 +1482,7 @@ class _ChatScreenState extends State<ChatScreen> {
         onReply: () => _startReply(message),
         child: GestureDetector(
           key: anchor,
-          onLongPress: () => _showReactionOverlay(message),
+          onLongPress: () => _showMessageActions(message),
           child: bubble,
         ),
       ),
@@ -2424,6 +2483,56 @@ class _ChatScreenState extends State<ChatScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (_editing != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8, top: 6),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              decoration: BoxDecoration(
+                color: c.primaryLt,
+                borderRadius: BorderRadius.circular(10),
+                border: Border(
+                  left: BorderSide(color: c.primary, width: 3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.edit_rounded, size: 15, color: c.primaryDk),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Editing message',
+                          style: GoogleFonts.poppins(
+                            color: c.primaryDk,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          // The original, so they can see what they are
+                          // changing it from once the field holds the new text.
+                          _editing!.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            color: c.textMid,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, size: 18, color: c.textMid),
+                    onPressed: _cancelEdit,
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (_replyTo != null)
           Padding(
             padding: const EdgeInsets.only(left: 8, right: 8, top: 6),
@@ -3068,55 +3177,530 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _showReactionOverlay(MessageModel message) {
+  /// The long-press menu: the reaction pill on top, the action list beneath.
+  ///
+  /// One overlay and one gesture, so holding a message reveals everything it can
+  /// do. Availability is decided once, here, from three questions — is it mine,
+  /// can I actually read it, and is it still inside [ChatService.editWindow] —
+  /// rather than each tile guessing for itself.
+  void _showMessageActions(MessageModel message) {
     final c = AppThemeColors.of(context);
+
+    final isMine = message.senderId == widget.currentUserId;
+    final isTombstone = message.deletedForEveryone;
+    final isReaction = message.type == MessageType.reaction;
+
+    // A bubble we never decrypted has no text to copy, quote or forward, and a
+    // tombstone has no content at all. Both are still deletable — for a message
+    // you cannot read, removing it is the only thing left to want.
+    final hasContent = !_isUndecryptable(message) && !isTombstone && !isReaction;
+    final fresh = ChatService.withinEditWindow(message.timestamp);
+
+    final canCopy = hasContent && message.text.trim().isNotEmpty;
+    final canEdit = isMine && hasContent && message.type == MessageType.text && fresh;
+    final canDeleteForEveryone = isMine && !isTombstone && fresh;
+
     showDialog(
       context: context,
       barrierColor: Colors.black.withOpacity(0.4),
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
+        // Scrollable because the pill plus six tiles is taller than a short
+        // screen in landscape, and a menu you cannot reach the bottom of is
+        // worse than one that scrolls.
         return Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            margin: const EdgeInsets.symmetric(horizontal: 24),
-            decoration: BoxDecoration(
-              color: c.surface.withOpacity(0.92),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: c.border.withOpacity(0.3), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasContent) _buildReactionPill(message, c, dialogContext),
+                if (hasContent) const SizedBox(height: 10),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 40),
+                  decoration: BoxDecoration(
+                    color: c.surface.withOpacity(0.98),
+                    borderRadius: BorderRadius.circular(18),
+                    border:
+                        Border.all(color: c.border.withOpacity(0.3), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.25),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.hardEdge,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasContent)
+                          _buildActionTile(
+                            icon: Icons.reply_rounded,
+                            label: 'Reply',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _startReply(message);
+                            },
+                          ),
+                        if (canCopy)
+                          _buildActionTile(
+                            icon: Icons.content_copy_rounded,
+                            label: 'Copy',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _copyMessage(message);
+                            },
+                          ),
+                        if (hasContent)
+                          _buildActionTile(
+                            icon: Icons.forward_rounded,
+                            label: 'Forward',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _showForwardSheet(message);
+                            },
+                          ),
+                        if (canEdit)
+                          _buildActionTile(
+                            icon: Icons.edit_rounded,
+                            label: 'Edit',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _startEdit(message);
+                            },
+                          ),
+                        _buildActionTile(
+                          icon: Icons.delete_outline_rounded,
+                          label: 'Delete',
+                          colors: c,
+                          destructive: true,
+                          onTap: () {
+                            Navigator.pop(dialogContext);
+                            _confirmDelete(message,
+                                forEveryone: canDeleteForEveryone);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
-                  return InkWell(
-                    onTap: () {
-                      Navigator.pop(context);
-                      _sendReaction(message, emoji);
-                    },
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      child: Text(
-                        emoji,
-                        style: const TextStyle(fontSize: 28),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
             ),
           ),
         );
       },
     );
+  }
+
+  /// The six-emoji reaction row. Unchanged behaviour; lifted out of
+  /// [_showMessageActions] so the overlay body stays readable.
+  Widget _buildReactionPill(
+      MessageModel message, AppThemeColors c, BuildContext dialogContext) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: BoxDecoration(
+        color: c.surface.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: c.border.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
+            return InkWell(
+              onTap: () {
+                Navigator.pop(dialogContext);
+                _sendReaction(message, emoji);
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Text(emoji, style: const TextStyle(fontSize: 28)),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String label,
+    required AppThemeColors colors,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    final tint = destructive ? const Color(0xFFE5484D) : colors.textHigh;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: tint),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                color: tint,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _copyMessage(MessageModel message) {
+    // Already plaintext: bubbles render decrypted text, so there is nothing to
+    // unwrap here.
+    Clipboard.setData(ClipboardData(text: message.text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied'),
+        duration: Duration(milliseconds: 1200),
+      ),
+    );
+  }
+
+  /// Asks which kind of delete, then performs it.
+  ///
+  /// A confirmation step rather than two tiles in the menu: "delete for
+  /// everyone" is irreversible and reaches someone else's device, which is not
+  /// something a single mis-aimed tap should be able to do.
+  Future<void> _confirmDelete(MessageModel message,
+      {required bool forEveryone}) async {
+    final c = AppThemeColors.of(context);
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: c.surface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Delete message?',
+          style: GoogleFonts.poppins(
+            color: c.textHigh,
+            fontSize: 16.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          forEveryone
+              ? 'Delete it just for you, or for everyone in this chat?'
+              // Shown when the 48h window has closed, or the message is not
+              // ours. Saying why is better than an option that is simply absent.
+              : 'This removes it from your devices only. '
+                  '${widget.contact.name} will still see it.',
+          style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
+        ),
+        actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'me'),
+            child: Text(
+              'Delete for me',
+              style: GoogleFonts.poppins(
+                color: const Color(0xFFE5484D),
+                fontSize: 13.5,
+              ),
+            ),
+          ),
+          if (forEveryone)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'everyone'),
+              child: Text(
+                'Delete for everyone',
+                style: GoogleFonts.poppins(
+                  color: const Color(0xFFE5484D),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+
+    try {
+      if (choice == 'everyone') {
+        await _chatService.deleteMessageForEveryone(
+          currentUserId: widget.currentUserId,
+          otherUserId: widget.contact.id,
+          messageId: message.id,
+        );
+      } else {
+        await _chatService.deleteMessageForMe(
+          currentUserId: widget.currentUserId,
+          otherUserId: widget.contact.id,
+          messageId: message.id,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete: $e')),
+      );
+    }
+  }
+
+  /// Picks a chat to forward [message] into.
+  ///
+  /// Deliberately a small sheet over the existing chat list rather than a picker
+  /// mode threaded through ContactsScreen: that screen carries tabs, device
+  /// contact matching and hardwired navigation, none of which a forward target
+  /// needs.
+  Future<void> _showForwardSheet(MessageModel message) async {
+    final c = AppThemeColors.of(context);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.forward_rounded, size: 18, color: c.textMid),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Forward to',
+                      style: GoogleFonts.poppins(
+                        color: c.textHigh,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: c.border.withOpacity(0.4)),
+              // Bounded so the sheet never grows past half the screen; the list
+              // itself scrolls.
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(sheetContext).size.height * 0.5,
+                ),
+                child: StreamBuilder<List<ChatRoom>>(
+                  stream: _chatService.getChatRooms(widget.currentUserId),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    // Forwarding into this same chat is a no-op the user never
+                    // means, so the current contact is left out.
+                    final peers = snapshot.data!
+                        .map((room) => room.participants.firstWhere(
+                              (p) => p != widget.currentUserId,
+                              orElse: () => '',
+                            ))
+                        .where((id) => id.isNotEmpty && id != widget.contact.id)
+                        .toList();
+
+                    if (peers.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.all(28),
+                        child: Text(
+                          'No other chats to forward to',
+                          style: GoogleFonts.poppins(
+                              color: c.textMid, fontSize: 13.5),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: peers.length,
+                      itemBuilder: (context, i) => _buildForwardTarget(
+                          peers[i], message, sheetContext, c),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildForwardTarget(String peerId, MessageModel message,
+      BuildContext sheetContext, AppThemeColors c) {
+    return FutureBuilder<UserModel?>(
+      future: _userService.getUserById(peerId),
+      builder: (context, snapshot) {
+        final user = snapshot.data;
+        // Rendered before the name resolves rather than after: the rows appear
+        // at once and fill in, instead of the sheet sitting empty.
+        final name = user?.name ?? '…';
+        return ListTile(
+          leading: CircleAvatar(
+            radius: 20,
+            backgroundColor: c.primaryLt,
+            backgroundImage: (user?.photoUrl?.isNotEmpty ?? false)
+                ? NetworkImage(user!.photoUrl!)
+                : null,
+            child: (user?.photoUrl?.isNotEmpty ?? false)
+                ? null
+                : Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: GoogleFonts.poppins(
+                      color: c.primaryDk,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+          title: Text(
+            name,
+            style: GoogleFonts.poppins(color: c.textHigh, fontSize: 14.5),
+          ),
+          onTap: user == null
+              ? null
+              : () {
+                  Navigator.pop(sheetContext);
+                  _forwardTo(user, message);
+                },
+        );
+      },
+    );
+  }
+
+  /// Sends [message]'s content on to [target] as a fresh message.
+  ///
+  /// A new send, not a copy of the document: `sendMessage` encrypts for the new
+  /// recipient's devices, and the old envelopes are addressed to devices the
+  /// target does not own. Media rides along by URL — `chat_images/` is readable
+  /// by any authenticated user, so there is nothing to re-upload.
+  ///
+  /// The reply quote and link preview are deliberately dropped: a quote of a
+  /// conversation the target cannot see is noise, and the preview will be
+  /// re-resolved from the text.
+  Future<void> _forwardTo(UserModel target, MessageModel message) async {
+    try {
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: target.id,
+        text: message.text,
+        senderName: widget.currentUserName,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        audioDuration: message.audioDuration,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Forwarded to ${target.name}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not forward: $e')),
+      );
+    }
+  }
+
+  void _startEdit(MessageModel message) {
+    setState(() {
+      _editing = message;
+      // A reply and an edit are mutually exclusive composer modes — leaving a
+      // stale reply strip above an edit would suggest the edit will carry a
+      // quote, which it will not.
+      _replyTo = null;
+    });
+    _messageController.text = message.text;
+    _messageController.selection =
+        TextSelection.collapsed(offset: _messageController.text.length);
+    _composerFocus.requestFocus();
+  }
+
+  void _cancelEdit() {
+    setState(() => _editing = null);
+    _messageController.clear();
+  }
+
+  /// Commits the composer's text as an edit of [_editing].
+  Future<void> _commitEdit() async {
+    final target = _editing;
+    if (target == null) return;
+    final text = _messageController.text.trim();
+
+    // An empty edit is a delete wearing the wrong hat. Say so rather than
+    // silently blanking the bubble.
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Use Delete to remove a message')),
+      );
+      return;
+    }
+    if (text == target.text) {
+      _cancelEdit();
+      return;
+    }
+
+    // Cleared in the same synchronous block as the read, for the same reason
+    // _sendMessage does it: re-encryption runs long after, and the user can
+    // start typing the next message immediately.
+    _cancelEdit();
+    _stopTyping();
+
+    try {
+      await _chatService.editMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        messageId: target.id,
+        newText: text,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      // Hand the text back — an edit that fails silently loses what they typed.
+      _messageController.text = text;
+      setState(() => _editing = target);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not edit: $e')),
+      );
+    }
   }
 
   Future<void> _sendReaction(MessageModel message, String emoji) async {

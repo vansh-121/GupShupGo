@@ -173,6 +173,39 @@ class MessageModel {
   /// Snapshot of the original's text, capped at [kReplySnippetMaxLength].
   final String? replyToText;
 
+  // ─── Delete & edit ──────────────────────────────────────────────────────
+  //
+  // These three are **cleartext metadata**, and deliberately so. They are
+  // absent from [kMessageContentKeys] and must never gain a
+  // `schemaVersion == 2 ? null : …` guard — that guard exists to keep message
+  // *content* off the server, whereas these have to be on the server document
+  // to do their job at all:
+  //
+  //  • a delete has to outlive a reinstall. SyncService backfills the latest 50
+  //    documents on first install, so a purely local delete comes straight back
+  //    — and never reaches the user's other devices.
+  //  • a tombstone has to be something the receiver's sync can *see*. A deleted
+  //    document is indistinguishable from one that slid out of the 50-document
+  //    window, which SyncService correctly refuses to act on.
+  //
+  // None of the three reveals anything the server didn't already know: who
+  // talked to whom and when is already plaintext on the document.
+
+  /// UIDs that have deleted this message for themselves. Bounded to 2 in a 1:1
+  /// chat. Filtered out at read time by `ChatService.getMessages`; the document
+  /// itself stays intact for the other participant.
+  final List<String> deletedFor;
+
+  /// Deleted for everyone by its sender. The ciphertext is stripped from the
+  /// document at the same time, so this is a genuine deletion with a marker
+  /// left behind — not a flag hiding content that is still there.
+  final bool deletedForEveryone;
+
+  /// When the sender last edited the text. Server timestamp. Also the signal
+  /// SyncService uses to decide that an already-synced message needs decrypting
+  /// again — without it an edit is invisible to the receiver forever.
+  final DateTime? editedAt;
+
   MessageModel({
     required this.id,
     required this.senderId,
@@ -211,6 +244,9 @@ class MessageModel {
     this.replyToSenderName,
     this.replyToType,
     this.replyToText,
+    this.deletedFor = const [],
+    this.deletedForEveryone = false,
+    this.editedAt,
   });
 
   // Convenience getters for status
@@ -219,6 +255,41 @@ class MessageModel {
   bool get isRead => status == MessageStatus.read;
   bool get hasStatusReply =>
       statusReplyOwnerId != null && statusReplyItemId != null;
+
+  /// True when the sender has edited this message since sending it.
+  bool get isEdited => editedAt != null;
+
+  /// Whether [uid] has deleted this message for themselves.
+  bool isDeletedFor(String uid) => deletedFor.contains(uid);
+
+  /// This message reduced to "deleted for everyone": identity and routing kept,
+  /// every trace of content gone.
+  ///
+  /// Deliberately a constructor call and not [copyWith]. `copyWith` is
+  /// `x ?? this.x` for all forty of its parameters, so it *cannot* clear a
+  /// field — passing `mediaUrl: null` keeps the old URL. A tombstone built with
+  /// `copyWith(deletedForEveryone: true, text: '')` therefore still carries the
+  /// media URL, the downloaded file path, the envelopes, the reactions and the
+  /// base64 link-preview thumbnail. Listing what survives, rather than what
+  /// dies, is the only version of this that stays correct as fields are added.
+  MessageModel asTombstone() => MessageModel(
+        id: id,
+        senderId: senderId,
+        receiverId: receiverId,
+        text: '',
+        // Kept as-is: the bubble needs to know it *was* an image to say so, and
+        // MessageType is not content.
+        type: type,
+        timestamp: timestamp,
+        status: status,
+        schemaVersion: schemaVersion,
+        senderDeviceId: senderDeviceId,
+        isOfflineMesh: isOfflineMesh,
+        meshHops: meshHops,
+        deletedFor: deletedFor,
+        deletedForEveryone: true,
+        editedAt: editedAt,
+      );
 
   /// True when this message carries a link preview card.
   bool get hasLinkPreview =>
@@ -274,6 +345,14 @@ class MessageModel {
       if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
       if (replyToType != null) 'replyToType': replyToType,
       if (replyToText != null) 'replyToText': replyToText,
+      // Written conditionally for the same reason as the block above, and with
+      // one extra benefit: a conditional key can never clobber. The real
+      // delete/edit writes are targeted `update()` calls, but if this map is
+      // ever handed to a merging `set()`, an unconditional `deletedFor: []`
+      // would wipe the other participant's deletion.
+      if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      if (deletedForEveryone) 'deletedForEveryone': true,
+      if (editedAt != null) 'editedAt': Timestamp.fromDate(editedAt!),
     };
   }
 
@@ -319,6 +398,9 @@ class MessageModel {
       if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
       if (replyToType != null) 'replyToType': replyToType,
       if (replyToText != null) 'replyToText': replyToText,
+      if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      if (deletedForEveryone) 'deletedForEveryone': true,
+      if (editedAt != null) 'editedAt': editedAt!.millisecondsSinceEpoch,
     };
   }
 
@@ -364,6 +446,9 @@ class MessageModel {
       replyToSenderName: map['replyToSenderName'],
       replyToType: map['replyToType'],
       replyToText: map['replyToText'],
+      deletedFor: _parseStringList(map['deletedFor']),
+      deletedForEveryone: map['deletedForEveryone'] ?? false,
+      editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
     );
   }
 
@@ -372,6 +457,15 @@ class MessageModel {
     if (raw is! Map) return null;
     return raw.map((k, v) =>
         MapEntry(k as String, Map<String, dynamic>.from(v as Map)));
+  }
+
+  /// Tolerant list parse for [deletedFor]. Always returns a list, never null:
+  /// "nobody has deleted this" and "the key was never written" are the same
+  /// thing, and a nullable list here would push a `?? const []` onto every
+  /// caller.
+  static List<String> _parseStringList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw.whereType<String>().toList(growable: false);
   }
 
   // Create MessageModel from Firestore document
@@ -413,6 +507,9 @@ class MessageModel {
       replyToSenderName: map['replyToSenderName'],
       replyToType: map['replyToType'],
       replyToText: map['replyToText'],
+      deletedFor: _parseStringList(map['deletedFor']),
+      deletedForEveryone: map['deletedForEveryone'] ?? false,
+      editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
     );
   }
 
@@ -504,6 +601,9 @@ class MessageModel {
     String? replyToSenderName,
     String? replyToType,
     String? replyToText,
+    List<String>? deletedFor,
+    bool? deletedForEveryone,
+    DateTime? editedAt,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -547,6 +647,9 @@ class MessageModel {
       replyToSenderName: replyToSenderName ?? this.replyToSenderName,
       replyToType: replyToType ?? this.replyToType,
       replyToText: replyToText ?? this.replyToText,
+      deletedFor: deletedFor ?? this.deletedFor,
+      deletedForEveryone: deletedForEveryone ?? this.deletedForEveryone,
+      editedAt: editedAt ?? this.editedAt,
     );
   }
 }

@@ -73,6 +73,29 @@ void main() {
         expect(kMessageContentKeys, contains(key));
       }
     });
+
+    test('excludes the delete and edit metadata', () {
+      // These three must stay OUT of the list, and the reason is the mirror
+      // image of why everything else is in it. A content key gets a
+      // `schemaVersion == 2 ? null : …` guard so it never reaches the server in
+      // the clear. These have to be on the server document to work at all: a
+      // delete that lives only on one device comes back with the next
+      // reinstall's 50-document backfill, and a tombstone the receiver's sync
+      // cannot see is indistinguishable from a document that slid out of the
+      // window.
+      //
+      // Nothing here tells the server anything it did not already know — who
+      // talked to whom, and when, is plaintext on the document regardless. If a
+      // later change "fixes" these into the encrypted payload, delete and edit
+      // both stop working across devices, and this test is the warning.
+      for (final key in const [
+        'deletedFor',
+        'deletedForEveryone',
+        'editedAt',
+      ]) {
+        expect(kMessageContentKeys, isNot(contains(key)));
+      }
+    });
   });
 
   group('toJson / fromJson (mesh transport + local Drift cache)', () {
@@ -107,6 +130,42 @@ void main() {
       expect(restored.replyToMessageId, isNull);
       expect(restored.hasLinkPreview, isFalse);
       expect(restored.hasReplyQuote, isFalse);
+    });
+
+    test('delete and edit metadata round-trips', () {
+      final original = _fullyPopulated().copyWith(
+        deletedFor: const ['bob'],
+        deletedForEveryone: true,
+        editedAt: DateTime.fromMillisecondsSinceEpoch(1700000060000),
+      );
+      final restored = MessageModel.fromJson(original.toJson());
+
+      expect(restored.deletedFor, const ['bob']);
+      expect(restored.deletedForEveryone, isTrue);
+      expect(restored.editedAt, original.editedAt);
+      expect(restored.isEdited, isTrue);
+      expect(restored.isDeletedFor('bob'), isTrue);
+      expect(restored.isDeletedFor('alice'), isFalse);
+    });
+
+    test('a row written by the old build reads as undeleted and unedited', () {
+      // Drift stores the whole model as one JSON blob, so rows written before
+      // these fields existed simply lack the keys. `deletedFor` in particular
+      // must default to an empty list and never to null, or every caller needs
+      // its own `?? const []`.
+      final legacy = MessageModel.fromJson(const {
+        'id': 'm',
+        'senderId': 'a',
+        'receiverId': 'b',
+        'text': 'hi',
+        'timestamp': 1700000000000,
+      });
+
+      expect(legacy.deletedFor, isEmpty);
+      expect(legacy.deletedForEveryone, isFalse);
+      expect(legacy.editedAt, isNull);
+      expect(legacy.isEdited, isFalse);
+      expect(legacy.isDeletedFor('a'), isFalse);
     });
   });
 
@@ -155,6 +214,36 @@ void main() {
       // Sanity: the timestamp really did go out as a Firestore type, so this
       // is exercising the Firestore serializer and not toJson by accident.
       expect(map['timestamp'], isA<Timestamp>());
+    });
+
+    test('delete and edit metadata round-trips', () {
+      final original = _fullyPopulated().copyWith(
+        deletedFor: const ['bob'],
+        deletedForEveryone: true,
+        editedAt: DateTime.fromMillisecondsSinceEpoch(1700000060000),
+      );
+      final map = original.toMap();
+      expect(map['editedAt'], isA<Timestamp>());
+
+      final restored = MessageModel.fromMap(map, original.id);
+      expect(restored.deletedFor, const ['bob']);
+      expect(restored.deletedForEveryone, isTrue);
+      expect(restored.editedAt, original.editedAt);
+    });
+
+    test('an undeleted, unedited message writes none of the three keys', () {
+      // Not cosmetic. This map is occasionally handed to a merging set(), and an
+      // unconditional `deletedFor: []` would wipe the *other* participant's
+      // "delete for me" — silently un-deleting a message on their device.
+      final map = _fullyPopulated().toMap();
+      for (final key in const [
+        'deletedFor',
+        'deletedForEveryone',
+        'editedAt',
+      ]) {
+        expect(map.containsKey(key), isFalse,
+            reason: '$key must not be written when it has nothing to say');
+      }
     });
   });
 
