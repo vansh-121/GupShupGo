@@ -50,7 +50,11 @@ enum VaultState {
 
 /// User-visible vault configuration mirrored from `vaultMeta/config`.
 class VaultSettings {
-  const VaultSettings({required this.retentionDays, required this.createdAt});
+  const VaultSettings({
+    required this.retentionDays,
+    required this.createdAt,
+    this.pinIsUserChosen = false,
+  });
 
   /// Number of days after which a vault entry is auto-deleted. `null`
   /// means "keep forever".
@@ -58,6 +62,17 @@ class VaultSettings {
 
   /// When the vault was originally set up (server timestamp).
   final DateTime? createdAt;
+
+  /// True once the user has demonstrably supplied the PIN themselves —
+  /// they chose it at setup, changed it, or typed it to unlock.
+  ///
+  /// A build before this flag existed could create a vault behind a
+  /// randomly generated PIN that was never shown to the user, which made
+  /// a reinstall unrecoverable. Absent/false therefore means "custody
+  /// unproven", and [classifyPinCustody] decides whether that install can
+  /// still be rescued. Defaults to false for config docs written before
+  /// this field shipped. Reveals nothing about the key itself.
+  final bool pinIsUserChosen;
 }
 
 class VaultCipher {
@@ -185,7 +200,13 @@ class VaultCipher {
         .collection('vaultMeta')
         .doc('config')
         .get();
-    if (existing.exists) return unlock(uid, pin);
+    if (existing.exists) {
+      // Config already there — this is really an unlock, and the PIN was
+      // typed by the user, so it proves custody.
+      final ok = await unlock(uid, pin);
+      if (ok) await markPinUserChosen(uid);
+      return ok;
+    }
 
     final salt = _randomBytes(16);
     final key = await _deriveKey(pin, salt);
@@ -209,6 +230,8 @@ class VaultCipher {
       },
       'verifier': verifier,
       'createdAt': FieldValue.serverTimestamp(),
+      // Setup always takes a PIN the user typed and confirmed.
+      'pinIsUserChosen': true,
     });
 
     await _cacheKey(uid, key);
@@ -426,7 +449,26 @@ class VaultCipher {
     return VaultSettings(
       retentionDays: data['retentionDays'] as int?,
       createdAt: ts is Timestamp ? ts.toDate() : null,
+      pinIsUserChosen: data['pinIsUserChosen'] == true,
     );
+  }
+
+  /// Records that the user has demonstrably supplied their own PIN.
+  ///
+  /// Call this from the paths where the PIN was *typed* — never from the
+  /// biometric path, which replays a stored copy and proves nothing about
+  /// what the user knows. [setup] and [changePin] already set the flag
+  /// themselves. Best-effort: a failure here only means the custody
+  /// prompt may appear once more.
+  Future<void> markPinUserChosen(String uid) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('vaultMeta')
+          .doc('config')
+          .set({'pinIsUserChosen': true}, SetOptions(merge: true));
+    } catch (_) {}
   }
 
   /// Updates the retention window. `days = null` means keep forever.
@@ -600,6 +642,8 @@ class VaultCipher {
         .set({
       'salt': base64Encode(newSalt),
       'verifier': newVerifier,
+      // Both PINs were typed by the user, so custody is proven.
+      'pinIsUserChosen': true,
     }, SetOptions(merge: true));
 
     await _cacheKey(uid, newKey);

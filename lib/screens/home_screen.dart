@@ -36,8 +36,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
+import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -497,11 +499,13 @@ class _HomeScreenState extends State<HomeScreen>
   ///   next chat / status open re-reads the vault, and kick off a
   ///   background backfill of any local messages that aren't in the
   ///   vault yet (e.g. messages sent while the vault was still locked).
+  /// • Finally, check PIN custody — see [_ensurePinCustody].
   Future<void> _ensureVaultReady(String uid) async {
     final state = await VaultCipher.instance.bootstrap(uid);
     if (state == VaultState.ready) {
       _migrateAndBackfillInBackground(uid);
       SyncService.instance.init(uid, force: true);
+      await _ensurePinCustody(uid);
       return;
     }
     if (!mounted) return;
@@ -517,6 +521,43 @@ class _HomeScreenState extends State<HomeScreen>
     StatusService.invalidatePreWarm(uid);
     SyncService.instance.init(uid, force: true);
     _migrateAndBackfillInBackground(uid, full: true);
+    await _ensurePinCustody(uid);
+  }
+
+  /// One-time repair for vaults created by an older build's "Setup with
+  /// Fingerprint" button, which generated a random PIN and never showed it to
+  /// the user — leaving history that only this install can decrypt.
+  ///
+  /// Reached from both of [_ensureVaultReady]'s success paths, because either
+  /// can land on an affected account: the warm path when the cached key is
+  /// still present, and the post-dialog path when biometrics replayed the
+  /// stored PIN (which is why that path does not count as proof of custody).
+  ///
+  /// Only [VaultPinCustody.rescueAvailable] prompts — see [classifyPinCustody]
+  /// for why the other three states must stay silent. Best-effort throughout:
+  /// if Firestore or secure storage is unreachable we skip the prompt and try
+  /// again next launch rather than blocking the app behind a failed read.
+  Future<void> _ensurePinCustody(String uid) async {
+    try {
+      final settings = await VaultCipher.instance.getSettings(uid);
+      // Cheap short-circuit for the overwhelmingly common case: the flag is
+      // already set, so skip the secure-storage read entirely.
+      if (settings?.pinIsUserChosen ?? false) return;
+      final storedPin =
+          await biometricPinStorage.read(key: biometricPinKey(uid));
+      final custody = classifyPinCustody(
+        configExists: settings != null,
+        pinIsUserChosen: settings?.pinIsUserChosen ?? false,
+        hasStoredPin: storedPin != null && storedPin.isNotEmpty,
+      );
+      if (custody != VaultPinCustody.rescueAvailable) return;
+      if (!mounted) return;
+      await VaultPinCustodyDialog.show(
+        context: context,
+        uid: uid,
+        storedPin: storedPin!,
+      );
+    } catch (_) {}
   }
 
   /// Background sweep that (a) re-encrypts any legacy plaintext vault docs

@@ -25,17 +25,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🖼️ **Link Previews** — Share a link and both of you see a neat card with the page's title, description, and thumbnail, so you know what you're opening before you tap it.
 - ↩️ **Swipe to Reply** — Swipe any message to the right to reply to it directly. Your reply shows the quoted message above it, so nobody loses track of what you're answering.
 - 👆 **Tap a Quote to Jump** — Tapping the quoted message in a reply scrolls you back to the original and briefly highlights it.
+- 👆 **Fingerprint Unlock, On Your Terms** — Vault settings now has an "Unlock with fingerprint" switch you can turn on or off any time. Turning it on asks for your PIN once; turning it off just means you type your PIN again.
 
 ### Changed
 - Updated version to 1.1.6 (build code 52).
 - 🔒 **Previews Never Phone Home** — Link cards are prepared entirely on the sender's device, so opening a chat never contacts the linked website. Your IP address is never exposed to a link someone sent you, and cards still appear with no internet connection.
 - 💬 **Replies Survive Deletions** — Each reply carries its own copy of the quoted text, so the quote keeps showing even if the original message was deleted or cleared from your device.
+- 🔑 **You Always Choose Your Vault PIN** — Setting up the vault now always asks you to pick a PIN, and fingerprint unlock is offered afterwards as a convenience. Your PIN is what protects your history, and it is the only thing that can restore your messages on a new phone.
+- ⏳ **"Decide Later" on the Unlock Screen** — Forgetting your PIN no longer forces a choice between deleting everything and being stuck. You can keep using the app with the vault locked, and unlocking later fills in whatever was missed.
+
+### Fixed
+- 👆 **Fingerprint No Longer Asks for a PIN You Never Set** — If you set the vault up with your fingerprint and later reinstalled the app, unlocking asked for a PIN that was never shown to you, leaving a full reset as the only way forward. Setup now always uses a PIN you chose, and anyone already in that situation is asked once — while their history is still readable — to pick a real PIN, with every existing message carried over.
+- 🚫 **No Fingerprint Buttons That Cannot Work** — The unlock screen only offers fingerprint when there is actually something on this device for it to unlock, and explains what to do instead when there isn't.
+- 🔐 **Your PIN Is Only Stored If You Ask** — Previously the app saved your PIN on the device after every unlock, whether or not you wanted fingerprint unlock. It is now saved only when you explicitly turn that feature on.
 
 ### Technical Details
 - **Sender-Side Unfurl:** OpenGraph metadata is fetched by the sending device and travels *inside* the encrypted Signal payload (`linkPreview*` fields), so nothing about the link is ever readable by the server and the receiving client makes no outbound request. Thumbnails are re-encoded to a ≤6 KB base64 JPEG to stay well within the 1 MiB Firestore document ceiling after per-device envelope fan-out.
 - **Snapshot Quotes:** `replyTo*` fields carry a self-contained copy of the quoted sender, type, and a 160-character snippet rather than a server-resolvable pointer, which is what makes quotes render for undecryptable, deleted, or never-synced originals.
 - **Content Key Registry:** `kMessageContentKeys` now declares every key that may appear in an encrypted payload, covered by a serializer test asserting `ChatService.applyPayload` consumes all of them — the previously-silent failure mode when adding an encrypted field.
 - **Package Visibility:** Added `android.intent.action.VIEW` `http`/`https` entries to the manifest `<queries>` block, required for link launching on Android 11+.
+- **PIN Custody Flag:** `vaultMeta/config` now carries `pinIsUserChosen`, set only at the moments that *prove* the user supplied the PIN — `setup`, `changePin`, and a successful typed-PIN `unlock`. It lives in Firestore rather than local storage because the question "does this person know their PIN" is account-level and must survive uninstall, and it reveals nothing about the key. A stored PIN is deliberately *not* used as the signal: the old code wrote one on every unlock, so its presence says nothing about its origin, and shape heuristics ("6 digits") misfire in both directions.
+- **One-Time Re-Key:** `classifyPinCustody` (pure, exhaustively tested over all 8 input combinations) resolves to exactly one state that may interrupt the user at launch — config present, custody unproven, old PIN still readable. That case re-keys the whole vault via the existing `changePin`, which validates the old PIN against the verifier, re-encrypts in 150-doc pages, and flips the verifier **last**, so an interrupted run leaves the old PIN valid and can simply be repeated. The window closes permanently once an affected install is removed.
+- **No New Crypto Primitive:** The "confirm you know your PIN" path reuses `unlock`, which returns `false` *before* caching the derived key, so a wrong guess cannot disturb an already-open vault.
+- **Known Limitation:** `flutter_secure_storage` has no biometric binding, so a successful `local_auth` scan is a UI gate rather than a cryptographic one — the stored PIN rests on `encryptedSharedPreferences` / Keychain `first_unlock`. Real binding needs an Android Keystore key with `setUserAuthenticationRequired(true)` behind a platform channel, and is not claimed by the opt-in copy.
 
 ---
 
