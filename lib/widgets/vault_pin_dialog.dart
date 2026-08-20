@@ -620,10 +620,18 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                 ],
 
                 // ── Secondary actions (Unlock Mode) ────────────────────
-                // "Decide later" exists so a forgotten PIN is not a choice
+                // "Restore later" exists so a forgotten PIN is not a choice
                 // between destroying all history and being stuck in a modal.
                 // A locked vault is a supported state: vault writes are
                 // skipped and a later unlock backfills what was missed.
+                //
+                // Named for what it postpones, not for a decision. "Decide
+                // later" read as deferring the choice *between* this button
+                // and "Forgot PIN?" next to it, and said nothing about what
+                // happens meanwhile — so the 🔒 previews that follow looked
+                // like loss. "Restore later" both names the postponed action
+                // and implies it is still available; VaultLockedBanner is
+                // what then makes that promise reachable.
                 if (!_isSetup) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -639,7 +647,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         child: Text(
-                          'Decide later',
+                          'Restore later',
                           style: GoogleFonts.poppins(
                             color: c.textMid,
                             fontSize: 12,

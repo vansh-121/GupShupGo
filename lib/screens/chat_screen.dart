@@ -1379,7 +1379,7 @@ class _ChatScreenState extends State<ChatScreen> {
               if (message.isOfflineMesh) ...[
                 const SizedBox(width: 4),
                 Icon(
-                  Icons.cell_tower_rounded,
+                  Icons.sensors_rounded,
                   size: 11,
                   color: isMe ? Colors.white.withOpacity(0.7) : c.textLow,
                 ),
@@ -2271,7 +2271,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           children: [
                             Icon(
                               mesh.isActive
-                                  ? Icons.cell_tower_rounded
+                                  ? Icons.sensors_rounded
                                   : Icons.wifi_off_rounded,
                               color: mesh.isActive
                                   ? const Color(0xFF4ADE80)

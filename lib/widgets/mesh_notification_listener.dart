@@ -278,7 +278,7 @@ class _MeshBannerState extends State<_MeshBanner>
                       color: Color(0xFF4ADE80),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.cell_tower_rounded,
+                    child: const Icon(Icons.connect_without_contact_rounded,
                         color: Colors.black, size: 20),
                   ),
                   const SizedBox(width: 12),

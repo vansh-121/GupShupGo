@@ -255,7 +255,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             color: const Color(0xFF2D2D2D),
             child: Row(
               children: [
-                const Icon(Icons.cell_tower_rounded,
+                const Icon(Icons.sensors_rounded,
                     color: Color(0xFF4ADE80), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
@@ -285,7 +285,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.cell_tower_rounded, size: 56, color: c.primary),
+              Icon(Icons.sensors_rounded, size: 56, color: c.primary),
               const SizedBox(height: 16),
               Text('Say hi to ${widget.peer.displayName}',
                   style: GoogleFonts.poppins(
@@ -380,7 +380,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Icon(Icons.cell_tower_rounded,
+                Icon(Icons.sensors_rounded,
                     size: 11,
                     color: isMe ? Colors.white.withOpacity(0.7) : c.textLow),
               ],

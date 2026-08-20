@@ -41,6 +41,9 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
+import 'package:video_chat_app/widgets/vault_locked_banner.dart';
+import 'package:video_chat_app/widgets/feature_coach_marks.dart';
+import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
@@ -114,6 +117,22 @@ class _HomeScreenState extends State<HomeScreen>
   // dot until something else happened to rebuild the list.
   Timer? _presenceDecayTimer;
   static const _presenceDecayInterval = Duration(seconds: 20);
+
+  // ─── First-run coaching ──────────────────────────────────────────────
+  // Attached to the two entry points that give no hint of what they do, so
+  // the spotlight can be measured from their real laid-out position rather
+  // than hardcoded offsets. See widgets/feature_coach_marks.dart.
+  final GlobalKey _meshIconKey = GlobalKey();
+  final GlobalKey _arcadeChipKey = GlobalKey();
+
+  // ─── Locked vault ────────────────────────────────────────────────────
+  // True only when the vault holds history this install cannot read and the
+  // user declined the unlock prompt ("Restore later"). Drives the chats-tab
+  // banner, which is the sole visible route back: the automatic re-prompt
+  // fires from initState only, so backgrounding and returning does not
+  // re-ask, and the alternative is buried in Settings. Never set for a
+  // needsSetup account — it has no older messages to restore.
+  bool _vaultLockedWithHistory = false;
 
   @override
   void initState() {
@@ -294,7 +313,8 @@ class _HomeScreenState extends State<HomeScreen>
         // user back on the auth screen. Keeping Home underneath fixes that and
         // matches how ProfileScreen already launches this same screen.
         if (_currentUser != null &&
-            (_currentUser!.username == null || _currentUser!.username!.trim().isEmpty) &&
+            (_currentUser!.username == null ||
+                _currentUser!.username!.trim().isEmpty) &&
             !UsernameSetupScreen.skippedThisSession &&
             mounted) {
           final updated = await Navigator.push<UserModel?>(
@@ -385,6 +405,13 @@ class _HomeScreenState extends State<HomeScreen>
             debugPrint('[DeepLink] failed to open chat: $e');
           }
         }
+
+        // ── First-run coaching — must be last ──────────────────────────
+        // Everything above can push a route or open a blocking dialog, and a
+        // spotlight over a screen the user has already left is worse than no
+        // spotlight. Deferring keeps the ordering rule in one place instead of
+        // threading a "did anything navigate?" flag through every branch above.
+        await _maybeShowFeatureCoaching();
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -523,21 +550,60 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  /// Shows the one-time spotlight tips for Home's least discoverable entry
+  /// points (offline mesh chat, Gup Arcade).
+  ///
+  /// Bails out unless Home is the visible route: the caller runs this at the
+  /// end of a startup chain that may have pushed a chat, profile, or username
+  /// screen, and [showCoachMarks] measures its targets from live render boxes.
+  /// Skipped marks keep their unseen flag, so they simply arrive on a later
+  /// launch instead of being spent on an off-screen widget.
+  Future<void> _maybeShowFeatureCoaching() async {
+    // Let the freshly-drawn Home settle first — a spotlight in the same frame
+    // as the first paint reads as a glitch rather than a tip.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+
+    await showCoachMarks(context, [
+      CoachMark(
+        prefKey: kCoachMeshKey,
+        targetKey: _meshIconKey,
+        icon: Icons.sensors_rounded,
+        title: 'Chat with no internet',
+        body: 'Tap here to find people nearby over Bluetooth and Wi-Fi — '
+            'works with no signal, no data, no Wi-Fi network.',
+      ),
+      CoachMark(
+        prefKey: kCoachArcadeKey,
+        targetKey: _arcadeChipKey,
+        icon: Icons.bolt_rounded,
+        title: 'These points are tappable',
+        body: 'Your Gup Points open the Arcade, where streaks with friends '
+            'and daily challenges live.',
+      ),
+    ]);
+  }
+
   /// Bootstraps the E2EE vault key.
   ///
   /// • Auto-unlocks from the cached key in secure storage when possible
   ///   (warm path on every cold start after the first).
   /// • If the user has a vault config in Firestore but no local key
   ///   (reinstall, or first run after this feature shipped on an
-  ///   already-onboarded account) → show the unlock dialog. The dialog
-  ///   blocks until they enter the right PIN or reset.
-  /// • If no vault config exists yet → show setup dialog so the user picks
-  ///   a PIN before any vault writes happen. Until they finish, vault
-  ///   writes silently skip — we never leak plaintext to Firestore.
+  ///   already-onboarded account) → show the unlock dialog. Declining it with
+  ///   "Restore later" is supported and non-destructive, but leaves history
+  ///   unreadable, so it raises [_vaultLockedWithHistory] to put a standing
+  ///   [VaultLockedBanner] on the chats tab — otherwise the state is
+  ///   indistinguishable from lost messages and has no visible way back.
+  /// • If no vault config exists yet → show the setup dialog so the user picks
+  ///   a PIN before any vault writes happen. Until they finish, vault writes
+  ///   silently skip — we never leak plaintext to Firestore.
   /// • After the vault is ready, drop in-memory pre-warm caches so the
   ///   next chat / status open re-reads the vault, and kick off a
   ///   background backfill of any local messages that aren't in the
   ///   vault yet (e.g. messages sent while the vault was still locked).
+  ///   See [_afterVaultUnlocked].
   /// • Finally, check PIN custody — see [_ensurePinCustody].
   Future<void> _ensureVaultReady(String uid) async {
     final state = await VaultCipher.instance.bootstrap(uid);
@@ -548,19 +614,51 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
     if (!mounted) return;
+    final isSetup = state == VaultState.needsSetup;
+
     final ok = await VaultPinDialog.show(
       context: context,
       uid: uid,
-      mode: state == VaultState.needsSetup
-          ? VaultPinMode.setup
-          : VaultPinMode.unlock,
+      mode: isSetup ? VaultPinMode.setup : VaultPinMode.unlock,
     );
-    if (!ok) return;
+    if (!ok) {
+      // Declining unlock (not setup) means the vault holds history this
+      // install cannot read. Raise the banner so there is a visible way back —
+      // without it this state looks identical to "my messages are gone".
+      if (!isSetup && mounted) {
+        setState(() => _vaultLockedWithHistory = true);
+      }
+      return;
+    }
+    await _afterVaultUnlocked(uid);
+  }
+
+  /// Everything that must follow a successful unlock, shared by
+  /// [_ensureVaultReady] and [_unlockVaultFromBanner] so a PIN entered from
+  /// either place repairs exactly the same amount.
+  Future<void> _afterVaultUnlocked(String uid) async {
     ChatService.invalidatePreWarm(uid);
     StatusService.invalidatePreWarm(uid);
     SyncService.instance.init(uid, force: true);
     _migrateAndBackfillInBackground(uid, full: true);
     await _ensurePinCustody(uid);
+  }
+
+  /// Re-opens the unlock prompt from the chats-tab banner.
+  ///
+  /// The banner clears on success only. A failed or dismissed attempt leaves
+  /// it standing, which is the point: the route back must not be spendable.
+  Future<void> _unlockVaultFromBanner() async {
+    final uid = _currentUserId;
+    if (uid == null) return;
+    final ok = await VaultPinDialog.show(
+      context: context,
+      uid: uid,
+      mode: VaultPinMode.unlock,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _vaultLockedWithHistory = false);
+    await _afterVaultUnlocked(uid);
   }
 
   /// One-time repair for vaults created by an older build's "Setup with
@@ -825,6 +923,191 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Empty Gup tab for a user who still has setup steps left — the checklist
+  /// plus the same "New chat" call to action the plain state offers.
+  Widget _buildStarterState({required bool hasPhoto}) {
+    final c = AppThemeColors.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              Text(
+                'Welcome to GupShupGo',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Three quick things and you are set up.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(fontSize: 14, color: c.textMid),
+              ),
+            ],
+          ),
+        ),
+        StarterChecklistCard(
+          hasPhoto: hasPhoto,
+          onAddPhoto: () async {
+            if (_currentUser == null) return;
+            final updated = await Navigator.push<UserModel>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ProfileScreen(currentUser: _currentUser!),
+              ),
+            );
+            // Refreshes the chat tab too, so the photo step ticks itself.
+            if (updated != null && mounted) {
+              setState(() => _currentUser = updated);
+            }
+          },
+          onFindPeople: () async {
+            if (_currentUserId == null) return;
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContactsScreen(
+                  currentUserId: _currentUserId!,
+                  currentUserName: _currentUser?.name,
+                ),
+              ),
+            );
+          },
+          onTryOffline: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
+            );
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+          child: Center(
+            child: ElevatedButton.icon(
+              onPressed: () {
+                if (_currentUserId == null) return;
+                markStarterContactsVisited();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContactsScreen(
+                      currentUserId: _currentUserId!,
+                      currentUserName: _currentUser?.name,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('New chat'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Empty Gup tab once the starter steps are all done — the original state,
+  /// for users who have set themselves up but have no conversations open.
+  Widget _buildPlainEmptyState() {
+    final c = AppThemeColors.of(context);
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.7,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: c.primaryLt,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 48,
+                  color: c.primary,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'No chats yet',
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Start a conversation by tapping the button below',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: c.textMid,
+                ),
+              ),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: () {
+                  if (_currentUserId == null) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ContactsScreen(
+                        currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('New chat'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Prepends [VaultLockedBanner] to [content] while the vault holds history
+  /// this install cannot read.
+  ///
+  /// Wrapped around the whole chats tab rather than around its individual
+  /// return paths, so the banner also covers the loading and empty states — a
+  /// reinstall that declined the PIN can land on any of them, and one wrap
+  /// point means it can never render twice.
+  ///
+  /// Both conditions are required. The flag records that the user declined;
+  /// [VaultCipher.isReady] is the live truth. Checking the latter too means an
+  /// unlock performed anywhere else — vault settings, the custody dialog —
+  /// retires the banner on the next rebuild instead of leaving it claiming a
+  /// lock that no longer exists.
+  Widget _withVaultBanner(Widget content) {
+    if (!_vaultLockedWithHistory || VaultCipher.instance.isReady) {
+      return content;
+    }
+    return Column(
+      children: [
+        VaultLockedBanner(onUnlock: _unlockVaultFromBanner),
+        Expanded(child: content),
+      ],
+    );
+  }
+
   Widget _buildChatsTab() {
     if (_currentUserId == null) {
       return const Center(child: CircularProgressIndicator());
@@ -835,7 +1118,6 @@ class _HomeScreenState extends State<HomeScreen>
     return StreamBuilder<List<ChatRoom>>(
       stream: _chatRoomsStream,
       builder: (context, chatSnapshot) {
-        final c = AppThemeColors.of(context);
         // ── Use cached data while Firestore stream is still connecting ──
         List<ChatRoom> chatRooms;
         if (chatSnapshot.connectionState == ConnectionState.waiting &&
@@ -880,70 +1162,20 @@ class _HomeScreenState extends State<HomeScreen>
         _syncStreakWatch(chatRooms);
 
         if (chatRooms.isEmpty) {
+          // A user with nothing to show is the one moment we can teach without
+          // interrupting anything. The checklist retires itself once every step
+          // is done, falling back to the plain empty state.
+          final hasPhoto = (_currentUser?.photoUrl ?? '').isNotEmpty;
+          final showChecklist =
+              !StarterChecklistCard.isComplete(hasPhoto: hasPhoto);
+
           return RefreshIndicator(
             onRefresh: () => _manualRefresh(chatRooms),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              child: SizedBox(
-                height: MediaQuery.of(context).size.height * 0.7,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(40),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 96,
-                          height: 96,
-                          decoration: BoxDecoration(
-                            color: c.primaryLt,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 48,
-                            color: c.primary,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                          'No chats yet',
-                          style: GoogleFonts.poppins(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: c.textHigh,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Start a conversation by tapping the button below',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            color: c.textMid,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ContactsScreen(
-                                  currentUserId: _currentUserId!,
-                                  currentUserName: _currentUser?.name,
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('New chat'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              child: showChecklist
+                  ? _buildStarterState(hasPhoto: hasPhoto)
+                  : _buildPlainEmptyState(),
             ),
           );
         }
@@ -1242,8 +1474,7 @@ class _HomeScreenState extends State<HomeScreen>
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (streakView != null &&
-                                streakView.count > 0) ...[
+                            if (streakView != null && streakView.count > 0) ...[
                               const SizedBox(width: 6),
                               StreakBadge(view: streakView, compact: true),
                             ] else if (streakView != null &&
@@ -1916,12 +2147,16 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.cell_tower_rounded),
+            key: _meshIconKey,
+            icon: const Icon(Icons.sensors_rounded),
             tooltip: 'Offline Chat — talk to people nearby',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
-            ),
+            onPressed: () {
+              markStarterMeshVisited();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
@@ -2032,7 +2267,7 @@ class _HomeScreenState extends State<HomeScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildChatsTab(),
+                _withVaultBanner(_buildChatsTab()),
                 _buildStatusTab(),
                 _buildCallsTab(),
               ],
@@ -2210,6 +2445,7 @@ class _HomeScreenState extends State<HomeScreen>
                   pts = data?['gupPoints'] as int? ?? 0;
                 }
                 return GestureDetector(
+                  key: _arcadeChipKey,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
