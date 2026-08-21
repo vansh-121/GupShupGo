@@ -256,16 +256,78 @@ service cloud.firestore {
         
         // Allow reading messages if participant or user is in room ID
         allow read: if request.auth != null && (isChatParticipant() || isUserInRoomId());
-        
+
         // Allow creating message if user is authenticated and is sender
-        allow create: if request.auth != null 
+        allow create: if request.auth != null
           && request.auth.uid == request.resource.data.senderId
           && (isChatParticipant() || isUserInRoomId());
-        
-        // Allow updating (for read receipts) if participant
-        allow update: if request.auth != null 
-          && (isChatParticipant() || isUserInRoomId());
-        
+
+        // Fields only a message's own sender may write.
+        //
+        // "Delete for everyone" and "edit" are both document *updates*, so a
+        // participant-wide update rule accepted them from either side: the peer
+        // could tombstone your message, or rewrite the plaintext `text` of a
+        // legacy v1 one. ChatService re-checks ownership against the server copy
+        // before writing, but that check lives in the client it is protecting
+        // against, so this is where it has to be true.
+        //
+        // `senderId` is in the list for a second reason: without it the gate
+        // defeats itself. A peer would reassign senderId to their own uid in one
+        // write, and satisfy every ownership check below in the next.
+        //
+        // The 48h limit (ChatService.editWindow) is deliberately NOT enforced
+        // here — see the comment on that constant. Bypassing a window is
+        // cosmetic; overwriting someone else's message is not.
+        //
+        // Absent on purpose, because a non-sender must write these:
+        //   status        — delivered/read receipts, written by the recipient
+        //   deletedFor    — "delete for me", either participant (bounded below)
+        //   retryRequests — arrayUnion by the asking device, arrayRemove by the
+        //                   sender once it has served the resend
+        //   reactions     — no write path today, and when there is one it is the
+        //                   recipient's to use
+        function touchesSenderOwnedFields() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny([
+              'senderId', 'senderDeviceId', 'receiverId', 'timestamp',
+              'deletedForEveryone', 'editedAt',
+              'text', 'envelopes', 'mediaUrl', 'type', 'replyToText',
+              'linkPreviewUrl', 'linkPreviewTitle', 'linkPreviewDescription',
+              'linkPreviewSiteName', 'linkPreviewImageBase64',
+            ]);
+        }
+
+        // "Delete for me" hides a message from one participant, so a participant
+        // may only ever add or remove *themselves* — never the other side's
+        // entry, which would hide a message from them, or un-hide one they had
+        // hidden. The client only ever writes arrayUnion([own uid]).
+        //
+        // Phrased as two subset checks rather than the more obvious
+        // "diff the lists": `removeAll` and `Set.difference` both fault on an
+        // *empty argument*, so a write that empties the array — the last entry
+        // removed — would be denied by an evaluation error instead of by the
+        // rule. Both arguments here contain the caller's own uid, so neither can
+        // ever be empty.
+        function deletedForOnlyAffectsSelf() {
+          let self = [request.auth.uid];
+          let before = resource.data.get('deletedFor', []);
+          let after = request.resource.data.get('deletedFor', []);
+          // after ⊆ before ∪ {self}: the only entry you can add is your own.
+          return after.hasOnly(before.concat(self))
+            // before ⊆ after ∪ {self}: the only entry you can drop is your own.
+            && before.hasOnly(after.concat(self));
+        }
+
+        // Allow updating (read receipts, "delete for me", resend requests) if
+        // participant. Sender-owned fields additionally require ownership.
+        allow update: if request.auth != null
+          && (isChatParticipant() || isUserInRoomId())
+          && (!touchesSenderOwnedFields()
+              || request.auth.uid == resource.data.senderId)
+          && (!request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['deletedFor'])
+              || deletedForOnlyAffectsSelf());
+
         // Allow deleting only own messages
         allow delete: if request.auth != null 
           && request.auth.uid == resource.data.senderId;

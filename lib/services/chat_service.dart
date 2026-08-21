@@ -2118,10 +2118,11 @@ class ChatService {
   /// How long after sending its sender may still delete a message for everyone,
   /// or edit it.
   ///
-  /// Client-side only: a modified client could ignore it. Enforcing it in
-  /// `firestore.rules` is possible, but it would mean rewriting the message
-  /// update rule that both participants depend on for read receipts, and the
-  /// cost of a bypass is cosmetic — so this is left as a UI affordance.
+  /// Client-side only: a modified client could ignore it. `firestore.rules`
+  /// enforces *who* may edit or tombstone a message (the sender-owned field list
+  /// on the messages update rule) but not *when* — a window check there would
+  /// have to read the document's own timestamp on every read receipt, and the
+  /// cost of a bypass is cosmetic, so this stays a UI affordance.
   static const Duration editWindow = Duration(hours: 48);
 
   /// What both the bubble and the chat-list preview show for a tombstone.
@@ -2143,8 +2144,10 @@ class ChatService {
   /// because a local-only delete does not survive: SyncService backfills the
   /// newest 50 documents on a fresh install and would hand the message straight
   /// back, and a second device would never learn of it. Either participant may
-  /// write this — the rules already allow a non-sender to update a message
-  /// document, which is how read receipts work.
+  /// write this — the rules allow a non-sender to update a message document,
+  /// which is how read receipts work — but only ever to add their *own* uid,
+  /// which is why this is an `arrayUnion` of exactly one element and not a
+  /// whole-list write.
   Future<void> deleteMessageForMe({
     required String currentUserId,
     required String otherUserId,

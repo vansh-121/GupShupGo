@@ -17,9 +17,15 @@
 // deviation is the timeout — 8s instead of the house 15s, because this fires
 // while the user is still typing and a slow host must lose the race rather than
 // hold the composer strip open.
+//
+// Sender-side fetching moves the exposure rather than removing it: the requests
+// leave the sender's network, and only the first of them is a URL the sender
+// actually typed. See "Destination filtering" below for what bounds where they
+// can be pointed.
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show InternetAddress, InternetAddressType;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -200,20 +206,151 @@ class LinkPreviewService {
 
   Future<http.StreamedResponse?> _get(Uri uri,
       {String accept = 'text/html'}) async {
-    try {
-      final request = http.Request('GET', uri)
-        ..followRedirects = true
-        ..maxRedirects = 5
-        ..headers.addAll({
-          'User-Agent': _userAgent,
-          'Accept': accept,
-          'Accept-Language': 'en',
-        });
-      return await _client.send(request).timeout(_timeout);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[LinkPreview] GET $uri failed: $e');
-      return null;
+    var target = uri;
+    // `<=`, not `<`: five redirects means six requests, and the sixth has to be
+    // the one that answers.
+    for (var hop = 0; hop <= _maxRedirects; hop++) {
+      if (!await _isPermittedTarget(target)) return null;
+      try {
+        final request = http.Request('GET', target)
+          // Followed by hand below — see _isPermittedTarget. A redirect the
+          // client follows for us is a request this code never gets to check.
+          ..followRedirects = false
+          ..headers.addAll({
+            'User-Agent': _userAgent,
+            'Accept': accept,
+            'Accept-Language': 'en',
+          });
+        final response = await _client.send(request).timeout(_timeout);
+        if (!_redirectCodes.contains(response.statusCode)) return response;
+
+        final location = response.headers['location'];
+        // Return the socket to the pool before starting the next hop; a
+        // redirect body is a few bytes, so this costs nothing.
+        await response.stream.drain();
+        if (location == null || location.isEmpty) return null;
+        // `resolve` handles a relative Location, which is legal and common.
+        target = target.resolve(location);
+      } catch (e) {
+        if (kDebugMode) debugPrint('[LinkPreview] GET $target failed: $e');
+        return null;
+      }
     }
+    if (kDebugMode) debugPrint('[LinkPreview] too many redirects from $uri');
+    return null;
+  }
+
+  static const Set<int> _redirectCodes = {301, 302, 303, 307, 308};
+  static const int _maxRedirects = 5;
+
+  // ── Destination filtering ─────────────────────────────────────────────────
+  //
+  // The composer fetches on its own, 600ms after a URL appears in the text —
+  // including one the user pasted out of a message somebody else sent them. And
+  // two of the three URLs this service requests are not the pasted one at all:
+  // redirect hops, and the `og:image` named by whatever page answered. Both are
+  // chosen by whoever controls that page.
+  //
+  // Unchecked, "paste this link" is therefore an attacker-chosen GET from inside
+  // the user's network: `http://192.168.1.1/setup.cgi?…` at the router, a
+  // loopback port belonging to another app, a link-local metadata address. The
+  // response never reaches the attacker — the card only renders og tags and a
+  // JPEG — so the request itself is the payload, which is exactly what a
+  // state-changing GET on an unauthenticated LAN device needs.
+  //
+  // Residual, stated plainly: this resolves the host and then `http` resolves it
+  // again to open the socket, so a record that changes between the two (DNS
+  // rebinding) is not covered. Closing that needs the validated address pinned
+  // into the connection via a custom HttpClient — more machinery than a blind
+  // GET nobody reads the answer to is worth.
+
+  /// Whether [uri] may be contacted at all. Async because a hostname has to be
+  /// resolved before its address can be judged.
+  Future<bool> _isPermittedTarget(Uri uri) async {
+    if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+    if (uri.host.isEmpty) return false;
+
+    // An IP literal needs no DNS, and must not be sent through it: `lookup`
+    // on a literal hands the same address straight back, so a failure to
+    // resolve would read as "unknown host" rather than "blocked address".
+    final literal = InternetAddress.tryParse(uri.host);
+    if (literal != null) {
+      if (isBlockedAddress(literal)) {
+        if (kDebugMode) debugPrint('[LinkPreview] blocked literal ${uri.host}');
+        return false;
+      }
+      return true;
+    }
+
+    try {
+      final resolved = await InternetAddress.lookup(uri.host).timeout(_timeout);
+      if (resolved.isEmpty) return false;
+      // ANY blocked answer disqualifies the name. A record that mixes a public
+      // address with 127.0.0.1 is the whole trick — checking only the first
+      // answer, or only whether some answer is public, walks right into it.
+      if (resolved.any(isBlockedAddress)) {
+        if (kDebugMode) debugPrint('[LinkPreview] blocked host ${uri.host}');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LinkPreview] lookup ${uri.host} failed: $e');
+      return false;
+    }
+  }
+
+  /// True for anything that is not a globally routable unicast address:
+  /// loopback, RFC1918 private, link-local (which includes the cloud metadata
+  /// address), CGNAT, multicast, broadcast, and the reserved/documentation
+  /// ranges. Deny-by-range rather than allow-by-range, because the set of
+  /// non-public ranges is the one that is actually enumerable.
+  @visibleForTesting
+  static bool isBlockedAddress(InternetAddress address) {
+    if (address.isLoopback || address.isLinkLocal || address.isMulticast) {
+      return true;
+    }
+    final raw = address.rawAddress;
+    return address.type == InternetAddressType.IPv4
+        ? _isBlockedV4(raw)
+        : _isBlockedV6(raw);
+  }
+
+  static bool _isBlockedV4(List<int> b) {
+    final a = b[0], second = b[1];
+    if (a == 0) return true; // 0.0.0.0/8 "this network"
+    if (a == 10) return true; // RFC1918
+    if (a == 100 && second >= 64 && second <= 127) return true; // CGNAT
+    if (a == 127) return true; // loopback
+    if (a == 169 && second == 254) return true; // link-local + metadata
+    if (a == 172 && second >= 16 && second <= 31) return true; // RFC1918
+    if (a == 192 && second == 0) return true; // protocol assignments, TEST-NET-1
+    if (a == 192 && second == 168) return true; // RFC1918
+    if (a == 198 && (second == 18 || second == 19)) return true; // benchmarking
+    if (a == 198 && second == 51) return true; // TEST-NET-2
+    if (a == 203 && second == 0) return true; // TEST-NET-3
+    if (a >= 224) return true; // multicast, reserved, 255.255.255.255
+    return false;
+  }
+
+  static bool _isBlockedV6(List<int> b) {
+    if (b.every((byte) => byte == 0)) return true; // ::
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return true; // fe80::/10
+    if ((b[0] & 0xfe) == 0xfc) return true; // fc00::/7 unique-local
+
+    // An embedded IPv4 address has to be judged as IPv4 or `::ffff:127.0.0.1`
+    // and `64:ff9b::127.0.0.1` sail past every rule above.
+    final firstTenZero = b.take(10).every((byte) => byte == 0);
+    if (firstTenZero && b[10] == 0xff && b[11] == 0xff) {
+      return _isBlockedV4(b.sublist(12)); // ::ffff:0:0/96 mapped
+    }
+    if (firstTenZero && b[10] == 0 && b[11] == 0) {
+      return _isBlockedV4(b.sublist(12)); // ::/96 compatible (deprecated)
+    }
+    // 64:ff9b::/96 and 64:ff9b:1::/48 — NAT64.
+    if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) {
+      return _isBlockedV4(b.sublist(12));
+    }
+    return false;
   }
 
   /// Reads at most [cap] bytes and then abandons the rest. Breaking out of the
