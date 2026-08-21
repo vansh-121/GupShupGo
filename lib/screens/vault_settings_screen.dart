@@ -16,6 +16,7 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultSettingsScreen extends StatefulWidget {
   const VaultSettingsScreen({super.key, required this.uid});
@@ -130,10 +131,11 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
       _settings = VaultSettings(
         retentionDays: picked,
         createdAt: _settings?.createdAt,
-        // Carry the flag through — rebuilding without it would reset the
-        // in-memory copy to false and mis-report custody to anything that
-        // reads _settings later.
+        // Carry the flags through — rebuilding without them would reset the
+        // in-memory copy to false and mis-report custody, or open the wrong
+        // keyboard, for anything that reads _settings later.
         pinIsUserChosen: _settings?.pinIsUserChosen ?? false,
+        pinIsNumeric: _settings?.pinIsNumeric ?? false,
       );
     });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -147,12 +149,21 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _ChangePinDialog(uid: widget.uid),
+      builder: (_) => _ChangePinDialog(
+        uid: widget.uid,
+        // The current-PIN field recalls the PIN that exists now, so it follows
+        // the recorded hint; the two new-PIN fields below it are choosing one
+        // and start on the number pad regardless.
+        numericPinHint: _settings?.pinIsNumeric ?? false,
+      ),
     );
     if (result == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('PIN changed.'),
       ));
+      // The new PIN may be a different character class than the old one, so
+      // the cached settings — and the hint they carry — are now stale.
+      await _load();
     }
   }
 
@@ -184,7 +195,11 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     final pin = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _FingerprintPinDialog(uid: widget.uid),
+      builder: (_) => _FingerprintPinDialog(
+        uid: widget.uid,
+        // Recalling the existing PIN, so follow the recorded hint.
+        numericPinHint: _settings?.pinIsNumeric ?? false,
+      ),
     );
     if (pin == null || !mounted) return;
 
@@ -502,8 +517,18 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
 // ─── Change PIN dialog ─────────────────────────────────────────────────────
 
 class _ChangePinDialog extends StatefulWidget {
-  const _ChangePinDialog({required this.uid});
+  const _ChangePinDialog({required this.uid, this.numericPinHint = false});
   final String uid;
+
+  /// Which keyboard all three fields open with — see
+  /// [VaultSettings.pinIsNumeric].
+  ///
+  /// Taken from the *current* PIN even though two of the three fields are
+  /// choosing a new one, because the current-PIN field is the one that has to
+  /// be filled first and the only one that can be entered wrong. The single
+  /// toggle below the fields switches all three, so someone replacing a
+  /// passphrase with digits types the old one, taps once, and carries on.
+  final bool numericPinHint;
 
   @override
   State<_ChangePinDialog> createState() => _ChangePinDialogState();
@@ -513,18 +538,36 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   final _old = TextEditingController();
   final _new = TextEditingController();
   final _confirm = TextEditingController();
+  final _oldFocus = FocusNode();
+  final _newFocus = FocusNode();
+  final _confirmFocus = FocusNode();
   bool _obscure = true;
   bool _busy = false;
   String? _error;
   int _done = 0;
   int _total = 0;
 
+  /// Number pad vs full keyboard. A default only — nothing here filters input.
+  late bool _numeric = widget.numericPinHint;
+
   @override
   void dispose() {
     _old.dispose();
     _new.dispose();
     _confirm.dispose();
+    _oldFocus.dispose();
+    _newFocus.dispose();
+    _confirmFocus.dispose();
     super.dispose();
+  }
+
+  /// Flips all three fields, preserving anything already typed.
+  Future<void> _toggleKeyboard() async {
+    setState(() => _numeric = !_numeric);
+    final target = _confirmFocus.hasFocus
+        ? _confirmFocus
+        : (_newFocus.hasFocus ? _newFocus : _oldFocus);
+    await reopenKeyboardFor(context, target);
   }
 
   Future<void> _submit() async {
@@ -590,11 +633,17 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
               style: TextStyle(color: c.textMid, fontSize: 12.5),
             ),
             const SizedBox(height: 16),
-            _field(c, _old, 'Current PIN', autofocus: true),
+            _field(c, _old, 'Current PIN',
+                focusNode: _oldFocus, autofocus: true),
             const SizedBox(height: 10),
-            _field(c, _new, 'New PIN'),
+            _field(c, _new, 'New PIN', focusNode: _newFocus),
             const SizedBox(height: 10),
-            _field(c, _confirm, 'Confirm new PIN'),
+            _field(c, _confirm, 'Confirm new PIN', focusNode: _confirmFocus),
+            PinKeyboardToggle(
+              numeric: _numeric,
+              onToggle: _toggleKeyboard,
+              enabled: !_busy,
+            ),
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!,
@@ -635,12 +684,16 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   }
 
   Widget _field(AppThemeColors c, TextEditingController ctrl, String hint,
-      {bool autofocus = false}) {
+      {required FocusNode focusNode, bool autofocus = false}) {
     return TextField(
       controller: ctrl,
+      focusNode: focusNode,
       obscureText: _obscure,
       autofocus: autofocus,
-      keyboardType: TextInputType.visiblePassword,
+      keyboardType:
+          _numeric ? TextInputType.number : TextInputType.visiblePassword,
+      // Length-limited only — no digitsOnly filter. The current-PIN field has
+      // to accept whatever the existing PIN is, letters included.
       inputFormatters: [LengthLimitingTextInputFormatter(64)],
       style: TextStyle(color: c.textHigh, letterSpacing: 2),
       decoration: InputDecoration(
@@ -669,8 +722,11 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
 /// Verification goes through `unlock`, which returns false *before* touching
 /// the cached key, so a wrong guess here cannot disturb the open vault.
 class _FingerprintPinDialog extends StatefulWidget {
-  const _FingerprintPinDialog({required this.uid});
+  const _FingerprintPinDialog({required this.uid, this.numericPinHint = false});
   final String uid;
+
+  /// Which keyboard the field opens with — see [VaultSettings.pinIsNumeric].
+  final bool numericPinHint;
 
   @override
   State<_FingerprintPinDialog> createState() => _FingerprintPinDialogState();
@@ -678,14 +734,24 @@ class _FingerprintPinDialog extends StatefulWidget {
 
 class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
   final _pin = TextEditingController();
+  final _pinFocus = FocusNode();
   bool _obscure = true;
   bool _busy = false;
   String? _error;
 
+  /// Number pad vs full keyboard. A default only — nothing here filters input.
+  late bool _numeric = widget.numericPinHint;
+
   @override
   void dispose() {
     _pin.dispose();
+    _pinFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleKeyboard() async {
+    setState(() => _numeric = !_numeric);
+    await reopenKeyboardFor(context, _pinFocus);
   }
 
   Future<void> _submit() async {
@@ -735,10 +801,15 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
             const SizedBox(height: 16),
             TextField(
               controller: _pin,
+              focusNode: _pinFocus,
               obscureText: _obscure,
               autofocus: true,
               enabled: !_busy,
-              keyboardType: TextInputType.visiblePassword,
+              keyboardType: _numeric
+                  ? TextInputType.number
+                  : TextInputType.visiblePassword,
+              // Length-limited only — this field recalls an existing PIN, so
+              // it has to accept letters.
               inputFormatters: [LengthLimitingTextInputFormatter(64)],
               style: TextStyle(color: c.textHigh, letterSpacing: 2),
               decoration: InputDecoration(
@@ -755,6 +826,11 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
               ),
+            ),
+            PinKeyboardToggle(
+              numeric: _numeric,
+              onToggle: _toggleKeyboard,
+              enabled: !_busy,
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),

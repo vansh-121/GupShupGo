@@ -620,6 +620,9 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       uid: uid,
       mode: isSetup ? VaultPinMode.setup : VaultPinMode.unlock,
+      // Populated by the bootstrap above from the config doc it already read,
+      // so the right keyboard opens without a second round-trip.
+      numericPinHint: VaultCipher.instance.pinIsNumericHint,
     );
     if (!ok) {
       // Declining unlock (not setup) means the vault holds history this
@@ -655,6 +658,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       uid: uid,
       mode: VaultPinMode.unlock,
+      numericPinHint: VaultCipher.instance.pinIsNumericHint,
     );
     if (!ok || !mounted) return;
     setState(() => _vaultLockedWithHistory = false);
@@ -693,6 +697,8 @@ class _HomeScreenState extends State<HomeScreen>
         context: context,
         uid: uid,
         storedPin: storedPin!,
+        // From the settings read above — no extra round-trip.
+        numericPinHint: settings?.pinIsNumeric ?? false,
       );
     } catch (_) {}
   }

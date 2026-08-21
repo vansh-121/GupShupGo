@@ -18,16 +18,26 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultPinDialog extends StatefulWidget {
   const VaultPinDialog({
     super.key,
     required this.uid,
     required this.mode,
+    this.numericPinHint = false,
   });
 
   final String uid;
   final VaultPinMode mode;
+
+  /// Which keyboard the unlock field should open with — see
+  /// [VaultCipher.pinIsNumericHint]. Ignored in setup mode, which always
+  /// starts on the number pad because it is choosing the PIN.
+  ///
+  /// Defaults to false (full keyboard) so a caller that does not pass it
+  /// degrades to the mode that can type every PIN, numeric ones included.
+  final bool numericPinHint;
 
   @override
   State<VaultPinDialog> createState() => _VaultPinDialogState();
@@ -39,11 +49,16 @@ class VaultPinDialog extends StatefulWidget {
     required BuildContext context,
     required String uid,
     required VaultPinMode mode,
+    bool numericPinHint = false,
   }) async {
     final res = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => VaultPinDialog(uid: uid, mode: mode),
+      builder: (_) => VaultPinDialog(
+        uid: uid,
+        mode: mode,
+        numericPinHint: numericPinHint,
+      ),
     );
     return res ?? false;
   }
@@ -54,11 +69,19 @@ enum VaultPinMode { setup, unlock }
 class _VaultPinDialogState extends State<VaultPinDialog> {
   final _pinCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
+  final _pinFocus = FocusNode();
+  final _confirmFocus = FocusNode();
   final LocalAuthentication _auth = LocalAuthentication();
   final _storage = biometricPinStorage;
 
   bool _obscure = true;
   bool _busy = false;
+
+  /// Number pad vs full keyboard. A default only — no PIN field filters what
+  /// can be typed, so this never decides what is a valid PIN. Setup starts
+  /// numeric because it is choosing one; unlock follows the recorded hint for
+  /// the PIN that already exists.
+  late bool _numeric = _isSetup || widget.numericPinHint;
 
   /// Device has usable biometric hardware.
   bool _canCheckBiometrics = false;
@@ -95,10 +118,22 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   void dispose() {
     _pinCtrl.dispose();
     _confirmCtrl.dispose();
+    _pinFocus.dispose();
+    _confirmFocus.dispose();
     super.dispose();
   }
 
   bool get _isSetup => widget.mode == VaultPinMode.setup;
+
+  /// Flips both fields between the number pad and the full keyboard.
+  ///
+  /// Text already typed is preserved — only the keyboard changes — so this is
+  /// safe to hit mid-entry.
+  Future<void> _toggleKeyboard() async {
+    setState(() => _numeric = !_numeric);
+    final target = _confirmFocus.hasFocus ? _confirmFocus : _pinFocus;
+    await reopenKeyboardFor(context, target);
+  }
 
   Future<void> _checkBiometrics() async {
     try {
@@ -578,6 +613,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                   c,
                   _pinCtrl,
                   _isSetup ? 'New PIN' : 'Enter PIN',
+                  focusNode: _pinFocus,
                   autofocus: !_biometricUnlockReady,
                 ),
                 if (_isSetup) ...[
@@ -586,8 +622,20 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                     c,
                     _confirmCtrl,
                     'Confirm PIN',
+                    focusNode: _confirmFocus,
                   ),
                 ],
+
+                // Escape hatch from a wrong keyboard default. Required, not
+                // decorative: the number pad on some Android keyboards has no
+                // ABC key, so a legacy passphrase user needs this to type at
+                // all — and the only other button on this dialog wipes the
+                // vault.
+                PinKeyboardToggle(
+                  numeric: _numeric,
+                  onToggle: _toggleKeyboard,
+                  enabled: !_busy,
+                ),
 
                 // ── Error Message Banner ────────────────────────────────
                 if (_error != null) ...[
@@ -718,7 +766,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   }
 
   Widget _pinField(AppThemeColors c, TextEditingController ctrl, String hint,
-      {bool autofocus = false}) {
+      {required FocusNode focusNode, bool autofocus = false}) {
     return Container(
       decoration: BoxDecoration(
         color: c.surface,
@@ -727,9 +775,15 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
       ),
       child: TextField(
         controller: ctrl,
+        focusNode: focusNode,
         obscureText: _obscure,
         autofocus: autofocus,
-        keyboardType: TextInputType.visiblePassword,
+        keyboardType:
+            _numeric ? TextInputType.number : TextInputType.visiblePassword,
+        // Length-limited only. Deliberately no digitsOnly filter even when the
+        // number pad is showing: the PIN is an Argon2id passphrase, older
+        // vaults were created with letters in them, and a filter on the unlock
+        // field would make those permanently unenterable.
         inputFormatters: [LengthLimitingTextInputFormatter(64)],
         style: GoogleFonts.poppins(
           color: c.textHigh,

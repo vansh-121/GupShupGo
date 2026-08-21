@@ -24,12 +24,14 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultPinCustodyDialog extends StatefulWidget {
   const VaultPinCustodyDialog({
     super.key,
     required this.uid,
     required this.storedPin,
+    this.numericPinHint = false,
   });
 
   final String uid;
@@ -37,6 +39,17 @@ class VaultPinCustodyDialog extends StatefulWidget {
   /// The PIN currently readable from secure storage. Used as the old PIN when
   /// re-keying, which is what makes the rescue lossless.
   final String storedPin;
+
+  /// Which keyboard the confirm step opens with — see
+  /// [VaultSettings.pinIsNumeric], which the caller has already read to decide
+  /// whether to show this dialog at all.
+  ///
+  /// Defaults to false, and in practice it always is: the flag was added after
+  /// every vault that lands here was created, so an absent field correctly
+  /// reads as "assume a passphrase". That is the safe direction — the full
+  /// keyboard can type digits, and this population is the one most likely to
+  /// hold a PIN that is not digits at all.
+  final bool numericPinHint;
 
   @override
   State<VaultPinCustodyDialog> createState() => _VaultPinCustodyDialogState();
@@ -47,11 +60,16 @@ class VaultPinCustodyDialog extends StatefulWidget {
     required BuildContext context,
     required String uid,
     required String storedPin,
+    bool numericPinHint = false,
   }) {
     return showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => VaultPinCustodyDialog(uid: uid, storedPin: storedPin),
+      builder: (_) => VaultPinCustodyDialog(
+        uid: uid,
+        storedPin: storedPin,
+        numericPinHint: numericPinHint,
+      ),
     );
   }
 }
@@ -63,12 +81,23 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   final _newCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
 
+  final _pinFocus = FocusNode();
+  final _newFocus = FocusNode();
+  final _confirmFocus = FocusNode();
+
   _Step _step = _Step.confirm;
   bool _obscure = true;
   bool _busy = false;
   String? _error;
   int _done = 0;
   int _total = 0;
+
+  /// Number pad vs full keyboard. A default only — no field here filters what
+  /// can be typed, so this never decides what counts as a valid PIN.
+  ///
+  /// Starts on the hint because the first step recalls a PIN that already
+  /// exists; [_Step.rekey] resets it, since that step is choosing a new one.
+  late bool _numeric = widget.numericPinHint;
 
   static const _minLen = 6;
 
@@ -77,7 +106,20 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
     _pinCtrl.dispose();
     _newCtrl.dispose();
     _confirmCtrl.dispose();
+    _pinFocus.dispose();
+    _newFocus.dispose();
+    _confirmFocus.dispose();
     super.dispose();
+  }
+
+  /// Flips every field in the dialog between the number pad and the full
+  /// keyboard, preserving anything already typed.
+  Future<void> _toggleKeyboard() async {
+    setState(() => _numeric = !_numeric);
+    final target = _step == _Step.confirm
+        ? _pinFocus
+        : (_confirmFocus.hasFocus ? _confirmFocus : _newFocus);
+    await reopenKeyboardFor(context, target);
   }
 
   /// Cheap path: they know the PIN. `unlock` returns false *before* caching
@@ -145,6 +187,8 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
       setState(() {
         _busy = false;
         _step = _Step.confirm;
+        // Back to recalling an existing PIN, so back to the hint's keyboard.
+        _numeric = widget.numericPinHint;
         _error = 'Could not update the PIN automatically. '
             'Please enter your current PIN.';
       });
@@ -229,12 +273,25 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                 ),
                 const SizedBox(height: 14),
                 if (isConfirm)
-                  _field(c, _pinCtrl, 'Enter PIN', autofocus: true)
+                  _field(c, _pinCtrl, 'Enter PIN',
+                      focusNode: _pinFocus, autofocus: true)
                 else ...[
-                  _field(c, _newCtrl, 'New PIN', autofocus: true),
+                  _field(c, _newCtrl, 'New PIN',
+                      focusNode: _newFocus, autofocus: true),
                   const SizedBox(height: 10),
-                  _field(c, _confirmCtrl, 'Confirm PIN'),
+                  _field(c, _confirmCtrl, 'Confirm PIN',
+                      focusNode: _confirmFocus),
                 ],
+                // Escape hatch from a wrong keyboard default, and load-bearing
+                // on the confirm step: the number pad on some Android
+                // keyboards has no ABC key, so a user whose PIN contains a
+                // letter needs this to type it at all. The only other way out
+                // of that step re-encrypts the entire vault.
+                PinKeyboardToggle(
+                  numeric: _numeric,
+                  onToggle: _toggleKeyboard,
+                  enabled: !_busy,
+                ),
                 if (_error != null) ...[
                   const SizedBox(height: 10),
                   Container(
@@ -294,6 +351,11 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                                 _step = _Step.rekey;
                                 _error = null;
                                 _pinCtrl.clear();
+                                // Fresh fields, new heading, and this step
+                                // *chooses* a PIN rather than recalling one —
+                                // so the number-pad default applies again,
+                                // even if the hint above said otherwise.
+                                _numeric = true;
                               }),
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
@@ -353,7 +415,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   }
 
   Widget _field(AppThemeColors c, TextEditingController ctrl, String hint,
-      {bool autofocus = false}) {
+      {required FocusNode focusNode, bool autofocus = false}) {
     return Container(
       decoration: BoxDecoration(
         color: c.surface,
@@ -362,10 +424,15 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
       ),
       child: TextField(
         controller: ctrl,
+        focusNode: focusNode,
         obscureText: _obscure,
         autofocus: autofocus,
         enabled: !_busy,
-        keyboardType: TextInputType.visiblePassword,
+        keyboardType:
+            _numeric ? TextInputType.number : TextInputType.visiblePassword,
+        // Length-limited only. Deliberately no digitsOnly filter even on the
+        // number pad: the PIN is an Argon2id passphrase, and the confirm step
+        // above is recalling one that may well contain letters.
         inputFormatters: [LengthLimitingTextInputFormatter(64)],
         style: GoogleFonts.poppins(
           color: c.textHigh,
