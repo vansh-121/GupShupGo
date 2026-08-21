@@ -341,7 +341,10 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                   ),
                 ],
                 if (isConfirm) ...[
-                  const SizedBox(height: 8),
+                  // Wider than the usual 8: this button and the keyboard
+                  // toggle above it are both text-sized tap targets, and
+                  // hitting this one by mistake re-encrypts the whole vault.
+                  const SizedBox(height: 14),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(

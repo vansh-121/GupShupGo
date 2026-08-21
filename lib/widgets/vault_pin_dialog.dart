@@ -681,7 +681,10 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                 // and implies it is still available; VaultLockedBanner is
                 // what then makes that promise reachable.
                 if (!_isSetup) ...[
-                  const SizedBox(height: 8),
+                  // Wider than the usual 8: this row and the keyboard toggle
+                  // above it are both text-sized tap targets, and confusing
+                  // them costs a dismissed dialog.
+                  const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [

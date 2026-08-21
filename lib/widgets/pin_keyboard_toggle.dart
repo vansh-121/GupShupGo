@@ -52,11 +52,18 @@ class PinKeyboardToggle extends StatelessWidget {
     final c = AppThemeColors.of(context);
 
     return Padding(
-      // Breathing room above, owned here rather than at the call sites: this
-      // widget always follows a bordered PIN field, and a compact TextButton
-      // has almost no margin of its own, so without this the label sits flush
-      // against the field's border and reads as part of it.
-      padding: const EdgeInsets.only(top: 8),
+      // Breathing room on both sides, owned here rather than at the call sites.
+      // Above: this widget always follows a bordered PIN field, and a compact
+      // TextButton has almost no margin of its own, so without it the label
+      // sits flush against the field's border and reads as part of it.
+      //
+      // Below: what follows is another small text button — "Restore later",
+      // "I don't know my PIN" — and both targets are shrink-wrapped to their
+      // text, so they end up two undersized tap areas a few pixels apart. The
+      // mis-tap is not symmetric: hitting this by accident flips a keyboard,
+      // while hitting the one below dismisses the dialog with the vault still
+      // locked. The call sites add their own gap on top of this.
+      padding: const EdgeInsets.only(top: 8, bottom: 6),
       child: Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
