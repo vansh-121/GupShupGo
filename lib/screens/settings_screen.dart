@@ -11,6 +11,7 @@ import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
+import 'package:video_chat_app/services/review_prompt_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -634,6 +635,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.delete_sweep_outlined,
                 title: 'Clear all gup history',
                 onTap: _clearAllChats,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.star_rate_rounded,
+                title: 'Leave a review',
+                onTap: () => ReviewPromptService.instance
+                    .openStoreListing(context: context),
               ),
               _buildStitchDivider(),
               _buildStitchTile(

@@ -26,6 +26,7 @@ import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
+import 'package:video_chat_app/services/review_prompt_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
@@ -412,6 +413,18 @@ class _HomeScreenState extends State<HomeScreen>
         // spotlight. Deferring keeps the ordering rule in one place instead of
         // threading a "did anything navigate?" flag through every branch above.
         await _maybeShowFeatureCoaching();
+
+        // ── Review nudge — after coaching, for the same reason ─────────
+        // Covers users who never make calls (the call screen has its own
+        // trigger). Play's sheet is a system overlay rather than a Flutter
+        // dialog, so it cannot stack with What's New or a badge unlock — but
+        // arriving after coaching means it lands on a settled screen instead of
+        // over a tooltip. Silently no-ops on every launch except the rare one
+        // where a forty-day window has reopened; see ReviewPromptService.
+        unawaited(ReviewPromptService.instance.maybeRequest(
+          trigger: 'sustained_use',
+          accountCreatedAt: _currentUser?.createdAt,
+        ));
       });
 
       // ── Run non-blocking setup concurrently ──
@@ -2209,6 +2222,12 @@ class _HomeScreenState extends State<HomeScreen>
                   );
                   if (updated != null) setState(() => _currentUser = updated);
                 }
+              } else if (value == 'review') {
+                // openStoreListing, not the review sheet: Play's sheet is
+                // quota-limited and may show nothing at all, which is the wrong
+                // thing to hang a tap on.
+                unawaited(ReviewPromptService.instance
+                    .openStoreListing(context: context));
               } else if (value == 'logout') {
                 _signOut();
               }
@@ -2233,6 +2252,16 @@ class _HomeScreenState extends State<HomeScreen>
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
                       const Text('Settings'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'review',
+                  child: Row(
+                    children: [
+                      Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Leave a review'),
                     ],
                   ),
                 ),

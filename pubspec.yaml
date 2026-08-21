@@ -94,6 +94,12 @@ dependencies:
   # Google Play In-App Update (native full-screen update prompt)
   in_app_update: ^4.2.5
 
+  # Google Play In-App Review (native review sheet). Same Play Core family as
+  # in_app_update, and the same "Play decides" contract: requestReview() is
+  # quota-limited and reports nothing back, so ReviewPromptService keeps its own
+  # stricter budget in front of it rather than trusting the outcome.
+  in_app_review: ^2.0.12
+
   # In-App Purchases (Google Play Billing — GupShupGo Pro)
   # Bumped to pull in_app_purchase_android >=0.5.0, which upgrades the
   # bundled Google Play Billing Library from 7.1.1 to 8.0.0. Google Play
