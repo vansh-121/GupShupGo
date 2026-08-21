@@ -102,7 +102,7 @@ class _StarterChecklistCardState extends State<StarterChecklistCard> {
             _run(widget.onFindPeople, mark: markStarterContactsVisited),
       ),
       _Step(
-        icon: Icons.sensors_rounded,
+        icon: Icons.sensors_rounded,  
         title: 'Try offline chat',
         body: 'Message people nearby with no internet at all.',
         done: _meshDone,

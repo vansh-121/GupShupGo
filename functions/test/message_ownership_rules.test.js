@@ -202,6 +202,30 @@ describe("message updates: content is the sender's", () => {
     await assertFails(update(ALICE, { linkPreviewTitle: deleteField() }));
   });
 
+  it("refuses to let the recipient forge reply attribution", async () => {
+    await seedMessage({
+      schemaVersion: 1,
+      replyToMessageId: "original-msg",
+      replyToSenderName: "Alice",
+      replyToSenderId: ALICE,
+      replyToType: "text",
+    });
+    await assertFails(update(ALICE, { replyToSenderName: "Mallory" }));
+    await assertFails(update(ALICE, { replyToMessageId: "fake-msg" }));
+    await assertFails(update(ALICE, { replyToSenderId: CAROL }));
+  });
+
+  it("refuses to let the recipient forge status-reply fields", async () => {
+    await seedMessage({
+      schemaVersion: 1,
+      statusReplyOwnerId: BOB,
+      statusReplyOwnerName: "Bob",
+      statusReplyText: "My status text",
+    });
+    await assertFails(update(ALICE, { statusReplyText: "Forged status" }));
+    await assertFails(update(ALICE, { statusReplyOwnerName: "Alice" }));
+  });
+
   it("refuses to let the recipient claim the message", async () => {
     // The escalation the field list exists to close. Without senderId in it,
     // Alice takes ownership here and every assertFails above becomes a

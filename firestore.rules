@@ -294,6 +294,17 @@ service cloud.firestore {
               'text', 'envelopes', 'mediaUrl', 'type', 'replyToText',
               'linkPreviewUrl', 'linkPreviewTitle', 'linkPreviewDescription',
               'linkPreviewSiteName', 'linkPreviewImageBase64',
+              // Reply-quote attribution — without these a peer could forge
+              // which message (and whose name) a quote points at.
+              'replyToMessageId', 'replyToSenderId', 'replyToSenderName',
+              'replyToType',
+              // Status-reply context — same rationale: only the sender who
+              // composed the status-reply should be able to set/change it.
+              'statusReplyOwnerId', 'statusReplyItemId',
+              'statusReplyOwnerName', 'statusReplyOwnerPhotoUrl',
+              'statusReplyType', 'statusReplyText',
+              'statusReplyMediaUrl', 'statusReplyCaption',
+              'statusReplyBackgroundColor',
             ]);
         }
 
