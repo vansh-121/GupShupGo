@@ -1,4 +1,18 @@
 # ─────────────────────────────────────────────
+# Global R8 options
+# ─────────────────────────────────────────────
+# Move classes into the unnamed (default) package so DEX drops the package
+# prefix from every class name. Recommended for apps; becomes R8's default in
+# AGP 9.1 (opt out there with -dontrepackage). Play Console → App optimization
+# reports this as "Repackage Classes".
+-repackageclasses
+
+# -allowaccessmodification is NOT repeated here: it is already active via
+# proguard-android-optimize.txt (see proguardFiles in app/build.gradle) and is
+# implied by R8 full mode since AGP 8.2. Verified present in the merged config
+# at build/app/outputs/mapping/release/configuration.txt.
+
+# ─────────────────────────────────────────────
 # Flutter engine
 # ─────────────────────────────────────────────
 -keep class io.flutter.** { *; }
