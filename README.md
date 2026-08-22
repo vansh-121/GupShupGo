@@ -8,7 +8,7 @@
 
 **The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
-[![Release: 1.1.5](https://img.shields.io/badge/Release-v1.1.5-blue.svg?style=flat-square)](CHANGELOG.md)
+[![Release: 1.1.6](https://img.shields.io/badge/Release-v1.1.6-blue.svg?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
 [![Flutter SDK](https://img.shields.io/badge/Flutter-%E2%89%A53.2.0-02569B.svg?style=flat-square&logo=flutter)](https://flutter.dev)
 [![Signal Protocol E2EE](https://img.shields.io/badge/Security-Signal%20E2EE-10B981.svg?style=flat-square&logo=signal)](https://signal.org)

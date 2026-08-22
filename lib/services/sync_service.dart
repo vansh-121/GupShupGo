@@ -271,6 +271,26 @@ class SyncService {
   static bool _isLocked(MessageModel m) =>
       VaultCipher.isPlaceholderText(m.text);
 
+  /// Whether [serverEditedAt] is an edit we have not applied yet.
+  ///
+  /// This decides whether an edited message ever becomes visible to its
+  /// recipient. An edit replaces the ciphertext under a **stable message id**,
+  /// and only the content pass below ever opens an envelope — the metadata pass
+  /// copies tick marks and nothing else. So a document that already has a
+  /// readable local copy has to be pulled back into the content pass on the
+  /// strength of this one comparison, or the new text is dropped on the floor
+  /// forever.
+  ///
+  /// Both "absent on both sides" and "same timestamp" must read false, or every
+  /// read receipt on an already-edited message would re-run libsignal. The real
+  /// signal is `local == null && server != null`: the first edit to arrive.
+  @visibleForTesting
+  static bool isNewerEdit(DateTime? localEditedAt, DateTime? serverEditedAt) {
+    if (serverEditedAt == null) return false;
+    if (localEditedAt == null) return true;
+    return serverEditedAt.isAfter(localEditedAt);
+  }
+
   /// Processes a single Firestore snapshot for [roomId]: decrypts new
   /// messages, updates previews, triggers media downloads. Runs via the
   /// per-room sequential queue so snapshots are never dropped.
@@ -344,9 +364,28 @@ class SyncService {
       final metadata = <DocumentSnapshot<Map<String, dynamic>>>[];
       for (final doc in changed) {
         final localMsg = localMap[doc.id];
+        // Read raw rather than parsing a whole MessageModel: both passes below
+        // parse the docs they actually take, and this loop runs over every
+        // changed doc in the room.
+        final rawEditedAt = doc.data()?['editedAt'];
+        final serverEditedAt =
+            rawEditedAt is Timestamp ? rawEditedAt.toDate() : null;
+
         if (localMsg == null || _isLocked(localMsg)) {
           content.add(doc);
           if (localMsg != null) _roomsWithLockedMessages.add(roomId);
+        } else if (isNewerEdit(localMsg.editedAt, serverEditedAt)) {
+          // The sender edited this. Routing it to the content pass is necessary
+          // but not sufficient: decryptForRendering answers from the first
+          // plaintext cache that hits and never looks at the envelope, so all
+          // of them still hold the pre-edit text. Clear them first.
+          //
+          // Not cleared: this user's own msgVault entry. It is only ever
+          // consulted when *no* envelope is addressed to this device, and in
+          // that case dropping it would turn a message that renders with
+          // slightly stale text into one that cannot be read at all.
+          await ChatService.instance.forgetCachedPayload(doc.id);
+          content.add(doc);
         } else {
           metadata.add(doc);
         }
@@ -374,6 +413,19 @@ class SyncService {
         final serverMsg = MessageModel.fromFirestore(doc);
         final localMsg = localMap[serverMsg.id];
         final wasLocked = localMsg != null && _isLocked(localMsg);
+
+        // Nothing here to decrypt — the sender stripped the envelopes when they
+        // deleted it. Reached when our local copy is a locked placeholder: a
+        // message we never managed to decrypt and which has since been deleted.
+        // Without this it would sit at 🔒 forever, telling the user to ask for a
+        // resend of something that no longer exists.
+        if (serverMsg.deletedForEveryone) {
+          if (localMsg == null || !localMsg.deletedForEveryone) {
+            await ChatService.instance.forgetCachedPayload(serverMsg.id);
+            pending.add((localMsg ?? serverMsg).asTombstone());
+          }
+          continue; // flush() after the loop picks this up.
+        }
 
         final decrypted = await ChatService.instance
             .decryptForRendering(serverMsg, currentUserId);
@@ -416,13 +468,34 @@ class SyncService {
         final localMsg = localMap[serverMsg.id];
         if (localMsg == null) continue;
 
+        // The one metadata change that has to destroy content rather than
+        // record it. The sender has already stripped the ciphertext from the
+        // document; leaving our decrypted copy in the local row and the memo
+        // would mean the "deleted" message is one render bug away from coming
+        // back, and still answerable by the resend protocol.
+        final newTombstone =
+            serverMsg.deletedForEveryone && !localMsg.deletedForEveryone;
+        if (newTombstone) {
+          await ChatService.instance.forgetCachedPayload(serverMsg.id);
+          statusUpdates.add(localMsg.asTombstone());
+          continue;
+        }
+
         if (localMsg.status != serverMsg.status ||
             localMsg.syncPending != serverMsg.syncPending ||
-            localMsg.mediaUrl != serverMsg.mediaUrl) {
+            localMsg.mediaUrl != serverMsg.mediaUrl ||
+            // listEquals, not `!=`: two equal lists parsed from two snapshots
+            // are never the same object, so identity comparison would rewrite
+            // the row and rebuild the list on every read receipt in the room.
+            !listEquals(localMsg.deletedFor, serverMsg.deletedFor)) {
           final updated = localMsg.copyWith(
             status: serverMsg.status,
             syncPending: serverMsg.syncPending,
             mediaUrl: serverMsg.mediaUrl,
+            // "Delete for me" on this user's other device. The row stays —
+            // ChatService.getMessages filters it out at read time, the same way
+            // it handles `clearedAt`.
+            deletedFor: serverMsg.deletedFor,
           );
           statusUpdates.add(updated);
           if (updated.mediaUrl != null && updated.localFilePath == null) {
@@ -446,9 +519,15 @@ class SyncService {
       if (snapshot.docs.isNotEmpty) {
         final latest = saved[snapshot.docs.first.id];
         if (latest != null) {
-          final previewText = latest.text.isNotEmpty
-              ? latest.text
-              : (latest.mediaUrl != null ? 'Media' : '');
+          // A tombstone has to be spelled out. Its text is empty and its media
+          // is gone, so it would fail the non-empty guard below and leave the
+          // chat list showing the message the sender just deleted — the one
+          // place the deleted text would survive on this device.
+          final previewText = latest.deletedForEveryone
+              ? ChatService.deletedMessageText
+              : latest.text.isNotEmpty
+                  ? latest.text
+                  : (latest.mediaUrl != null ? 'Media' : '');
           if (previewText.isNotEmpty) {
             await store.saveRoomPreview(
               chatRoomId: roomId,
@@ -749,6 +828,20 @@ class SyncService {
         'statusReplyMediaUrl': payload['statusReplyMediaUrl'],
         'statusReplyCaption': payload['statusReplyCaption'],
         'statusReplyBackgroundColor': payload['statusReplyBackgroundColor'],
+      },
+      if (payload['linkPreviewUrl'] != null) ...{
+        'linkPreviewUrl': payload['linkPreviewUrl'],
+        'linkPreviewTitle': payload['linkPreviewTitle'],
+        'linkPreviewDescription': payload['linkPreviewDescription'],
+        'linkPreviewSiteName': payload['linkPreviewSiteName'],
+        'linkPreviewImageBase64': payload['linkPreviewImageBase64'],
+      },
+      if (payload['replyToMessageId'] != null) ...{
+        'replyToMessageId': payload['replyToMessageId'],
+        'replyToSenderId': payload['replyToSenderId'],
+        'replyToSenderName': payload['replyToSenderName'],
+        'replyToType': payload['replyToType'],
+        'replyToText': payload['replyToText'],
       },
     };
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:video_chat_app/main.dart'; // sharedPrefs global
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/streak/streak_state.dart';
 
 /// Lightweight JSON cache for the chat list displayed on the home screen.
@@ -29,7 +30,21 @@ class ChatCacheService {
   /// User profiles indexed by userId — avoids N Firestore reads per frame.
   final Map<String, UserModel> _userCache = {};
 
-  UserModel? getCachedUser(String userId) => _userCache[userId];
+  /// Returns the cached profile with its presence re-checked against the
+  /// clock.
+  ///
+  /// The cache is persisted to SharedPreferences and `UserModel.toMap()`
+  /// includes `isOnline`, so without this a green dot would survive process
+  /// death and reappear on the next launch. `lastSeen` is persisted too, which
+  /// is what makes the check possible offline.
+  UserModel? getCachedUser(String userId) {
+    final user = _userCache[userId];
+    if (user == null) return null;
+    if (user.isOnline && !PresenceService.isRecentlyActive(user.lastSeen)) {
+      return user.copyWith(isOnline: false);
+    }
+    return user;
+  }
 
   void cacheUser(UserModel user) {
     _userCache[user.id] = user;
@@ -102,8 +117,11 @@ class ChatCacheService {
       if (json == null) return;
       final map = jsonDecode(json) as Map<String, dynamic>;
       map.forEach((id, data) {
-        _userCache[id] =
-            UserModel.fromMap(data as Map<String, dynamic>, id);
+        // Force presence off on restore: an entry written by a previous
+        // process is never evidence of a live connection, whatever it says.
+        // The real value arrives with the first Firestore refresh.
+        _userCache[id] = UserModel.fromMap(data as Map<String, dynamic>, id)
+            .copyWith(isOnline: false);
       });
     } catch (e) {
       print('Error loading user cache from disk: $e');

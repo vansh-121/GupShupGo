@@ -480,6 +480,19 @@ class MeshNetworkService extends ChangeNotifier {
     required String receiverId,
     required String text,
     String? senderName,
+    // Link preview + reply quote. The serializers carry these across the wire
+    // on their own, but the model built here has to actually hold them or an
+    // offline send silently drops the card and the quote.
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
   }) async {
     final message = MessageModel(
       id: _generateId(),
@@ -491,6 +504,16 @@ class MeshNetworkService extends ChangeNotifier {
       isOfflineMesh: true,
       meshHops: 0,
       syncPending: true,
+      linkPreviewUrl: linkPreviewUrl,
+      linkPreviewTitle: linkPreviewTitle,
+      linkPreviewDescription: linkPreviewDescription,
+      linkPreviewSiteName: linkPreviewSiteName,
+      linkPreviewImageBase64: linkPreviewImageBase64,
+      replyToMessageId: replyToMessageId,
+      replyToSenderId: replyToSenderId,
+      replyToSenderName: replyToSenderName,
+      replyToType: replyToType,
+      replyToText: replyToText,
     );
 
     _cacheService.storePendingMeshMessage(message);

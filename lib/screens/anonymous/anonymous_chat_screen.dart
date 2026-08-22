@@ -9,6 +9,7 @@ import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/linkified_text.dart';
 
 /// Dedicated 1-on-1 anonymous chat screen between two strangers.
 class AnonymousChatScreen extends StatefulWidget {
@@ -535,8 +536,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                             bottomRight: Radius.circular(isMe ? 4 : 16),
                           ),
                         ),
-                        child: Text(
+                        child: LinkifiedText(
                           text,
+                          linkColor: isMe ? Colors.white : c.primary,
                           style: GoogleFonts.poppins(
                             fontSize: 14,
                             color: isMe ? Colors.white : c.textHigh,

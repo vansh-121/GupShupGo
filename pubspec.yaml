@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.5+51
+version: 1.1.6+52
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
@@ -93,6 +93,12 @@ dependencies:
 
   # Google Play In-App Update (native full-screen update prompt)
   in_app_update: ^4.2.5
+
+  # Google Play In-App Review (native review sheet). Same Play Core family as
+  # in_app_update, and the same "Play decides" contract: requestReview() is
+  # quota-limited and reports nothing back, so ReviewPromptService keeps its own
+  # stricter budget in front of it rather than trusting the outcome.
+  in_app_review: ^2.0.12
 
   # In-App Purchases (Google Play Billing — GupShupGo Pro)
   # Bumped to pull in_app_purchase_android >=0.5.0, which upgrades the

@@ -50,7 +50,12 @@ enum VaultState {
 
 /// User-visible vault configuration mirrored from `vaultMeta/config`.
 class VaultSettings {
-  const VaultSettings({required this.retentionDays, required this.createdAt});
+  const VaultSettings({
+    required this.retentionDays,
+    required this.createdAt,
+    this.pinIsUserChosen = false,
+    this.pinIsNumeric = false,
+  });
 
   /// Number of days after which a vault entry is auto-deleted. `null`
   /// means "keep forever".
@@ -58,6 +63,31 @@ class VaultSettings {
 
   /// When the vault was originally set up (server timestamp).
   final DateTime? createdAt;
+
+  /// True once the user has demonstrably supplied the PIN themselves —
+  /// they chose it at setup, changed it, or typed it to unlock.
+  ///
+  /// A build before this flag existed could create a vault behind a
+  /// randomly generated PIN that was never shown to the user, which made
+  /// a reinstall unrecoverable. Absent/false therefore means "custody
+  /// unproven", and [classifyPinCustody] decides whether that install can
+  /// still be rescued. Defaults to false for config docs written before
+  /// this field shipped. Reveals nothing about the key itself.
+  final bool pinIsUserChosen;
+
+  /// True when the PIN consists only of digits, so the unlock screen can
+  /// open a number pad instead of a full keyboard.
+  ///
+  /// Purely a UI default — nothing is enforced on either kind of field, and
+  /// both dialogs carry a keyboard toggle, so a wrong value here costs one
+  /// tap rather than access. Absent/false means "assume a passphrase",
+  /// which is the safe direction: the full keyboard can type digits too,
+  /// while a number pad cannot type letters on every Android keyboard.
+  ///
+  /// This cannot be cached locally instead: SharedPreferences is wiped on
+  /// uninstall, and reinstall is precisely when the unlock screen appears.
+  /// It reveals only the PIN's character class, never its length or value.
+  final bool pinIsNumeric;
 }
 
 class VaultCipher {
@@ -132,7 +162,31 @@ class VaultCipher {
   Uint8List? _key;
   String? _uid;
 
+  bool _pinIsNumericHint = false;
+
   bool get isReady => _key != null;
+
+  /// Whether the PIN on this account is all digits, as recorded by whichever
+  /// [setup] / [changePin] last wrote the config.
+  ///
+  /// A hint, never a rule: it only decides which keyboard the unlock field
+  /// opens with, and that field enforces nothing, so a stale or wrong value
+  /// costs the user one tap on the keyboard toggle. Populated by [bootstrap]
+  /// from the config doc it already fetches — deliberately not a second read,
+  /// because it is consumed on the cold-start path where the user is waiting.
+  ///
+  /// Stays false until a [bootstrap] actually reads the config, which is
+  /// exactly the `needsUnlock` case where the unlock field is shown. The
+  /// early-return `ready` paths never need it.
+  bool get pinIsNumericHint => _pinIsNumericHint;
+
+  /// True when [pin] is all digits — the value written to `pinIsNumeric`.
+  ///
+  /// Derived from the string rather than from which dialog produced it, so
+  /// the flag stays correct no matter what wrote the PIN, and self-heals if
+  /// a user with an old passphrase later changes to digits.
+  static bool isNumericPin(String pin) =>
+      pin.isNotEmpty && !pin.runes.any((r) => r < 0x30 || r > 0x39);
 
   /// Returns the current state for [uid] and auto-unlocks from cached
   /// secure-storage entry when possible. Safe to call repeatedly.
@@ -146,7 +200,11 @@ class VaultCipher {
         .collection('vaultMeta')
         .doc('config')
         .get();
-    return cfg.exists ? VaultState.needsUnlock : VaultState.needsSetup;
+    if (!cfg.exists) return VaultState.needsSetup;
+    // Capture the keyboard hint from the doc we just read, so the unlock
+    // dialog does not have to make a round-trip of its own.
+    _pinIsNumericHint = cfg.data()?['pinIsNumeric'] == true;
+    return VaultState.needsUnlock;
   }
 
   Future<bool> _tryAutoUnlock(String uid) async {
@@ -185,7 +243,13 @@ class VaultCipher {
         .collection('vaultMeta')
         .doc('config')
         .get();
-    if (existing.exists) return unlock(uid, pin);
+    if (existing.exists) {
+      // Config already there — this is really an unlock, and the PIN was
+      // typed by the user, so it proves custody.
+      final ok = await unlock(uid, pin);
+      if (ok) await markPinUserChosen(uid);
+      return ok;
+    }
 
     final salt = _randomBytes(16);
     final key = await _deriveKey(pin, salt);
@@ -209,9 +273,13 @@ class VaultCipher {
       },
       'verifier': verifier,
       'createdAt': FieldValue.serverTimestamp(),
+      // Setup always takes a PIN the user typed and confirmed.
+      'pinIsUserChosen': true,
+      'pinIsNumeric': isNumericPin(pin),
     });
 
     await _cacheKey(uid, key);
+    _pinIsNumericHint = isNumericPin(pin);
     _key = key;
     _uid = uid;
     return true;
@@ -426,7 +494,27 @@ class VaultCipher {
     return VaultSettings(
       retentionDays: data['retentionDays'] as int?,
       createdAt: ts is Timestamp ? ts.toDate() : null,
+      pinIsUserChosen: data['pinIsUserChosen'] == true,
+      pinIsNumeric: data['pinIsNumeric'] == true,
     );
+  }
+
+  /// Records that the user has demonstrably supplied their own PIN.
+  ///
+  /// Call this from the paths where the PIN was *typed* — never from the
+  /// biometric path, which replays a stored copy and proves nothing about
+  /// what the user knows. [setup] and [changePin] already set the flag
+  /// themselves. Best-effort: a failure here only means the custody
+  /// prompt may appear once more.
+  Future<void> markPinUserChosen(String uid) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('vaultMeta')
+          .doc('config')
+          .set({'pinIsUserChosen': true}, SetOptions(merge: true));
+    } catch (_) {}
   }
 
   /// Updates the retention window. `days = null` means keep forever.
@@ -600,9 +688,13 @@ class VaultCipher {
         .set({
       'salt': base64Encode(newSalt),
       'verifier': newVerifier,
+      // Both PINs were typed by the user, so custody is proven.
+      'pinIsUserChosen': true,
+      'pinIsNumeric': isNumericPin(newPin),
     }, SetOptions(merge: true));
 
     await _cacheKey(uid, newKey);
+    _pinIsNumericHint = isNumericPin(newPin);
     _key = newKey;
     _uid = uid;
     return true;

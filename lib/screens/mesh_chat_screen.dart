@@ -11,6 +11,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 /// Direct peer-to-peer chat over the mesh network.
@@ -254,7 +255,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             color: const Color(0xFF2D2D2D),
             child: Row(
               children: [
-                const Icon(Icons.cell_tower_rounded,
+                const Icon(Icons.sensors_rounded,
                     color: Color(0xFF4ADE80), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
@@ -284,7 +285,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.cell_tower_rounded, size: 56, color: c.primary),
+              Icon(Icons.sensors_rounded, size: 56, color: c.primary),
               const SizedBox(height: 16),
               Text('Say hi to ${widget.peer.displayName}',
                   style: GoogleFonts.poppins(
@@ -359,8 +360,9 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 ),
               )
             else
-              Text(
+              LinkifiedText(
                 msg.text,
+                linkColor: isMe ? Colors.white : c.primary,
                 style: GoogleFonts.poppins(
                   color: isMe ? Colors.white : c.textHigh,
                   fontSize: 14.5,
@@ -378,7 +380,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Icon(Icons.cell_tower_rounded,
+                Icon(Icons.sensors_rounded,
                     size: 11,
                     color: isMe ? Colors.white.withOpacity(0.7) : c.textLow),
               ],

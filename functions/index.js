@@ -2,6 +2,7 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onValueWritten } = require("firebase-functions/v2/database");
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -3461,4 +3462,169 @@ exports.processProblemReportEmail = onDocumentCreated(
     }
   },
 );
+
+// ─── Presence: RTDB → Firestore mirror ───────────────────────────────────────
+// The client owns RTDB `/presence/{uid}` and arms an onDisconnect() handler, so
+// the RTDB node self-heals when a process dies. Firestore — which every screen
+// actually reads — has no such mechanism: without this trigger a force-killed
+// app leaves `users/{uid}.isOnline` stuck at `true` forever.
+//
+// The trigger watches ONLY the `online` child, not the whole node. The client
+// heartbeats `lastSeen` (a sibling path) every 25s; watching the parent would
+// invoke this function on every heartbeat instead of ~twice per session.
+const PRESENCE_STALE_MS = 60000; // must match PresenceService.staleThreshold
+
+exports.presenceMirror = onValueWritten(
+  {
+    ref: "/presence/{uid}/online",
+    instance: "videocallapp-81166-default-rtdb",
+    region: "us-central1",
+    // Retries are off by default, which would make the `throw` below a no-op.
+    // They matter for the exact case this whole fix targets: the app is
+    // backgrounded, so `online` flips false while `lastSeen` is still fresh
+    // from a heartbeat seconds earlier. If that one mirror write is dropped,
+    // Firestore keeps `isOnline: true` with a *fresh* lastSeen — the reader's
+    // freshness guard can't catch that, and the user shows online for a full
+    // minute. A retry is what closes it.
+    //
+    // Retrying can't report a lie: `online` comes from the (possibly stale)
+    // event, but `lastSeen` is re-read live on every attempt. So a late retry
+    // that re-asserts `true` for a session that has since died carries that
+    // session's real, stale lastSeen, and the reader suppresses it anyway.
+    retry: true,
+  },
+  async (event) => {
+    const { uid } = event.params;
+    const before = event.data.before.val();
+    const after = event.data.after.val();
+
+    // Heartbeats never touch `online`, but a no-op write still reaches here.
+    if (before === after) return;
+
+    const isOnline = after === true;
+
+    // Take lastSeen from the RTDB sibling rather than stamping serverTimestamp():
+    // an onDisconnect fires up to a minute after the user's real last activity,
+    // so stamping "now" would report "last seen just now" for someone who
+    // vanished a minute ago.
+    let lastSeen;
+    try {
+      const snap = await event.data.after.ref.parent.child("lastSeen").once("value");
+      const ms = snap.val();
+      if (typeof ms === "number" && Number.isFinite(ms) && ms > 0) {
+        lastSeen = admin.firestore.Timestamp.fromMillis(ms);
+      }
+    } catch (error) {
+      console.warn(`presenceMirror: could not read lastSeen for ${uid}:`, error.message);
+    }
+    if (!lastSeen) lastSeen = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+      // update() rather than set({merge:true}) on purpose: a lingering RTDB node
+      // for a deleted account must not resurrect a stub users/{uid} document,
+      // which would then surface in discovery queries.
+      await db.collection("users").doc(uid).update({ isOnline, lastSeen });
+    } catch (error) {
+      if (error.code === 5 || error.code === "not-found") {
+        console.log(`presenceMirror: no user doc for ${uid}, skipping.`);
+        return;
+      }
+      console.error(`presenceMirror error for ${uid}:`, error.message);
+      throw error; // let the platform retry — a dropped mirror is a stuck "online"
+    }
+
+    console.log(`presenceMirror: ${uid} → ${isOnline ? "online" : "offline"}`);
+  },
+);
+
+// ─── Scheduled: Presence sweeper (every 5 minutes) ───────────────────────────
+// onDisconnect() is not a hard guarantee — observed in production at roughly a
+// 4% miss rate, with individual records stuck `online: true` for weeks. This job
+// is the janitor that makes presence self-healing regardless.
+//
+// Two independent passes, because the two stores fail in different ways:
+//   1. Firestore — catches docs the mirror never corrected (the historical bug,
+//      including any that predate presenceMirror being deployed).
+//   2. RTDB — catches nodes whose onDisconnect never fired, cleaning the source
+//      of truth. Flipping `online` there also re-triggers presenceMirror.
+//
+// The cutoff is deliberately looser than PRESENCE_STALE_MS: readers already
+// enforce 60s freshness client-side, so this only needs to catch long-lived
+// ghosts, and a wider window can't race a live user's delayed heartbeat.
+const PRESENCE_SWEEP_STALE_MS = 3 * PRESENCE_STALE_MS;
+
+exports.presenceSweeper = onSchedule(
+  { schedule: "every 5 minutes", region: "us-central1" },
+  async () => {
+    const cutoffMs = Date.now() - PRESENCE_SWEEP_STALE_MS;
+    let firestoreFixed = 0;
+    let rtdbFixed = 0;
+
+    // ── Pass 1: Firestore ────────────────────────────────────────────────
+    // Single-field query (auto-indexed) with the staleness filter applied in
+    // memory — avoids adding a composite index for isOnline + lastSeen.
+    try {
+      const onlineSnap = await db
+        .collection("users")
+        .where("isOnline", "==", true)
+        .get();
+
+      const stale = [];
+      for (const doc of onlineSnap.docs) {
+        const lastSeen = doc.data().lastSeen;
+        const lastSeenMs = lastSeen?.toMillis ? lastSeen.toMillis() : null;
+        // A missing lastSeen can never be evidence of a live connection.
+        if (lastSeenMs !== null && lastSeenMs >= cutoffMs) continue;
+        stale.push(doc.ref);
+      }
+
+      // Chunked at Firestore's hard 500-writes-per-batch limit. Not a
+      // theoretical concern: this job's whole purpose is to be the layer that
+      // still works, and a single oversized commit would throw and repair
+      // nothing — silently, right as the userbase grew past the limit.
+      const BATCH_LIMIT = 500;
+      for (let i = 0; i < stale.length; i += BATCH_LIMIT) {
+        const batch = db.batch();
+        for (const ref of stale.slice(i, i + BATCH_LIMIT)) {
+          // Preserve lastSeen — the user really was last seen then, and the UI
+          // renders it as "last seen X ago".
+          batch.update(ref, { isOnline: false });
+        }
+        await batch.commit();
+        firestoreFixed += Math.min(BATCH_LIMIT, stale.length - i);
+      }
+    } catch (error) {
+      console.error("presenceSweeper: Firestore pass failed:", error.message);
+    }
+
+    // ── Pass 2: RTDB ─────────────────────────────────────────────────────
+    try {
+      const ghostSnap = await admin
+        .database()
+        .ref("presence")
+        .orderByChild("online")
+        .equalTo(true)
+        .once("value");
+
+      const writes = [];
+      ghostSnap.forEach((child) => {
+        const lastSeenMs = child.val()?.lastSeen;
+        const isStale =
+          typeof lastSeenMs !== "number" || lastSeenMs < cutoffMs;
+        if (!isStale) return;
+        // update() not set(): keeps the original lastSeen intact.
+        writes.push(child.ref.update({ online: false }));
+        rtdbFixed++;
+      });
+      await Promise.all(writes);
+    } catch (error) {
+      console.error("presenceSweeper: RTDB pass failed:", error.message);
+    }
+
+    console.log(
+      `presenceSweeper: cleared ${firestoreFixed} Firestore + ${rtdbFixed} RTDB ghost records.`
+    );
+  },
+);
+
 

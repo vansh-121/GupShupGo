@@ -15,6 +15,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/connecting_call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/qr_scanner_screen.dart';
+import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
@@ -235,6 +236,22 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       MaterialPageRoute(
         builder: (_) => ChatScreen(
           contact: contact,
+          currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName ?? _currentUserModel?.name,
+        ),
+      ),
+    );
+  }
+
+  /// Opens the tapped person's profile. Passes the already-loaded [UserModel]
+  /// rather than a handle, so there is no refetch and users who never set a
+  /// username still open.
+  void _openProfile(UserModel user) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PublicProfileScreen(
+          initialUser: user,
           currentUserId: widget.currentUserId,
           currentUserName: widget.currentUserName ?? _currentUserModel?.name,
         ),
@@ -582,6 +599,11 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                     onInitiateCall: (user) {
                       Navigator.pop(context);
                       _initiateCall(user);
+                    },
+                    // Close the sheet first, or the profile pushes behind it.
+                    onOpenProfile: (user) {
+                      Navigator.pop(context);
+                      _openProfile(user);
                     },
                   );
                 },
@@ -932,6 +954,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                   currentUserUsername: _currentUserModel?.username,
                                   onOpenChat: _openChat,
                                   onInitiateCall: _initiateCall,
+                                  onOpenProfile: _openProfile,
                                 ),
                               ),
                             ),
@@ -976,6 +999,11 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           ),
         ),
         child: ListTile(
+          onTap: () => _openProfile(user),
+          // Keeps the ripple inside the card's rounded corners.
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: Stack(
             children: [
@@ -1366,6 +1394,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                         currentUserId: widget.currentUserId,
                         currentUserName: _currentUserModel?.name ?? widget.currentUserName ?? 'User',
                         currentUserUsername: _currentUserModel?.username,
+                        onTap: () => _openProfile(item.user),
                       );
                     },
                   );
@@ -1542,6 +1571,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               currentUserUsername: _currentUserModel?.username,
               onOpenChat: _openChat,
               onInitiateCall: _initiateCall,
+              onOpenProfile: _openProfile,
             ),
           ),
         );
@@ -1750,6 +1780,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                         currentUserUsername: _currentUserModel?.username,
                         onOpenChat: _openChat,
                         onInitiateCall: _initiateCall,
+                        onOpenProfile: _openProfile,
                       ),
                     ),
                   );
@@ -1771,6 +1802,10 @@ class YouMightKnowCard extends StatefulWidget {
   final String currentUserName;
   final String? currentUserUsername;
 
+  /// Tapping the card body opens this person's profile. The ADD FRIEND button
+  /// is a descendant, so it keeps winning the hit test.
+  final VoidCallback? onTap;
+
   const YouMightKnowCard({
     super.key,
     required this.targetUser,
@@ -1778,6 +1813,7 @@ class YouMightKnowCard extends StatefulWidget {
     required this.currentUserId,
     required this.currentUserName,
     this.currentUserUsername,
+    this.onTap,
   });
 
   @override
@@ -1794,8 +1830,9 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
     final c = AppThemeColors.of(context);
     final user = widget.targetUser;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
+    // Ink (not Container) so the tap ripple paints *above* the card's own
+    // opaque background instead of being hidden behind it.
+    return Ink(
       decoration: BoxDecoration(
         color: c.cardBg,
         borderRadius: BorderRadius.circular(20),
@@ -1803,98 +1840,105 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
           color: c.isDark ? Colors.white.withOpacity(0.08) : c.divider,
         ),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundImage: NetworkImage(
-              user.photoUrl ??
-                  'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
-            ),
-            backgroundColor: c.primaryLt,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            user.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: c.textHigh,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            widget.reasonSubtitle.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: c.textMid,
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            height: 34,
-            child: _isRequested
-                ? OutlinedButton(
-                    onPressed: null,
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundImage: NetworkImage(
+                  user.photoUrl ??
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                ),
+                backgroundColor: c.primaryLt,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                user.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: c.textHigh,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                widget.reasonSubtitle.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: c.textMid,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 34,
+                child: _isRequested
+                    ? OutlinedButton(
+                        onPressed: null,
+                        style: OutlinedButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Text(
+                          'Requested',
+                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      )
+                    : ElevatedButton.icon(
+                        onPressed: _isSending
+                            ? null
+                            : () async {
+                                setState(() => _isSending = true);
+                                bool ok = await _friendService.sendFriendRequest(
+                                  fromUserId: widget.currentUserId,
+                                  toUserId: user.id,
+                                  fromName: widget.currentUserName,
+                                  fromUsername: widget.currentUserUsername,
+                                );
+                                if (mounted) {
+                                  setState(() {
+                                    _isSending = false;
+                                    if (ok) _isRequested = true;
+                                  });
+                                }
+                              },
+                        icon: _isSending
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.person_add_rounded, size: 14),
+                        label: Text(
+                          'ADD FRIEND',
+                          style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: c.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
                       ),
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: Text(
-                      'Requested',
-                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: _isSending
-                        ? null
-                        : () async {
-                            setState(() => _isSending = true);
-                            bool ok = await _friendService.sendFriendRequest(
-                              fromUserId: widget.currentUserId,
-                              toUserId: user.id,
-                              fromName: widget.currentUserName,
-                              fromUsername: widget.currentUserUsername,
-                            );
-                            if (mounted) {
-                              setState(() {
-                                _isSending = false;
-                                if (ok) _isRequested = true;
-                              });
-                            }
-                          },
-                    icon: _isSending
-                        ? const SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.person_add_rounded, size: 14),
-                    label: Text(
-                      'ADD FRIEND',
-                      style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: c.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1910,6 +1954,12 @@ class UserDiscoverTile extends StatefulWidget {
   final Function(UserModel) onOpenChat;
   final Function(UserModel) onInitiateCall;
 
+  /// Tapping the row body opens this person's profile. Nullable because
+  /// [PublicProfileScreen] embeds this tile itself — wiring it there would
+  /// navigate to the profile you are already on, without limit. Left unset,
+  /// the row body is inert and only the trailing action responds.
+  final Function(UserModel)? onOpenProfile;
+
   const UserDiscoverTile({
     super.key,
     required this.targetUser,
@@ -1919,6 +1969,7 @@ class UserDiscoverTile extends StatefulWidget {
     this.customSubtitle,
     required this.onOpenChat,
     required this.onInitiateCall,
+    this.onOpenProfile,
   });
 
   @override
@@ -2057,6 +2108,9 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
     final user = widget.targetUser;
 
     return ListTile(
+      onTap: widget.onOpenProfile == null
+          ? null
+          : () => widget.onOpenProfile!(user),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: CircleAvatar(
         radius: 24,

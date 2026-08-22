@@ -18,6 +18,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Custom themes and color palettes
 
+## [1.1.6] - 2026-08-19
+
+### Added
+- 🔗 **Tappable Links in Chats** — Web links in any conversation are now underlined and open straight in your browser with a single tap, in normal chats, offline mesh chats, and anonymous rooms.
+- 🖼️ **Link Previews** — Share a link and both of you see a neat card with the page's title, description, and thumbnail, so you know what you're opening before you tap it.
+- ↩️ **Swipe to Reply** — Swipe any message to the right to reply to it directly. Your reply shows the quoted message above it, so nobody loses track of what you're answering.
+- 👆 **Tap a Quote to Jump** — Tapping the quoted message in a reply scrolls you back to the original and briefly highlights it.
+- 👆 **Fingerprint Unlock, On Your Terms** — Vault settings now has an "Unlock with fingerprint" switch you can turn on or off any time. Turning it on asks for your PIN once; turning it off just means you type your PIN again.
+- 👤 **Tap Anyone to See Their Profile** — People listed in Contacts, in Discover search results and suggestions, in the "You might know" cards, and in your matched device contacts are all tappable now. Tapping opens their profile; the call, message, and add-friend buttons on each row still do exactly what they did before.
+- ✨ **Profiles Actually Tell You Something** — A profile now shows whether they're online or when they were last seen, their level with progress to the next one, their Gup Points, the badges they've earned, and when they joined — instead of just a photo and a name.
+
+### Changed
+- Updated version to 1.1.6 (build code 52).
+- 🔒 **Previews Never Phone Home** — Link cards are prepared entirely on the sender's device, so opening a chat never contacts the linked website. Your IP address is never exposed to a link someone sent you, and cards still appear with no internet connection.
+- 💬 **Replies Survive Deletions** — Each reply carries its own copy of the quoted text, so the quote keeps showing even if the original message was deleted or cleared from your device.
+- 🔑 **You Always Choose Your Vault PIN** — Setting up the vault now always asks you to pick a PIN, and fingerprint unlock is offered afterwards as a convenience. Your PIN is what protects your history, and it is the only thing that can restore your messages on a new phone.
+- ⏳ **"Decide Later" on the Unlock Screen** — Forgetting your PIN no longer forces a choice between deleting everything and being stuck. You can keep using the app with the vault locked, and unlocking later fills in whatever was missed.
+
+### Fixed
+- 👆 **Fingerprint No Longer Asks for a PIN You Never Set** — If you set the vault up with your fingerprint and later reinstalled the app, unlocking asked for a PIN that was never shown to you, leaving a full reset as the only way forward. Setup now always uses a PIN you chose, and anyone already in that situation is asked once — while their history is still readable — to pick a real PIN, with every existing message carried over.
+- 🚫 **No Fingerprint Buttons That Cannot Work** — The unlock screen only offers fingerprint when there is actually something on this device for it to unlock, and explains what to do instead when there isn't.
+- 🔐 **Your PIN Is Only Stored If You Ask** — Previously the app saved your PIN on the device after every unlock, whether or not you wanted fingerprint unlock. It is now saved only when you explicitly turn that feature on.
+- 🛡️ **Message & Quote Tamper Protection** — Fixed a database security rule so that other participants in a chat cannot secretly change who is quoted or fake status-reply details on your messages.
+
+### Technical Details
+- **Ownership Gate Hardening:** Added `replyToMessageId`, `replyToSenderId`, `replyToSenderName`, `replyToType`, and all `statusReply*` fields to `touchesSenderOwnedFields()` in `firestore.rules`, and added comprehensive negative test cases in `message_ownership_rules.test.js`.
+- **Sender-Side Unfurl:** OpenGraph metadata is fetched by the sending device and travels *inside* the encrypted Signal payload (`linkPreview*` fields), so nothing about the link is ever readable by the server and the receiving client makes no outbound request. Thumbnails are re-encoded to a ≤6 KB base64 JPEG to stay well within the 1 MiB Firestore document ceiling after per-device envelope fan-out.
+- **Snapshot Quotes:** `replyTo*` fields carry a self-contained copy of the quoted sender, type, and a 160-character snippet rather than a server-resolvable pointer, which is what makes quotes render for undecryptable, deleted, or never-synced originals.
+- **Content Key Registry:** `kMessageContentKeys` now declares every key that may appear in an encrypted payload, covered by a serializer test asserting `ChatService.applyPayload` consumes all of them — the previously-silent failure mode when adding an encrypted field.
+- **Package Visibility:** Added `android.intent.action.VIEW` `http`/`https` entries to the manifest `<queries>` block, required for link launching on Android 11+.
+- **PIN Custody Flag:** `vaultMeta/config` now carries `pinIsUserChosen`, set only at the moments that *prove* the user supplied the PIN — `setup`, `changePin`, and a successful typed-PIN `unlock`. It lives in Firestore rather than local storage because the question "does this person know their PIN" is account-level and must survive uninstall, and it reveals nothing about the key. A stored PIN is deliberately *not* used as the signal: the old code wrote one on every unlock, so its presence says nothing about its origin, and shape heuristics ("6 digits") misfire in both directions.
+- **One-Time Re-Key:** `classifyPinCustody` (pure, exhaustively tested over all 8 input combinations) resolves to exactly one state that may interrupt the user at launch — config present, custody unproven, old PIN still readable. That case re-keys the whole vault via the existing `changePin`, which validates the old PIN against the verifier, re-encrypts in 150-doc pages, and flips the verifier **last**, so an interrupted run leaves the old PIN valid and can simply be repeated. The window closes permanently once an affected install is removed.
+- **No New Crypto Primitive:** The "confirm you know your PIN" path reuses `unlock`, which returns `false` *before* caching the derived key, so a wrong guess cannot disturb an already-open vault.
+- **Known Limitation:** `flutter_secure_storage` has no biometric binding, so a successful `local_auth` scan is a UI gate rather than a cryptographic one — the stored PIN rests on `encryptedSharedPreferences` / Keychain `first_unlock`. Real binding needs an Android Keystore key with `setUserAuthenticationRequired(true)` behind a platform channel, and is not claimed by the opt-in copy.
+- **Preloaded Profile Entry Point:** `PublicProfileScreen` now takes *either* a `username` to resolve or an already-loaded `UserModel` (`initialUser`). List rows pass the model they already hold, which skips a redundant Firestore read and — more importantly — works for users who never set a handle, since `UserModel.username` is nullable and the handle lookup could never have found them. The `@handle` line is rendered conditionally as a result.
+- **Non-Recursive Row Callback:** `onOpenProfile` on `UserDiscoverTile` is deliberately nullable. `PublicProfileScreen` embeds that same tile as its own action row, so a required callback would navigate from a profile to the identical profile without limit; leaving it unset there keeps the row body inert while its buttons still work. The "You might know" card switched from `Container` to `Ink` so the tap ripple paints above the card background rather than behind it.
+
+---
+
 ## [1.1.5] - 2026-08-18
 
 ### Added

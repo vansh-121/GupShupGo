@@ -1037,7 +1037,17 @@ class ChatService {
     }
   }
 
-  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) {
+  /// Lifts the decrypted inner payload back onto a message whose Firestore doc
+  /// carries nothing but ciphertext.
+  ///
+  /// Static and `@visibleForTesting` on purpose: it is pure (only `copyWith`),
+  /// and every key it must consume is listed in [kMessageContentKeys]. A test
+  /// asserts the two stay in sync, because a key that reaches here unread
+  /// decrypts fine and then simply never renders — the quietest of the seven
+  /// failure modes described on that constant.
+  @visibleForTesting
+  static MessageModel applyPayload(
+      MessageModel msg, Map<String, dynamic> payload) {
     return msg.copyWith(
       text: (payload['text'] as String?) ?? '',
       mediaUrl: payload['mediaUrl'] as String?,
@@ -1053,8 +1063,21 @@ class ChatService {
       statusReplyCaption: payload['statusReplyCaption'] as String?,
       statusReplyBackgroundColor:
           payload['statusReplyBackgroundColor'] as String?,
+      linkPreviewUrl: payload['linkPreviewUrl'] as String?,
+      linkPreviewTitle: payload['linkPreviewTitle'] as String?,
+      linkPreviewDescription: payload['linkPreviewDescription'] as String?,
+      linkPreviewSiteName: payload['linkPreviewSiteName'] as String?,
+      linkPreviewImageBase64: payload['linkPreviewImageBase64'] as String?,
+      replyToMessageId: payload['replyToMessageId'] as String?,
+      replyToSenderId: payload['replyToSenderId'] as String?,
+      replyToSenderName: payload['replyToSenderName'] as String?,
+      replyToType: payload['replyToType'] as String?,
+      replyToText: payload['replyToText'] as String?,
     );
   }
+
+  MessageModel _applyPayload(MessageModel msg, Map<String, dynamic> payload) =>
+      applyPayload(msg, payload);
 
   // Generate a unique chat room ID from two user IDs
   String getChatRoomId(String userId1, String userId2) {
@@ -1112,6 +1135,18 @@ class ChatService {
     int? audioDuration,
     String? localFilePath,
     String? reactionTargetMessageId,
+    // ── Link preview (resolved by the SENDER, see LinkPreviewService) ────
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    // ── Reply quote (a self-contained snapshot, not a pointer) ───────────
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -1144,6 +1179,16 @@ class ChatService {
       statusReplyBackgroundColor: statusReplyBackgroundColor,
       localFilePath: localFilePath,
       reactionTargetMessageId: reactionTargetMessageId,
+      linkPreviewUrl: linkPreviewUrl,
+      linkPreviewTitle: linkPreviewTitle,
+      linkPreviewDescription: linkPreviewDescription,
+      linkPreviewSiteName: linkPreviewSiteName,
+      linkPreviewImageBase64: linkPreviewImageBase64,
+      replyToMessageId: replyToMessageId,
+      replyToSenderId: replyToSenderId,
+      replyToSenderName: replyToSenderName,
+      replyToType: replyToType,
+      replyToText: replyToText,
     );
     final ps = await PlaintextStore.instance();
 
@@ -1194,6 +1239,16 @@ class ChatService {
           statusReplyBackgroundColor: statusReplyBackgroundColor,
           localFilePath: localFilePath,
           reactionTargetMessageId: reactionTargetMessageId,
+          linkPreviewUrl: linkPreviewUrl,
+          linkPreviewTitle: linkPreviewTitle,
+          linkPreviewDescription: linkPreviewDescription,
+          linkPreviewSiteName: linkPreviewSiteName,
+          linkPreviewImageBase64: linkPreviewImageBase64,
+          replyToMessageId: replyToMessageId,
+          replyToSenderId: replyToSenderId,
+          replyToSenderName: replyToSenderName,
+          replyToType: replyToType,
+          replyToText: replyToText,
         ).timeout(_sendTimeout, onTimeout: () {
           throw TimeoutException(
               'Send timed out after ${_sendTimeout.inSeconds}s');
@@ -1240,6 +1295,16 @@ class ChatService {
     String? statusReplyBackgroundColor,
     String? localFilePath,
     String? reactionTargetMessageId,
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -1285,6 +1350,23 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+        },
+        // Sender-resolved OpenGraph metadata. It rides inside the envelope so
+        // the receiver renders the card without ever contacting the link host —
+        // no IP leak to whoever sent the link, and it still works offline.
+        if (linkPreviewUrl != null) ...{
+          'linkPreviewUrl': linkPreviewUrl,
+          'linkPreviewTitle': linkPreviewTitle,
+          'linkPreviewDescription': linkPreviewDescription,
+          'linkPreviewSiteName': linkPreviewSiteName,
+          'linkPreviewImageBase64': linkPreviewImageBase64,
+        },
+        if (replyToMessageId != null) ...{
+          'replyToMessageId': replyToMessageId,
+          'replyToSenderId': replyToSenderId,
+          'replyToSenderName': replyToSenderName,
+          'replyToType': replyToType,
+          'replyToText': replyToText,
         },
       });
 
@@ -1336,6 +1418,20 @@ class ChatService {
           'statusReplyMediaUrl': statusReplyMediaUrl,
           'statusReplyCaption': statusReplyCaption,
           'statusReplyBackgroundColor': statusReplyBackgroundColor,
+          if (linkPreviewUrl != null) ...{
+            'linkPreviewUrl': linkPreviewUrl,
+            'linkPreviewTitle': linkPreviewTitle,
+            'linkPreviewDescription': linkPreviewDescription,
+            'linkPreviewImageBase64': linkPreviewImageBase64,
+            'linkPreviewSiteName': linkPreviewSiteName,
+          },
+          if (replyToMessageId != null) ...{
+            'replyToMessageId': replyToMessageId,
+            'replyToSenderId': replyToSenderId,
+            'replyToSenderName': replyToSenderName,
+            'replyToType': replyToType,
+            'replyToText': replyToText,
+          },
           if (localFilePath != null) 'localFilePath': localFilePath,
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
@@ -1417,6 +1513,22 @@ class ChatService {
       envelopes: envelopes,
       localFilePath: localFilePath,
       reactionTargetMessageId: reactionTargetMessageId,
+      // Same rule as every other content field: on v2 these are committed as
+      // null so nothing but ciphertext reaches Firestore. A link preview would
+      // otherwise hand the server the page title, and a reply quote a verbatim
+      // snippet of the message being answered — both plaintext.
+      linkPreviewUrl: schemaVersion == 2 ? null : linkPreviewUrl,
+      linkPreviewTitle: schemaVersion == 2 ? null : linkPreviewTitle,
+      linkPreviewDescription:
+          schemaVersion == 2 ? null : linkPreviewDescription,
+      linkPreviewSiteName: schemaVersion == 2 ? null : linkPreviewSiteName,
+      linkPreviewImageBase64:
+          schemaVersion == 2 ? null : linkPreviewImageBase64,
+      replyToMessageId: schemaVersion == 2 ? null : replyToMessageId,
+      replyToSenderId: schemaVersion == 2 ? null : replyToSenderId,
+      replyToSenderName: schemaVersion == 2 ? null : replyToSenderName,
+      replyToType: schemaVersion == 2 ? null : replyToType,
+      replyToText: schemaVersion == 2 ? null : replyToText,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -1510,6 +1622,31 @@ class ChatService {
   // the user reported after the outbox was introduced (sending a message
   // updates chatRoom.lastMessage as part of the same batch, which fired
   // the asyncExpand teardown right after the optimistic bubble appeared).
+  /// Everything this user should actually see, in one place.
+  ///
+  /// Two independent per-user hides, both driven by server state so they
+  /// survive a reinstall and reach the user's other devices:
+  ///  • `clearedAt` — "clear chat", a timestamp on the room document;
+  ///  • `deletedFor` — "delete for me", an array on the message document.
+  ///
+  /// A tombstone (`deletedForEveryone`) is deliberately **not** filtered here:
+  /// the "This message was deleted" marker is the whole point of it.
+  ///
+  /// Static and `@visibleForTesting` because it is pure, and because the
+  /// `deletedFor` half is easy to get subtly wrong — filtering on the peer's
+  /// deletion instead of your own hides the message for the wrong person.
+  @visibleForTesting
+  static List<MessageModel> visibleMessages(
+    List<MessageModel> messages,
+    String currentUserId,
+    DateTime? clearedAt,
+  ) {
+    return messages
+        .where((m) => !m.isDeletedFor(currentUserId))
+        .where((m) => clearedAt == null || m.timestamp.isAfter(clearedAt))
+        .toList();
+  }
+
   Stream<List<MessageModel>> getMessages(
       String currentUserId, String otherUserId) {
     final chatRoomId = getChatRoomId(currentUserId, otherUserId);
@@ -1523,14 +1660,7 @@ class ChatService {
 
     void emit() {
       if (controller.isClosed) return;
-      if (clearedAt == null) {
-        controller.add(latestMessages);
-      } else {
-        final filtered = latestMessages
-            .where((m) => m.timestamp.isAfter(clearedAt!))
-            .toList();
-        controller.add(filtered);
-      }
+      controller.add(visibleMessages(latestMessages, currentUserId, clearedAt));
     }
 
     controller.onListen = () async {
@@ -1976,22 +2106,331 @@ class ChatService {
     return controller.stream;
   }
 
-  // Delete a message
-  Future<void> deleteMessage({
+  // ─── Delete a message ─────────────────────────────────────────────────────
+  //
+  // Replaces an earlier `deleteMessage` that hard-deleted the document and had
+  // no callers. A hard delete cannot work here: SyncService deliberately reads
+  // a vanished document as "slid out of the 50-document window, not deleted",
+  // so the recipient's bubble would stay on screen forever. And the rules only
+  // permit deleting your *own* message, which rules out "delete for me" on one
+  // the peer sent.
+
+  /// How long after sending its sender may still delete a message for everyone,
+  /// or edit it.
+  ///
+  /// Client-side only: a modified client could ignore it. `firestore.rules`
+  /// enforces *who* may edit or tombstone a message (the sender-owned field list
+  /// on the messages update rule) but not *when* — a window check there would
+  /// have to read the document's own timestamp on every read receipt, and the
+  /// cost of a bypass is cosmetic, so this stays a UI affordance.
+  static const Duration editWindow = Duration(hours: 48);
+
+  /// What both the bubble and the chat-list preview show for a tombstone.
+  static const String deletedMessageText = 'This message was deleted';
+
+  /// Whether a message sent at [sentAt] is still inside [editWindow].
+  ///
+  /// Static and pure so the boundary is testable without a clock or a Firestore
+  /// handle, and so the menu can grey out Edit and "Delete for everyone" using
+  /// the very same predicate the service enforces — one definition, not two that
+  /// can drift apart.
+  static bool withinEditWindow(DateTime sentAt, {DateTime? now}) =>
+      (now ?? DateTime.now()).difference(sentAt) <= editWindow;
+
+  /// "Delete for me" — hides the message for [currentUserId] on every device
+  /// they own, permanently, leaving it untouched for the other participant.
+  ///
+  /// The flag lives on the server document, not just in the local database,
+  /// because a local-only delete does not survive: SyncService backfills the
+  /// newest 50 documents on a fresh install and would hand the message straight
+  /// back, and a second device would never learn of it. Either participant may
+  /// write this — the rules allow a non-sender to update a message document,
+  /// which is how read receipts work — but only ever to add their *own* uid,
+  /// which is why this is an `arrayUnion` of exactly one element and not a
+  /// whole-list write.
+  Future<void> deleteMessageForMe({
     required String currentUserId,
     required String otherUserId,
     required String messageId,
   }) async {
-    String chatRoomId = getChatRoomId(currentUserId, otherUserId);
+    final chatRoomId = getChatRoomId(currentUserId, otherUserId);
+    final docRef = _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .collection(_messagesCollection)
+        .doc(messageId);
+
+    var serverHasDoc = true;
+    try {
+      await docRef.update({
+        'deletedFor': FieldValue.arrayUnion([currentUserId]),
+      });
+    } on FirebaseException catch (e) {
+      if (e.code != 'not-found') rethrow;
+      // Never reached Firestore — still in the outbox, mesh-only, or already
+      // removed by an older build. With no document to carry the flag, the
+      // local row is the only copy there is, so deleting it outright is both
+      // correct and durable.
+      serverHasDoc = false;
+    }
+
+    final ps = await PlaintextStore.instance();
+    if (serverHasDoc) {
+      // Mirror locally so the bubble disappears now rather than when the
+      // snapshot comes back. The read filter keys off this same field.
+      final local = await ps.getMessagesByIds([messageId]);
+      if (local.isNotEmpty) {
+        final m = local.first;
+        await ps.saveMessage(
+          m.copyWith(deletedFor: [...m.deletedFor, currentUserId]),
+          chatRoomId,
+        );
+      }
+    } else {
+      await ps.deleteMessage(messageId, chatRoomId);
+    }
+
+    await _recomputeRoomPreview(chatRoomId, currentUserId);
+  }
+
+  /// "Delete for everyone" — replaces the message with a tombstone for both
+  /// participants and takes the content off the server.
+  ///
+  /// Sender-only, and only inside [editWindow]; callers should check
+  /// [withinEditWindow] before offering it.
+  ///
+  /// A tombstone rather than a document delete, for the reason above. The
+  /// content genuinely goes, though: this strips the ciphertext along with
+  /// every plaintext content field a legacy v1 document may still carry, so
+  /// what remains on the server is a marker and nothing else.
+  Future<void> deleteMessageForEveryone({
+    required String currentUserId,
+    required String otherUserId,
+    required String messageId,
+  }) async {
+    final chatRoomId = getChatRoomId(currentUserId, otherUserId);
 
     await _firestore
         .collection(_chatRoomsCollection)
         .doc(chatRoomId)
         .collection(_messagesCollection)
         .doc(messageId)
-        .delete();
+        .update({
+      'deletedForEveryone': true,
+      'text': '',
+      'mediaUrl': null,
+      'envelopes': FieldValue.delete(),
+      'retryRequests': FieldValue.delete(),
+      'reactions': FieldValue.delete(),
+      // v1 documents carry these in the clear, including a base64 thumbnail.
+      'linkPreviewUrl': FieldValue.delete(),
+      'linkPreviewTitle': FieldValue.delete(),
+      'linkPreviewDescription': FieldValue.delete(),
+      'linkPreviewSiteName': FieldValue.delete(),
+      'linkPreviewImageBase64': FieldValue.delete(),
+      'replyToText': FieldValue.delete(),
+    });
 
-    print('Message deleted: $messageId');
+    final ps = await PlaintextStore.instance();
+
+    // Our stored plaintext has to go too, or the resend protocol would happily
+    // re-encrypt and serve a deleted message back to anyone who asks for it.
+    // `forgetCachedPayload` rather than a bare `ps.delete`: the in-memory memo
+    // is checked first and would otherwise still hold the text for the life of
+    // the process.
+    await forgetCachedPayload(messageId);
+
+    final local = await ps.getMessagesByIds([messageId]);
+    if (local.isNotEmpty) {
+      // Not copyWith — see MessageModel.asTombstone. copyWith cannot null a
+      // field out, so it would leave the media URL, the downloaded file and the
+      // link-preview thumbnail on a row we just told the user was deleted.
+      await ps.saveMessage(local.first.asTombstone(), chatRoomId);
+    }
+
+    await _recomputeRoomPreview(chatRoomId, currentUserId);
+  }
+
+  /// Re-derives the chat-list preview from the newest message still visible to
+  /// [currentUserId]. Without this, deleting the most recent message leaves its
+  /// text sitting in the chat list.
+  Future<void> _recomputeRoomPreview(
+      String chatRoomId, String currentUserId) async {
+    try {
+      final ps = await PlaintextStore.instance();
+      final visible =
+          visibleMessages(await ps.getMessages(chatRoomId), currentUserId, null);
+      if (visible.isEmpty) return;
+
+      final newest = visible.reduce(
+          (a, b) => b.timestamp.isAfter(a.timestamp) ? b : a);
+      final text = newest.deletedForEveryone
+          ? deletedMessageText
+          : (newest.text.isNotEmpty
+              ? newest.text
+              : (newest.mediaUrl != null ? 'Media' : ''));
+      if (text.isEmpty) return;
+
+      await ps.saveRoomPreview(
+        chatRoomId: chatRoomId,
+        messageId: newest.id,
+        text: text,
+      );
+    } catch (e) {
+      // Cosmetic: a stale preview is not worth failing a delete over.
+      if (kDebugMode) debugPrint('[ChatService] preview recompute failed: $e');
+    }
+  }
+
+  // ─── Edit a message ───────────────────────────────────────────────────────
+
+  /// Forgets every cached plaintext for [messageId], so the next
+  /// [decryptForRendering] genuinely opens the envelope again.
+  ///
+  /// Needed for exactly one event: an edit. Every other change to a message
+  /// leaves its ciphertext alone, which is why [decryptForRendering] can open
+  /// with a memo hit and never look at the envelope at all. An edit replaces the
+  /// ciphertext under a **stable message id**, so all three plaintext tiers now
+  /// hold the pre-edit text — and any one of them, on its own, is enough to keep
+  /// showing it forever.
+  ///
+  /// Called by SyncService when a document arrives with a newer `editedAt` than
+  /// the copy we hold.
+  Future<void> forgetCachedPayload(String messageId) async {
+    _payloadMemo.remove(messageId);
+    // A decrypt already in flight was started against the *old* ciphertext;
+    // leaving it here would hand its result to the caller asking about the new
+    // one.
+    _inFlightDecrypts.remove(messageId);
+    // Keyed by an envelope fingerprint, so a stale entry can't block the new
+    // ciphertext — but it costs nothing to drop and keeps the tiers consistent.
+    _decryptFailures.remove(messageId);
+    final store = await PlaintextStore.instance();
+    // Deleted rather than overwritten: `save` is insertOrIgnore.
+    await store.delete(messageId);
+  }
+
+  /// Edits the text of a message we sent. Sender-only, and only inside
+  /// [editWindow].
+  ///
+  /// The hard part is not the write. A message id is *stable* across an edit
+  /// while its ciphertext is not, and three caches key plaintext by message id
+  /// — the in-memory memo, the PlaintextStore row, and the cross-install vault.
+  /// [decryptForRendering] answers from the first that hits without ever
+  /// consulting the envelope, so every tier has to be replaced here, and the
+  /// PlaintextStore row has to be *deleted* first: its `save` is insertOrIgnore
+  /// and would otherwise quietly keep the old text.
+  Future<void> editMessage({
+    required String senderId,
+    required String receiverId,
+    required String messageId,
+    required String newText,
+  }) async {
+    final trimmed = newText.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError('an edit cannot empty a message — delete it instead');
+    }
+
+    final chatRoomId = getChatRoomId(senderId, receiverId);
+    final docRef = _firestore
+        .collection(_chatRoomsCollection)
+        .doc(chatRoomId)
+        .collection(_messagesCollection)
+        .doc(messageId);
+
+    // Re-checked against the server copy rather than trusted from the caller's
+    // model: the UI's copy can be minutes old, and every one of these is a
+    // condition the recipient's client would have no way to reject.
+    final snap = await docRef.get();
+    if (!snap.exists) throw StateError('message $messageId no longer exists');
+    final existing = MessageModel.fromFirestore(snap);
+    if (existing.senderId != senderId) {
+      throw StateError('only the sender may edit a message');
+    }
+    if (existing.deletedForEveryone) {
+      throw StateError('a deleted message cannot be edited');
+    }
+    if (!withinEditWindow(existing.timestamp)) {
+      throw StateError('the edit window for this message has closed');
+    }
+
+    // Read the old payload *before* touching any cache — it carries the reply
+    // quote, link preview and media metadata that the edit has to preserve.
+    final basePayload = existing.schemaVersion >= 2
+        ? await ownPayloadFor(senderId, messageId)
+        : null;
+
+    final ps = await PlaintextStore.instance();
+
+    if (existing.schemaVersion < 2) {
+      // Legacy plaintext message. Its text is already on the document in the
+      // clear, so leaving it there is not a downgrade — whereas encrypting it
+      // now would make a message an old client could read a moment ago
+      // unreadable to it.
+      await docRef.update({
+        'text': trimmed,
+        'editedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      final deviceId = await _deviceIdentity.getDeviceId();
+      if (deviceId == null || !await _peerHasKeyBundle(receiverId)) {
+        throw StateError('cannot re-encrypt this edit for $receiverId');
+      }
+
+      final payload = <String, dynamic>{...?basePayload, 'text': trimmed};
+      // `type` travels in the wire payload but never in the stored one;
+      // `localFilePath` is the reverse — a path on this device that must never
+      // reach the wire. See kMessageContentKeys.
+      final wire = <String, dynamic>{...payload, 'type': existing.type.name}
+        ..remove('localFilePath');
+
+      final encs = await SignalService.instance.encryptForUser(
+        senderUid: senderId,
+        senderDeviceId: deviceId,
+        recipientUid: receiverId,
+        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(wire))),
+      );
+      // Same guard as the send path: a v2 message with no envelope addressed to
+      // the recipient renders for them as a permanent placeholder that no
+      // resend request can ever repair.
+      if (!encs.keys.any((k) => k.startsWith('$receiverId:'))) {
+        throw StateError(
+            'no envelope addressed to $receiverId (${encs.length} written)');
+      }
+
+      await docRef.update({
+        'envelopes': encs.map((k, v) => MapEntry(k, v.toMap())),
+        'senderDeviceId': deviceId,
+        // Item 5 of the kMessageContentKeys contract. On a v2 document the
+        // plaintext must never be written, and this is the one line in the edit
+        // path where a slip would put message content into Firestore in the
+        // clear.
+        'text': '',
+        'editedAt': FieldValue.serverTimestamp(),
+        // The old ciphertext is gone, so an outstanding resend request against
+        // it is meaningless — and serving one would re-publish the pre-edit
+        // text under the new envelope's id.
+        'retryRequests': FieldValue.delete(),
+      });
+
+      // Replace all three plaintext tiers. Delete before save, per above.
+      await ps.delete(messageId);
+      _addToMemo(messageId, payload);
+      await ps.save(messageId, payload);
+      unawaited(_saveToVault(senderId, messageId, payload));
+    }
+
+    // Local row, so our own bubble updates now instead of when the snapshot
+    // returns. `saveMessage` is insertOrReplace, so this upserts.
+    final local = await ps.getMessagesByIds([messageId]);
+    if (local.isNotEmpty) {
+      await ps.saveMessage(
+        local.first.copyWith(text: trimmed, editedAt: DateTime.now()),
+        chatRoomId,
+      );
+    }
+
+    await _recomputeRoomPreview(chatRoomId, senderId);
   }
 
   // Get unread message count for a user across all chats

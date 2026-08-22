@@ -1,10 +1,36 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/presence_service.dart';
 
 class UserService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final String _usersCollection = 'users';
+
+  /// How often a presence-bearing stream re-evaluates freshness. A Firestore
+  /// document only re-emits when it changes, so without a tick of its own an
+  /// `isOnline: true` on a doc that stops being written would stay on screen
+  /// forever. Must be well under [PresenceService.staleThreshold].
+  static const _freshnessTick = Duration(seconds: 15);
+
+  /// Single point where a raw `isOnline` becomes a trustworthy one.
+  ///
+  /// `isOnline` is never believed on its own: `onDisconnect` can fail to fire
+  /// and leave a record stuck `true` indefinitely, so a live session must also
+  /// prove itself with a recent `lastSeen` heartbeat. Applied at the service
+  /// boundary rather than per screen so no caller can forget it.
+  ///
+  /// Static and `@visibleForTesting` because it is pure — it touches no
+  /// Firestore handle, and it is the one rule the whole presence fix rests on.
+  @visibleForTesting
+  static UserModel withFreshPresence(UserModel user) {
+    if (user.isOnline && !PresenceService.isRecentlyActive(user.lastSeen)) {
+      return user.copyWith(isOnline: false);
+    }
+    return user;
+  }
 
   // Create or update user
   Future<void> createOrUpdateUser(UserModel user) async {
@@ -27,7 +53,7 @@ class UserService {
           await _firestore.collection(_usersCollection).doc(userId).get();
 
       if (doc.exists) {
-        return UserModel.fromFirestore(doc);
+        return withFreshPresence(UserModel.fromFirestore(doc));
       }
       return null;
     } catch (e) {
@@ -62,7 +88,7 @@ class UserService {
         .snapshots()
         .map((snapshot) {
       return snapshot.docs
-          .map((doc) => UserModel.fromFirestore(doc))
+          .map((doc) => withFreshPresence(UserModel.fromFirestore(doc)))
           .where((user) => user.isDiscoverable)
           .toList();
     });
@@ -85,22 +111,6 @@ class UserService {
     }
   }
 
-  // Update user online status
-  Future<void> updateOnlineStatus(String userId, bool isOnline) async {
-    try {
-      // Always write lastSeen so that stale-detection works for all users.
-      // Privacy (whether to *display* the timestamp to others) is enforced
-      // at the UI layer, not here.
-      await _firestore.collection(_usersCollection).doc(userId).update({
-        'isOnline': isOnline,
-        'lastSeen': FieldValue.serverTimestamp(),
-      });
-      print('Online status updated for $userId: $isOnline');
-    } catch (e) {
-      print('Error updating online status: $e');
-    }
-  }
-
   // Update FCM token
   Future<void> updateFCMToken(String userId, String fcmToken) async {
     try {
@@ -114,44 +124,85 @@ class UserService {
     }
   }
 
-  // Get online users
-  Stream<List<UserModel>> getOnlineUsers(String currentUserId) {
-    return _firestore
-        .collection(_usersCollection)
-        .where(FieldPath.documentId, isNotEqualTo: currentUserId)
-        .where('isOnline', isEqualTo: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => UserModel.fromFirestore(doc))
-          .toList();
-    });
-  }
-
   /// Returns a real-time stream of a single user's profile (including
   /// online status). Use this to keep UI in sync without manual refreshes.
   ///
-  /// Includes stale-detection: if `isOnline` is true but `lastSeen` is
-  /// older than [PresenceService.staleThreshold], the user is treated as
-  /// offline. This guards against edge cases where the RTDB onDisconnect
-  /// handler is delayed.
+  /// Presence is re-evaluated on two independent triggers:
+  ///   • the Firestore document changing, and
+  ///   • a [_freshnessTick] timer.
+  ///
+  /// The timer is what makes this correct. Firestore only re-emits a document
+  /// when it is written, so a session that dies without its `isOnline` ever
+  /// being corrected would leave the last snapshot — with `isOnline: true` —
+  /// as the newest thing the UI ever sees, and "Online" would stay on screen
+  /// indefinitely. Ticking lets that `true` decay on its own.
   Stream<UserModel?> getUserStream(String userId) {
-    return _firestore
-        .collection(_usersCollection)
-        .doc(userId)
-        .snapshots()
-        .map((doc) {
-      if (doc.exists) {
-        final user = UserModel.fromFirestore(doc);
-        // Stale-detection: override isOnline if lastSeen is too old.
-        if (user.isOnline &&
-            !PresenceService.isRecentlyActive(user.lastSeen)) {
-          return user.copyWith(isOnline: false);
-        }
-        return user;
+    return decayingPresence(
+      _firestore
+          .collection(_usersCollection)
+          .doc(userId)
+          .snapshots()
+          .map((doc) => doc.exists ? UserModel.fromFirestore(doc) : null),
+    );
+  }
+
+  /// Re-normalises presence on a timer as well as on upstream events, so a
+  /// stale `isOnline: true` decays to `false` with no new event to prompt it.
+  ///
+  /// Separated from [getUserStream] — and `@visibleForTesting` — because the
+  /// tick *is* the fix, and asserting it needs only a plain
+  /// [StreamController], not a Firestore connection.
+  ///
+  /// Source completion is deliberately not forwarded: "upstream will never
+  /// speak again" is precisely the state that the ticker exists to survive, so
+  /// decay continues until the listener cancels.
+  @visibleForTesting
+  static Stream<UserModel?> decayingPresence(
+    Stream<UserModel?> source, {
+    Duration tick = _freshnessTick,
+  }) {
+    // Hand-rolled rather than a combineLatest: rxdart is not a dependency.
+    late StreamController<UserModel?> controller;
+    StreamSubscription<UserModel?>? sub;
+    Timer? ticker;
+    UserModel? latest; // newest raw profile, re-normalised on every tick
+    bool? lastEmittedOnline;
+
+    void emit({required bool force}) {
+      if (controller.isClosed) return;
+      final user = latest;
+      if (user == null) {
+        if (force) controller.add(null);
+        return;
       }
-      return null;
-    });
+      final fresh = withFreshPresence(user);
+      // On a tick, only push when the verdict actually flipped — otherwise
+      // every listener would rebuild on a timer for no reason.
+      if (!force && fresh.isOnline == lastEmittedOnline) return;
+      lastEmittedOnline = fresh.isOnline;
+      controller.add(fresh);
+    }
+
+    controller = StreamController<UserModel?>(
+      onListen: () {
+        sub = source.listen(
+          (user) {
+            latest = user;
+            emit(force: true);
+          },
+          onError: controller.addError,
+        );
+        ticker = Timer.periodic(tick, (_) => emit(force: false));
+      },
+      onCancel: () async {
+        ticker?.cancel();
+        ticker = null;
+        await sub?.cancel();
+        sub = null;
+      },
+    );
+
+    return controller.stream;
   }
 
   // Check if user exists by phone number
@@ -164,7 +215,7 @@ class UserService {
           .get();
 
       if (snapshot.docs.isNotEmpty) {
-        return UserModel.fromFirestore(snapshot.docs.first);
+        return withFreshPresence(UserModel.fromFirestore(snapshot.docs.first));
       }
       return null;
     } catch (e) {
@@ -292,7 +343,7 @@ class UserService {
           .get();
 
       if (snapshot.docs.isNotEmpty) {
-        return UserModel.fromFirestore(snapshot.docs.first);
+        return withFreshPresence(UserModel.fromFirestore(snapshot.docs.first));
       }
       return null;
     } catch (e) {
@@ -344,7 +395,7 @@ class UserService {
               .get();
           for (final doc in snap.docs) {
             if (doc.id == currentUserId) continue;
-            final u = UserModel.fromFirestore(doc);
+            final u = withFreshPresence(UserModel.fromFirestore(doc));
             if (!u.isDiscoverable) continue;
             results[u.id] = u;
           }
@@ -377,7 +428,7 @@ class UserService {
       try {
         final snapshot = await q.get();
         for (final doc in snapshot.docs) {
-          final user = UserModel.fromFirestore(doc);
+          final user = withFreshPresence(UserModel.fromFirestore(doc));
           if (results.containsKey(user.id)) continue;
           // Respect the user's discoverability opt-out before matching.
           if (!user.isDiscoverable) continue;
@@ -460,7 +511,7 @@ class UserService {
       final List<UserModel> matchedUsers = [];
 
       for (final doc in snapshot.docs) {
-        final user = UserModel.fromFirestore(doc);
+        final user = withFreshPresence(UserModel.fromFirestore(doc));
 
         // Enforced here (rather than at each call site) so contact sync and
         // the suggestion engine can't drift apart on this policy.

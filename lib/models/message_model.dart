@@ -18,6 +18,67 @@ enum MessageStatus {
   read // Message read by receiver
 }
 
+/// Every key that may appear inside the **encrypted** payload of a v2 message.
+///
+/// A content field is not one edit — it is seven, and six of the seven fail
+/// *silently* in a different way if you miss them. When adding one, touch all of:
+///
+///  1. the five serializers in this file (`toMap`, `toJson`, `fromJson`,
+///     `fromMap`, `copyWith`) — miss one and the field vanishes on a cold
+///     restart or over mesh;
+///  2. `ChatService.sendMessage`'s parameters and its `optimistic` model — miss
+///     it and the sender's own bubble renders bare until the app restarts;
+///  3. `ChatService._commitMessage`'s wire `payload` — miss it and the receiver
+///     never gets the data at all;
+///  4. `ChatService._commitMessage`'s `outgoingPayload` — miss it and the
+///     *sender* loses the field on cold restart, and the vault copy is short;
+///  5. the `schemaVersion == 2 ? null : …` guards on the committed
+///     `MessageModel` — miss it and **the content is written to Firestore in
+///     the clear**;
+///  6. `ChatService._applyPayload` — miss it and decryption succeeds while the
+///     field silently never renders;
+///  7. `SyncService._serveOneResend`'s `wire` map — miss it and a *resent*
+///     message loses the field, which only ever reproduces after a decrypt
+///     failure.
+///
+/// `test/models/message_model_serialization_test.dart` pins 1 and 6 against
+/// this list. 2-5 and 7 are still on you.
+///
+/// Two keys travel in the payload but are deliberately absent here: `type`
+/// (restored from the plaintext Firestore field, not the envelope) and
+/// `localFilePath` (a path on *this* device, so it goes in the sender's local
+/// copy only and must never reach the wire).
+const List<String> kMessageContentKeys = <String>[
+  'text',
+  'mediaUrl',
+  'audioDuration',
+  'reactionTargetMessageId',
+  'statusReplyOwnerId',
+  'statusReplyItemId',
+  'statusReplyOwnerName',
+  'statusReplyOwnerPhotoUrl',
+  'statusReplyType',
+  'statusReplyText',
+  'statusReplyMediaUrl',
+  'statusReplyCaption',
+  'statusReplyBackgroundColor',
+  'linkPreviewUrl',
+  'linkPreviewTitle',
+  'linkPreviewDescription',
+  'linkPreviewSiteName',
+  'linkPreviewImageBase64',
+  'replyToMessageId',
+  'replyToSenderId',
+  'replyToSenderName',
+  'replyToType',
+  'replyToText',
+];
+
+/// Longest reply snippet we snapshot into a quote. Long enough to identify the
+/// original at a glance, short enough that quoting a wall of text doesn't
+/// multiply into every recipient device's envelope.
+const int kReplySnippetMaxLength = 160;
+
 class MessageModel {
   final String id;
   final String senderId;
@@ -77,6 +138,74 @@ class MessageModel {
   /// The ID of the message this reaction is targeting (only populated when type == MessageType.reaction)
   final String? reactionTargetMessageId;
 
+  // ─── Link preview ───────────────────────────────────────────────────────
+  // Resolved by the SENDER before encrypting and carried inside the envelope,
+  // so the receiver renders the card without ever contacting the link host —
+  // no IP leak to whoever sent the link, no tracking pixel on delivery, and
+  // the card still works offline. See lib/services/link_preview_service.dart.
+
+  /// The URL the card opens. Non-null iff this message carries a preview.
+  final String? linkPreviewUrl;
+  final String? linkPreviewTitle;
+  final String? linkPreviewDescription;
+
+  /// Human-readable source ("YouTube", "github.com").
+  final String? linkPreviewSiteName;
+
+  /// JPEG micro-thumbnail, base64, capped at 6 KB by the fetcher. Null when the
+  /// page had no usable image — the card then renders text-only.
+  final String? linkPreviewImageBase64;
+
+  // ─── Reply quote ────────────────────────────────────────────────────────
+  // A self-contained SNAPSHOT, not a pointer. The quote must still render when
+  // the original was deleted, cleared from this device, or never decrypted
+  // here — so everything needed to draw it travels with the reply.
+
+  /// Original message id. Used for tap-to-jump only; never required to render.
+  final String? replyToMessageId;
+  final String? replyToSenderId;
+  final String? replyToSenderName;
+
+  /// `MessageType.name` of the original, so a quoted photo can render an icon
+  /// even when its bytes are nowhere on this device.
+  final String? replyToType;
+
+  /// Snapshot of the original's text, capped at [kReplySnippetMaxLength].
+  final String? replyToText;
+
+  // ─── Delete & edit ──────────────────────────────────────────────────────
+  //
+  // These three are **cleartext metadata**, and deliberately so. They are
+  // absent from [kMessageContentKeys] and must never gain a
+  // `schemaVersion == 2 ? null : …` guard — that guard exists to keep message
+  // *content* off the server, whereas these have to be on the server document
+  // to do their job at all:
+  //
+  //  • a delete has to outlive a reinstall. SyncService backfills the latest 50
+  //    documents on first install, so a purely local delete comes straight back
+  //    — and never reaches the user's other devices.
+  //  • a tombstone has to be something the receiver's sync can *see*. A deleted
+  //    document is indistinguishable from one that slid out of the 50-document
+  //    window, which SyncService correctly refuses to act on.
+  //
+  // None of the three reveals anything the server didn't already know: who
+  // talked to whom and when is already plaintext on the document.
+
+  /// UIDs that have deleted this message for themselves. Bounded to 2 in a 1:1
+  /// chat. Filtered out at read time by `ChatService.getMessages`; the document
+  /// itself stays intact for the other participant.
+  final List<String> deletedFor;
+
+  /// Deleted for everyone by its sender. The ciphertext is stripped from the
+  /// document at the same time, so this is a genuine deletion with a marker
+  /// left behind — not a flag hiding content that is still there.
+  final bool deletedForEveryone;
+
+  /// When the sender last edited the text. Server timestamp. Also the signal
+  /// SyncService uses to decide that an already-synced message needs decrypting
+  /// again — without it an edit is invisible to the receiver forever.
+  final DateTime? editedAt;
+
   MessageModel({
     required this.id,
     required this.senderId,
@@ -105,6 +234,19 @@ class MessageModel {
     this.envelopes,
     this.reactions,
     this.reactionTargetMessageId,
+    this.linkPreviewUrl,
+    this.linkPreviewTitle,
+    this.linkPreviewDescription,
+    this.linkPreviewSiteName,
+    this.linkPreviewImageBase64,
+    this.replyToMessageId,
+    this.replyToSenderId,
+    this.replyToSenderName,
+    this.replyToType,
+    this.replyToText,
+    this.deletedFor = const [],
+    this.deletedForEveryone = false,
+    this.editedAt,
   });
 
   // Convenience getters for status
@@ -113,6 +255,49 @@ class MessageModel {
   bool get isRead => status == MessageStatus.read;
   bool get hasStatusReply =>
       statusReplyOwnerId != null && statusReplyItemId != null;
+
+  /// True when the sender has edited this message since sending it.
+  bool get isEdited => editedAt != null;
+
+  /// Whether [uid] has deleted this message for themselves.
+  bool isDeletedFor(String uid) => deletedFor.contains(uid);
+
+  /// This message reduced to "deleted for everyone": identity and routing kept,
+  /// every trace of content gone.
+  ///
+  /// Deliberately a constructor call and not [copyWith]. `copyWith` is
+  /// `x ?? this.x` for all forty of its parameters, so it *cannot* clear a
+  /// field — passing `mediaUrl: null` keeps the old URL. A tombstone built with
+  /// `copyWith(deletedForEveryone: true, text: '')` therefore still carries the
+  /// media URL, the downloaded file path, the envelopes, the reactions and the
+  /// base64 link-preview thumbnail. Listing what survives, rather than what
+  /// dies, is the only version of this that stays correct as fields are added.
+  MessageModel asTombstone() => MessageModel(
+        id: id,
+        senderId: senderId,
+        receiverId: receiverId,
+        text: '',
+        // Kept as-is: the bubble needs to know it *was* an image to say so, and
+        // MessageType is not content.
+        type: type,
+        timestamp: timestamp,
+        status: status,
+        schemaVersion: schemaVersion,
+        senderDeviceId: senderDeviceId,
+        isOfflineMesh: isOfflineMesh,
+        meshHops: meshHops,
+        deletedFor: deletedFor,
+        deletedForEveryone: true,
+        editedAt: editedAt,
+      );
+
+  /// True when this message carries a link preview card.
+  bool get hasLinkPreview =>
+      linkPreviewUrl != null && linkPreviewUrl!.isNotEmpty;
+
+  /// True when this message quotes another message.
+  bool get hasReplyQuote =>
+      replyToMessageId != null && replyToMessageId!.isNotEmpty;
 
   // Convert MessageModel to Map for Firestore
   Map<String, dynamic> toMap() {
@@ -144,6 +329,30 @@ class MessageModel {
       if (envelopes != null) 'envelopes': envelopes,
       if (reactions != null) 'reactions': reactions,
       if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+      // Link preview and reply quote are written conditionally rather than as
+      // explicit nulls: on a v2 message every one of them is null by design
+      // (the real values ride inside `envelopes`), and 10 null fields per
+      // document is pure noise. An absent key reads back as null either way.
+      if (linkPreviewUrl != null) 'linkPreviewUrl': linkPreviewUrl,
+      if (linkPreviewTitle != null) 'linkPreviewTitle': linkPreviewTitle,
+      if (linkPreviewDescription != null)
+        'linkPreviewDescription': linkPreviewDescription,
+      if (linkPreviewSiteName != null) 'linkPreviewSiteName': linkPreviewSiteName,
+      if (linkPreviewImageBase64 != null)
+        'linkPreviewImageBase64': linkPreviewImageBase64,
+      if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+      if (replyToSenderId != null) 'replyToSenderId': replyToSenderId,
+      if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
+      if (replyToType != null) 'replyToType': replyToType,
+      if (replyToText != null) 'replyToText': replyToText,
+      // Written conditionally for the same reason as the block above, and with
+      // one extra benefit: a conditional key can never clobber. The real
+      // delete/edit writes are targeted `update()` calls, but if this map is
+      // ever handed to a merging `set()`, an unconditional `deletedFor: []`
+      // would wipe the other participant's deletion.
+      if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      if (deletedForEveryone) 'deletedForEveryone': true,
+      if (editedAt != null) 'editedAt': Timestamp.fromDate(editedAt!),
     };
   }
 
@@ -177,6 +386,21 @@ class MessageModel {
       if (envelopes != null) 'envelopes': envelopes,
       if (reactions != null) 'reactions': reactions,
       if (reactionTargetMessageId != null) 'reactionTargetMessageId': reactionTargetMessageId,
+      if (linkPreviewUrl != null) 'linkPreviewUrl': linkPreviewUrl,
+      if (linkPreviewTitle != null) 'linkPreviewTitle': linkPreviewTitle,
+      if (linkPreviewDescription != null)
+        'linkPreviewDescription': linkPreviewDescription,
+      if (linkPreviewSiteName != null) 'linkPreviewSiteName': linkPreviewSiteName,
+      if (linkPreviewImageBase64 != null)
+        'linkPreviewImageBase64': linkPreviewImageBase64,
+      if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+      if (replyToSenderId != null) 'replyToSenderId': replyToSenderId,
+      if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
+      if (replyToType != null) 'replyToType': replyToType,
+      if (replyToText != null) 'replyToText': replyToText,
+      if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      if (deletedForEveryone) 'deletedForEveryone': true,
+      if (editedAt != null) 'editedAt': editedAt!.millisecondsSinceEpoch,
     };
   }
 
@@ -212,6 +436,19 @@ class MessageModel {
       envelopes: _parseEnvelopes(map['envelopes']),
       reactions: map['reactions'] != null ? Map<String, String>.from(map['reactions']) : null,
       reactionTargetMessageId: map['reactionTargetMessageId'],
+      linkPreviewUrl: map['linkPreviewUrl'],
+      linkPreviewTitle: map['linkPreviewTitle'],
+      linkPreviewDescription: map['linkPreviewDescription'],
+      linkPreviewSiteName: map['linkPreviewSiteName'],
+      linkPreviewImageBase64: map['linkPreviewImageBase64'],
+      replyToMessageId: map['replyToMessageId'],
+      replyToSenderId: map['replyToSenderId'],
+      replyToSenderName: map['replyToSenderName'],
+      replyToType: map['replyToType'],
+      replyToText: map['replyToText'],
+      deletedFor: _parseStringList(map['deletedFor']),
+      deletedForEveryone: map['deletedForEveryone'] ?? false,
+      editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
     );
   }
 
@@ -220,6 +457,15 @@ class MessageModel {
     if (raw is! Map) return null;
     return raw.map((k, v) =>
         MapEntry(k as String, Map<String, dynamic>.from(v as Map)));
+  }
+
+  /// Tolerant list parse for [deletedFor]. Always returns a list, never null:
+  /// "nobody has deleted this" and "the key was never written" are the same
+  /// thing, and a nullable list here would push a `?? const []` onto every
+  /// caller.
+  static List<String> _parseStringList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw.whereType<String>().toList(growable: false);
   }
 
   // Create MessageModel from Firestore document
@@ -251,6 +497,19 @@ class MessageModel {
       envelopes: _parseEnvelopes(map['envelopes']),
       reactions: map['reactions'] != null ? Map<String, String>.from(map['reactions']) : null,
       reactionTargetMessageId: map['reactionTargetMessageId'],
+      linkPreviewUrl: map['linkPreviewUrl'],
+      linkPreviewTitle: map['linkPreviewTitle'],
+      linkPreviewDescription: map['linkPreviewDescription'],
+      linkPreviewSiteName: map['linkPreviewSiteName'],
+      linkPreviewImageBase64: map['linkPreviewImageBase64'],
+      replyToMessageId: map['replyToMessageId'],
+      replyToSenderId: map['replyToSenderId'],
+      replyToSenderName: map['replyToSenderName'],
+      replyToType: map['replyToType'],
+      replyToText: map['replyToText'],
+      deletedFor: _parseStringList(map['deletedFor']),
+      deletedForEveryone: map['deletedForEveryone'] ?? false,
+      editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
     );
   }
 
@@ -332,6 +591,19 @@ class MessageModel {
     Map<String, Map<String, dynamic>>? envelopes,
     Map<String, String>? reactions,
     String? reactionTargetMessageId,
+    String? linkPreviewUrl,
+    String? linkPreviewTitle,
+    String? linkPreviewDescription,
+    String? linkPreviewSiteName,
+    String? linkPreviewImageBase64,
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToSenderName,
+    String? replyToType,
+    String? replyToText,
+    List<String>? deletedFor,
+    bool? deletedForEveryone,
+    DateTime? editedAt,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -363,6 +635,21 @@ class MessageModel {
       envelopes: envelopes ?? this.envelopes,
       reactions: reactions ?? this.reactions,
       reactionTargetMessageId: reactionTargetMessageId ?? this.reactionTargetMessageId,
+      linkPreviewUrl: linkPreviewUrl ?? this.linkPreviewUrl,
+      linkPreviewTitle: linkPreviewTitle ?? this.linkPreviewTitle,
+      linkPreviewDescription:
+          linkPreviewDescription ?? this.linkPreviewDescription,
+      linkPreviewSiteName: linkPreviewSiteName ?? this.linkPreviewSiteName,
+      linkPreviewImageBase64:
+          linkPreviewImageBase64 ?? this.linkPreviewImageBase64,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyToSenderId: replyToSenderId ?? this.replyToSenderId,
+      replyToSenderName: replyToSenderName ?? this.replyToSenderName,
+      replyToType: replyToType ?? this.replyToType,
+      replyToText: replyToText ?? this.replyToText,
+      deletedFor: deletedFor ?? this.deletedFor,
+      deletedForEveryone: deletedForEveryone ?? this.deletedForEveryone,
+      editedAt: editedAt ?? this.editedAt,
     );
   }
 }

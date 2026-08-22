@@ -15,6 +15,7 @@ import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/pip_service.dart';
+import 'package:video_chat_app/services/review_prompt_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -269,6 +270,18 @@ class _CallScreenState extends State<CallScreen> {
     if (_cleanupDone) return;
     _cleanupDone = true;
     await _createCallLog();
+
+    // A call the peer joined and stayed on is the one moment in this app where
+    // the user is reliably pleased and not mid-task, so it is where the review
+    // sheet gets asked for. Gated hard inside the service — never twice inside
+    // forty days. Fire-and-forget: it never throws and usually no-ops.
+    if (ReviewPromptService.isGoodCall(
+      remoteJoined: _remoteUserJoined,
+      durationSeconds: _callDurationSeconds,
+    )) {
+      unawaited(ReviewPromptService.instance.maybeRequest(trigger: 'call'));
+    }
+
     _signalingSubscription?.cancel();
     _noAnswerTimer?.cancel();
     _mediaWatchdogTimer?.cancel();

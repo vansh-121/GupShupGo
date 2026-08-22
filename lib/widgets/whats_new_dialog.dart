@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.5';
+const String kCurrentVersion = '1.1.6';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -183,23 +183,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.mark_chat_read_rounded,
-    'Instant & Reliable Messaging',
-    'Send messages rapidly back-to-back with zero lag. Chats now deliver smoothly even on slow connections.',
+    Icons.link_rounded,
+    'Smart Links & Previews',
+    'Tap links directly in chats. Shared links now show rich preview cards with titles, descriptions, and thumbnails.',
   ),
   _Feature(
-    Icons.sync_lock_rounded,
-    'Seamless Chat Recovery',
-    'Messages automatically fix and restore themselves in the background if your phone was offline or restarting.',
+    Icons.reply_rounded,
+    'Swipe to Reply',
+    'Swipe any message to quote it in your reply. Tap any quoted message to quickly jump back to the original.',
   ),
-  // _Feature(
-  //   Icons.lock_outline_rounded,
-  //   'Private & Secure Calling',
-  //   'Clear lock badges let you know instantly when your voice and video calls are 100% private and protected.',
-  // ),
   _Feature(
-    Icons.picture_in_picture_alt_rounded,
-    'Multitask While Calling',
-    'Keep your video calls in a floating mini-window while browsing photos, checking chats, or using other apps.',
+    Icons.fingerprint_rounded,
+    'Custom Vault PIN & Biometrics',
+    'Set your own secret PIN to protect your private vault, with optional fingerprint unlock for quick access.',
+  ),
+  _Feature(
+    Icons.person_rounded,
+    'Rich Profile Details',
+    'Tap any contact to see their online status, points, badges, and joined date at a glance.',
   ),
 ];
