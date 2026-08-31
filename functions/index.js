@@ -2006,7 +2006,7 @@ function hasFreeRestoreAllowance(userData, weekKey) {
 // If they diverge, the app advertises one figure and the server pays another,
 // which reads to the user as the reward being broken.
 const ADS_REWARD_POINTS = 50;
-const ADS_REWARD_DAILY_CAP = 5;
+const ADS_REWARD_DAILY_CAP = 10;
 
 // One ad-granted Bond Restore per ISO week, deliberately: a free restore is the
 // Pro tier's headline weekly perk, and an uncapped ad route would undercut the

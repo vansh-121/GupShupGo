@@ -41,6 +41,8 @@ import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/widgets/ads/ad_banner.dart';
+import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
+import 'package:video_chat_app/widgets/ads/post_call_interstitial.dart';
 import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
@@ -76,6 +78,13 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
+
+  // Load budgets for the two native ad cards, owned here rather than by the
+  // cards. Both live in lists whose indices shift when content arrives — a new
+  // moment, a new call log — which rebuilds the card and would otherwise reset
+  // its own attempt counter each time. See [NativeAdBudget].
+  final NativeAdBudget _momentsAdBudget = NativeAdBudget();
+  final NativeAdBudget _callsAdBudget = NativeAdBudget();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -1671,6 +1680,15 @@ class _HomeScreenState extends State<HomeScreen>
             if (otherStatuses.isNotEmpty)
               ...otherStatuses.map((status) => _buildStatusTile(status)),
 
+            // Under the moments, not above them: the user came here to see who
+            // posted, and the tab is short enough that the bottom of the list is
+            // still on screen. Skipped entirely when there are no moments, where
+            // the card would otherwise be the only thing in the tab — an ad as
+            // empty state is exactly the impression AdMob's placement guidance
+            // is written against.
+            if (otherStatuses.isNotEmpty)
+              NativeAdCard(placement: 'moments', budget: _momentsAdBudget),
+
             // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
               Padding(
@@ -1977,9 +1995,24 @@ class _HomeScreenState extends State<HomeScreen>
         }
 
         final callLogs = snapshot.data!;
+
+        // A single card at a fixed slot, three logs down. Skipped entirely on
+        // short histories: with three or fewer calls the ad would be a
+        // substantial fraction of the tab, which is the "more ad than content"
+        // shape AdMob's placement guidance calls out.
+        const adSlot = 3;
+        final showAd = callLogs.length > adSlot;
+
         return ListView.builder(
-          itemCount: callLogs.length,
-          itemBuilder: (context, index) {
+          itemCount: callLogs.length + (showAd ? 1 : 0),
+          itemBuilder: (context, rawIndex) {
+            if (showAd && rawIndex == adSlot) {
+              return NativeAdCard(placement: 'calls', budget: _callsAdBudget);
+            }
+            // Everything after the slot is shifted by the card that took its
+            // place in the list, so unmap the index before touching callLogs.
+            final index =
+                (showAd && rawIndex > adSlot) ? rawIndex - 1 : rawIndex;
             final log = callLogs[index];
 
             // Get the other person's information
@@ -2283,6 +2316,11 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       body: Column(
         children: [
+          // Renders nothing. Lives here because the home screen is where a call
+          // returns to, and an interstitial has to be fired from the screen it
+          // will appear over — never from the call screen itself. See
+          // [InterstitialAdService.armPostCall].
+          const PostCallInterstitial(),
           if (!_hasFirebaseSession) _buildReverifyBanner(),
           // ── Anonymous Match Banner — only on Gup tab ──────────────
           if (_tabController.index == 0 && _currentUserId != null)

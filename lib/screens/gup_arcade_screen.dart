@@ -139,7 +139,10 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                         chatService: _chatService,
                         chatCacheService: _chatCacheService,
                       ),
-                      _ChallengesTab(user: user),
+                      _ChallengesTab(
+                        user: user,
+                        currentUserId: widget.currentUserId,
+                      ),
                       _LeaderboardTab(
                         currentUserId: widget.currentUserId,
                       ),
@@ -1210,8 +1213,9 @@ class _OverviewTab extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 class _ChallengesTab extends StatefulWidget {
   final UserModel user;
+  final String currentUserId;
 
-  const _ChallengesTab({required this.user});
+  const _ChallengesTab({required this.user, required this.currentUserId});
 
   @override
   State<_ChallengesTab> createState() => _ChallengesTabState();
@@ -1423,6 +1427,13 @@ class _ChallengesTabState extends State<_ChallengesTab> {
             ),
           );
         }),
+
+        // Last, under the challenges rather than above them: every card above
+        // this is a way to earn points by using the app, and the ad is the
+        // fallback for someone who has read them all and wants points now. It
+        // hides itself when rewarded ads are off or the daily cap is spent.
+        const SizedBox(height: 4),
+        WatchAdForPointsCard(userId: widget.currentUserId),
       ],
     );
   }

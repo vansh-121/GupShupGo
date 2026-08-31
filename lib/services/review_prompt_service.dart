@@ -160,6 +160,30 @@ class ReviewPromptService {
     }
   }
 
+  /// Whether a review sheet was asked for in the last [window].
+  ///
+  /// Exists so the post-call interstitial can stand down: a Play review is worth
+  /// far more than one impression, and the two triggers overlap on exactly the
+  /// same moment — a call that connected and lasted.
+  ///
+  /// Reads the stamp rather than a return value on purpose. [maybeRequest] is
+  /// fire-and-forget and stamps *before* it calls Play, so by the time the
+  /// interstitial would appear the answer is already on disk — no await, and no
+  /// race between the two deciding at once.
+  bool askedRecently({Duration window = const Duration(minutes: 2)}) {
+    try {
+      final lastAskMs = sharedPrefs.getInt(_kLastAskKey) ?? 0;
+      if (lastAskMs == 0) return false;
+      final elapsed = DateTime.now().millisecondsSinceEpoch - lastAskMs;
+      // A negative elapsed means the clock moved backwards; treat it as recent
+      // rather than as "long ago", which is the direction that stays quiet.
+      return elapsed < window.inMilliseconds;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Review] askedRecently failed: $e');
+      return false;
+    }
+  }
+
   /// Opens the store listing directly. Unlike [maybeRequest] this is not
   /// quota-limited and always does something visible, which is why it — and not
   /// the review sheet — is what the menu entries call.

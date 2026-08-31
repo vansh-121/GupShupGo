@@ -11,6 +11,7 @@ import 'package:video_chat_app/services/ads/rewarded_ad_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_api.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/ads/watch_ad_for_points_card.dart';
 
 /// A premium dialog for restoring a broken bond (task 8.2).
 ///
@@ -720,6 +721,21 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                     ),
                   ),
                 ],
+              ],
+
+              // Short on points, with no free route left — the one place in the
+              // dialog where an ad offer is help rather than an interruption.
+              //
+              // Suppressed while [_canOfferAd] holds, because that offer buys a
+              // whole restore and this one buys ⚡50 towards it: showing both
+              // would invite the user to take the worse deal. So this is strictly
+              // the fallback for a week whose ad-restore credit is already spent.
+              if (!_loadingQuote &&
+                  !_canAfford &&
+                  !_canOfferAd &&
+                  !_windowExpired) ...[
+                const SizedBox(height: 12),
+                WatchAdForPointsCard(userId: widget.userId, dense: true),
               ],
 
               if (context.watch<SubscriptionProvider>().isProFeatureVisible &&

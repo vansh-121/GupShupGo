@@ -2,7 +2,8 @@
 ///
 /// Everything about *whether* an ad may appear is decided here, in one place,
 /// so a new placement cannot accidentally ship without the gating. See
-/// [canShowBanner].
+/// [canShowBanner], [canShowRewarded], [canShowInterstitial] and
+/// [canShowNative] — one gate per format, all sharing the same shape.
 ///
 /// Ordering matters and is not arbitrary:
 ///
@@ -180,6 +181,47 @@ class AdsService extends ChangeNotifier {
       _flags.adsRewardedEnabled &&
       _consent.canRequestAds &&
       _sdkReady;
+
+  /// Whether an interstitial may be shown right now.
+  ///
+  /// Pro *does* suppress these, unlike [canShowRewarded]: a rewarded ad is
+  /// something the user chose to watch, whereas a fullscreen ad in front of
+  /// someone who paid to remove advertising is worse than the banner they
+  /// already don't see.
+  ///
+  /// This is only the *eligibility* half of the decision. Pacing — how long
+  /// since the last one, how many skips ago — lives in
+  /// [InterstitialAdService], because it needs persistence and this class holds
+  /// no per-user state.
+  bool canShowInterstitial({
+    required bool hasProEntitlement,
+    required CallState callState,
+  }) {
+    return _flags.adsEnabled &&
+        _flags.adsInterstitialEnabled &&
+        !hasProEntitlement &&
+        callState == CallState.Idle &&
+        _consent.canRequestAds &&
+        _sdkReady;
+  }
+
+  /// Whether a native ad card may be built right now.
+  ///
+  /// [inChat] narrows the check to the conversation placement, which carries its
+  /// own Remote Config switch — the one surface inside a conversation is the one
+  /// most worth being able to kill on its own.
+  bool canShowNative({
+    required bool hasProEntitlement,
+    required CallState callState,
+    bool inChat = false,
+  }) {
+    return _flags.adsEnabled &&
+        (inChat ? _flags.adsNativeChatEnabled : _flags.adsNativeEnabled) &&
+        !hasProEntitlement &&
+        callState == CallState.Idle &&
+        _consent.canRequestAds &&
+        _sdkReady;
+  }
 
   @override
   void dispose() {

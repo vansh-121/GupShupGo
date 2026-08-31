@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/services/ads/interstitial_ad_service.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
@@ -16,6 +17,15 @@ import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/pip_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
+
+/// Talk time a call needs before it earns a post-call interstitial.
+///
+/// Lower than `ReviewPromptService.isGoodCall`'s two minutes on purpose: the two
+/// triggers share this moment and the review sheet wins it whenever it fires, so
+/// this threshold only decides which calls are *eligible* for the consolation
+/// prize. Well above a mis-tap either way — an ad after a ten-second wrong number
+/// teaches users that calling costs them something.
+const int _kMinCallSecondsForInterstitial = 60;
 
 class CallScreen extends StatefulWidget {
   final String channelId;
@@ -101,6 +111,16 @@ class _CallScreenState extends State<CallScreen> {
   // prompts, and E2EE key exchange — so the token is usually ready by the
   // time we reach joinChannel.
   Future<String?>? _tokenFuture;
+
+  /// Captured while the context is still valid so [dispose] can release the call
+  /// state without reaching into an unmounted context.
+  CallStateNotifier? _callStates;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _callStates = Provider.of<CallStateNotifier>(context, listen: false);
+  }
 
   @override
   void initState() {
@@ -280,6 +300,17 @@ class _CallScreenState extends State<CallScreen> {
       durationSeconds: _callDurationSeconds,
     )) {
       unawaited(ReviewPromptService.instance.maybeRequest(trigger: 'call'));
+    }
+
+    // A real conversation also earns an interstitial — never a missed, declined
+    // or cancelled call, which is what `_remoteUserJoined` rules out. Only
+    // *armed* here: this method ends in `Navigator.pop`, so showing the ad from
+    // the call screen would put it over call UI and over a hangup button.
+    // `PostCallInterstitial` on the home screen fires it once we're back at idle,
+    // and stands down if the review sheet above actually appeared.
+    if (_remoteUserJoined &&
+        _callDurationSeconds >= _kMinCallSecondsForInterstitial) {
+      InterstitialAdService.instance.armPostCall();
     }
 
     _signalingSubscription?.cancel();
@@ -631,6 +662,20 @@ class _CallScreenState extends State<CallScreen> {
 
     // Use proper release method with cleanup tracking
     AgoraService.releaseEngine(_engine);
+
+    // `Ended` is a signal, not a resting state: nothing in the app ever moved it
+    // back, so before this every gate keyed on `CallState.Idle` — the ad banner
+    // included — stayed shut for the rest of the session after a single call.
+    // Released here rather than in `_cleanupAndPop` so the back button and a
+    // system kill are covered too, and on the next frame so listeners see
+    // `Ended` and `Idle` as two separate transitions rather than one.
+    final callStates = _callStates;
+    if (callStates != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        callStates.updateState(CallState.Idle);
+      });
+    }
+
     super.dispose();
   }
 

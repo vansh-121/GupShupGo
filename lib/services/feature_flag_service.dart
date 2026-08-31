@@ -21,20 +21,37 @@ class FeatureFlagService extends ChangeNotifier {
   // ── Flag keys ────────────────────────────────────────────────────────────
   static const _kProEnabled = 'pro_enabled';
 
-  // Ads. `ads_enabled` is the master switch: the two per-format flags are only
+  // Ads. `ads_enabled` is the master switch: the per-format flags are only
   // consulted when it is on, so flipping it off kills every placement at once
   // without having to remember which formats exist.
   static const _kAdsEnabled = 'ads_enabled';
   static const _kAdsBannerEnabled = 'ads_banner_enabled';
   static const _kAdsRewardedEnabled = 'ads_rewarded_enabled';
+  static const _kAdsInterstitialEnabled = 'ads_interstitial_enabled';
+  static const _kAdsNativeEnabled = 'ads_native_enabled';
+  // Chat gets its own switch on top of `ads_native_enabled`. It is the only
+  // placement inside a conversation, so it carries the most UX risk of the
+  // three, and this is what allows it to be killed without also losing the
+  // Moments and Calls cards.
+  static const _kAdsNativeChatEnabled = 'ads_native_chat_enabled';
   static const _kAdsRewardPoints = 'ads_reward_points';
   static const _kAdsRewardedDailyCap = 'ads_rewarded_daily_cap';
+  static const _kAdsInterstitialMinGapSeconds =
+      'ads_interstitial_min_gap_seconds';
+  static const _kAdsInterstitialCallMinGapSeconds =
+      'ads_interstitial_call_min_gap_seconds';
 
   // Fallbacks used when the console holds a value Remote Config can't parse as
   // a positive int — getInt() returns 0 in that case, and a 0-point reward or a
   // 0 daily cap silently disables the feature rather than failing loudly.
   static const _kDefaultRewardPoints = 50;
-  static const _kDefaultRewardedDailyCap = 5;
+  static const _kDefaultRewardedDailyCap = 10;
+
+  // Interstitial pacing. The stranger-skip gap is short because a skip is a
+  // deliberate request for new content; the post-call gap is hours because an ad
+  // after every call teaches people that calling costs them something.
+  static const _kDefaultInterstitialMinGapSeconds = 60;
+  static const _kDefaultInterstitialCallMinGapSeconds = 14400; // 4h
 
   final FirebaseRemoteConfig _remoteConfig = FirebaseRemoteConfig.instance;
 
@@ -54,6 +71,21 @@ class FeatureFlagService extends ChangeNotifier {
   /// [adsEnabled].
   bool get adsRewardedEnabled => _remoteConfig.getBool(_kAdsRewardedEnabled);
 
+  /// Whether interstitials may be shown. Meaningless on its own — see
+  /// [adsEnabled].
+  bool get adsInterstitialEnabled =>
+      _remoteConfig.getBool(_kAdsInterstitialEnabled);
+
+  /// Whether native ad cards may render. Meaningless on its own — see
+  /// [adsEnabled].
+  bool get adsNativeEnabled => _remoteConfig.getBool(_kAdsNativeEnabled);
+
+  /// Whether a native card may appear inside a conversation. Requires
+  /// [adsNativeEnabled] as well — this is a narrowing switch, not an
+  /// independent one.
+  bool get adsNativeChatEnabled =>
+      adsNativeEnabled && _remoteConfig.getBool(_kAdsNativeChatEnabled);
+
   /// Gup Points granted per completed rewarded ad.
   ///
   /// This is the value the *UI advertises*. The authoritative one lives in the
@@ -70,6 +102,28 @@ class FeatureFlagService extends ChangeNotifier {
   int get adsRewardedDailyCap {
     final v = _remoteConfig.getInt(_kAdsRewardedDailyCap);
     return v > 0 ? v : _kDefaultRewardedDailyCap;
+  }
+
+  /// Minimum seconds between two interstitials from the same trigger.
+  ///
+  /// Unlike the reward knobs there is no server counterpart: an interstitial
+  /// pays on impression, so the client is the only party that can pace it. That
+  /// makes this flag the actual ceiling rather than a display value, which is why
+  /// the fallback is deliberately conservative.
+  Duration get adsInterstitialMinGap {
+    final v = _remoteConfig.getInt(_kAdsInterstitialMinGapSeconds);
+    return Duration(
+      seconds: v > 0 ? v : _kDefaultInterstitialMinGapSeconds,
+    );
+  }
+
+  /// Minimum seconds between two post-call interstitials. Much longer than
+  /// [adsInterstitialMinGap] on purpose — see the constant's note.
+  Duration get adsInterstitialCallMinGap {
+    final v = _remoteConfig.getInt(_kAdsInterstitialCallMinGapSeconds);
+    return Duration(
+      seconds: v > 0 ? v : _kDefaultInterstitialCallMinGapSeconds,
+    );
   }
 
   Future<void>? _initFuture;
@@ -92,8 +146,14 @@ class FeatureFlagService extends ChangeNotifier {
         _kAdsEnabled: false,
         _kAdsBannerEnabled: false,
         _kAdsRewardedEnabled: false,
+        _kAdsInterstitialEnabled: false,
+        _kAdsNativeEnabled: false,
+        _kAdsNativeChatEnabled: false,
         _kAdsRewardPoints: _kDefaultRewardPoints,
         _kAdsRewardedDailyCap: _kDefaultRewardedDailyCap,
+        _kAdsInterstitialMinGapSeconds: _kDefaultInterstitialMinGapSeconds,
+        _kAdsInterstitialCallMinGapSeconds:
+            _kDefaultInterstitialCallMinGapSeconds,
       });
 
       // Configure fetch settings
@@ -117,7 +177,9 @@ class FeatureFlagService extends ChangeNotifier {
       debugPrint(
           '[FeatureFlags] ✅ Initialised — pro_enabled=$isProEnabled, '
           'ads_enabled=$adsEnabled (banner=$adsBannerEnabled, '
-          'rewarded=$adsRewardedEnabled)');
+          'rewarded=$adsRewardedEnabled, '
+          'interstitial=$adsInterstitialEnabled, '
+          'native=$adsNativeEnabled, chat_native=$adsNativeChatEnabled)');
     } catch (e) {
       // Non-fatal — defaults (everything off) are fine as fallback
       debugPrint('[FeatureFlags] ⚠️ Init failed (using defaults): $e');

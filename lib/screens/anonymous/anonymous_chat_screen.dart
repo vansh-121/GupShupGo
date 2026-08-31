@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
+import 'package:video_chat_app/provider/call_state_provider.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
+import 'package:video_chat_app/services/ads/interstitial_ad_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -46,6 +50,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   void initState() {
     super.initState();
     _loadRoom();
+    // Only warms one when the next skip is the one that would show it, so the
+    // user isn't left staring at the chat they just left while an ad loads.
+    unawaited(InterstitialAdService.instance.preloadForNextSkip());
   }
 
   @override
@@ -125,9 +132,29 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   Future<void> _nextStranger() async {
     if (_isEnding) return;
     _isEnding = true;
+
+    // Read the providers before any await — after them this State may be gone
+    // and its context unusable.
+    final hasPro = Provider.of<SubscriptionProvider>(context, listen: false)
+        .hasActiveProEntitlement;
+    final callState =
+        Provider.of<CallStateNotifier>(context, listen: false).state;
+
     if (_room != null && _room!.isActive) {
       await _service.endSession(widget.roomId, widget.currentUserId);
     }
+
+    // Between one stranger and the next: the room is closed, no match is
+    // running, and the user has explicitly asked for different content — the one
+    // transition in this app where a fullscreen ad interrupts nothing.
+    //
+    // Awaited on purpose. Starting the search first would leave a matched
+    // stranger waiting behind the ad, quite possibly long enough to leave.
+    await InterstitialAdService.instance.maybeShowOnStrangerSkip(
+      hasProEntitlement: hasPro,
+      callState: callState,
+    );
+
     if (!mounted) return;
     Navigator.pushReplacement(
       context,

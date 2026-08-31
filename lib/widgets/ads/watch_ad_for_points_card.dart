@@ -1,8 +1,10 @@
 /// GupShupGo — "watch an ad for Gup Points" card.
 ///
-/// Lives in the Arcade overview, where points are already the unit of account, so
-/// the offer reads as part of the game rather than an interruption. Deliberately
-/// **not** placed anywhere in the chat or call flow.
+/// Appears where points are already the unit of account, so the offer reads as
+/// part of the game rather than an interruption: the Arcade's Overview and
+/// Challenges tabs, and — as the compact [WatchAdForPointsCard.dense] form — the
+/// Bond Restore dialog's "not enough points" branch, where it is the way out of
+/// that state. Deliberately **not** placed anywhere in the chat or call flow.
 ///
 /// The card promises what Remote Config says (`ads_reward_points`,
 /// `ads_rewarded_daily_cap`) but pays nothing: `admobSsv` credits the account
@@ -25,9 +27,20 @@ import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 class WatchAdForPointsCard extends StatefulWidget {
-  const WatchAdForPointsCard({super.key, required this.userId});
+  const WatchAdForPointsCard({
+    super.key,
+    required this.userId,
+    this.dense = false,
+  });
 
   final String userId;
+
+  /// Renders as a single compact row instead of the full gradient card.
+  ///
+  /// For hosts with no room for the card — the Bond Restore dialog, where this
+  /// appears underneath the "not enough points" line as a way *out* of that
+  /// state rather than as a separate offer.
+  final bool dense;
 
   @override
   State<WatchAdForPointsCard> createState() => _WatchAdForPointsCardState();
@@ -45,7 +58,15 @@ class _WatchAdForPointsCardState extends State<WatchAdForPointsCard> {
     // The Arcade is a full screen, so it is a reasonable place to resolve consent
     // if the home banner hasn't already — unlike a dialog, a form here isn't
     // stacked on top of something the user was mid-way through.
-    unawaited(AdsService.instance.ensureConsent());
+    //
+    // Which is exactly why the dense variant does *not* ask: it renders inside
+    // the Bond Restore dialog, and a consent form over an open dialog is the
+    // stacked-modal case this comment warns about. An unresolved user simply
+    // doesn't see the offer there — `canShowRewarded` is false until consent
+    // lands, and it lands from the home banner or the Arcade instead.
+    if (!widget.dense) {
+      unawaited(AdsService.instance.ensureConsent());
+    }
     unawaited(RewardedAdService.instance.preload());
   }
 
@@ -140,6 +161,17 @@ class _WatchAdForPointsCardState extends State<WatchAdForPointsCard> {
         final pointsNow = user == null ? 0 : AdRewardWaiter.points(user);
         final busy = _watching || _awaiting;
         final exhausted = remaining == 0;
+
+        if (widget.dense) {
+          return _buildDense(
+            c: c,
+            reward: reward,
+            remaining: remaining,
+            pointsNow: pointsNow,
+            busy: busy,
+            exhausted: exhausted,
+          );
+        }
 
         return Container(
           margin: const EdgeInsets.only(bottom: 20),
@@ -251,6 +283,84 @@ class _WatchAdForPointsCardState extends State<WatchAdForPointsCard> {
           ),
         );
       },
+    );
+  }
+
+  /// The compact form: one full-width outlined button, plus the same status line
+  /// the card uses. No gradient and no header — in a dialog this has to read as
+  /// an action available to you, not as an advertisement for an advertisement.
+  Widget _buildDense({
+    required AppThemeColors c,
+    required int reward,
+    required int remaining,
+    required int pointsNow,
+    required bool busy,
+    required bool exhausted,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: (exhausted || busy) ? null : () => _watch(pointsNow),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              foregroundColor: c.primary,
+              side: BorderSide(color: c.primary.withValues(alpha: 0.45)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: busy
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: c.primary,
+                    ),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.play_circle_outline_rounded, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        exhausted
+                            ? 'Daily ad limit reached'
+                            : 'Watch an ad for ⚡$reward points',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _message!,
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              color: c.textMid,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ] else if (!exhausted) ...[
+          const SizedBox(height: 6),
+          Text(
+            '$remaining left today',
+            style: GoogleFonts.poppins(
+              fontSize: 10,
+              color: c.textLow,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -31,6 +31,8 @@ class AdIds {
   // exactly one platform of one app).
   static const _androidBanner = 'ca-app-pub-8214980075451384/7389208840';
   static const _androidRewarded = 'ca-app-pub-8214980075451384/3145500055';
+  static const _androidInterstitial = 'ca-app-pub-8214980075451384/7917947606';
+  static const _androidNative = 'ca-app-pub-8214980075451384/5771613062';
 
   // ── Google's public test units ───────────────────────────────────────────
   // Documented at https://developers.google.com/admob/flutter/test-ads —
@@ -39,6 +41,11 @@ class AdIds {
   static const _testBannerIos = 'ca-app-pub-3940256099942544/2934735716';
   static const _testRewardedAndroid = 'ca-app-pub-3940256099942544/5224354917';
   static const _testRewardedIos = 'ca-app-pub-3940256099942544/1712485313';
+  static const _testInterstitialAndroid =
+      'ca-app-pub-3940256099942544/1033173712';
+  static const _testInterstitialIos = 'ca-app-pub-3940256099942544/4411468910';
+  static const _testNativeAndroid = 'ca-app-pub-3940256099942544/2247696110';
+  static const _testNativeIos = 'ca-app-pub-3940256099942544/3986624511';
 
   /// True when this build must not touch live inventory.
   static bool get useTestAds => kDebugMode || !Platform.isAndroid;
@@ -55,5 +62,24 @@ class AdIds {
       return Platform.isAndroid ? _testRewardedAndroid : _testRewardedIos;
     }
     return _androidRewarded;
+  }
+
+  static String get interstitial {
+    if (useTestAds) {
+      return Platform.isAndroid
+          ? _testInterstitialAndroid
+          : _testInterstitialIos;
+    }
+    return _androidInterstitial;
+  }
+
+  /// Native *advanced* unit. The template renderer in `NativeAdCard` needs one of
+  /// these — a banner unit handed to `NativeAd` fails to load rather than
+  /// degrading, so the two are not interchangeable.
+  static String get nativeAd {
+    if (useTestAds) {
+      return Platform.isAndroid ? _testNativeAndroid : _testNativeIos;
+    }
+    return _androidNative;
   }
 }

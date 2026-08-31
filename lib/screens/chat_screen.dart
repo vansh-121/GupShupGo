@@ -34,6 +34,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
+import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -78,6 +79,20 @@ class ChatScreen extends StatefulWidget {
   @override
   _ChatScreenState createState() => _ChatScreenState();
 }
+
+/// How much history a conversation needs before it carries a native ad card.
+///
+/// The card is only acceptable in a chat because it lands in *scrollback* — old
+/// messages the user has already read. In a short thread there is no scrollback
+/// to land in, so there is no card.
+const int _kChatAdMinMessages = 25;
+
+/// How many messages sit between the card and the newest message.
+///
+/// The chat list is `reverse: true`, so the newest message is at the bottom next
+/// to the composer and the send button. This gap is what keeps the card out of
+/// reach of a mis-tap while typing.
+const int _kChatAdGapFromComposer = 8;
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
@@ -141,6 +156,23 @@ class _ChatScreenState extends State<ChatScreen> {
   // every message would animate on the first build of the chat screen.
   final Set<String> _seenMessageIds = <String>{};
   bool _didInitialMessageBuild = false;
+
+  /// Id of the message the chat's single native ad card sits above, chosen once
+  /// per chat open.
+  ///
+  /// Anchored to a message rather than to an offset from the end of the list: an
+  /// offset would walk the card up through scrollback every time a message
+  /// arrived, and each move would rebuild it into a fresh ad request. Null until
+  /// the thread is long enough — see [_kChatAdMinMessages].
+  String? _chatAdAnchorId;
+
+  /// Load budget for that card, owned here rather than by the card.
+  ///
+  /// The message list is `reverse: true`, so a new message — or the typing bubble
+  /// blinking on and off — shifts every index and rebuilds the card from scratch.
+  /// Its own counter would reset each time; this one doesn't. See
+  /// [NativeAdBudget].
+  final NativeAdBudget _chatAdBudget = NativeAdBudget();
 
   // ─── Mesh messaging state ─────────────────────────────────────────
   StreamSubscription<MessageModel>? _meshMessageSubscription;
@@ -1980,9 +2012,25 @@ class _ChatScreenState extends State<ChatScreen> {
     displayItems.add(const _DisplayItem.banner());
     String? lastDate;
 
+    // Pick the chat's single ad anchor, once, on the first build with enough
+    // history. Counted back from the newest message because `reverse: true` puts
+    // the composer at the bottom — the gap is what keeps the card away from the
+    // send button, where a mis-tap would be an accidental click.
+    if (_chatAdAnchorId == null &&
+        displayMessages.length >= _kChatAdMinMessages) {
+      _chatAdAnchorId =
+          displayMessages[displayMessages.length - _kChatAdGapFromComposer].id;
+    }
+
     for (int i = 0; i < displayMessages.length; i++) {
       final message = displayMessages[i];
       final messageDate = _formatMessageDate(message.timestamp);
+
+      // Above the date divider rather than below it, so the card never reads as
+      // the first thing that happened on a given day.
+      if (message.id == _chatAdAnchorId) {
+        displayItems.add(const _DisplayItem.nativeAd());
+      }
 
       if (lastDate != messageDate) {
         displayItems.add(_DisplayItem.dateDivider(messageDate));
@@ -2021,6 +2069,15 @@ class _ChatScreenState extends State<ChatScreen> {
             return _buildTypingBubble();
           case _DisplayItemType.loadingOlder:
             return _buildLoadingOlderIndicator();
+          case _DisplayItemType.nativeAd:
+            // Self-hiding: renders nothing at all unless native ads are on for
+            // chat, the user isn't Pro, and an ad actually filled. Never styled
+            // as a bubble — see [NativeAdCard].
+            return NativeAdCard(
+              placement: 'chat',
+              inChat: true,
+              budget: _chatAdBudget,
+            );
           case _DisplayItemType.message:
             final bubble = _buildMessage(item.message!);
             // RepaintBoundary isolates each message bubble into its own
@@ -3905,7 +3962,14 @@ class _TypingDotsIndicatorState extends State<_TypingDotsIndicator>
 // ListView.builder's itemBuilder callback, saving massive CPU on chats with
 // hundreds of messages.
 
-enum _DisplayItemType { banner, dateDivider, message, typing, loadingOlder }
+enum _DisplayItemType {
+  banner,
+  dateDivider,
+  message,
+  typing,
+  loadingOlder,
+  nativeAd,
+}
 
 class _DisplayItem {
   final _DisplayItemType type;
@@ -3926,6 +3990,8 @@ class _DisplayItem {
 
   const _DisplayItem.loadingOlder()
       : this._(type: _DisplayItemType.loadingOlder);
+
+  const _DisplayItem.nativeAd() : this._(type: _DisplayItemType.nativeAd);
 
   _DisplayItem.dateDivider(String label)
       : this._(type: _DisplayItemType.dateDivider, dateLabel: label);
