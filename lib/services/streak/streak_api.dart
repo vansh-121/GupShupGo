@@ -27,14 +27,16 @@ import 'streak_state.dart';
 
 /// The quote rendered by `StreakRestoreDialog` before the user commits.
 ///
-/// Shape: `{ previousCount, cost, canUseFreePerk, restoreDeadlineAt,
-/// serverNow, contactName }`.
+/// Shape: `{ previousCount, cost, canUseFreePerk, adRestoreCredits,
+/// canEarnAdRestore, restoreDeadlineAt, serverNow, contactName }`.
 @immutable
 class StreakRestoreQuote {
   const StreakRestoreQuote({
     required this.previousCount,
     required this.cost,
     required this.canUseFreePerk,
+    this.adRestoreCredits = 0,
+    this.canEarnAdRestore = false,
     this.restoreDeadlineAt,
     this.serverNow,
     this.contactName,
@@ -50,6 +52,14 @@ class StreakRestoreQuote {
   /// from the server, never from `SubscriptionService`.
   final bool canUseFreePerk;
 
+  /// Unspent restore credits earned from rewarded ads. Written only by the
+  /// `admobSsv` function, so this is as trustworthy as [canUseFreePerk].
+  final int adRestoreCredits;
+
+  /// True when another ad-granted restore can still be earned this ISO week.
+  /// The cap is one per week so the ad route doesn't cannibalise the Pro perk.
+  final bool canEarnAdRestore;
+
   /// End of the restore window, server-stamped.
   final DateTime? restoreDeadlineAt;
 
@@ -59,6 +69,10 @@ class StreakRestoreQuote {
   /// Display name of the other participant.
   final String? contactName;
 
+  /// Whether this restore costs nothing — either the Pro perk or a credit
+  /// already banked from an ad. `streakRestore` spends the perk first.
+  bool get isFree => canUseFreePerk || adRestoreCredits > 0;
+
   static StreakRestoreQuote? fromJson(Map<String, dynamic> json) {
     final previousCount = _asInt(json['previousCount']);
     if (previousCount == null) return null;
@@ -66,6 +80,8 @@ class StreakRestoreQuote {
       previousCount: previousCount,
       cost: _asInt(json['cost']) ?? 0,
       canUseFreePerk: json['canUseFreePerk'] == true,
+      adRestoreCredits: _asInt(json['adRestoreCredits']) ?? 0,
+      canEarnAdRestore: json['canEarnAdRestore'] == true,
       restoreDeadlineAt: streakInstantFrom(json['restoreDeadlineAt']),
       serverNow: streakInstantFrom(json['serverNow']),
       contactName: json['contactName'] as String?,
@@ -109,13 +125,15 @@ class StreakRestoreResult {
     this.restoredCount,
     this.costPaid,
     this.usedFreePerk = false,
+    this.usedAdCredit = false,
     this.message,
   });
 
   const StreakRestoreResult.failure(this.status, {this.message})
       : restoredCount = null,
         costPaid = null,
-        usedFreePerk = false;
+        usedFreePerk = false,
+        usedAdCredit = false;
 
   final StreakRestoreStatus status;
 
@@ -127,6 +145,11 @@ class StreakRestoreResult {
 
   /// True when the Pro weekly allowance was consumed instead of points.
   final bool usedFreePerk;
+
+  /// True when an ad-earned restore credit was spent instead of points. The
+  /// server prefers the Pro perk when both are available, so at most one of
+  /// this and [usedFreePerk] is ever true.
+  final bool usedAdCredit;
 
   /// Server-supplied detail, useful for the transport-failure snackbar.
   final String? message;
@@ -292,6 +315,7 @@ class StreakApi {
         restoredCount: _asInt(body['restoredCount']) ?? _asInt(body['count']),
         costPaid: _asInt(body['costPaid']) ?? _asInt(body['cost']),
         usedFreePerk: body['usedFreePerk'] == true,
+        usedAdCredit: body['usedAdCredit'] == true,
         message: message,
       );
     }

@@ -19,7 +19,18 @@ pluginManagement {
 plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
     id "com.android.application" version "8.12.0" apply false
-    id "org.jetbrains.kotlin.android" version "2.1.21" apply false
+    // Kotlin 2.3.x is a floor, not a preference: google_mobile_ads pulls
+    // play-services-ads 25.4.0, whose .kotlin_module metadata is version 2.3.0.
+    // A Kotlin compiler reads its own metadata version and older, never newer, so
+    // 2.1.21 failed :app:compileDebugKotlin with "Module was compiled with an
+    // incompatible version of Kotlin ... expected version is 2.1.0" — twenty times
+    // over, once per module inside the ads AAR.
+    //
+    // The alternative was forcing play-services-ads back to a 2.1-metadata
+    // release, which was rejected: older ads builds are less likely to be 16 KB
+    // page-size aligned, and that would put the Play compliance work in
+    // a2a6833 at risk to avoid a version bump.
+    id "org.jetbrains.kotlin.android" version "2.3.21" apply false
 }
 
 include ":app"

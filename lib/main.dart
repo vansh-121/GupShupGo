@@ -21,6 +21,7 @@ import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/crypto/crypto_worker.dart';
@@ -116,6 +117,14 @@ void main() async {
 
   // ── Feature Flags (Remote Config) — fire-and-forget ───────────────────
   unawaited(FeatureFlagService.instance.init().catchError((_) {}));
+
+  // ── AdMob — fire-and-forget ───────────────────────────────────────────
+  // Awaits the flags internally (init() above is idempotent) and does nothing
+  // at all while `ads_enabled` is false: no SDK, no consent form, no network.
+  // The UMP consent form is deliberately NOT shown from here — AdsService defers
+  // it to the first ad-bearing screen, so a new user isn't met by a consent
+  // dialog before they have even signed in.
+  unawaited(AdsService.instance.init().catchError((_) {}));
 
   // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
   //         any screen tries to encrypt or decrypt, the service is ready.

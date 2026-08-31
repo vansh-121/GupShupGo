@@ -68,6 +68,16 @@
 -dontwarn com.google.firebase.appcheck.safetynet.**
 
 # ─────────────────────────────────────────────
+# Google Mobile Ads (AdMob) + UMP consent
+# ─────────────────────────────────────────────
+# The ads SDK itself (com.google.android.gms.ads.**) is already covered by the
+# broad gms keep/dontwarn pair above. The User Messaging Platform is NOT — it
+# ships under com.google.android.ump, outside that package, and R8 stripping it
+# breaks the GDPR/DMA consent form with no build-time error.
+-keep class com.google.android.ump.** { *; }
+-dontwarn com.google.android.ump.**
+
+# ─────────────────────────────────────────────
 # Google Sign-In
 # ─────────────────────────────────────────────
 -keep class com.google.android.gms.auth.** { *; }

@@ -108,6 +108,13 @@ dependencies:
   # .fvmrc in this project — see .fvm/ and .fvmrc).
   in_app_purchase: ^3.3.0
 
+  # Google Mobile Ads (AdMob) — banner + rewarded, gated by Remote Config.
+  # 9.x needs Dart >=3.10 / Flutter >=3.38.1, satisfied by the 3.38.10 pinned
+  # in .fvmrc. It pulls the webview_flutter family, but none of those packages
+  # depend on `web`, so the `web ^1.0.0` vs firebase_core 2.x conflict that
+  # pinned drift to 2.18.x does not apply here.
+  google_mobile_ads: ^9.1.0
+
   # Media picker & video player
   image_picker: ^1.0.7
   url_launcher: ^6.2.1

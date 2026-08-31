@@ -40,6 +40,7 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/widgets/ads/ad_banner.dart';
 import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
@@ -2310,7 +2311,18 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNavDock(),
+      // The banner lives in the bottomNavigationBar slot, NOT in the body
+      // Column. Scaffold measures this slot when positioning the FAB, so
+      // _buildFABRow() automatically floats above the ad. In the body it would
+      // sit *under* the FAB — an obscured ad (a policy problem) and an
+      // accidental-click risk right where the compose button is.
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const AdBanner(),
+          _buildBottomNavDock(),
+        ],
+      ),
       floatingActionButton: _buildFABRow(),
     );
   }

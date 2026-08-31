@@ -322,7 +322,7 @@ class _PremiumScreenState extends State<PremiumScreen>
         icon: Icons.local_fire_department_rounded,
         title: 'Bond Restore',
         description: 'Restore broken bonds for free',
-        freeLabel: 'Pay with Gup Points',
+        freeLabel: 'Points or watch an ad',
         proLabel: '1 free restore/week',
       ),
       _FeatureItem(
@@ -338,6 +338,16 @@ class _PremiumScreenState extends State<PremiumScreen>
         description: 'Export conversations as text files',
         freeLabel: 'Not available',
         proLabel: 'Export as TXT',
+      ),
+      // Worded to promise exactly what Pro does: banners go away. Rewarded ads
+      // are opt-in and stay available to Pro members, so claiming a blanket
+      // "no ads" here would be a promise the app then breaks in the Arcade.
+      _FeatureItem(
+        icon: Icons.block_rounded,
+        title: 'Ad-Free Experience',
+        description: 'No banner ads anywhere in the app',
+        freeLabel: 'Banner ads shown',
+        proLabel: 'No banners (reward ads stay optional)',
       ),
     ];
 

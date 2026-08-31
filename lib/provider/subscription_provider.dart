@@ -42,6 +42,18 @@ class SubscriptionProvider extends ChangeNotifier {
   /// automatically treat the user as free.
   bool get isPro => isProFeatureVisible && _service.isPro;
 
+  /// The raw Play entitlement, ignoring the `pro_enabled` flag.
+  ///
+  /// Ad suppression MUST use this and never [isPro]. [isPro] is deliberately
+  /// masked by the flag so that turning Pro off treats everyone as free — but
+  /// applied to ads that logic inverts: with `pro_enabled=false`, [isPro] is
+  /// `false` even for someone with a live subscription, so banners would be
+  /// shown to the exact users who paid to remove them.
+  ///
+  /// This is only for "has this person paid?" questions. For "should Pro UI be
+  /// visible?", keep using [isPro] / [isProFeatureVisible].
+  bool get hasActiveProEntitlement => _service.isPro;
+
   bool get isLoading => _isLoading;
   String? get error => _error;
   SubscriptionModel get subscription => _service.subscription;

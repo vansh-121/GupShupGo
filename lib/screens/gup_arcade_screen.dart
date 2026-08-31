@@ -15,6 +15,7 @@ import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/ads/watch_ad_for_points_card.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 
@@ -578,6 +579,11 @@ class _OverviewTab extends StatelessWidget {
         // Quick Stats Row
         _buildQuickStats(c),
         const SizedBox(height: 20),
+
+        // Earn points by watching an ad. Hides itself entirely when ads are off,
+        // unconsented, or the daily allowance is spent — so it never advertises
+        // a reward it can't pay.
+        WatchAdForPointsCard(userId: currentUserId),
 
         // Active Bonds
         _buildStreaksSection(c),

@@ -9,6 +9,7 @@ import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/vault_settings_screen.dart';
+import 'package:video_chat_app/services/ads/ad_consent_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
@@ -76,6 +77,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  /// Reopens Google's privacy options form so the user can change or withdraw
+  /// ad consent. The form is UMP's, not ours — it is the only UI allowed to
+  /// record that choice, and it writes the result to the device itself, so there
+  /// is nothing for this screen to save afterwards.
+  Future<void> _openAdPreferences() async {
+    final shown = await AdConsentService.instance.showPrivacyOptionsForm();
+    if (!mounted) return;
+    if (!shown) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Couldn't open ad preferences. Check your connection and try again.",
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+        ),
+      );
+      return;
+    }
+    // The requirement status can flip once the choice is recorded, which decides
+    // whether this row keeps existing.
+    setState(() {});
   }
 
   Future<void> _signOut() async {
@@ -555,6 +579,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: _settings.showReadReceipts,
                 onChanged: (v) => setState(() => _settings.showReadReceipts = v),
               ),
+              // UMP requires a permanent way to revisit an ad-consent choice
+              // wherever privacy options apply — so this is a legal obligation in
+              // the EEA/UK, not a convenience. Hidden elsewhere, because UMP
+              // reports no privacy options and the form would be empty.
+              if (AdConsentService.instance.privacyOptionsRequired) ...[
+                _buildStitchDivider(),
+                _buildStitchTile(
+                  icon: Icons.ads_click_rounded,
+                  title: 'Ad preferences',
+                  trailingText: 'Manage',
+                  onTap: _openAdPreferences,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 16),

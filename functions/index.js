@@ -29,6 +29,11 @@ const streakAwards = require("./streak/awards");
 const streakNotify = require("./streak/notify");
 const streakRepair = require("./streak/repair");
 
+// ─── Rewarded-ad SSV ──────────────────────────────────────────────────────────
+// Signature verification only — no Firestore, no Express — so it can be unit
+// tested against a locally generated keypair. See `exports.admobSsv` below.
+const adsSsv = require("./ads/ssv");
+
 // ─── Repair admin token ────────────────────────────────────────────────────────
 // Set via: firebase functions:secrets:set STREAK_ADMIN_TOKEN
 // The only credential that can drive `streakRepairRoom`. Not a user id token: the
@@ -1992,6 +1997,66 @@ function hasFreeRestoreAllowance(userData, weekKey) {
   return !Number.isFinite(used) || used < 1;
 }
 
+// ─── Rewarded-ad reward limits ────────────────────────────────────────────────
+// These two numbers are the AUTHORITATIVE ones — `admobSsv` is what actually
+// credits an account, so nothing a client claims can change them.
+//
+// The Remote Config keys `ads_reward_points` and `ads_rewarded_daily_cap` are
+// display-only: they tell the UI what to promise. KEEP THEM IN SYNC WITH THESE.
+// If they diverge, the app advertises one figure and the server pays another,
+// which reads to the user as the reward being broken.
+const ADS_REWARD_POINTS = 50;
+const ADS_REWARD_DAILY_CAP = 5;
+
+// One ad-granted Bond Restore per ISO week, deliberately: a free restore is the
+// Pro tier's headline weekly perk, and an uncapped ad route would undercut the
+// thing people are paying for.
+const ADS_RESTORE_WEEKLY_CAP = 1;
+
+/**
+ * How many paid rewarded views [userData] already has on the canonical day
+ * [dayKey]. A counter from any other day is stale and counts as zero — the same
+ * "the key IS the reset" trick as `hasFreeRestoreAllowance`, which is why no
+ * sweeper job is needed to roll the day over.
+ *
+ * @param {?object} userData
+ * @param {string} dayKey
+ * @returns {number}
+ */
+function adRewardDailyCount(userData, dayKey) {
+  return _staleKeyedCount(userData && userData.adRewardDaily, "dayKey", dayKey);
+}
+
+/**
+ * How many ad-granted Bond Restores [userData] earned in the ISO week [weekKey].
+ *
+ * @param {?object} userData
+ * @param {string} weekKey
+ * @returns {number}
+ */
+function adRestoreWeeklyCount(userData, weekKey) {
+  return _staleKeyedCount(userData && userData.adRestoreWeekly, "weekKey", weekKey);
+}
+
+/**
+ * Whether an ad-granted Bond Restore can still be earned in the ISO week
+ * [weekKey].
+ *
+ * @param {?object} userData
+ * @param {string} weekKey
+ * @returns {boolean}
+ */
+function _adRestoreEarnableThisWeek(userData, weekKey) {
+  return adRestoreWeeklyCount(userData, weekKey) < ADS_RESTORE_WEEKLY_CAP;
+}
+
+function _staleKeyedCount(bucket, keyField, expectedKey) {
+  if (!bucket || typeof bucket !== "object") return 0;
+  if (bucket[keyField] !== expectedKey) return 0; // different period → reset
+  const count = Number(bucket.count);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 /**
  * The participants of a room, preferring the state document and falling back to
  * the parent room (a bond with no state document yet).
@@ -2160,10 +2225,18 @@ exports.streakRestoreQuote = onRequest(
       const canUseFreePerk =
         isProUser(userData, nowMs) && hasFreeRestoreAllowance(userData, weekKey);
 
+      // Rewarded-ad state, so the dialog can tell the three cases apart: spend a
+      // banked credit now, watch an ad to earn one, or neither (already earned
+      // this week — the cap is per ISO week, see `admobSsv`).
+      const adRestoreCredits = Math.max(0, Number(userData && userData.adRestoreCredits) || 0);
+      const canEarnAdRestore = _adRestoreEarnableThisWeek(userData, weekKey);
+
       res.status(200).json({
         previousCount,
         cost: streakEngine.restoreCost(previousCount),
         canUseFreePerk,
+        adRestoreCredits,
+        canEarnAdRestore,
         restoreDeadlineAt: deadlineMs,
         serverNow: nowMs,
         contactName: otherUid === null ? null : nameMap[otherUid] || null,
@@ -2254,9 +2327,18 @@ exports.streakRestore = onRequest(
           isProUser(userData, nowMs) && hasFreeRestoreAllowance(userData, weekKey);
         const usedFreePerk = wantsFreePerk && perkAvailable;
 
+        // (d2) a rewarded-ad credit, granted only by `admobSsv` after Google's
+        // signed callback verified. The Pro perk is spent FIRST when both are
+        // available: the perk expires at the end of the ISO week regardless,
+        // while a credit keeps — so spending the credit first would quietly burn
+        // the thing the user sat through an ad for.
+        const adCredits = Number(userData.adRestoreCredits) || 0;
+        const usedAdCredit = wantsFreePerk && !perkAvailable && adCredits > 0;
+        const isFree = usedFreePerk || usedAdCredit;
+
         // (e) otherwise the points must actually be there
         const points = Number(userData.gupPoints) || 0;
-        if (!usedFreePerk && points < cost) {
+        if (!isFree && points < cost) {
           return {
             refusal: {
               status: 402,
@@ -2290,7 +2372,7 @@ exports.streakRestore = onRequest(
           longestForRoom: Math.max(stored.longestForRoom || 0, previousCount),
           restoredAt: serverNow,
           restoredBy: uid,
-          restoreCostPaid: usedFreePerk ? 0 : cost,
+          restoreCostPaid: isFree ? 0 : cost,
         });
 
         tx.set(
@@ -2316,6 +2398,10 @@ exports.streakRestore = onRequest(
             used: usedBefore + 1,
             lastUsedAt: serverNow,
           };
+        } else if (usedAdCredit) {
+          // Decremented inside the same transaction that consumed it, so two
+          // concurrent restores can never spend one credit twice.
+          userUpdates.adRestoreCredits = admin.firestore.FieldValue.increment(-1);
         } else {
           userUpdates.gupPoints = admin.firestore.FieldValue.increment(-cost);
         }
@@ -2324,8 +2410,9 @@ exports.streakRestore = onRequest(
         return {
           ok: true,
           restoredCount: previousCount,
-          costPaid: usedFreePerk ? 0 : cost,
+          costPaid: isFree ? 0 : cost,
           usedFreePerk,
+          usedAdCredit,
           weekKey,
           serverNow: nowMs,
           state: next,
@@ -2367,7 +2454,8 @@ exports.streakRestore = onRequest(
 
       console.log(
         `streakRestore: ${roomId} restored to ${outcome.restoredCount} by ${uid} ` +
-        `cost=${outcome.costPaid} freePerk=${outcome.usedFreePerk}`
+        `cost=${outcome.costPaid} freePerk=${outcome.usedFreePerk} ` +
+        `adCredit=${outcome.usedAdCredit}`
       );
 
       res.status(200).json({
@@ -2377,6 +2465,7 @@ exports.streakRestore = onRequest(
         costPaid: outcome.costPaid,
         cost: outcome.costPaid,
         usedFreePerk: outcome.usedFreePerk,
+        usedAdCredit: outcome.usedAdCredit,
         serverNow: outcome.serverNow,
       });
     } catch (error) {
@@ -2386,6 +2475,274 @@ exports.streakRestore = onRequest(
         error: "Server error restoring streak",
         detail: error.message,
       });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REWARDED-AD SERVER-SIDE VERIFICATION (SSV)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// This function is the ONLY thing in the system that pays out a rewarded ad. The
+// client (`lib/services/ads/rewarded_ad_service.dart`) does not credit anything,
+// cannot credit anything, and is not trusted even when it swears the ad was
+// watched — Google calls us directly, over a signed URL, and this is the only
+// party that writes `gupPoints` or `adRestoreCredits` for an ad.
+//
+// Three properties make that stick:
+//
+//   1. AUTHENTICITY — every callback is signed by Google with ECDSA-SHA256 over
+//      the raw query string. An unsigned or altered URL is refused before any
+//      read happens, so a hand-crafted request buys nothing.
+//   2. IDEMPOTENCE — Google retries callbacks it can't confirm we received, and
+//      an attacker who captures a real URL will simply replay it. `transaction_id`
+//      is recorded in the same transaction that credits, so the second delivery
+//      of the same reward is a no-op instead of a double payout.
+//   3. CAPS — the daily/weekly limits are enforced HERE. `ads_reward_points` and
+//      `ads_rewarded_daily_cap` in Remote Config only tell the UI what to
+//      *promise*; a rooted device rewriting them changes the copy, not the payout.
+//
+// Configure this in AdMob → the rewarded ad unit → Server-side verification, as
+//   https://<region>-<project>.cloudfunctions.net/admobSsv
+// The unit is shared by both reward types, so the type travels in `custom_data`.
+//
+// Two deliberate non-features:
+//
+//   * No `timestamp` freshness check. Google's docs have described that field in
+//     both milliseconds and microseconds, and a unit mistake here fails CLOSED —
+//     it would silently refuse every legitimate reward. The `transaction_id`
+//     ledger already makes a captured URL worthless after its first delivery,
+//     which is the property a freshness window was going to buy.
+//   * No TTL on the `adRewards` ledger. It grows, but each row is tiny and a row
+//     is the only thing standing between a saved callback URL and a second
+//     payout. If it ever needs pruning, the TTL has to be long enough that no
+//     replay could outlive it — months, not days.
+
+// ─── Verifier keys ────────────────────────────────────────────────────────────
+// Google publishes its public keys and rotates them. Fetching per callback would
+// add a round-trip to every reward, so they're cached per instance.
+//
+// The signature work lives in `ads/ssv.js` and is unit-tested against a locally
+// generated keypair (`test/admob_ssv.unit.test.js`), because it is the piece of
+// this feature that can be wrong without anyone noticing: get the byte slicing
+// off by one and every legitimate reward is refused, which looks identical to
+// "nobody watched an ad".
+const admobKeys = new adsSsv.VerifierKeyCache();
+
+// ─── GET /admobSsv ────────────────────────────────────────────────────────────
+// Status codes are deliberate, because they decide whether Google retries:
+//   400 — the callback isn't genuine (bad/absent signature). Never credits.
+//   500 — WE failed (key fetch, Firestore). Google retries; the reward survives.
+//   200 — handled. Includes the cases that can never succeed on a retry (already
+//         processed, cap reached, unknown reward type), because retrying those
+//         forever would just fill the logs.
+exports.admobSsv = onRequest(
+  { invoker: "public", minInstances: 0 },
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    if (req.method !== "GET") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const q = req.query || {};
+    const signature = typeof q.signature === "string" ? q.signature : null;
+    const keyId = q.key_id == null ? null : String(q.key_id);
+    const transactionId =
+      typeof q.transaction_id === "string" && q.transaction_id.length > 0
+        ? q.transaction_id
+        : null;
+
+    const signedContent = adsSsv.signedContentFrom(req.originalUrl);
+    if (!signature || !keyId || !transactionId || signedContent === null) {
+      console.warn("admobSsv: malformed callback");
+      res.status(400).json({ ok: false, error: "malformed-callback" });
+      return;
+    }
+
+    // ── 1. authenticity, before anything is read or written ───────────────────
+    let verified = false;
+    try {
+      verified = await admobKeys.verify(signedContent, signature, keyId);
+    } catch (error) {
+      console.error("admobSsv: verifier unavailable:", error && error.message);
+      res.status(500).json({ ok: false, error: "verification-unavailable" });
+      return;
+    }
+    if (!verified) {
+      console.warn(
+        `admobSsv: REJECTED unverified callback txn=${transactionId} key_id=${keyId}`
+      );
+      res.status(400).json({ ok: false, error: "bad-signature" });
+      return;
+    }
+
+    // Everything below is inside the signed blob, so it is Google's word — but
+    // the *contents* were composed by our client, so shape is still checked.
+    let custom = null;
+    if (typeof q.custom_data === "string" && q.custom_data.length > 0) {
+      try {
+        custom = JSON.parse(q.custom_data);
+      } catch (_) {
+        custom = null;
+      }
+    }
+    const customUid =
+      custom && typeof custom.uid === "string" && custom.uid.length > 0
+        ? custom.uid
+        : null;
+    const userIdParam =
+      typeof q.user_id === "string" && q.user_id.length > 0 ? q.user_id : null;
+    const type = custom && typeof custom.type === "string" ? custom.type : null;
+    const roomId =
+      custom && typeof custom.roomId === "string" ? custom.roomId : null;
+
+    // The uid is sent twice — as `user_id` and inside `custom_data` — precisely
+    // so a mismatch is detectable. Both are signed, so disagreement means our own
+    // client built the request wrong, which is a bug worth shouting about.
+    if (customUid && userIdParam && customUid !== userIdParam) {
+      console.error(
+        `admobSsv: uid mismatch custom=${customUid} user_id=${userIdParam} ` +
+        `txn=${transactionId}`
+      );
+      res.status(200).json({ ok: true, credited: false, reason: "uid-mismatch" });
+      return;
+    }
+
+    const uid = customUid || userIdParam;
+    if (!uid || (type !== "points" && type !== "restore")) {
+      console.error(
+        `admobSsv: verified callback we can't route uid=${uid} type=${type} ` +
+        `txn=${transactionId}`
+      );
+      res.status(200).json({ ok: true, credited: false, reason: "unroutable" });
+      return;
+    }
+
+    // The transaction id becomes a document id. Google sends hex, but a `/` or a
+    // lone `.` would make `doc()` throw — and a throw means 500, which means
+    // Google retries a request that can never succeed. Same for the uid, which
+    // our own client supplied. Checked here rather than with the early guards so
+    // an unsigned probe isn't answered any differently.
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(transactionId) ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(uid)) {
+      console.error(
+        `admobSsv: unusable ids txn=${transactionId} uid=${uid}`
+      );
+      res.status(200).json({ ok: true, credited: false, reason: "bad-ids" });
+      return;
+    }
+
+    const rewardRef = db.collection("adRewards").doc(transactionId);
+    const userRef = db.collection("users").doc(uid);
+
+    try {
+      const outcome = await db.runTransaction(async (tx) => {
+        // ── 2. replay guard, in the same transaction as the credit ────────────
+        // Reading and writing the id atomically with the payout is the whole
+        // point: a check-then-write outside the transaction would let two
+        // concurrent retries both pass the check.
+        const existing = await tx.get(rewardRef);
+        if (existing.exists) {
+          return { replay: true };
+        }
+
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists) {
+          return { skipped: "user-not-found" };
+        }
+        const userData = userSnap.data();
+
+        const serverNow = new Date();
+        const nowMs = serverNow.getTime();
+
+        // The audit trail. Written on every outcome, including refusals — a
+        // reward that didn't pay is exactly the thing someone will dispute.
+        const record = {
+          uid,
+          type,
+          roomId: roomId || null,
+          transactionId,
+          keyId,
+          adUnit: typeof q.ad_unit === "string" ? q.ad_unit : null,
+          rewardItem: typeof q.reward_item === "string" ? q.reward_item : null,
+          rewardAmount: Number(q.reward_amount) || 0,
+          createdAt: serverNow,
+        };
+
+        // ── 3. credit, with the caps enforced here and nowhere else ───────────
+        if (type === "points") {
+          const dayKey = streakDay.dayKeyFromInstant(serverNow);
+          const already = adRewardDailyCount(userData, dayKey);
+          if (already >= ADS_REWARD_DAILY_CAP) {
+            tx.set(rewardRef, { ...record, credited: false, reason: "daily-cap", dayKey });
+            return { skipped: "daily-cap", dayKey };
+          }
+
+          tx.update(userRef, {
+            gupPoints: admin.firestore.FieldValue.increment(ADS_REWARD_POINTS),
+            adRewardDaily: { dayKey, count: already + 1, lastAt: serverNow },
+          });
+          tx.set(rewardRef, {
+            ...record,
+            credited: true,
+            points: ADS_REWARD_POINTS,
+            dayKey,
+          });
+          return {
+            credited: true,
+            points: ADS_REWARD_POINTS,
+            remaining: ADS_REWARD_DAILY_CAP - already - 1,
+          };
+        }
+
+        // type === "restore" — a credit, not a restore. The user still has to
+        // spend it through `streakRestore`, which is where participation and the
+        // restore window are checked; granting one here says nothing about
+        // whether there is a broken streak to spend it on.
+        const weekKey = isoWeekKeyInCanonicalZone(nowMs);
+        const earned = adRestoreWeeklyCount(userData, weekKey);
+        if (earned >= ADS_RESTORE_WEEKLY_CAP) {
+          tx.set(rewardRef, { ...record, credited: false, reason: "weekly-cap", weekKey });
+          return { skipped: "weekly-cap", weekKey };
+        }
+
+        tx.update(userRef, {
+          adRestoreCredits: admin.firestore.FieldValue.increment(1),
+          adRestoreWeekly: { weekKey, count: earned + 1, lastAt: serverNow },
+        });
+        tx.set(rewardRef, { ...record, credited: true, weekKey });
+        return { credited: true, weekKey };
+      });
+
+      if (outcome.replay) {
+        console.log(`admobSsv: duplicate txn=${transactionId} — no credit`);
+        res.status(200).json({ ok: true, credited: false, reason: "duplicate" });
+        return;
+      }
+      if (outcome.skipped) {
+        console.log(
+          `admobSsv: ${uid} ${type} not credited (${outcome.skipped}) txn=${transactionId}`
+        );
+        res.status(200).json({ ok: true, credited: false, reason: outcome.skipped });
+        return;
+      }
+
+      console.log(
+        `admobSsv: credited ${uid} ${type} txn=${transactionId}` +
+        (type === "points"
+          ? ` points=${outcome.points} remainingToday=${outcome.remaining}`
+          : ` week=${outcome.weekKey} room=${roomId || "-"}`)
+      );
+      res.status(200).json({ ok: true, credited: true });
+    } catch (error) {
+      // Ours to fix, so ask Google to try again rather than eating the reward.
+      console.error(
+        "admobSsv error:",
+        error && error.stack ? error.stack : error
+      );
+      res.status(500).json({ ok: false, error: "credit-failed" });
     }
   }
 );
