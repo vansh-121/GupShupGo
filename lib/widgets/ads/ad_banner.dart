@@ -1,8 +1,9 @@
-/// GupShupGo — anchored adaptive banner.
+/// GupShupGo — bottom banner, sized to the ad that actually arrived.
 ///
 /// Reserves **zero** height until an ad has actually loaded, so a slow or empty
 /// fill never shifts the layout under the user's thumb — which in a chat app
-/// means never moving a list item out from under a tap.
+/// means never moving a list item out from under a tap. Once loaded it takes
+/// exactly the height the creative was served at and not a pixel more.
 ///
 /// Placement rules live in [AdsService.canShowBanner], not here. This widget's
 /// only jobs are to ask, to reconcile when the answer changes mid-session (a
@@ -27,6 +28,15 @@ import 'package:video_chat_app/theme/app_theme.dart';
 /// a request loop — and repeated requests with no impressions is itself
 /// something AdMob penalises.
 const int _kMaxLoadAttempts = 3;
+
+/// Ceiling on the banner's height, in logical pixels.
+///
+/// The anchored-adaptive sizes Google steers you toward return roughly 100dp on
+/// a phone — a band nearly twice the height of the 60dp nav dock, sitting under
+/// the app's primary surface. This caps the ad at one standard banner row
+/// instead. It costs nothing in fill: 320×50 is the best-filled banner format
+/// there is.
+const int _kMaxBannerHeight = 50;
 
 class AdBanner extends StatefulWidget {
   const AdBanner({super.key});
@@ -103,27 +113,29 @@ class _AdBannerState extends State<AdBanner> {
     final width = _width;
 
     try {
-      // The non-deprecated anchored-adaptive call. It returns a taller slot than
-      // the old fixed 320×50 banner (capped at 15% of screen height), which is
-      // real screen space on a chat list — but it is what Google optimises fill
-      // and eCPM for, and the alternative is a deprecated API scheduled for
-      // removal. The height is used as-is: shrinking the container to claw back
-      // pixels would clip the ad, which is an obscured-ad policy violation.
-      final size = await AdSize.getLargeAnchoredAdaptiveBannerAdSize(width);
-      if (size == null || !mounted) return;
+      // Inline adaptive, not anchored adaptive, and deliberately so. An
+      // anchored request returns one fixed slot per device and pads whatever
+      // creative arrives out to fill it — so a 320×50 fill leaves a half-empty
+      // band, which is exactly what the large anchored size was doing here.
+      // Inline lets Google pick any height up to the cap, and
+      // getPlatformAdSize() reports what actually came back, so the container
+      // matches the ad. The anchored calls that return a *smaller* slot are all
+      // deprecated in google_mobile_ads 9.x; this one is not.
+      final requested = AdSize.getInlineAdaptiveBannerAdSize(
+        width,
+        _kMaxBannerHeight,
+      );
+
+      if (!mounted) return;
 
       final ad = BannerAd(
-        size: size,
+        size: requested,
         adUnitId: AdIds.banner,
         request: const AdRequest(),
         listener: BannerAdListener(
-          onAdLoaded: (_) {
-            if (!mounted) return;
-            setState(() {
-              _loaded = true;
-              _attempts = 0;
-            });
-          },
+          // Not awaited inline: the callback signature is synchronous, and the
+          // served height needs a platform round trip.
+          onAdLoaded: (Ad ad) => unawaited(_applyServedSize(ad as BannerAd)),
           onAdFailedToLoad: (ad, error) {
             debugPrint('[AdBanner] ⚠️ load failed: $error');
             ad.dispose();
@@ -138,7 +150,6 @@ class _AdBannerState extends State<AdBanner> {
       );
 
       _ad = ad;
-      _size = size;
       _loadedWidth = width;
       await ad.load();
     } catch (e) {
@@ -147,6 +158,32 @@ class _AdBannerState extends State<AdBanner> {
     } finally {
       _loading = false;
     }
+  }
+
+  /// Reads back the height the creative was actually served at.
+  ///
+  /// An inline adaptive request carries height 0 by design, so this round trip
+  /// is the only way to know how tall the band should be — and it is the whole
+  /// point of using inline here, because it is what stops the slot from
+  /// reserving space the ad does not fill.
+  Future<void> _applyServedSize(BannerAd ad) async {
+    final served = await ad.getPlatformAdSize();
+    // A rotation or a call starting mid-round-trip can retire this ad first.
+    if (!mounted || ad != _ad) return;
+
+    if (served == null) {
+      // Guessing a height risks clipping the creative, which is an obscured-ad
+      // violation, so treat it as a no-fill instead.
+      debugPrint('[AdBanner] ⚠️ filled but reported no size — dropping');
+      _release();
+      return;
+    }
+
+    setState(() {
+      _size = served;
+      _loaded = true;
+      _attempts = 0;
+    });
   }
 
   /// Tears down the native ad. Safe to call when there is nothing to release.
@@ -179,16 +216,29 @@ class _AdBannerState extends State<AdBanner> {
     final c = AppThemeColors.of(context);
 
     // The top border is not decoration: AdMob requires ads to be clearly
-    // distinguishable from app content, and this band sits directly under a
-    // scrolling list.
+    // distinguishable from app content, and this band sits directly against the
+    // nav dock's tap targets.
+    //
+    // The band spans the full width so that separator line does too, while the
+    // AdWidget keeps the exact size it was served at — centred when the creative
+    // is narrower than the screen. Stretching it to fill would scale the ad, and
+    // a scaled ad is a distorted one.
     return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: c.surface,
         border: Border(top: BorderSide(color: c.border, width: 1.0)),
       ),
-      width: size.width.toDouble(),
-      height: size.height.toDouble(),
-      child: AdWidget(ad: ad),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: size.width.toDouble(),
+            height: size.height.toDouble(),
+            child: AdWidget(ad: ad),
+          ),
+        ],
+      ),
     );
   }
 }

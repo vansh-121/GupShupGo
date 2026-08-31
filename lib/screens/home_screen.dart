@@ -2316,12 +2316,27 @@ class _HomeScreenState extends State<HomeScreen>
       // _buildFABRow() automatically floats above the ad. In the body it would
       // sit *under* the FAB — an obscured ad (a policy problem) and an
       // accidental-click risk right where the compose button is.
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const AdBanner(),
-          _buildBottomNavDock(),
-        ],
+      //
+      // Dock first, banner *below* it: the strip under the nav is the least
+      // valuable space on the screen, so the ad costs the chat list nothing.
+      //
+      // The bottom inset is taken here rather than inside _buildBottomNavDock,
+      // because whichever child renders last is the one that has to clear the
+      // system gesture bar — and the banner is absent whenever a call is live,
+      // Pro is active, or the fill comes back empty. ColoredBox carries the
+      // dock's surface colour through that inset so it does not read as a gap.
+      bottomNavigationBar: ColoredBox(
+        color: c.surface,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBottomNavDock(),
+              const AdBanner(),
+            ],
+          ),
+        ),
       ),
       floatingActionButton: _buildFABRow(),
     );
@@ -2339,94 +2354,93 @@ class _HomeScreenState extends State<HomeScreen>
           top: BorderSide(color: c.border, width: 1.0),
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                index: 0,
-                label: 'Gup',
-                icon: Icons.chat_bubble_rounded,
-                selectedIcon: Icons.chat_bubble_rounded,
-                isSelected: selectedIndex == 0,
-                onTap: () => setState(() => _tabController.animateTo(0)),
-              ),
-              _buildNavItem(
-                index: 1,
-                label: 'Moments',
-                icon: Icons.camera_alt_outlined,
-                selectedIcon: Icons.camera_alt_rounded,
-                isSelected: selectedIndex == 1,
-                onTap: () => setState(() => _tabController.animateTo(1)),
-              ),
-              _buildNavItem(
-                index: 2,
-                label: 'Calls',
-                icon: Icons.call_outlined,
-                selectedIcon: Icons.call_rounded,
-                isSelected: selectedIndex == 2,
-                onTap: () => setState(() => _tabController.animateTo(2)),
-              ),
-              // Profile Tab (Avatar on far right)
-              GestureDetector(
-                onTap: () async {
-                  if (_currentUser != null) {
-                    final updated = await Navigator.push<UserModel>(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              ProfileScreen(currentUser: _currentUser!)),
-                    );
-                    if (updated != null) setState(() => _currentUser = updated);
-                  }
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: c.border,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Builder(
-                        builder: (_) {
-                          final hasPhoto =
-                              _currentUser?.photoUrl?.isNotEmpty ?? false;
-                          return CircleAvatar(
-                            radius: 13,
-                            backgroundImage: hasPhoto
-                                ? NetworkImage(_currentUser!.photoUrl!)
-                                : null,
-                            backgroundColor: c.primaryLt,
-                            child: hasPhoto
-                                ? null
-                                : Icon(Icons.person,
-                                    size: 14, color: c.textMid),
-                          );
-                        },
+      // No SafeArea here: the bottom inset is taken once around the whole
+      // bottomNavigationBar column, because the banner sits *below* this dock
+      // and is the child that has to clear the system gesture bar.
+      child: SizedBox(
+        height: 60,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(
+              index: 0,
+              label: 'Gup',
+              icon: Icons.chat_bubble_rounded,
+              selectedIcon: Icons.chat_bubble_rounded,
+              isSelected: selectedIndex == 0,
+              onTap: () => setState(() => _tabController.animateTo(0)),
+            ),
+            _buildNavItem(
+              index: 1,
+              label: 'Moments',
+              icon: Icons.camera_alt_outlined,
+              selectedIcon: Icons.camera_alt_rounded,
+              isSelected: selectedIndex == 1,
+              onTap: () => setState(() => _tabController.animateTo(1)),
+            ),
+            _buildNavItem(
+              index: 2,
+              label: 'Calls',
+              icon: Icons.call_outlined,
+              selectedIcon: Icons.call_rounded,
+              isSelected: selectedIndex == 2,
+              onTap: () => setState(() => _tabController.animateTo(2)),
+            ),
+            // Profile Tab (Avatar on far right)
+            GestureDetector(
+              onTap: () async {
+                if (_currentUser != null) {
+                  final updated = await Navigator.push<UserModel>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            ProfileScreen(currentUser: _currentUser!)),
+                  );
+                  if (updated != null) setState(() => _currentUser = updated);
+                }
+              },
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: c.border,
+                        width: 1.5,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Profile',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: c.textMid,
-                      ),
+                    child: Builder(
+                      builder: (_) {
+                        final hasPhoto =
+                            _currentUser?.photoUrl?.isNotEmpty ?? false;
+                        return CircleAvatar(
+                          radius: 13,
+                          backgroundImage: hasPhoto
+                              ? NetworkImage(_currentUser!.photoUrl!)
+                              : null,
+                          backgroundColor: c.primaryLt,
+                          child: hasPhoto
+                              ? null
+                              : Icon(Icons.person, size: 14, color: c.textMid),
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Profile',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: c.textMid,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
