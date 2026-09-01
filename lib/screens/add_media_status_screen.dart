@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_chat_app/models/subscription_model.dart' show PlanLimits;
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
@@ -264,7 +265,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   Future<void> _pickVideo(ImageSource source) async {
     _isPicking = true;
     // Read before the picker await — `use_build_context_synchronously`.
-    final maxSec = context.read<SubscriptionProvider>().maxStatusVideoSec;
+    final sub = context.read<SubscriptionProvider>();
+    final maxSec = sub.maxStatusVideoSec;
+    final canUpsell = sub.isProFeatureVisible && !sub.isProUnlocked;
     try {
       final XFile? video = await _imagePicker.pickVideo(
         source: source,
@@ -278,7 +281,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
         // video instead of the "permission error" dialog a Storage rejection
         // would surface.
         final file = File(video.path);
-        if (!await _isPostableVideo(file)) {
+        if (!await _isPostableVideo(file, maxSec, canUpsell: canUpsell)) {
           // Straight back to the source sheet: the pick failed, the screen has
           // not, and popping out would make choosing a shorter clip a restart.
           if (mounted) _showMediaSourcePicker();
@@ -311,11 +314,21 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   /// bound and `ImageCompressor.compressForStatus` re-encode it to 2560 px at
   /// q90 — a couple of megabytes — so rejecting a 40 MB photo that would have
   /// compressed fine would be a bug, not a guard.
-  Future<bool> _isPostableVideo(File file) async {
+  ///
+  /// Size is checked before duration so a 389 MB pick is rejected on a `stat`
+  /// rather than by handing it to a video decoder first.
+  Future<bool> _isPostableVideo(
+    File file,
+    int maxSec, {
+    required bool canUpsell,
+  }) async {
     final bytes = await file.length();
-    if (bytes <= _maxStatusVideoBytes) return true;
-    if (mounted) {
-      _showErrorDialog(
+    if (bytes > _maxStatusVideoBytes) {
+      if (!mounted) return false;
+      // Awaited: the caller reopens the source sheet the moment this returns,
+      // and a sheet drawn over the dialog is how the message got buried the
+      // first time round.
+      await _showErrorDialog(
         'This video is ${_formatMb(bytes)}, and the most a status can carry is '
         '${_formatMb(_maxStatusVideoBytes)}.\n\n'
         'Videos are uploaded at the quality your camera recorded them, so a '
@@ -323,12 +336,59 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
         'your camera to a lower recording quality and film it again.',
         title: 'Video is too large',
       );
+      return false;
     }
-    return false;
+
+    final duration = await _probeDuration(file);
+    // A 1 s grace: a camera capture bounded by `maxDuration` routinely comes
+    // back a few frames over the limit it was given, and rejecting the app's
+    // own recording would be absurd.
+    if (duration != null && duration.inMilliseconds > (maxSec + 1) * 1000) {
+      if (!mounted) return false;
+      await _showErrorDialog(
+        'This video is ${_formatDuration(duration)} long, and a status can be '
+        'up to ${_formatDuration(Duration(seconds: maxSec))}.'
+        '${canUpsell ? '\n\nGupShupGo Pro raises the limit to '
+            '${_formatDuration(Duration(seconds: PlanLimits.maxStatusVideoSec(true)))}.' : ''}',
+        title: 'Video is too long',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /// Reads a video's duration, or `null` if it cannot be determined.
+  ///
+  /// This check exists because `image_picker`'s `maxDuration` binds the *camera*
+  /// only — Android passes it to the capture intent as `EXTRA_DURATION_LIMIT`
+  /// and ignores it completely for a gallery pick. Without this, the advertised
+  /// 30 s / 90 s cap was enforced against people who filmed inside the app and
+  /// nobody else: picking an existing file let anyone post a ten-minute
+  /// "status", which is also the one case the size guard above can miss, since a
+  /// long low-bitrate clip fits comfortably under 64 MB.
+  Future<Duration?> _probeDuration(File file) async {
+    final probe = VideoPlayerController.file(file);
+    try {
+      await probe.initialize();
+      final d = probe.value.duration;
+      return d == Duration.zero ? null : d;
+    } catch (_) {
+      // Unreadable metadata lets the post through rather than blocking a valid
+      // upload on a probe failure. The size guard and the Storage rules still
+      // apply, so the failure mode is a too-long status, not an unbounded one.
+      return null;
+    } finally {
+      await probe.dispose();
+    }
   }
 
   Future<void> _uploadStatus() async {
     if (_selectedFile == null) return;
+
+    // Read before the first await — `use_build_context_synchronously`.
+    final sub = context.read<SubscriptionProvider>();
+    final maxSec = sub.maxStatusVideoSec;
+    final canUpsell = sub.isProFeatureVisible && !sub.isProUnlocked;
 
     // Verify the file actually exists on disk
     if (!await _selectedFile!.exists()) {
@@ -340,11 +400,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     }
 
     // Second gate, for the `preSelectedFile` route that never passed through
-    // `_pickVideo`. One `stat` call, and it is the last point where a rejection
-    // can still be a sentence: the post below is fire-and-forget, so after it
-    // starts a Storage rejection reaches the user only as a status that
-    // silently never appeared.
-    if (_isVideo && !await _isPostableVideo(_selectedFile!)) return;
+    // `_pickVideo`. It is the last point where a rejection can still be a
+    // sentence: the post below is fire-and-forget, so after it starts a Storage
+    // rejection reaches the user only as a status that silently never appeared.
+    if (_isVideo &&
+        !await _isPostableVideo(_selectedFile!, maxSec,
+            canUpsell: canUpsell)) {
+      return;
+    }
 
     setState(() {
       _isUploading = true;
@@ -423,8 +486,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     }
   }
 
-  void _showErrorDialog(String message, {String title = 'Upload Error'}) {
-    showDialog(
+  /// Completes when the dialog is dismissed, so a caller can put something else
+  /// on screen afterwards without racing it.
+  Future<void> _showErrorDialog(String message,
+      {String title = 'Upload Error'}) {
+    return showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
