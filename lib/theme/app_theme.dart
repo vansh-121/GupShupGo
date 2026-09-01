@@ -91,8 +91,10 @@ class AppThemeColors {
   /// Palette for an explicit brightness, independent of the surrounding theme.
   ///
   /// For surfaces that deliberately fix their own light/dark appearance rather
-  /// than following the app setting — currently the chat-theme presets, whose
-  /// bubble palettes are designed against one brightness (see [ChatTheme]).
+  /// than following the app setting — the media-status preview, which is drawn
+  /// over the user's photo on a permanently dark chrome. Chat-theme presets used
+  /// this too, until each of them gained a light and a dark face and started
+  /// following the app instead (see [ChatTheme]).
   factory AppThemeColors.forBrightness(Brightness brightness) =>
       AppThemeColors._(brightness == Brightness.dark);
 

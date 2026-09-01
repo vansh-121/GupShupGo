@@ -11,6 +11,10 @@
 //     older per-chat overrides.
 //   • A `custom` selection with no image behind it is treated as unset, because
 //     rendering an empty background would look like a bug in the app.
+//   • Every preset presents a light face in light mode and a dark one in dark
+//     mode. That is asserted structurally rather than by eye, because the colours
+//     are the feature and a stop copied from the wrong face is invisible in the
+//     source and glaring on a phone.
 //
 // `resolve` takes `unlocked` as a parameter instead of reaching for
 // SubscriptionProvider, which is what makes all of this testable with no widget
@@ -23,6 +27,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/main.dart' show sharedPrefs;
 import 'package:video_chat_app/provider/chat_theme_provider.dart';
+import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/theme/chat_theme.dart';
 
 const _roomA = 'alice_bob';
@@ -64,11 +69,12 @@ void main() {
     });
 
     test('Default follows the app light/dark palette rather than fixing one', () {
-      // The sentinel property of the default preset: it declares no colours at
+      // The sentinel property of the default preset: it declares no faces at
       // all, so an existing chat looks exactly as it did before chat themes
       // existed.
       expect(ChatThemeCatalog.defaultTheme.followsAppTheme, isTrue);
-      expect(ChatThemeCatalog.defaultTheme.background, isNull);
+      expect(ChatThemeCatalog.defaultTheme.light, isNull);
+      expect(ChatThemeCatalog.defaultTheme.dark, isNull);
       expect(ChatThemeCatalog.defaultTheme.sentBubble, isNull);
     });
 
@@ -264,18 +270,80 @@ void main() {
   });
 
   group('bubble legibility', () {
-    test('a fixed-palette preset declares the brightness it was designed for',
-        () {
-      // Bubble text colour is not stored on the preset; the message list is
-      // wrapped in the matching theme instead. A preset with colours but no
-      // brightness would render dark text on its own dark bubbles.
+    test('the app palette picks the face, not the preset', () {
+      // The mechanism behind "dark mode shows dark themes": a preset no longer
+      // fixes a brightness, so every colour getter reads the face matching the
+      // palette it is handed. Nothing else in the app has to know.
+      final light = AppThemeColors.forBrightness(Brightness.light);
+      final dark = AppThemeColors.forBrightness(Brightness.dark);
+      final indigo = _preset('midnight');
+
+      expect(indigo.backgroundOf(light), indigo.light!.background);
+      expect(indigo.backgroundOf(dark), indigo.dark!.background);
+      expect(indigo.receivedOf(light), indigo.light!.receivedBubble);
+      expect(indigo.receivedOf(dark), indigo.dark!.receivedBubble);
+
+      // The sent fill is deliberately *not* per-face: it is the theme's identity
+      // and clears the same white-text bar in either mode.
+      expect(indigo.sentOf(light), indigo.sentOf(dark));
+
+      // Default declares no faces, so it falls through to the app palette — a
+      // different one per mode, which is what makes it "Default".
+      const fallback = ChatThemeCatalog.defaultTheme;
+      expect(fallback.backgroundOf(light), light.chatBg);
+      expect(fallback.backgroundOf(dark), dark.chatBg);
+      expect(light.chatBg, isNot(dark.chatBg));
+    });
+
+    test('a preset offers both faces or neither', () {
+      // Half a pair is the failure mode this structure exists to prevent: a
+      // preset with only a light face would fall back to the app's plain chat
+      // surface in dark mode, so the picker would show it as a themed tile and
+      // the chat would open untinted.
       for (final preset in ChatThemeCatalog.presets) {
-        if (preset.background != null || preset.sentBubble != null) {
-          expect(preset.brightness, isNotNull,
-              reason: '${preset.id} sets colours, so it must fix a brightness');
-        } else {
-          expect(preset.followsAppTheme, isTrue,
-              reason: '${preset.id} sets no colours, so it must follow the app');
+        expect(
+          preset.light == null,
+          preset.dark == null,
+          reason: '${preset.id} declares one face but not the other',
+        );
+        if (preset.followsAppTheme) {
+          expect(preset.sentBubble, isNull,
+              reason: '${preset.id} sets no faces, so it must follow the app '
+                  'palette wholesale');
+        }
+      }
+    });
+
+    test('each face sits on the side of the light/dark line it is used on', () {
+      // The assertion behind "dark mode shows dark themes". Bubble *text* colour
+      // comes from the app palette, not the preset, so a light-ish fill on the
+      // dark face draws near-white text onto a near-white bubble — and a dark
+      // fill on the light face does the mirror image. Every surface the app
+      // writes text over is checked: the field, its gradient stops, and the
+      // received bubble.
+      //
+      // `estimateBrightnessForColor` returning `Brightness.dark` means "this
+      // colour needs light text on it", which is what a dark face must be.
+      for (final preset in ChatThemeCatalog.presets) {
+        for (final (face, side) in [
+          if (preset.light != null) (preset.light!, Brightness.light),
+          if (preset.dark != null) (preset.dark!, Brightness.dark),
+        ]) {
+          final label = '${preset.id} ${side.name} face';
+          for (final fill in [
+            face.background,
+            face.receivedBubble,
+            ...?face.backgroundGradient,
+          ]) {
+            expect(
+              ThemeData.estimateBrightnessForColor(fill),
+              side,
+              reason: '$label: '
+                  '#${fill.toARGB32().toRadixString(16).padLeft(8, '0')} is on '
+                  'the wrong side of the line (luminance '
+                  '${fill.computeLuminance().toStringAsFixed(3)})',
+            );
+          }
         }
       }
     });
@@ -287,6 +355,10 @@ void main() {
       // (bright coral, mint, sky) lands near 3:1, which reads fine on a desk and
       // not at all outdoors. `estimateBrightnessForColor` is Flutter's own
       // 4.5:1-against-white test, so this is the same bar the framework uses.
+      //
+      // The fill is shared by both faces, which is only sound because this bar
+      // does not move with the mode: white text needs the same contrast on a
+      // pale field as on a deep one.
       //
       // Both the gradient stops and the flat fill are checked: the flat one is
       // the fallback for the picker preview and for any surface that takes a
@@ -310,15 +382,26 @@ void main() {
     test('a gradient has both a fallback fill and enough stops to be one', () {
       // `sentGradientOf` returns null below two stops, which would silently drop
       // a one-stop "gradient" back to the flat colour — a preset that looks
-      // right in the source and flat on screen.
+      // right in the source and flat on screen. `decorationOf` does the same for
+      // the background gradient, quietly leaving the flat colour behind.
       for (final preset in ChatThemeCatalog.presets) {
         final stops = preset.sentGradient;
-        if (stops == null) continue;
+        if (stops != null) {
+          expect(stops.length, greaterThanOrEqualTo(2),
+              reason: '${preset.id} would render flat');
+          expect(preset.sentBubble, isNotNull,
+              reason: '${preset.id} needs a single-colour fallback');
+        }
 
-        expect(stops.length, greaterThanOrEqualTo(2),
-            reason: '${preset.id} would render flat');
-        expect(preset.sentBubble, isNotNull,
-            reason: '${preset.id} needs a single-colour fallback');
+        for (final (face, name) in [
+          if (preset.light != null) (preset.light!, 'light'),
+          if (preset.dark != null) (preset.dark!, 'dark'),
+        ]) {
+          final bg = face.backgroundGradient;
+          if (bg == null) continue;
+          expect(bg.length, greaterThanOrEqualTo(2),
+              reason: '${preset.id} $name background would render flat');
+        }
       }
     });
 
@@ -329,8 +412,26 @@ void main() {
       for (final preset in ChatThemeCatalog.presets) {
         if (preset.pattern == ChatPattern.none) continue;
 
-        expect(preset.patternOpacity, inInclusiveRange(0.04, 0.09),
-            reason: '${preset.id} pattern opacity is outside the readable band');
+        for (final (face, name) in [
+          if (preset.light != null) (preset.light!, 'light'),
+          if (preset.dark != null) (preset.dark!, 'dark'),
+        ]) {
+          expect(face.patternOpacity, inInclusiveRange(0.04, 0.09),
+              reason: '${preset.id} $name pattern opacity is outside the '
+                  'readable band');
+
+          // At 6-8% alpha an ink close to its own field is not a quiet pattern,
+          // it is no pattern — and the mode-specific ink is exactly the value
+          // most likely to be copied from the other face and left there.
+          final ink = face.patternColor;
+          if (ink == null) continue;
+          expect(
+            (ink.computeLuminance() - face.background.computeLuminance()).abs(),
+            greaterThan(0.15),
+            reason: '${preset.id} $name pattern ink is too close to its '
+                'background to show at ${face.patternOpacity}',
+          );
+        }
       }
     });
 

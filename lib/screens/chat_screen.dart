@@ -128,15 +128,20 @@ class _ChatScreenState extends State<ChatScreen> {
   ///
   /// Cached in a field rather than read from the tree because the bubble
   /// builders (`_buildMessage`, `_buildTypingBubble`, `_buildDateDivider`, …)
-  /// resolve colours off `State.context`, which sits above the themed area they
-  /// are rendered into. See [_messageColors].
+  /// are called from `State.context` rather than from a builder inside the
+  /// message area.
   ChatTheme _chatTheme = ChatThemeCatalog.defaultTheme;
 
-  /// Palette the message area is drawn against: the chat theme's own brightness
-  /// when it fixes one, otherwise the app's light/dark palette.
-  AppThemeColors get _messageColors => _chatTheme.followsAppTheme
-      ? AppThemeColors.of(context)
-      : AppThemeColors.forBrightness(_chatTheme.brightness!);
+  /// Palette the message area is drawn against: always the app's own light/dark
+  /// palette.
+  ///
+  /// It used to be the chat theme's, because a preset fixed one brightness and
+  /// the message list was re-rooted on the matching [AppTheme]. Every preset now
+  /// carries both a light and a dark face (see [ChatTheme]), so the theme follows
+  /// the app instead of overriding it and this is a plain read. Kept as a named
+  /// getter because that agreement is the thing worth stating once at the seven
+  /// call sites that draw bubble content.
+  AppThemeColors get _messageColors => AppThemeColors.of(context);
 
   // ─── Chat export ──────────────────────────────────────────────────
   /// True while an export is in flight. The overflow menu stays tappable for the
@@ -4189,20 +4194,17 @@ class _DisplayItem {
       : this._(type: _DisplayItemType.message, message: msg, animate: animate);
 }
 
-/// Paints the chat theme's background behind the message list and, when the
-/// theme fixes its own brightness, re-roots the subtree on the matching
-/// [AppTheme].
+/// Paints the chat theme's background — colour or gradient or photo, plus its
+/// pattern — behind the message list.
 ///
-/// The [Theme] override is what keeps nested bubble content legible. Widgets
-/// inside a bubble — [VoiceMessageBubble], [ReplyQuoteCard], [LinkPreviewCard] —
-/// resolve their own text colours via `AppThemeColors.of(context)`, so on a dark
-/// preset while the app is in light mode they would otherwise draw near-black
-/// text onto a dark bubble. Overriding the theme here fixes all of them at once
-/// instead of threading a colour through every constructor.
-///
-/// Only the message list is wrapped: the app bar and composer stay on the app's
-/// own theme, so a themed conversation doesn't turn into a differently-coloured
-/// screen.
+/// There is deliberately no [Theme] override here. An earlier version re-rooted
+/// the subtree on `AppTheme.light`/`AppTheme.dark` to match a preset that fixed
+/// its own brightness, which is what kept nested bubble content
+/// ([VoiceMessageBubble], [ReplyQuoteCard], [LinkPreviewCard]) legible on a dark
+/// preset inside a light app. Presets now carry a light *and* a dark face and are
+/// resolved against the app's own palette (see [ChatTheme]), so those widgets are
+/// already looking at the right colours and the chat can no longer disagree with
+/// the mode the user picked for the rest of the app.
 class _ChatThemedArea extends StatelessWidget {
   const _ChatThemedArea({
     required this.theme,
@@ -4212,7 +4214,8 @@ class _ChatThemedArea extends StatelessWidget {
 
   final ChatTheme theme;
 
-  /// The app palette, used to fill in whatever the theme leaves unset.
+  /// The app palette. Selects the theme's face and fills in whatever it leaves
+  /// unset.
   final AppThemeColors colors;
 
   final Widget child;
@@ -4247,14 +4250,6 @@ class _ChatThemedArea extends StatelessWidget {
       content = DecoratedBox(decoration: decoration, child: content);
     }
 
-    if (!theme.followsAppTheme) {
-      content = Theme(
-        data: theme.brightness == Brightness.dark
-            ? AppTheme.dark
-            : AppTheme.light,
-        child: content,
-      );
-    }
     return content;
   }
 }

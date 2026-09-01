@@ -385,10 +385,11 @@ class _SectionLabel extends StatelessWidget {
 /// One preset tile: a miniature conversation rendered in the theme's own
 /// background, pattern and bubble colours.
 ///
-/// The preview resolves the palette the same way `chat_screen` does — a preset
-/// with a fixed [ChatTheme.brightness] previews against *that* palette, not the
-/// app's — so the tile shows what the chat will actually look like rather than a
-/// dark preset lit by the light theme.
+/// The preview resolves the palette exactly the way `chat_screen` does — through
+/// the app's own [AppThemeColors], which picks each preset's light or dark face —
+/// so in dark mode the whole grid previews as dark themes and in light mode as
+/// light ones. That is the point of [ChatFace]: the tile shows what the chat will
+/// actually look like, and no tile glares against the mode the user is in.
 class _ThemeTile extends StatelessWidget {
   const _ThemeTile({
     required this.theme,
@@ -402,7 +403,8 @@ class _ThemeTile extends StatelessWidget {
 
   final ChatTheme theme;
 
-  /// The app palette, used for presets that follow the app theme.
+  /// The app palette: both the tile's own chrome and the face each preset is
+  /// previewed in.
   final AppThemeColors appColors;
 
   final double width;
@@ -415,9 +417,7 @@ class _ThemeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = theme.followsAppTheme
-        ? appColors
-        : AppThemeColors.forBrightness(theme.brightness!);
+    final c = appColors;
 
     final preview = theme.id == ChatThemeCatalog.customId && customPath != null
         ? theme.withImagePath(customPath)
