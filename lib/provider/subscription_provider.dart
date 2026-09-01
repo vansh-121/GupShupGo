@@ -40,7 +40,10 @@ class SubscriptionProvider extends ChangeNotifier {
   /// feature flag allows it. When the flag is off, this always returns
   /// `false` so all existing `isPro` checks throughout the app
   /// automatically treat the user as free.
-  bool get isPro => isProFeatureVisible && _service.isPro;
+  ///
+  /// Delegates to [SubscriptionService.isProGated] so that services without a
+  /// `BuildContext` apply the identical masking rule.
+  bool get isPro => _service.isProGated;
 
   /// The raw Play entitlement, ignoring the `pro_enabled` flag.
   ///
@@ -53,6 +56,31 @@ class SubscriptionProvider extends ChangeNotifier {
   /// This is only for "has this person paid?" questions. For "should Pro UI be
   /// visible?", keep using [isPro] / [isProFeatureVisible].
   bool get hasActiveProEntitlement => _service.isPro;
+
+  /// **The** gate for a Pro *capability*. Every feature check should use this.
+  ///
+  /// `pro_enabled` off does not mean "everyone is free" — it means the Pro
+  /// programme is not live: no Premium screen, no pricing, nothing to buy. A
+  /// capability withheld in that state is withheld from *everybody*, forever,
+  /// in exchange for nothing. So with the flag off every gate opens, which is
+  /// already what [PremiumGate.checkAndPrompt] does, and what
+  /// `SubscriptionService.isProUnlocked` does for callers with no `BuildContext`.
+  ///
+  /// The three things this deliberately does **not** cover:
+  ///   * **Purchase surfaces** — the upgrade card, pricing, upsell sheets. Those
+  ///     follow [isProFeatureVisible]: there is nothing to sell yet.
+  ///   * **The Pro badge** — an identity marker for someone who paid, not a
+  ///     capability. It follows [isPro], so the flag being off hides it rather
+  ///     than handing it to everyone.
+  ///   * **Ad suppression** — [hasActiveProEntitlement], see its doc. Ads are
+  ///     the revenue *because* Pro is not live; opening this gate must not turn
+  ///     them off.
+  ///
+  /// The cost, accepted deliberately: on the day the flag flips, users lose
+  /// features they had been using. That is the normal shape of a paid tier
+  /// arriving, and it is strictly better than shipping a picker with one theme
+  /// in it and an export button nobody can press.
+  bool get isProUnlocked => !isProFeatureVisible || isPro;
 
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -159,13 +187,22 @@ class SubscriptionProvider extends ChangeNotifier {
   // is consumed inside the `POST /streakRestore` transaction. See `StreakApi`.
 
   // ── Feature gate helpers ──────────────────────────────────────────────────
+  //
+  // All of these route through `isProUnlocked`, never `isPro` — see its doc.
+  // `isPro` here would mean a capability is locked whenever `pro_enabled` is
+  // false, i.e. locked for everyone with no way to unlock it.
 
-  bool get canPostMediaStatus => PlanLimits.canPostMediaStatus(isPro);
-  bool get canScreenShare => PlanLimits.canScreenShare(isPro);
-  bool get canExportChat => PlanLimits.canExportChat(isPro);
-  bool get canCustomWallpaper => PlanLimits.canCustomWallpaper(isPro);
-  int get maxVoiceDurationSec => PlanLimits.maxVoiceDurationSec(isPro);
-  int get maxMediaSizeBytes => PlanLimits.maxMediaSizeBytes(isPro);
+  bool get canPostMediaStatus => PlanLimits.canPostMediaStatus(isProUnlocked);
+  bool get canScreenShare => PlanLimits.canScreenShare(isProUnlocked);
+  bool get canExportChat => PlanLimits.canExportChat(isProUnlocked);
+  bool get canCustomWallpaper => PlanLimits.canCustomWallpaper(isProUnlocked);
+
+  /// Whether outgoing media gets the Pro quality tier.
+  bool get hasProMediaQuality => isProUnlocked;
+  int get maxStatusVideoSec => PlanLimits.maxStatusVideoSec(isProUnlocked);
+
+  /// Voice cap in seconds, or `null` for uncapped.
+  int? get maxVoiceDurationSec => PlanLimits.maxVoiceDurationSec(isProUnlocked);
 
   // ── Loading timeout ───────────────────────────────────────────────────────
 

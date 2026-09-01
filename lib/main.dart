@@ -19,6 +19,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/ads/ads_service.dart';
@@ -186,6 +187,7 @@ void main() async {
             ChangeNotifierProvider(create: (_) => CallStateNotifier()),
             ChangeNotifierProvider(create: (_) => StatusProvider()),
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider(create: (_) => ChatThemeProvider()),
             ChangeNotifierProvider(create: (_) => SubscriptionProvider()..init()),
             ChangeNotifierProvider.value(value: connectivityProvider),
             ChangeNotifierProvider(

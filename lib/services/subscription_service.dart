@@ -25,6 +25,7 @@ import 'package:http/http.dart' as http;
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/subscription_model.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 
 class SubscriptionService {
   SubscriptionService._();
@@ -61,6 +62,25 @@ class SubscriptionService {
   SubscriptionModel _subscription = SubscriptionModel.free();
   SubscriptionModel get subscription => _subscription;
   bool get isPro => _subscription.isPro;
+
+  /// [isPro] masked by the `pro_enabled` Remote Config flag — the same value
+  /// `SubscriptionProvider.isPro` exposes, reachable from services that have no
+  /// `BuildContext` to read a Provider from (e.g. `StatusService`).
+  ///
+  /// The masking rule lives here so provider and services can never disagree.
+  /// Do **not** use this for ad suppression: see the warning on
+  /// `SubscriptionProvider.hasActiveProEntitlement`.
+  bool get isProGated => FeatureFlagService.instance.isProEnabled && isPro;
+
+  /// The capability gate for services with no `BuildContext` — the mirror of
+  /// `SubscriptionProvider.isProUnlocked`, whose doc carries the reasoning.
+  ///
+  /// Short version: with `pro_enabled` off there is nothing to buy, so a locked
+  /// capability is locked for everyone permanently. Feature checks use this;
+  /// [isProGated] is for "is this person on the Pro plan" questions (badges,
+  /// plan display) and [isPro] alone is for "has this person paid" (ads).
+  bool get isProUnlocked =>
+      !FeatureFlagService.instance.isProEnabled || isPro;
 
   List<ProductDetails> _products = [];
   List<ProductDetails> get products => _products;

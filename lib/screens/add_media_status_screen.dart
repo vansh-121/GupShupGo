@@ -5,8 +5,35 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+
+/// Largest video status this device can actually post, in bytes.
+///
+/// Two independent ceilings sit above a status video and this is the lower of
+/// them, deliberately:
+///
+///   * `EncryptedMediaService.encryptAndUpload` does `file.readAsBytes()`,
+///     GCM-encrypts that into a second buffer and concatenates into a third, so
+///     a video costs roughly 3× its size in heap before the upload even starts.
+///     At 100 MB that is an out-of-memory kill on a mid-range phone, not a slow
+///     upload.
+///   * `storage.rules` rejects anything at or above 100 MB under `statuses/`.
+///
+/// 64 MB keeps the encrypt step inside ~200 MB of heap and leaves the Storage
+/// rule as pure headroom, so an oversized pick always meets the message below
+/// rather than a crash or a silent server rejection.
+///
+/// This is **not** a plan limit. Pro buys a longer video (90 s vs 30 s), never a
+/// bigger file — see `PlanLimits.maxStatusVideoSec`. But nothing in this app
+/// compresses video (`image_picker` hands back the raw capture), so a
+/// high-bitrate 1080p 90 s recording can exceed this. That case is exactly what
+/// the message exists to explain.
+const int _maxStatusVideoBytes = 64 * 1024 * 1024;
+
+String _formatMb(int bytes) =>
+    '${(bytes / (1024 * 1024)).toStringAsFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB';
 
 /// Screen for capturing / picking image or video and posting as a status.
 /// Launched from the camera FAB or from the status type selector.
@@ -82,7 +109,12 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (context) {
+        // Resolved through AppThemeColors rather than the raw AppColors
+        // constants: those are the *light* palette, so the icons below used to
+        // render light-theme accents on a dark sheet.
+        final c = AppThemeColors.of(context);
+        return SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 20),
           child: Column(
@@ -113,7 +145,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child:
-                      const Icon(Icons.camera_alt_rounded, color: AppColors.primary),
+                      Icon(Icons.camera_alt_rounded, color: c.primary),
                 ),
                 title: const Text('Camera',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -127,11 +159,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.online.withOpacity(0.1),
+                    color: c.online.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.photo_library_rounded,
-                      color: AppColors.online),
+                  child: Icon(Icons.photo_library_rounded,
+                      color: c.online),
                 ),
                 title: const Text('Gallery Photo',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -162,11 +194,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.primaryLt,
+                    color: c.primaryLt,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.video_library_rounded,
-                      color: AppColors.primary),
+                  child: Icon(Icons.video_library_rounded,
+                      color: c.primary),
                 ),
                 title: const Text('Gallery Video',
                     style: TextStyle(fontWeight: FontWeight.w500)),
@@ -179,7 +211,8 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
             ],
           ),
         ),
-      ),
+        );
+      },
     ).then((value) {
       // If nothing was selected, no file is loaded, and not currently picking, go back
       if (_selectedFile == null && !_isPicking && mounted) {
@@ -190,12 +223,21 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     _isPicking = true;
+    // Read before the picker await — `use_build_context_synchronously`.
+    final pro = context.read<SubscriptionProvider>().hasProMediaQuality;
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: source,
-        maxWidth: 1920,
-        maxHeight: 1920,
-        imageQuality: 80,
+        // These bounds are applied *before* `ImageCompressor.compressForStatus`
+        // runs, so they are a hard ceiling on the Pro quality tier: at 1920px /
+        // q80 a Pro upload would be re-encoded from an already-shrunk image and
+        // never reach the 2560px it is entitled to. Pro therefore hands the
+        // original through untouched (`null` = no picker resize or re-encode)
+        // and lets the compressor make the single quality decision. Free keeps
+        // 1920 / 80 exactly as before.
+        maxWidth: pro ? null : 1920,
+        maxHeight: pro ? null : 1920,
+        imageQuality: pro ? null : 80,
       );
 
       _isPicking = false;
@@ -221,17 +263,30 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
 
   Future<void> _pickVideo(ImageSource source) async {
     _isPicking = true;
+    // Read before the picker await — `use_build_context_synchronously`.
+    final maxSec = context.read<SubscriptionProvider>().maxStatusVideoSec;
     try {
       final XFile? video = await _imagePicker.pickVideo(
         source: source,
-        maxDuration: const Duration(seconds: 30),
+        maxDuration: Duration(seconds: maxSec),
       );
 
       _isPicking = false;
       if (video != null) {
+        // Checked here rather than at upload time so the answer arrives before
+        // the caption is written, and so the rejection is a sentence about the
+        // video instead of the "permission error" dialog a Storage rejection
+        // would surface.
+        final file = File(video.path);
+        if (!await _isPostableVideo(file)) {
+          // Straight back to the source sheet: the pick failed, the screen has
+          // not, and popping out would make choosing a shorter clip a restart.
+          if (mounted) _showMediaSourcePicker();
+          return;
+        }
         _disposeVideoPlayer();
         setState(() {
-          _selectedFile = File(video.path);
+          _selectedFile = file;
           _isVideo = true;
         });
         _initVideoPlayer();
@@ -249,6 +304,29 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     }
   }
 
+  /// True when [file] can actually be posted; otherwise explains why not and
+  /// returns false.
+  ///
+  /// Video only. An oversized *image* is not a problem to report: the picker
+  /// bound and `ImageCompressor.compressForStatus` re-encode it to 2560 px at
+  /// q90 — a couple of megabytes — so rejecting a 40 MB photo that would have
+  /// compressed fine would be a bug, not a guard.
+  Future<bool> _isPostableVideo(File file) async {
+    final bytes = await file.length();
+    if (bytes <= _maxStatusVideoBytes) return true;
+    if (mounted) {
+      _showErrorDialog(
+        'This video is ${_formatMb(bytes)}, and the most a status can carry is '
+        '${_formatMb(_maxStatusVideoBytes)}.\n\n'
+        'Videos are uploaded at the quality your camera recorded them, so a '
+        'high-resolution clip gets large quickly. Try a shorter one, or drop '
+        'your camera to a lower recording quality and film it again.',
+        title: 'Video is too large',
+      );
+    }
+    return false;
+  }
+
   Future<void> _uploadStatus() async {
     if (_selectedFile == null) return;
 
@@ -260,6 +338,13 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       }
       return;
     }
+
+    // Second gate, for the `preSelectedFile` route that never passed through
+    // `_pickVideo`. One `stat` call, and it is the last point where a rejection
+    // can still be a sentence: the post below is fire-and-forget, so after it
+    // starts a Storage rejection reaches the user only as a status that
+    // silently never appeared.
+    if (_isVideo && !await _isPostableVideo(_selectedFile!)) return;
 
     setState(() {
       _isUploading = true;
@@ -338,15 +423,15 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
     }
   }
 
-  void _showErrorDialog(String message) {
+  void _showErrorDialog(String message, {String title = 'Upload Error'}) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.error_outline, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Upload Error'),
+            const Icon(Icons.error_outline, color: Colors.red),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title)),
           ],
         ),
         content: Text(message, style: const TextStyle(fontSize: 14)),
@@ -513,8 +598,14 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                     child: Container(
                       width: 48,
                       height: 48,
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
+                      decoration: BoxDecoration(
+                        // Pinned to the dark palette rather than resolved from
+                        // the app theme: this bar sits on a black scrim over the
+                        // picked photo, so the surface is dark whatever the app
+                        // setting is, and the dark palette's lighter accent is
+                        // the one that reads against it.
+                        color:
+                            AppThemeColors.forBrightness(Brightness.dark).primary,
                         shape: BoxShape.circle,
                       ),
                       child: _isUploading

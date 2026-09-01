@@ -3,8 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
@@ -629,6 +631,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 6),
+              _buildStitchDivider(),
+              // Global default chat theme. Opens the same sheet the chat
+              // overflow menu does, in default mode (`chatRoomId: null`) — a
+              // per-chat pick made from inside a conversation still wins over
+              // whatever is set here.
+              _buildStitchTile(
+                icon: Icons.palette_outlined,
+                title: 'Chat theme',
+                trailingText: context
+                    .watch<ChatThemeProvider>()
+                    .resolve(
+                      null,
+                      unlocked:
+                          context.watch<SubscriptionProvider>().isProUnlocked,
+                    )
+                    .name,
+                onTap: () => ChatThemeSheet.show(context),
               ),
             ],
           ),

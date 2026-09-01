@@ -22,9 +22,40 @@ class VoiceRecorderService extends ChangeNotifier {
   Timer? _timer;
   String? _currentPath;
 
+  /// Cap for the current recording in seconds, or `null` for uncapped.
+  ///
+  /// Held here rather than in the UI because the recorder is driven from two
+  /// screens (`chat_screen` and `mesh_chat_screen`) and a cap enforced in only
+  /// one of them is not a cap.
+  int? _maxDurationSec;
+  int? get maxDurationSec => _maxDurationSec;
+
+  VoidCallback? _onLimitReached;
+
+  /// Whether [_onLimitReached] has already fired for this recording. The ticker
+  /// keeps running until the callback's `stopRecording` completes, so without
+  /// this the send would be triggered once per second.
+  bool _limitFired = false;
+
+  /// Seconds left before the cap stops this recording, or `null` when uncapped.
+  Duration? get remaining {
+    final cap = _maxDurationSec;
+    if (cap == null) return null;
+    final left = cap - _elapsed.inSeconds;
+    return Duration(seconds: left < 0 ? 0 : left);
+  }
+
   /// Start recording audio to a temp .m4a file.
   /// Returns the path where the file will be written, or null on failure.
-  Future<String?> startRecording() async {
+  ///
+  /// Pass [maxDurationSec] to cap the recording — `null` means uncapped. On
+  /// reaching the cap the ticker fires [onLimitReached] exactly once; the
+  /// callback owns what happens next (the chat screens stop and send, so the
+  /// user keeps the audio they had already recorded rather than losing it).
+  Future<String?> startRecording({
+    int? maxDurationSec,
+    VoidCallback? onLimitReached,
+  }) async {
     try {
       // Check microphone permission
       final status = await Permission.microphone.request();
@@ -42,6 +73,9 @@ class VoiceRecorderService extends ChangeNotifier {
       _currentPath = filePath;
       _isRecording = true;
       _elapsed = Duration.zero;
+      _maxDurationSec = maxDurationSec;
+      _onLimitReached = onLimitReached;
+      _limitFired = false;
       _startTimer();
       notifyListeners();
 
@@ -97,12 +131,26 @@ class VoiceRecorderService extends ChangeNotifier {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _elapsed += const Duration(seconds: 1);
       notifyListeners();
+
+      final cap = _maxDurationSec;
+      if (cap != null && !_limitFired && _elapsed.inSeconds >= cap) {
+        // Latch before invoking: the callback's stop is async, so this ticker
+        // gets at least one more tick before `_isRecording` goes false.
+        _limitFired = true;
+        _onLimitReached?.call();
+      }
     });
   }
 
   void _stopTimer() {
     _timer?.cancel();
     _timer = null;
+    // Drop the cap and its callback with the ticker that used them. A stale
+    // `_onLimitReached` closure holds a reference to the screen that started the
+    // recording, and a stale `_maxDurationSec` would make `remaining` report a
+    // countdown for a recording that is no longer running.
+    _maxDurationSec = null;
+    _onLimitReached = null;
   }
 
   /// Format a duration as mm:ss.

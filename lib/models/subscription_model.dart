@@ -118,12 +118,30 @@ class SubscriptionModel {
 class PlanLimits {
   PlanLimits._();
 
-  /// Max voice message duration in seconds.
-  static int maxVoiceDurationSec(bool isPro) => isPro ? 300 : 60;
+  /// Max voice message duration in seconds — `null` means uncapped (Pro).
+  ///
+  /// The recorder stops and sends automatically on reaching the cap; see
+  /// `VoiceRecorderService.startRecording`. Pro is genuinely uncapped on the
+  /// client, but `storage.rules` still bounds `chat_audio` at 50 MB, which is
+  /// ~52 min at the recorder's 128 kbps mono AAC.
+  static int? maxVoiceDurationSec(bool isPro) => isPro ? null : 120;
 
-  /// Max media file size in bytes.
-  static int maxMediaSizeBytes(bool isPro) =>
-      isPro ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+  /// Max status video duration in seconds.
+  static int maxStatusVideoSec(bool isPro) => isPro ? 90 : 30;
+
+  // ── Outgoing image quality ────────────────────────────────────────────────
+  //
+  // The Pro media perk is a *quality* tier, not a larger byte allowance. The
+  // free numbers below are exactly what shipped before the tier existed, so
+  // nobody loses anything; Pro simply stops downscaling as aggressively.
+  // Chat images render at thumbnail size, hence the lower free baseline than
+  // statuses, which fill the screen in the viewer.
+
+  static int chatImageMaxEdge(bool isPro) => isPro ? 2560 : 1280;
+  static int chatImageQuality(bool isPro) => isPro ? 90 : 70;
+
+  static int statusImageMaxEdge(bool isPro) => isPro ? 2560 : 1600;
+  static int statusImageQuality(bool isPro) => isPro ? 90 : 75;
 
   /// Whether media statuses (photo/video) are allowed.
   static bool canPostMediaStatus(bool isPro) => isPro;

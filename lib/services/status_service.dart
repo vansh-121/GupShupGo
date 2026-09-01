@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/image_compressor.dart';
 import 'package:video_chat_app/services/performance_service.dart';
+import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/services/gamification_service.dart';
 
 /// Decrypted form of an encrypted status item, kept in the process-wide
@@ -611,7 +612,15 @@ class StatusService {
   }) async {
     // Shrink before encrypt+upload — a 5 MB gallery photo turns into a
     // ~250 KB JPEG that uploads in a second over 4G instead of 15-30s.
-    final compressed = await ImageCompressor.compressForStatus(imageFile);
+    //
+    // Pro gets a higher-quality tier. Read straight off
+    // `SubscriptionService.isProUnlocked` rather than threading a bool down from
+    // the screen: that getter is the same capability gate the UI uses, so a
+    // service with no `BuildContext` can't drift from the screen's answer.
+    final compressed = await ImageCompressor.compressForStatus(
+      imageFile,
+      pro: SubscriptionService.instance.isProUnlocked,
+    );
     return _uploadEncryptedMedia(
       userId: userId,
       userName: userName,
@@ -887,7 +896,12 @@ class StatusService {
     String? caption,
   }) async {
     try {
-      final compressed = await ImageCompressor.compressForStatus(imageFile);
+      // Pro quality tier — see the note on the encrypted path above for why this
+      // reads `isProUnlocked` directly instead of taking a parameter.
+      final compressed = await ImageCompressor.compressForStatus(
+        imageFile,
+        pro: SubscriptionService.instance.isProUnlocked,
+      );
       final imageUrl = await _uploadFileToStorage(
         userId: userId,
         file: compressed,

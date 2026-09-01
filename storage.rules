@@ -1,13 +1,48 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // ── Upload ceilings are abuse bounds, not the Pro tier ────────────────
+    //
+    // These used to be tiered per plan via a `firestore.get` on
+    // `subscriptionPlan`. They are deliberately flat again, for two reasons
+    // that both point the same way:
+    //
+    //   1. Pro's media perk is *quality* (resolution, duration, recording
+    //      length), not a byte allowance. A byte wall was never the product
+    //      gate, so encoding one server-side only ever produced a confusing
+    //      second gate that could contradict the first.
+    //   2. While `pro_enabled` is off, Pro capabilities are granted to
+    //      everybody (see `SubscriptionProvider.isProUnlocked`) — but nobody
+    //      has `subscriptionPlan == 'pro'`, because there is nothing to buy.
+    //      A plan-keyed rule is therefore false for every single caller in the
+    //      state the app actually ships in, and the free ceiling would reject
+    //      the very uploads the client was just told it could make. A Storage
+    //      rule cannot read Remote Config, so it cannot be taught the flag.
+    //
+    // Flat also means these ceilings do not have to change on the day the flag
+    // flips: they are sized for what the client can legitimately produce at
+    // full quality, and nothing more. What they bound is a tampered client, not
+    // a free user — a modified app can push one 50 MB voice note instead of one
+    // 10 MB one, and that is the whole of the exposure being accepted here.
+    //
+    // Removing the `firestore.get` also drops one document read per oversized
+    // upload and the lapsed-subscriber staleness caveat that came with it.
+
     // Status media (images/videos). E2EE uploads use
     // application/octet-stream so the server can't tell text from image
     // from video — accept that too.
+    //
+    // 100 MB, and deliberately never the binding constraint. Status video is
+    // picked with `image_picker` and uploaded raw — there is no video compressor
+    // in this app — so the real ceiling is the client's, at 64 MB
+    // (`_maxStatusVideoBytes` in add_media_status_screen.dart, sized by the 3×
+    // heap cost of encrypt-then-upload). A user who picks something too large
+    // gets a "Video is too large" dialog naming both sizes; this rule is the
+    // headroom above it, so it only ever fires against a tampered client.
     match /statuses/{userId}/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId
-        && request.resource.size < 30 * 1024 * 1024
+        && request.resource.size < 100 * 1024 * 1024
         && (request.resource.contentType.matches('image/.*')
             || request.resource.contentType.matches('video/.*')
             || request.resource.contentType == 'application/octet-stream');
@@ -23,6 +58,9 @@ service firebase.storage {
     }
 
     // Chat image attachments. Accept E2EE opaque uploads too.
+    //
+    // 10 MB is untouched and already generous: chat images are compressed
+    // before upload, and full quality is 2560 px at q90 — a 1-3 MB JPEG.
     match /chat_images/{chatRoomId}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
@@ -32,10 +70,16 @@ service firebase.storage {
     }
 
     // Chat audio / voice notes. Same E2EE allowance as above.
+    //
+    // 50 MB, raised from a flat 5 MB that the uncapped-recording perk broke
+    // almost immediately: the native recorder runs 128 kbps mono AAC (~16 KB/s)
+    // and voice notes upload raw with no compression, so 5 MB was ~5 minutes
+    // and 10 MB ~10. 50 MB is ~52 minutes — the honest practical ceiling, since
+    // a truly unbounded upload isn't expressible in a Storage rule.
     match /chat_audio/{chatRoomId}/{fileName} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
-        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.size < 50 * 1024 * 1024
         && (request.resource.contentType.matches('audio/.*')
             || request.resource.contentType == 'application/octet-stream');
     }

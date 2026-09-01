@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -19,6 +20,7 @@ import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/chat_export_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
@@ -33,6 +35,10 @@ import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/theme/chat_pattern_painter.dart';
+import 'package:video_chat_app/theme/chat_theme.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
+import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
@@ -113,6 +119,30 @@ class _ChatScreenState extends State<ChatScreen> {
   // ─── Mute state ───────────────────────────────────────────────────
   final SettingsService _settingsService = SettingsService();
   late bool _isMuted;
+
+  // ─── Chat theme ───────────────────────────────────────────────────
+  /// Deterministic room id, used to key this conversation's chat theme.
+  late final String _chatRoomId;
+
+  /// Chat theme in force, re-resolved at the top of every [build].
+  ///
+  /// Cached in a field rather than read from the tree because the bubble
+  /// builders (`_buildMessage`, `_buildTypingBubble`, `_buildDateDivider`, …)
+  /// resolve colours off `State.context`, which sits above the themed area they
+  /// are rendered into. See [_messageColors].
+  ChatTheme _chatTheme = ChatThemeCatalog.defaultTheme;
+
+  /// Palette the message area is drawn against: the chat theme's own brightness
+  /// when it fixes one, otherwise the app's light/dark palette.
+  AppThemeColors get _messageColors => _chatTheme.followsAppTheme
+      ? AppThemeColors.of(context)
+      : AppThemeColors.forBrightness(_chatTheme.brightness!);
+
+  // ─── Chat export ──────────────────────────────────────────────────
+  /// True while an export is in flight. The overflow menu stays tappable for the
+  /// whole read — the entire local history plus a Firestore round-trip — so
+  /// without this a double tap runs two exports and opens two share sheets.
+  bool _isExporting = false;
 
   // ── Image picker ─────────────────────────────────────────────────
   final ImagePicker _imagePicker = ImagePicker();
@@ -228,6 +258,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _isContactOnline = widget.contact.isOnline; // seed from passed-in value
     final chatRoomId =
         _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+    _chatRoomId = chatRoomId;
     _isMuted = _settingsService.isChatMuted(chatRoomId);
     _messagesStream = _chatService
         .getMessages(widget.currentUserId, widget.contact.id)
@@ -1246,7 +1277,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildDateDivider(String date) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Center(
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 14),
@@ -1269,8 +1300,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessage(MessageModel message) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     final isMe = message.senderId == widget.currentUserId;
+    final sentGradient = _chatTheme.sentGradientOf(c);
     final isTombstone = message.deletedForEveryone;
     // A deleted message has nothing left to react to, and its reactions left
     // the document along with its ciphertext. Belt-and-braces: a row written by
@@ -1288,7 +1320,14 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
       decoration: BoxDecoration(
-        color: isMe ? c.sent : c.received,
+        // A preset may carry a diagonal gradient for sent bubbles; `color` and
+        // `gradient` are mutually exclusive in practice (BoxDecoration paints the
+        // gradient and ignores the colour), so only one is set to keep that
+        // explicit rather than relying on the precedence.
+        color: isMe && sentGradient != null
+            ? null
+            : (isMe ? _chatTheme.sentOf(c) : _chatTheme.receivedOf(c)),
+        gradient: isMe ? sentGradient : null,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(18),
           topRight: const Radius.circular(18),
@@ -1749,7 +1788,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildStatusReplyPreview(MessageModel message, bool isMe) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     final type = message.statusReplyType;
     final mediaUrl = message.statusReplyMediaUrl;
     final previewText = _statusReplyPreviewText(message);
@@ -1909,7 +1948,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessagesList(List<MessageModel> messages) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     if (messages.isEmpty) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -2094,7 +2133,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildLoadingOlderIndicator() {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
@@ -2113,8 +2152,16 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    // Resolve the chat theme once per build and cache it for the bubble
+    // builders. They read `State.context`, which sits *above* the themed area
+    // inserted below, so they cannot pick the palette up from the tree — see
+    // `_messageColors`.
+    _chatTheme = context.watch<ChatThemeProvider>().resolve(
+          _chatRoomId,
+          unlocked: context.watch<SubscriptionProvider>().isProUnlocked,
+        );
     return Scaffold(
-      backgroundColor: c.chatBg,
+      backgroundColor: _chatTheme.backgroundOf(c),
       appBar: AppBar(
         foregroundColor: c.textHigh,
         surfaceTintColor: Colors.transparent,
@@ -2255,6 +2302,13 @@ class _ChatScreenState extends State<ChatScreen> {
                       value: 'search',
                       child: Text('Search', style: GoogleFonts.poppins())),
                   PopupMenuItem(
+                      value: 'chat theme',
+                      child: Text('Chat theme', style: GoogleFonts.poppins())),
+                  PopupMenuItem(
+                      value: 'export chat',
+                      child:
+                          Text('Export chat', style: GoogleFonts.poppins())),
+                  PopupMenuItem(
                       value: 'mute notifications',
                       child: Text(
                           _isMuted
@@ -2377,9 +2431,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   },
                 ),
                 Expanded(
-                  child: StreamBuilder<List<MessageModel>>(
-                    stream: _messagesStream,
-                    builder: (context, snapshot) {
+                  child: _ChatThemedArea(
+                    theme: _chatTheme,
+                    colors: c,
+                    child: StreamBuilder<List<MessageModel>>(
+                      stream: _messagesStream,
+                      builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
                         return Center(
@@ -2440,7 +2497,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       });
 
                       return _buildMessagesList(nonReactionMessages);
-                    },
+                      },
+                    ),
                   ),
                 ),
                 // ── Message input bar (or blocked banner) ───────────
@@ -2771,12 +2829,20 @@ class _ChatScreenState extends State<ChatScreen> {
         // Pulsing red dot
         _buildPulsingDot(c),
         const SizedBox(width: 8),
-        // Duration counter
+        // Duration counter. Capped recordings show `elapsed / cap` so the
+        // auto-stop-and-send at the limit is never a surprise; uncapped ones
+        // (Pro) show a plain stopwatch with nothing to count down to.
         ListenableBuilder(
           listenable: _voiceRecorder,
           builder: (context, _) {
+            final cap = _voiceRecorder.maxDurationSec;
+            final elapsed =
+                VoiceRecorderService.formatDuration(_voiceRecorder.elapsed);
             return Text(
-              VoiceRecorderService.formatDuration(_voiceRecorder.elapsed),
+              cap == null
+                  ? elapsed
+                  : '$elapsed / '
+                      '${VoiceRecorderService.formatDuration(Duration(seconds: cap))}',
               style: GoogleFonts.poppins(
                 color: c.textHigh,
                 fontSize: 15,
@@ -2863,8 +2929,43 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _startVoiceRecording() async {
     if (_isBlocked || _isBlockedByContact) return;
     HapticFeedback.mediumImpact();
-    await _voiceRecorder.startRecording();
+
+    // Read the cap before the await: `_voiceRecorder.startRecording` awaits a
+    // permission prompt, and touching `context` after that is exactly what
+    // `use_build_context_synchronously` warns about.
+    //
+    // `maxVoiceDurationSec` is `null` for Pro — and also for everyone while
+    // `pro_enabled` is off, because capping a feature that is unlimited today
+    // while the upgrade path is hidden would strip a capability with no way to
+    // buy it back. See `SubscriptionProvider.isProUnlocked`.
+    final cap = context.read<SubscriptionProvider>().maxVoiceDurationSec;
+
+    await _voiceRecorder.startRecording(
+      maxDurationSec: cap,
+      onLimitReached: cap == null ? null : () => _onVoiceLimitReached(cap),
+    );
     if (mounted) setState(() {});
+  }
+
+  /// Fired once by the recorder's ticker when a capped recording hits its limit.
+  ///
+  /// Stops **and sends** rather than discarding: the user has just spoken for two
+  /// minutes, and throwing that away to teach them about a limit would be the
+  /// wrong trade. The snackbar explains why the recording ended on its own.
+  void _onVoiceLimitReached(int capSeconds) {
+    HapticFeedback.mediumImpact();
+    _stopVoiceRecording();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Voice messages are limited to '
+          '${VoiceRecorderService.formatDuration(Duration(seconds: capSeconds))}'
+          ' — sent what you recorded.',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   Future<void> _stopVoiceRecording() async {
@@ -2952,14 +3053,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildTypingBubble() {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(left: 16, bottom: 4, top: 4),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         decoration: BoxDecoration(
-          color: c.received,
+          color: _chatTheme.receivedOf(c),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(18),
             topRight: Radius.circular(18),
@@ -2988,6 +3089,16 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
       case 'search':
         setState(() => _isSearchMode = true);
+        break;
+      case 'chat theme':
+        ChatThemeSheet.show(
+          context,
+          chatRoomId: _chatRoomId,
+          contactName: widget.contact.name,
+        );
+        break;
+      case 'export chat':
+        _exportChat();
         break;
       case 'mute notifications':
         _toggleMute();
@@ -3152,6 +3263,66 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ─── Chat export ───────────────────────────────────────────────────
+  /// Renders this conversation to a `.txt` file and hands it to the OS share
+  /// sheet.
+  ///
+  /// The heavy lifting — and the reasoning about why the transcript is built
+  /// from the local plaintext cache and never from a decrypt pass — lives in
+  /// [ChatExportService]. This method is only the gate, the progress feedback and
+  /// the share.
+  Future<void> _exportChat() async {
+    if (_isExporting) return;
+    if (!PremiumGate.checkAndPrompt(
+      context,
+      featureName: 'Chat Export',
+      featureIcon: Icons.ios_share_rounded,
+      description: 'Save this conversation as a text file you can keep as a '
+          'backup or share anywhere.',
+    )) {
+      return;
+    }
+
+    // Captured before the first await: the messenger is needed again after it,
+    // and reaching back through `context` there is what
+    // `use_build_context_synchronously` exists to catch.
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _isExporting = true);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Preparing export…'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    try {
+      final file = await ChatExportService.exportChat(
+        chatRoomId: _chatRoomId,
+        selfUserId: widget.currentUserId,
+        contactName: widget.contact.name,
+      );
+      if (!mounted) return;
+      if (file == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Nothing to export in this chat yet')),
+        );
+        return;
+      }
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/plain')],
+        subject: 'GupShupGo chat with ${widget.contact.name}',
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not export chat: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
     if (_isBlocked || _isBlockedByContact) {
@@ -3161,10 +3332,21 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // Read before the picker await, both for the lint and because the picker's
+    // own re-encode has to know the tier.
+    final proMediaQuality =
+        context.read<SubscriptionProvider>().hasProMediaQuality;
+
     try {
       final XFile? picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 70,
+        // The picker re-encodes at this quality *before* ImageCompressor ever
+        // sees the file, so it is a hard upstream ceiling: leaving it at 70
+        // would make the Pro tier's quality-90 pass re-encode an
+        // already-degraded image, spending bytes for no visible gain. Pro skips
+        // the picker's pass (`null` = no re-encode) so `compressForChat` is the
+        // only place quality is decided. Free keeps 70, exactly as before.
+        imageQuality: proMediaQuality ? null : 70,
       );
       if (picked == null) return;
 
@@ -3206,8 +3388,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
         // Compress before upload — 5 MB → ~250 KB JPEG, cuts upload from
         // 10-20s on mobile data to ~1s with no visible quality loss.
-        final compressed =
-            await ImageCompressor.compressForChat(File(picked.path));
+        //
+        // Pro gets a higher-resolution, higher-quality tier (the free numbers
+        // are unchanged). `isPro` is masked by the `pro_enabled` flag, so with
+        // the flag off everyone keeps today's compression and storage costs
+        // don't move.
+        final compressed = await ImageCompressor.compressForChat(
+          File(picked.path),
+          pro: proMediaQuality,
+        );
         await ref.putFile(compressed);
         final imageUrl = await ref.getDownloadURL();
 
@@ -3998,4 +4187,74 @@ class _DisplayItem {
 
   _DisplayItem.message(MessageModel msg, {bool animate = false})
       : this._(type: _DisplayItemType.message, message: msg, animate: animate);
+}
+
+/// Paints the chat theme's background behind the message list and, when the
+/// theme fixes its own brightness, re-roots the subtree on the matching
+/// [AppTheme].
+///
+/// The [Theme] override is what keeps nested bubble content legible. Widgets
+/// inside a bubble — [VoiceMessageBubble], [ReplyQuoteCard], [LinkPreviewCard] —
+/// resolve their own text colours via `AppThemeColors.of(context)`, so on a dark
+/// preset while the app is in light mode they would otherwise draw near-black
+/// text onto a dark bubble. Overriding the theme here fixes all of them at once
+/// instead of threading a colour through every constructor.
+///
+/// Only the message list is wrapped: the app bar and composer stay on the app's
+/// own theme, so a themed conversation doesn't turn into a differently-coloured
+/// screen.
+class _ChatThemedArea extends StatelessWidget {
+  const _ChatThemedArea({
+    required this.theme,
+    required this.colors,
+    required this.child,
+  });
+
+  final ChatTheme theme;
+
+  /// The app palette, used to fill in whatever the theme leaves unset.
+  final AppThemeColors colors;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final decoration = theme.decorationOf(colors);
+
+    Widget content = child;
+
+    // The pattern sits between the background and the message list: above the
+    // gradient or photo, below the bubbles. A photo background gets no pattern —
+    // it has texture of its own, and overlaying motifs on someone's chosen image
+    // is defacing it.
+    if (theme.pattern != ChatPattern.none && !theme.hasImage) {
+      content = Stack(
+        children: [
+          Positioned.fill(
+            child: ChatPatternLayer(
+              pattern: theme.pattern,
+              ink: theme.patternInk(colors),
+            ),
+          ),
+          content,
+        ],
+      );
+    }
+
+    // The Scaffold already paints `theme.backgroundOf(colors)`, so a plain
+    // colour needs no extra layer here.
+    if (decoration != null) {
+      content = DecoratedBox(decoration: decoration, child: content);
+    }
+
+    if (!theme.followsAppTheme) {
+      content = Theme(
+        data: theme.brightness == Brightness.dark
+            ? AppTheme.dark
+            : AppTheme.light,
+        child: content,
+      );
+    }
+    return content;
+  }
 }

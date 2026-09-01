@@ -167,6 +167,17 @@ dependencies:
   # Bumping would mean reworking lib/screens/qr_scanner_screen.dart for no gain.
   mobile_scanner: 5.2.3
 
+  # OS share sheet, used by chat export (lib/services/chat_export_service.dart).
+  #
+  # Pinned to the 10.x line, NOT the latest. 11.x replaced the static
+  # `Share.shareXFiles(...)` API with `SharePlus.instance.share(ShareParams(...))`
+  # and raised its Dart SDK floor; 10.x is the newest line that resolves against
+  # this project's other constraints without dragging anything else along. The
+  # one side effect it does have is transitive: share_plus_platform_interface
+  # pins `mime: ^1.0.4`, which holds `mime` at 1.0.6 instead of 2.0.0. Nothing in
+  # lib/ imports `mime` directly, so that is invisible here.
+  share_plus: ^10.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
