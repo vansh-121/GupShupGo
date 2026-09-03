@@ -22,14 +22,16 @@ const VERIFIER_KEYS_URL =
 const KEY_CACHE_MS = 24 * 60 * 60 * 1000;
 
 /**
- * The exact bytes Google signed: the query string from the character after `?`
- * up to (not including) `&signature=`.
+ * The signed span of the query string: from the character after `?` up to (not
+ * including) `&signature=`.
  *
- * This MUST come from the raw URL. Rebuilding it from a parsed query object
- * re-encodes values — `custom_data` is a JSON blob full of `{`, `"` and `:` — and
- * one byte of difference makes a valid signature look forged. Google documents
- * `signature` and `key_id` as the last two parameters, in that order, which is
- * what makes the cut well-defined.
+ * This MUST be cut out of the raw URL rather than rebuilt from a parsed query
+ * object, because re-serialising reorders and re-encodes parameters and Google
+ * signs them in the order sent. Google documents `signature` and `key_id` as the
+ * last two parameters, in that order, which is what makes the cut well-defined.
+ *
+ * Note this returns the span still percent-encoded — see
+ * [signedContentCandidatesFrom] for which byte-form actually gets verified.
  *
  * @param {string} originalUrl Raw request URL, e.g. `/?ad_network=…&signature=…`
  * @returns {?string} null when the URL isn't shaped like a callback.
@@ -42,6 +44,44 @@ function signedContentFrom(originalUrl) {
   const marker = query.indexOf("&signature=");
   if (marker <= 0) return null;
   return query.slice(0, marker);
+}
+
+/**
+ * Every byte-form of the signed span that Google might have signed, likeliest
+ * first. Verification succeeds if *any* of them checks out, which is safe
+ * because each one still has to satisfy Google's signature.
+ *
+ * There has to be more than one because AdMob signs the **percent-decoded**
+ * query string, not the encoded one on the wire. Google's own verification
+ * sample reads the span with Java's `URI.getQuery()`, which expands `%XX`
+ * escapes — so `custom_data={"uid":"…","type":"points"}` is what was hashed,
+ * while `custom_data=%7B%22uid%22…` is what arrives.
+ *
+ * That distinction is invisible until a parameter actually contains an escape,
+ * which is why this was wrong for months without looking wrong: no other
+ * callback parameter needs encoding, so a callback carrying no `custom_data`
+ * — including the "send test SSV" button in the AdMob console — verifies
+ * either way, and only real rewards failed.
+ *
+ * The encoded span is kept as a fallback in case a future proxy hands us an
+ * already-decoded URL, in which case the two forms coincide anyway.
+ *
+ * @param {string} originalUrl Raw request URL.
+ * @returns {?Array<string>} null when the URL isn't shaped like a callback.
+ */
+function signedContentCandidatesFrom(originalUrl) {
+  const raw = signedContentFrom(originalUrl);
+  if (raw === null) return null;
+  let decoded = null;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch (error) {
+    // A stray `%` isn't decodable. Not fatal — try the raw form and let the
+    // signature be the judge.
+    decoded = null;
+  }
+  if (decoded === null || decoded === raw) return [raw];
+  return [decoded, raw];
 }
 
 /**
@@ -135,18 +175,23 @@ class VerifierKeyCache {
   }
 
   /**
-   * Whether [signatureB64Url] is Google's over [signedContent].
+   * Whether [signatureB64Url] is Google's over the signed content.
    *
    * Throws only when the key set can't be reached. That is our outage, not a
    * forgery, and the caller must answer 500 so Google retries rather than the
    * user losing a reward they earned.
    *
-   * @param {string} signedContent
+   * @param {string|Array<string>} signedContent One byte-form, or the
+   *   candidates from [signedContentCandidatesFrom]. Any one of them verifying
+   *   is enough — they all have to satisfy the same signature.
    * @param {string} signatureB64Url
    * @param {string} keyId
    * @returns {Promise<boolean>}
    */
   async verify(signedContent, signatureB64Url, keyId) {
+    const candidates = Array.isArray(signedContent)
+      ? signedContent
+      : [signedContent];
     let byId = await this.keys(false);
     let pem = byId.get(String(keyId));
     if (!pem) {
@@ -154,7 +199,9 @@ class VerifierKeyCache {
       pem = byId.get(String(keyId));
     }
     if (!pem) return false;
-    return verifyWithPem(signedContent, signatureB64Url, pem);
+    return candidates.some((content) =>
+      verifyWithPem(content, signatureB64Url, pem)
+    );
   }
 }
 
@@ -164,5 +211,6 @@ module.exports = {
   VerifierKeyCache,
   parseVerifierKeys,
   signedContentFrom,
+  signedContentCandidatesFrom,
   verifyWithPem,
 };

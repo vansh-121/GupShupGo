@@ -17,6 +17,7 @@ const {
   VerifierKeyCache,
   parseVerifierKeys,
   signedContentFrom,
+  signedContentCandidatesFrom,
   verifyWithPem,
 } = require("../ads/ssv");
 
@@ -173,6 +174,143 @@ describe("verifyWithPem", () => {
       .sign("sha256", Buffer.from(content, "utf8"), key.privateKey)
       .toString("base64");
     assert.strictEqual(verifyWithPem(content, std, key.pem), true);
+  });
+});
+
+// ─── Real captured callbacks ──────────────────────────────────────────────────
+// The tests above sign their own URLs, which means they agree with whatever
+// assumption the implementation makes about *which bytes* Google signs. They
+// therefore passed while production refused every real reward.
+//
+// These vectors close that hole: real signatures, made by Google's live key, over
+// real callbacks captured from the Cloud Run request log. Nothing here is a
+// secret — the key is published and the uid is a Firebase Auth id.
+
+/** Google's published verifier key, id 3335741209. */
+const GOOGLE_PEM =
+  "-----BEGIN PUBLIC KEY-----\n" +
+  "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+nzvoGqvDeB9+SzE6igTl7TyK4JB\n" +
+  "bglwir9oTcQta8NuG26ZpZFxt+F2NDk7asTE6/2Yc8i1ATcGIqtuS5hv0Q==\n" +
+  "-----END PUBLIC KEY-----";
+
+/** A real `points` reward. `custom_data` is percent-encoded JSON. */
+const REAL_WITH_CUSTOM_DATA =
+  "/admobSsv?ad_network=5450213213286189855&ad_unit=3145500055" +
+  "&custom_data=%7B%22uid%22%3A%22D268P40MbCgAqEI1q4GPhJt4cmJ3%22%2C%22type%22%3A%22points%22%7D" +
+  "&reward_amount=1&reward_item=Reward&timestamp=1788460324887" +
+  "&transaction_id=00065a985cc423f002ac87ddcf20aacf" +
+  "&user_id=D268P40MbCgAqEI1q4GPhJt4cmJ3" +
+  "&signature=MEQCIHvWnxD-voBY1xk3yLEyw33JFlUicoe-f-DsROKVfexHAiAioXRsmLiinDxI6fEi-j1zEFKhJbQ972Z3KqYVgqvYHw" +
+  "&key_id=3335741209";
+
+/** The AdMob console's "send test SSV" callback — no `custom_data`. */
+const REAL_WITHOUT_CUSTOM_DATA =
+  "/admobSsv?ad_network=5450213213286189855&ad_unit=1234567890" +
+  "&reward_amount=1&reward_item=Reward&timestamp=1788456881623" +
+  "&transaction_id=123456789" +
+  "&signature=MEQCIFAn0V2DiSRrlS2rxFo4vX7xm_koj-U78CWXN26DrHfKAiAoMR02rHEFLAsWsMFcdA3tYrhtDDE9aSQh9WKYFiUIVw" +
+  "&key_id=3335741209";
+
+/** Pulls the `signature` value back out of a callback URL. */
+function signatureOf(url) {
+  return /[?&]signature=([^&]+)/.exec(url)[1];
+}
+
+describe("signedContentCandidatesFrom", () => {
+  it("offers the decoded form first, then the raw one", () => {
+    const candidates = signedContentCandidatesFrom(REAL_WITH_CUSTOM_DATA);
+    assert.strictEqual(candidates.length, 2);
+    assert.ok(candidates[0].includes('custom_data={"uid":"D268P40MbCgAqEI1q4GPhJt4cmJ3"'));
+    assert.ok(candidates[1].includes("custom_data=%7B%22uid%22"));
+  });
+
+  it("collapses to one candidate when there is nothing to decode", () => {
+    assert.deepStrictEqual(
+      signedContentCandidatesFrom(REAL_WITHOUT_CUSTOM_DATA).length,
+      1
+    );
+  });
+
+  it("survives an undecodable escape instead of throwing", () => {
+    const candidates = signedContentCandidatesFrom(
+      "/admobSsv?custom_data=%zz&signature=AAAA&key_id=1"
+    );
+    assert.deepStrictEqual(candidates, ["custom_data=%zz"]);
+  });
+
+  it("still reports a non-callback URL as null", () => {
+    assert.strictEqual(signedContentCandidatesFrom("/admobSsv"), null);
+  });
+});
+
+describe("verification against real AdMob callbacks", () => {
+  it("accepts a real reward whose custom_data is percent-encoded", async () => {
+    const cache = new VerifierKeyCache({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ keys: [{ keyId: 3335741209, pem: GOOGLE_PEM }] }),
+      }),
+    });
+    assert.strictEqual(
+      await cache.verify(
+        signedContentCandidatesFrom(REAL_WITH_CUSTOM_DATA),
+        signatureOf(REAL_WITH_CUSTOM_DATA),
+        "3335741209"
+      ),
+      true
+    );
+  });
+
+  it("still accepts a callback with no custom_data", async () => {
+    const cache = new VerifierKeyCache({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ keys: [{ keyId: 3335741209, pem: GOOGLE_PEM }] }),
+      }),
+    });
+    assert.strictEqual(
+      await cache.verify(
+        signedContentCandidatesFrom(REAL_WITHOUT_CUSTOM_DATA),
+        signatureOf(REAL_WITHOUT_CUSTOM_DATA),
+        "3335741209"
+      ),
+      true
+    );
+  });
+
+  it("signs the DECODED query string, not the encoded one", () => {
+    // The regression, stated as a fact about Google rather than about our code:
+    // the encoded span on the wire is NOT what the signature covers.
+    const [decoded, raw] = signedContentCandidatesFrom(REAL_WITH_CUSTOM_DATA);
+    const signature = signatureOf(REAL_WITH_CUSTOM_DATA);
+    assert.strictEqual(verifyWithPem(decoded, signature, GOOGLE_PEM), true);
+    assert.strictEqual(verifyWithPem(raw, signature, GOOGLE_PEM), false);
+  });
+
+  it("rejects a real callback with the uid swapped in custom_data", () => {
+    const forged = REAL_WITH_CUSTOM_DATA.replace(
+      "D268P40MbCgAqEI1q4GPhJt4cmJ3%22%2C%22type",
+      "attackersUidHere00000000000x%22%2C%22type"
+    );
+    for (const content of signedContentCandidatesFrom(forged)) {
+      assert.strictEqual(
+        verifyWithPem(content, signatureOf(forged), GOOGLE_PEM),
+        false
+      );
+    }
+  });
+
+  it("rejects a real callback with the reward inflated", () => {
+    const forged = REAL_WITH_CUSTOM_DATA.replace(
+      "reward_amount=1",
+      "reward_amount=9999"
+    );
+    for (const content of signedContentCandidatesFrom(forged)) {
+      assert.strictEqual(
+        verifyWithPem(content, signatureOf(forged), GOOGLE_PEM),
+        false
+      );
+    }
   });
 });
 

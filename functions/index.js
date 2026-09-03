@@ -2522,11 +2522,14 @@ exports.streakRestore = onRequest(
 // Google publishes its public keys and rotates them. Fetching per callback would
 // add a round-trip to every reward, so they're cached per instance.
 //
-// The signature work lives in `ads/ssv.js` and is unit-tested against a locally
-// generated keypair (`test/admob_ssv.unit.test.js`), because it is the piece of
-// this feature that can be wrong without anyone noticing: get the byte slicing
-// off by one and every legitimate reward is refused, which looks identical to
-// "nobody watched an ad".
+// The signature work lives in `ads/ssv.js` and is unit-tested against both a
+// locally generated keypair and a real captured callback, because it is the piece
+// of this feature that can be wrong without anyone noticing: get the signed bytes
+// wrong and every legitimate reward is refused, which looks identical to "nobody
+// watched an ad". It shipped wrong exactly once, in exactly that way — Google
+// signs the percent-DECODED query string, so only callbacks carrying
+// `custom_data` failed, and the AdMob console's test callback (which carries
+// none) passed. See `signedContentCandidatesFrom`.
 const admobKeys = new adsSsv.VerifierKeyCache();
 
 // ─── GET /admobSsv ────────────────────────────────────────────────────────────
@@ -2554,7 +2557,7 @@ exports.admobSsv = onRequest(
         ? q.transaction_id
         : null;
 
-    const signedContent = adsSsv.signedContentFrom(req.originalUrl);
+    const signedContent = adsSsv.signedContentCandidatesFrom(req.originalUrl);
     if (!signature || !keyId || !transactionId || signedContent === null) {
       console.warn("admobSsv: malformed callback");
       res.status(400).json({ ok: false, error: "malformed-callback" });
