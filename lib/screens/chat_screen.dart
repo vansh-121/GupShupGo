@@ -42,6 +42,7 @@ import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/export_format_sheet.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/reply_quote_card.dart';
@@ -3269,43 +3270,62 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ─── Chat export ───────────────────────────────────────────────────
-  /// Renders this conversation to a `.txt` file and hands it to the OS share
-  /// sheet.
+  /// Renders this conversation to a file and hands it to the OS share sheet.
   ///
-  /// The heavy lifting — and the reasoning about why the transcript is built
-  /// from the local plaintext cache and never from a decrypt pass — lives in
-  /// [ChatExportService]. This method is only the gate, the progress feedback and
-  /// the share.
+  /// The heavy lifting — and the reasoning about why the export is built from the
+  /// local plaintext cache and never from a decrypt pass — lives in
+  /// [ChatExportService]. This method is only the gate, the format choice, the
+  /// progress feedback and the share.
+  ///
+  /// The share sheet is also the print path: Android's own print service appears
+  /// in it for a PDF, so "print this chat" needs no dialog of our own.
   Future<void> _exportChat() async {
     if (_isExporting) return;
     if (!PremiumGate.checkAndPrompt(
       context,
       featureName: 'Chat Export',
       featureIcon: Icons.ios_share_rounded,
-      description: 'Save this conversation as a text file you can keep as a '
-          'backup or share anywhere.',
+      description: 'Save this conversation as a PDF you can keep, print or '
+          'share — or as a plain-text transcript.',
     )) {
       return;
     }
 
-    // Captured before the first await: the messenger is needed again after it,
-    // and reaching back through `context` there is what
-    // `use_build_context_synchronously` exists to catch.
+    final format = await ExportFormatSheet.show(context);
+    if (format == null || !mounted) return;
+
+    // Captured after the sheet closes but before the export await: the messenger
+    // is needed again afterwards, and reaching back through `context` there is
+    // what `use_build_context_synchronously` exists to catch.
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _isExporting = true);
     messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Preparing export…'),
-        duration: Duration(seconds: 1),
+      SnackBar(
+        // A PDF with photos in it takes noticeably longer than writing a few KB
+        // of text, so the two get different waits rather than one that is either
+        // a lie or a flicker.
+        content: Text(
+          format == ExportFormat.pdf
+              ? 'Building your PDF…'
+              : 'Preparing export…',
+        ),
+        duration: Duration(seconds: format == ExportFormat.pdf ? 3 : 1),
       ),
     );
 
     try {
-      final file = await ChatExportService.exportChat(
-        chatRoomId: _chatRoomId,
-        selfUserId: widget.currentUserId,
-        contactName: widget.contact.name,
-      );
+      final isPdf = format == ExportFormat.pdf;
+      final file = isPdf
+          ? await ChatExportService.exportChatPdf(
+              chatRoomId: _chatRoomId,
+              selfUserId: widget.currentUserId,
+              contactName: widget.contact.name,
+            )
+          : await ChatExportService.exportChat(
+              chatRoomId: _chatRoomId,
+              selfUserId: widget.currentUserId,
+              contactName: widget.contact.name,
+            );
       if (!mounted) return;
       if (file == null) {
         messenger.showSnackBar(
@@ -3314,7 +3334,12 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
       await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/plain')],
+        [
+          XFile(
+            file.path,
+            mimeType: isPdf ? 'application/pdf' : 'text/plain',
+          ),
+        ],
         subject: 'GupShupGo chat with ${widget.contact.name}',
       );
     } catch (e) {

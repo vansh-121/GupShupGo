@@ -178,6 +178,25 @@ dependencies:
   # lib/ imports `mime` directly, so that is invisible here.
   share_plus: ^10.0.0
 
+  # PDF generation for chat export (lib/services/chat_pdf_builder.dart).
+  #
+  # `pdf` alone, deliberately without its companion `printing` package. Printing
+  # only adds a native print dialog and a runtime font downloader; the share
+  # sheet already reaches every printer through Android's own print service, and
+  # a downloader is the wrong dependency for a feature that has to work on a
+  # plane. Skipping it keeps this a pure-Dart addition with no new platform
+  # channel and nothing to register per platform.
+  #
+  # It does pull `image` and `archive` transitively. Neither collides with the
+  # `web ^1.0.0` constraint that pins drift below 2.19.2 here.
+  pdf: ^3.11.1
+
+  # `@immutable` / `@visibleForTesting` on the chat-export renderer. Already in
+  # the tree transitively via flutter_test; declared because lib/ imports it
+  # directly, which is what `depend_on_referenced_packages` asks for. Version
+  # pinned by the Flutter SDK, so the constraint is a formality.
+  meta: ^1.15.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

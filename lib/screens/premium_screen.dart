@@ -347,9 +347,9 @@ class _PremiumScreenState extends State<PremiumScreen>
       _FeatureItem(
         icon: Icons.download_rounded,
         title: 'Chat Export',
-        description: 'Export conversations as text files',
+        description: 'Save a chat as a PDF you can print, or as plain text',
         freeLabel: 'Not available',
-        proLabel: 'Export as TXT',
+        proLabel: 'PDF & TXT export',
       ),
       // Worded to promise exactly what Pro does: banners go away. Rewarded ads
       // are opt-in and stay available to Pro members, so claiming a blanket
