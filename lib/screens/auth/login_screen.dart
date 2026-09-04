@@ -101,6 +101,21 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      // A failed profile read is the one exception we must NOT wave through.
+      // The branch below exists for the case where Firebase Auth succeeded and
+      // only some later step complained — letting the user in is right there.
+      // But ProfileReadException means sign-in stopped precisely because it
+      // could not tell whether this account already exists, so Home would load
+      // with no profile and the "choose a username" prompt could fire at an
+      // account that already has one. Retrying is the honest answer.
+      if (e is ProfileReadException) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage =
+              "Couldn't load your profile. Check your connection and try again.";
+        });
+        return;
+      }
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
         setState(() => _isLoading = false);

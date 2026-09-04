@@ -3401,6 +3401,13 @@ exports.weeklyDigestEmailJob = onSchedule(
 
     let sentCount = 0;
 
+    // Stats-query failures are counted here and reported once at the end of the
+    // job. A missing composite index makes every count() below fail, which would
+    // otherwise be invisible: the digest still sends, just reporting zero
+    // activity for everyone. Aggregating avoids one log line per room per user.
+    let statsQueryFailures = 0;
+    let firstStatsError = null;
+
     // Process users in sequential batches to avoid OOM / rate-limiting
     const BATCH_SIZE = 20;
     for (let i = 0; i < usersSnap.docs.length; i += BATCH_SIZE) {
@@ -3450,9 +3457,17 @@ exports.weeklyDigestEmailJob = onSchedule(
                   .count()
                   .get();
                 messagesSent += msgCountSnap.data().count || 0;
-              } catch (_) { }
+              } catch (error) {
+                // Needs a composite index on messages (senderId, timestamp).
+                // Without it this throws for every room and messagesSent stays 0.
+                statsQueryFailures++;
+                if (!firstStatsError) firstStatsError = error;
+              }
             }
-          } catch (_) { }
+          } catch (error) {
+            statsQueryFailures++;
+            if (!firstStatsError) firstStatsError = error;
+          }
 
           const gupPointsEarned = Math.max(0, (userData.gupPoints || 0) - (userData.lastWeekPoints || 0));
 
@@ -3478,6 +3493,14 @@ exports.weeklyDigestEmailJob = onSchedule(
         }),
       );
       sentCount += results.filter((r) => r.status === "fulfilled" && r.value).length;
+    }
+
+    if (statsQueryFailures > 0) {
+      console.error(
+        `weeklyDigestEmailJob: ${statsQueryFailures} stats queries failed, so those digests ` +
+        "under-reported activity. Check for a missing composite index. First error:",
+        (firstStatsError && firstStatsError.message) || firstStatsError,
+      );
     }
 
     console.log(`weeklyDigestEmailJob: sent ${sentCount} weekly digest emails.`);

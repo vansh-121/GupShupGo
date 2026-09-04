@@ -2324,7 +2324,7 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Report a problem'),
+                      const Text('Report Issue'),
                     ],
                   ),
                 ),
