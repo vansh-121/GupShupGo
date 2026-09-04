@@ -37,6 +37,7 @@ import 'package:video_chat_app/services/sync_service.dart';import 'package:video
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
+import 'package:video_chat_app/services/whats_new_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 import 'package:video_chat_app/widgets/screen_share_overlay.dart';
@@ -76,6 +77,11 @@ void main() async {
     Firebase.initializeApp(),
     SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
   ]);
+
+  // Decide which newly shipped features still deserve a "NEW" dot. This has to
+  // happen before the home screen calls `maybeShowWhatsNew`, which writes the
+  // stored-version key that distinguishes a first install from an update.
+  WhatsNewService.bootstrap();
 
   // ── Firebase Crashlytics — capture all unhandled errors ────────────────
   // Enable collection on non-debug builds; disable in debug so local errors

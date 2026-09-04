@@ -45,6 +45,7 @@ import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/export_format_sheet.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
 import 'package:video_chat_app/widgets/reply_quote_card.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -2296,7 +2297,11 @@ class _ChatScreenState extends State<ChatScreen> {
               tooltip: 'Video Call',
             ),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
+              icon: const NewFeatureDot(
+                anchor: NewFeatureAnchor.chatOverflow,
+                offset: NewFeatureDot.narrowGlyph,
+                child: Icon(Icons.more_vert),
+              ),
               onSelected: _onMenuItemSelected,
               itemBuilder: (BuildContext context) {
                 return [
@@ -2308,12 +2313,23 @@ class _ChatScreenState extends State<ChatScreen> {
                       value: 'search',
                       child: Text('Search', style: GoogleFonts.poppins())),
                   PopupMenuItem(
-                      value: 'chat theme',
-                      child: Text('Chat theme', style: GoogleFonts.poppins())),
+                    value: 'chat theme',
+                    child: Row(
+                      children: [
+                        Text('Chat theme', style: GoogleFonts.poppins()),
+                        const NewFeatureChip(featureId: NewFeature.chatThemes),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
-                      value: 'export chat',
-                      child:
-                          Text('Export chat', style: GoogleFonts.poppins())),
+                    value: 'export chat',
+                    child: Row(
+                      children: [
+                        Text('Export chat', style: GoogleFonts.poppins()),
+                        const NewFeatureChip(featureId: NewFeature.chatExport),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
                       value: 'mute notifications',
                       child: Text(
@@ -3097,6 +3113,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => _isSearchMode = true);
         break;
       case 'chat theme':
+        // Visiting is what clears the badge — merely opening this menu does not.
+        WhatsNewService.instance.markSeen(NewFeature.chatThemes);
         ChatThemeSheet.show(
           context,
           chatRoomId: _chatRoomId,
@@ -3104,6 +3122,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
         break;
       case 'export chat':
+        WhatsNewService.instance.markSeen(NewFeature.chatExport);
         _exportChat();
         break;
       case 'mute notifications':

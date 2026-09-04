@@ -47,6 +47,7 @@ import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
 import 'package:video_chat_app/widgets/feature_coach_marks.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
 import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -2228,13 +2229,24 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
+            // The dot is placed inside each branch rather than around the pair,
+            // because the two hosts need different tucks: an avatar fills its
+            // box, while `more_vert` is a narrow column of dots the badge would
+            // otherwise sit on top of.
             icon: (_currentUser?.photoUrl?.isNotEmpty ?? false)
-                ? CircleAvatar(
-                    radius: 16,
-                    backgroundImage: NetworkImage(_currentUser!.photoUrl!),
-                    backgroundColor: c.primaryLt,
+                ? NewFeatureDot(
+                    anchor: NewFeatureAnchor.homeOverflow,
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundImage: NetworkImage(_currentUser!.photoUrl!),
+                      backgroundColor: c.primaryLt,
+                    ),
                   )
-                : const Icon(Icons.more_vert),
+                : const NewFeatureDot(
+                    anchor: NewFeatureAnchor.homeOverflow,
+                    offset: NewFeatureDot.narrowGlyph,
+                    child: Icon(Icons.more_vert),
+                  ),
             onSelected: (value) async {
               if (value == 'profile') {
                 if (_currentUser != null) {
@@ -2286,6 +2298,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
                       const Text('Settings'),
+                      const NewFeatureChip(featureId: NewFeature.chatThemes),
                     ],
                   ),
                 ),

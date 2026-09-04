@@ -7,6 +7,7 @@ import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
@@ -601,6 +602,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── 3. Appearance Card (Full Width) ─────────────────────────────────
           _buildStitchCard(
             title: 'Appearance',
+            newAnchor: NewFeatureAnchor.settingsAppearance,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -641,6 +643,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchTile(
                 icon: Icons.palette_outlined,
                 title: 'Chat theme',
+                badge: const NewFeatureChip(featureId: NewFeature.chatThemes),
                 trailingText: context
                     .watch<ChatThemeProvider>()
                     .resolve(
@@ -649,7 +652,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           context.watch<SubscriptionProvider>().isProUnlocked,
                     )
                     .name,
-                onTap: () => ChatThemeSheet.show(context),
+                onTap: () {
+                  WhatsNewService.instance.markSeen(NewFeature.chatThemes);
+                  ChatThemeSheet.show(context);
+                },
               ),
             ],
           ),
@@ -749,6 +755,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String title,
     required List<Widget> children,
     EdgeInsetsGeometry? padding,
+    String? newAnchor,
   }) {
     final c = AppThemeColors.of(context);
     return Container(
@@ -762,14 +769,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: c.textHigh,
+          // A dot on the heading, so a new control inside a card that sits below
+          // the fold still announces itself while the user is scrolling past.
+          if (newAnchor != null)
+            NewFeatureDot(
+              anchor: newAnchor,
+              offset: NewFeatureDot.besideText,
+              child: Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                ),
+              ),
+            )
+          else
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.textHigh,
+              ),
             ),
-          ),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -783,6 +806,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String? trailingText,
     VoidCallback? onTap,
     bool compact = false,
+    Widget? badge,
   }) {
     final c = AppThemeColors.of(context);
     return InkWell(
@@ -794,16 +818,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Icon(icon, color: c.textMid, size: 22),
             const SizedBox(width: 12),
+            // The title and its badge share one Expanded slot so tiles without a
+            // badge lay out exactly as they did before, and a badge never steals
+            // width from the trailing value.
             Expanded(
-              child: Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: compact ? 13.5 : 15,
-                  fontWeight: FontWeight.w500,
-                  color: c.textHigh,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        fontSize: compact ? 13.5 : 15,
+                        fontWeight: FontWeight.w500,
+                        color: c.textHigh,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (badge != null) badge,
+                ],
               ),
             ),
             if (trailingText != null) ...[
