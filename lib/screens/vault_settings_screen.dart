@@ -1,5 +1,5 @@
 // VaultSettingsScreen — single screen that surfaces every vault control:
-//   • What the vault stores (transparency for the user).
+//   • About the vault — what it is and what it holds, in plain language.
 //   • Auto-delete window (rolling retention).
 //   • Change PIN.
 //   • Unlock with fingerprint (opt in / out on this device).
@@ -363,9 +363,13 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
                             ? 'On for this device'
                             : 'Skip typing your PIN on this device',
                         onTap: _settings == null ? null : _toggleFingerprint,
+                        // No colour overrides here: the app's switchTheme
+                        // already paints a white thumb on a primary track.
+                        // Forcing the thumb to primary made it the same colour
+                        // as its own track, so "on" rendered as a plain purple
+                        // pill with no thumb to see.
                         trailing: Switch(
                           value: _bioEnabled,
-                          activeThumbColor: c.primary,
                           onChanged: _settings == null
                               ? null
                               : (_) => _toggleFingerprint(),
@@ -414,7 +418,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
         Row(children: [
           Icon(Icons.shield_outlined, color: c.primary, size: 22),
           const SizedBox(width: 8),
-          Text('What the vault stores',
+          Text('About the vault',
               style: TextStyle(
                   color: c.textHigh,
                   fontSize: 15,
@@ -422,22 +426,19 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
         ]),
         const SizedBox(height: 10),
         Text(
-          'The vault holds an end-to-end-encrypted copy of your message '
-          'history so it can survive a reinstall. Every entry is encrypted '
-          'on this device with a key derived from your PIN (Argon2id → '
-          'AES-256-GCM). Firebase never sees your PIN, your key, or any '
-          'plaintext.',
+          'A private backup of your chat history, locked with your PIN. It '
+          'brings your messages back when you reinstall the app or switch to '
+          'a new phone. Only your PIN can open it — nobody else can read '
+          'what is inside, not even us.',
           style: TextStyle(color: c.textMid, fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 10),
-        _bullet(c, 'Decrypted text and metadata of your messages'),
-        _bullet(c, 'Text statuses you can read'),
-        _bullet(c, 'AES content keys for status media (the media blobs '
-            'themselves live in Storage, also encrypted)'),
+        _bullet(c, 'Your messages'),
+        _bullet(c, 'Statuses you can see'),
         const SizedBox(height: 10),
         Text(
-          'The vault does NOT store your call history, contacts, photos in '
-          'chat, or anyone else\'s messages — only yours.',
+          'Never kept here: your call history, contacts, photos shared in '
+          'chats, or anyone else\'s private messages.',
           style: TextStyle(color: c.textLow, fontSize: 12, height: 1.4),
         ),
       ]),

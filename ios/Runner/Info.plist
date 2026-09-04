@@ -57,5 +57,16 @@
 	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>GupShupGo needs camera access to scan profile QR codes and for video calls.</string>
+	<!-- AdMob. GADApplicationIdentifier is not optional: with google_mobile_ads
+	     linked, the SDK raises at launch if this key is absent or malformed, so
+	     the iOS build would crash on start even though ads are Android-first.
+	     This is the app ID (…~2552239193), not an ad unit ID. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-8214980075451384~2552239193</string>
+	<!-- Shown in Apple's App Tracking Transparency prompt. Required before the
+	     ads SDK may read the IDFA; without ATT consent, iOS ads serve
+	     non-personalised. -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>GupShupGo uses this to show you more relevant ads. Your messages are end-to-end encrypted and are never used for advertising.</string>
 </dict>
 </plist>

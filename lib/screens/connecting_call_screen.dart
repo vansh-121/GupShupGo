@@ -5,6 +5,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// A lightweight pre-call screen that shows a "connecting" animation while the
 /// signaling document and FCM push are set up. Once the async work finishes it
@@ -295,7 +296,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
                       radius: 80,
                       backgroundColor: Colors.white12,
                       backgroundImage: widget.calleePhotoUrl != null
-                          ? NetworkImage(widget.calleePhotoUrl!)
+                          ? avatarImage(widget.calleePhotoUrl!, radius: 80)
                           : null,
                       child: widget.calleePhotoUrl == null
                           ? const Icon(Icons.person,

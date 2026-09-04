@@ -12,6 +12,7 @@ import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 
 /// Shows one person's public profile.
@@ -185,9 +186,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         children: [
           CircleAvatar(
             radius: 56,
-            backgroundImage: NetworkImage(
+            backgroundImage: avatarImage(
               user.photoUrl ??
                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=6C5CE7&color=fff&size=256',
+              radius: 56,
             ),
             backgroundColor: c.primaryLt,
           ),

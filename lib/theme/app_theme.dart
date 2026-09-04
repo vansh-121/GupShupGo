@@ -88,6 +88,16 @@ class AppThemeColors {
     return AppThemeColors._(brightness == Brightness.dark);
   }
 
+  /// Palette for an explicit brightness, independent of the surrounding theme.
+  ///
+  /// For surfaces that deliberately fix their own light/dark appearance rather
+  /// than following the app setting — the media-status preview, which is drawn
+  /// over the user's photo on a permanently dark chrome. Chat-theme presets used
+  /// this too, until each of them gained a light and a dark face and started
+  /// following the app instead (see [ChatTheme]).
+  factory AppThemeColors.forBrightness(Brightness brightness) =>
+      AppThemeColors._(brightness == Brightness.dark);
+
   Color get primary => isDark ? AppColorsDark.primary : AppColors.primary;
   Color get primaryDk => isDark ? AppColorsDark.primaryDk : AppColors.primaryDk;
   Color get primaryLt => isDark ? AppColorsDark.primaryLt : AppColors.primaryLt;

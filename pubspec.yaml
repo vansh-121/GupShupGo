@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.6+52
+version: 1.1.7+53
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
@@ -108,6 +108,13 @@ dependencies:
   # .fvmrc in this project — see .fvm/ and .fvmrc).
   in_app_purchase: ^3.3.0
 
+  # Google Mobile Ads (AdMob) — banner + rewarded, gated by Remote Config.
+  # 9.x needs Dart >=3.10 / Flutter >=3.38.1, satisfied by the 3.38.10 pinned
+  # in .fvmrc. It pulls the webview_flutter family, but none of those packages
+  # depend on `web`, so the `web ^1.0.0` vs firebase_core 2.x conflict that
+  # pinned drift to 2.18.x does not apply here.
+  google_mobile_ads: ^9.1.0
+
   # Media picker & video player
   image_picker: ^1.0.7
   url_launcher: ^6.2.1
@@ -159,6 +166,36 @@ dependencies:
   # overrides in android/app/build.gradle, not from mobile_scanner itself.
   # Bumping would mean reworking lib/screens/qr_scanner_screen.dart for no gain.
   mobile_scanner: 5.2.3
+
+  # OS share sheet, used by chat export (lib/services/chat_export_service.dart).
+  #
+  # Pinned to the 10.x line, NOT the latest. 11.x replaced the static
+  # `Share.shareXFiles(...)` API with `SharePlus.instance.share(ShareParams(...))`
+  # and raised its Dart SDK floor; 10.x is the newest line that resolves against
+  # this project's other constraints without dragging anything else along. The
+  # one side effect it does have is transitive: share_plus_platform_interface
+  # pins `mime: ^1.0.4`, which holds `mime` at 1.0.6 instead of 2.0.0. Nothing in
+  # lib/ imports `mime` directly, so that is invisible here.
+  share_plus: ^10.0.0
+
+  # PDF generation for chat export (lib/services/chat_pdf_builder.dart).
+  #
+  # `pdf` alone, deliberately without its companion `printing` package. Printing
+  # only adds a native print dialog and a runtime font downloader; the share
+  # sheet already reaches every printer through Android's own print service, and
+  # a downloader is the wrong dependency for a feature that has to work on a
+  # plane. Skipping it keeps this a pure-Dart addition with no new platform
+  # channel and nothing to register per platform.
+  #
+  # It does pull `image` and `archive` transitively. Neither collides with the
+  # `web ^1.0.0` constraint that pins drift below 2.19.2 here.
+  pdf: ^3.11.1
+
+  # `@immutable` / `@visibleForTesting` on the chat-export renderer. Already in
+  # the tree transitively via flutter_test; declared because lib/ imports it
+  # directly, which is what `depend_on_referenced_packages` asks for. Version
+  # pinned by the Flutter SDK, so the constraint is a formality.
+  meta: ^1.15.0
 
 dev_dependencies:
   flutter_test:

@@ -46,16 +46,27 @@ class UserService {
     }
   }
 
+  /// Reads a user, letting a failed read fail.
+  ///
+  /// [getUserById] answers `null` both for "no such user" and for "the read
+  /// blew up", which is fine for UI that just wants to render nothing. It is not
+  /// fine for sign-in: a caller that reads absence as "new account" builds a
+  /// fresh profile and writes it over the real one. Anything deciding whether an
+  /// account already exists must use this and handle the throw.
+  Future<UserModel?> fetchUserById(String userId) async {
+    final doc =
+        await _firestore.collection(_usersCollection).doc(userId).get();
+    if (!doc.exists) return null;
+    return withFreshPresence(UserModel.fromFirestore(doc));
+  }
+
   // Get user by ID
+  //
+  // Swallows read errors and reports them as `null`. See [fetchUserById] for
+  // the variant that distinguishes a missing user from a failed read.
   Future<UserModel?> getUserById(String userId) async {
     try {
-      DocumentSnapshot doc =
-          await _firestore.collection(_usersCollection).doc(userId).get();
-
-      if (doc.exists) {
-        return withFreshPresence(UserModel.fromFirestore(doc));
-      }
-      return null;
+      return await fetchUserById(userId);
     } catch (e) {
       print('Error getting user: $e');
       return null;

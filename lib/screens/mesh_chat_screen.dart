@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/message_model.dart';
+import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
@@ -128,7 +129,26 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
 
   Future<void> _startVoiceRecording() async {
     HapticFeedback.mediumImpact();
-    await _voiceRecorder.startRecording();
+    // Same cap as an online chat — a mesh voice note is the same feature over a
+    // different transport, and leaving it uncapped would make the limit trivially
+    // bypassable by turning off Wi-Fi. Read before the await: `startRecording`
+    // awaits a permission prompt.
+    final cap = context.read<SubscriptionProvider>().maxVoiceDurationSec;
+    await _voiceRecorder.startRecording(
+      maxDurationSec: cap,
+      onLimitReached: cap == null
+          ? null
+          : () {
+              _stopVoiceRecording();
+              if (mounted) {
+                _showError(
+                  'Voice messages are limited to '
+                  '${VoiceRecorderService.formatDuration(Duration(seconds: cap))}'
+                  ' — sent what you recorded.',
+                );
+              }
+            },
+    );
     if (mounted) setState(() {});
   }
 

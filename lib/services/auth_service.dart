@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show VoidCallback;
+import 'package:flutter/foundation.dart' show VoidCallback, visibleForTesting;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
@@ -21,6 +21,24 @@ import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 
+/// Thrown when sign-in could not read the profile that may already exist for a
+/// uid.
+///
+/// Sign-in fails on this rather than carrying on, because carrying on means
+/// treating a real account as new and overwriting it. A failed sign-in is
+/// recoverable by tapping the button again; an overwritten profile is not.
+class ProfileReadException implements Exception {
+  ProfileReadException(this.userId, this.cause);
+
+  final String userId;
+  final Object? cause;
+
+  @override
+  String toString() =>
+      'ProfileReadException: could not read profile for $userId '
+      "— refusing to overwrite it with a new one. Cause: $cause";
+}
+
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final UserService _userService = UserService();
@@ -28,6 +46,68 @@ class AuthService {
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final DeviceSessionService _deviceSession = DeviceSessionService();
   final DeviceIdentityService _deviceIdentity = DeviceIdentityService();
+
+  // ── Existing-profile lookup ───────────────────────────────────────────────
+  //
+  // Every sign-in path asks the same question — "does this uid already have a
+  // profile?" — and the answer decides between updating the existing model and
+  // building a fresh one. Getting that wrong in the "fresh" direction is
+  // destructive: the fresh model has no handle, no points, no badges, no about,
+  // and writing it lands those absences on a real account.
+  //
+  // The read is most fragile exactly where it matters most. On a reinstall it
+  // happens milliseconds after the ID token is minted, against a cold Firestore
+  // channel with no local persistence behind it, and Firestore's rules context
+  // can briefly not have the token yet — which surfaces as `permission-denied`,
+  // not as an empty document.
+
+  /// Decides whether [userId] already has a profile, retrying a failed read.
+  ///
+  /// Returns null **only** when the document genuinely does not exist. If the
+  /// read keeps failing this throws [ProfileReadException], because the only
+  /// other option is to guess "new account" and overwrite a real one.
+  ///
+  /// Split from [_loadExistingProfile] and injected rather than hard-wired so
+  /// the policy — retry, refresh the token between attempts, and throw rather
+  /// than return null — is testable without a Firestore or an auth session.
+  @visibleForTesting
+  static Future<UserModel?> resolveExistingProfile({
+    required String userId,
+    required Future<UserModel?> Function() read,
+    Future<void> Function()? refreshToken,
+    Future<void> Function(Duration)? delay,
+    int attempts = 3,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await read();
+      } catch (e) {
+        lastError = e;
+        if (attempt == attempts - 1) break;
+        // A stale rules context is the likeliest cause, and a forced token
+        // refresh is what clears it. Failing to refresh is not itself fatal —
+        // the next read attempt may still succeed.
+        try {
+          await refreshToken?.call();
+        } catch (_) {}
+        final wait = Duration(milliseconds: 200 * (attempt + 1));
+        await (delay?.call(wait) ?? Future<void>.delayed(wait));
+      }
+    }
+    throw ProfileReadException(userId, lastError);
+  }
+
+  /// [resolveExistingProfile] bound to Firestore and the live auth session.
+  Future<UserModel?> _loadExistingProfile(String userId, {User? authUser}) {
+    return resolveExistingProfile(
+      userId: userId,
+      read: () => _userService.fetchUserById(userId),
+      refreshToken: () async {
+        await authUser?.getIdToken(true);
+      },
+    );
+  }
 
   /// E2EE: ensures the local Signal stores are initialised and a key bundle
   /// is published to Firestore for this user/device. Safe to call repeatedly
@@ -236,8 +316,12 @@ class AuthService {
         String userId = userCredential.user!.uid;
         String? phoneNumber = userCredential.user!.phoneNumber;
 
-        // Check if user already exists
-        UserModel? existingUser = await _userService.getUserById(userId);
+        // Check if user already exists. Throws rather than guessing "new" if
+        // the read fails, so a transient failure can never overwrite a profile.
+        UserModel? existingUser = await _loadExistingProfile(
+          userId,
+          authUser: userCredential.user,
+        );
 
         UserModel user;
         if (existingUser != null) {
@@ -383,19 +467,14 @@ class AuthService {
           } catch (_) {}
           await Future.delayed(const Duration(milliseconds: 150));
 
-          UserModel? existingUser;
-          for (int attempt = 0; attempt < 3; attempt++) {
-            try {
-              existingUser = await _userService.getUserById(userId);
-              break;
-            } catch (e) {
-              if (attempt == 2) break; // Fallback to creating new user if fetch fails
-              try {
-                await userCredential.user!.getIdToken(true);
-              } catch (_) {}
-              await Future.delayed(Duration(milliseconds: 200 * (attempt + 1)));
-            }
-          }
+          // This loop used to live here inline, and could not work: it only
+          // retried inside `catch`, while the lookup it called swallowed every
+          // error and returned null. So it broke out on the first attempt every
+          // time and a failed read went straight to "create a new user".
+          final UserModel? existingUser = await _loadExistingProfile(
+            userId,
+            authUser: userCredential.user,
+          );
 
           UserModel user;
           if (existingUser != null) {
@@ -577,8 +656,12 @@ class AuthService {
           String userId = userCredential.user!.uid;
           print('Signed in with user ID: $userId');
 
-          // Check if user exists in Firestore
-          UserModel? existingUser = await _userService.getUserById(userId);
+          // Check if user exists in Firestore. Throws rather than guessing
+          // "new" if the read fails — see [_loadExistingProfile].
+          UserModel? existingUser = await _loadExistingProfile(
+            userId,
+            authUser: userCredential.user,
+          );
 
           UserModel user;
           if (existingUser != null) {
@@ -648,7 +731,10 @@ class AuthService {
         await currentUser.linkWithCredential(credential);
 
     final String userId = userCredential.user!.uid;
-    UserModel? existingUser = await _userService.getUserById(userId);
+    UserModel? existingUser = await _loadExistingProfile(
+      userId,
+      authUser: userCredential.user,
+    );
     UserModel user;
     if (existingUser != null) {
       user = existingUser.copyWith(
@@ -687,7 +773,10 @@ class AuthService {
         await currentUser.linkWithCredential(emailCredential);
 
     final String userId = userCredential.user!.uid;
-    UserModel? existingUser = await _userService.getUserById(userId);
+    UserModel? existingUser = await _loadExistingProfile(
+      userId,
+      authUser: userCredential.user,
+    );
     UserModel user;
     if (existingUser != null) {
       user = existingUser.copyWith(

@@ -117,6 +117,32 @@ class UserModel {
   /// alone, and a new account gets both within seconds from
   /// `PresenceService.setupPresence`. Absence reads as `isOnline: false` in
   /// [fromMap], the correct default.
+  ///
+  /// Gamification fields are omitted for the third time over the same reasoning,
+  /// and they are the ones that actually bit. `gupPoints`, `badges`,
+  /// `challengeProgress`, `completedChallenges`, `reactionsGiven`,
+  /// `nightMessages` and `longestStreak` are owned by `GamificationService`
+  /// (which moves points with `FieldValue.increment`) and by the Cloud
+  /// Functions that award them. Nothing reaches them through here legitimately,
+  /// and two ways of reaching them illegitimately both lose data: a profile save
+  /// writes back whatever totals its model was *read* with, silently rolling
+  /// back anything earned since, and a sign-in that built a fresh model writes
+  /// `0` / `[]` over the real history. Note that the null-drop below cannot
+  /// catch either case — `0` and `[]` are not null — so these have to be named.
+  ///
+  /// Finally, every remaining null is dropped, which is the general form of the
+  /// same rule. `SetOptions(merge: true)` only protects keys that are *absent*
+  /// from the payload — a key present with a null value overwrites whatever was
+  /// stored. So a model that simply doesn't know a field's value used to erase
+  /// it: when a sign-in couldn't read the existing profile it built a fresh
+  /// model and this map carried `username: null` over a real account, wiping the
+  /// handle.
+  ///
+  /// Dropping nulls costs nothing, because null never means "clear" anywhere in
+  /// this class: [copyWith] resolves every field as `x ?? this.x`, so a null
+  /// argument already means "leave it alone". Callers that genuinely clear a
+  /// field write an empty string (profile save sends `about: ''`), which is not
+  /// null and still goes through.
   Map<String, dynamic> toWritableMap() {
     final map = toMap();
     map.remove('isDiscoverable');
@@ -127,8 +153,25 @@ class UserModel {
     map.remove('subscriptionProductId');
     map.remove('subscriptionVerifiedAt');
     map.remove('subscriptionPurchaseToken');
+    for (final field in gamificationFields) {
+      map.remove(field);
+    }
+    map.removeWhere((_, value) => value == null);
     return map;
   }
+
+  /// Fields owned by `GamificationService` and the award Cloud Functions, never
+  /// by a client profile write. Named here so [toWritableMap] and its test refer
+  /// to one list instead of two that can drift.
+  static const Set<String> gamificationFields = {
+    'gupPoints',
+    'badges',
+    'challengeProgress',
+    'completedChallenges',
+    'reactionsGiven',
+    'nightMessages',
+    'longestStreak',
+  };
 
   // Create UserModel from Firestore document
   factory UserModel.fromMap(Map<String, dynamic> map, String documentId) {

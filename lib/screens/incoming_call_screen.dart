@@ -4,6 +4,7 @@ import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// Full-screen incoming call UI shown when the app is in the foreground.
 ///
@@ -234,7 +235,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                       backgroundImage:
                           widget.callerPhotoUrl != null &&
                                   widget.callerPhotoUrl!.isNotEmpty
-                              ? NetworkImage(widget.callerPhotoUrl!)
+                              ? avatarImage(widget.callerPhotoUrl!, radius: 65)
                               : null,
                       child: widget.callerPhotoUrl == null ||
                               widget.callerPhotoUrl!.isEmpty

@@ -15,8 +15,10 @@ import 'package:video_chat_app/services/gamification_service.dart';
 import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/ads/watch_ad_for_points_card.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class GupArcadeScreen extends StatefulWidget {
   final String currentUserId;
@@ -138,7 +140,10 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                         chatService: _chatService,
                         chatCacheService: _chatCacheService,
                       ),
-                      _ChallengesTab(user: user),
+                      _ChallengesTab(
+                        user: user,
+                        currentUserId: widget.currentUserId,
+                      ),
                       _LeaderboardTab(
                         currentUserId: widget.currentUserId,
                       ),
@@ -217,7 +222,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                       child: CircleAvatar(
                         radius: 13,
                         backgroundImage: user.photoUrl != null
-                            ? NetworkImage(user.photoUrl!)
+                            ? avatarImage(user.photoUrl!, radius: 13)
                             : null,
                         backgroundColor: c.primaryLt,
                         child: user.photoUrl == null
@@ -579,6 +584,11 @@ class _OverviewTab extends StatelessWidget {
         _buildQuickStats(c),
         const SizedBox(height: 20),
 
+        // Earn points by watching an ad. Hides itself entirely when ads are off,
+        // unconsented, or the daily allowance is spent — so it never advertises
+        // a reward it can't pay.
+        WatchAdForPointsCard(userId: currentUserId),
+
         // Active Bonds
         _buildStreaksSection(c),
         const SizedBox(height: 20),
@@ -748,7 +758,7 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundImage: avatarImage(avatarUrl, radius: 22),
                     backgroundColor: c.primaryLt,
                   ),
                   Positioned(
@@ -812,7 +822,7 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundImage: avatarImage(avatarUrl, radius: 20),
                     backgroundColor: c.primaryLt,
                   ),
                   Positioned(
@@ -1204,8 +1214,9 @@ class _OverviewTab extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 class _ChallengesTab extends StatefulWidget {
   final UserModel user;
+  final String currentUserId;
 
-  const _ChallengesTab({required this.user});
+  const _ChallengesTab({required this.user, required this.currentUserId});
 
   @override
   State<_ChallengesTab> createState() => _ChallengesTabState();
@@ -1417,6 +1428,13 @@ class _ChallengesTabState extends State<_ChallengesTab> {
             ),
           );
         }),
+
+        // Last, under the challenges rather than above them: every card above
+        // this is a way to earn points by using the app, and the ad is the
+        // fallback for someone who has read them all and wants points now. It
+        // hides itself when rewarded ads are off or the daily cap is spent.
+        const SizedBox(height: 4),
+        WatchAdForPointsCard(userId: widget.currentUserId),
       ],
     );
   }
@@ -1515,9 +1533,10 @@ class _LeaderboardTab extends StatelessWidget {
                           ),
                           CircleAvatar(
                             radius: 18,
-                            backgroundImage: NetworkImage(
+                            backgroundImage: avatarImage(
                               u.photoUrl ??
                                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(u.name)}&background=6C5CE7&color=fff&size=128',
+                              radius: 18,
                             ),
                             backgroundColor: c.primaryLt,
                           ),
@@ -1667,9 +1686,10 @@ class _LeaderboardTab extends StatelessWidget {
                 const SizedBox(height: 6),
                 CircleAvatar(
                   radius: isFirst ? 26 : 20,
-                  backgroundImage: NetworkImage(
+                  backgroundImage: avatarImage(
                     u.photoUrl ??
                         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(u.name)}&background=6C5CE7&color=fff&size=128',
+                    radius: isFirst ? 26 : 20,
                   ),
                   backgroundColor: c.primaryLt,
                 ),

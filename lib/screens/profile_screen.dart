@@ -16,6 +16,7 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -164,7 +165,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   CircleAvatar(
                     radius: 60,
-                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundImage: avatarImage(avatarUrl, radius: 60),
                     backgroundColor: c.surfaceAlt,
                     child: _isUploadingPhoto
                         ? const CircularProgressIndicator(color: Colors.white)

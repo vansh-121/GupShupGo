@@ -3,12 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
+import 'package:video_chat_app/widgets/report_problem_dialog.dart';
+import 'package:video_chat_app/widgets/whats_new_dialog.dart'
+    show kCurrentVersion, showWhatsNewDialog;
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/vault_settings_screen.dart';
+import 'package:video_chat_app/services/ads/ad_consent_service.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
@@ -20,6 +27,7 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -76,6 +84,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  /// Reopens Google's privacy options form so the user can change or withdraw
+  /// ad consent. The form is UMP's, not ours — it is the only UI allowed to
+  /// record that choice, and it writes the result to the device itself, so there
+  /// is nothing for this screen to save afterwards.
+  Future<void> _openAdPreferences() async {
+    final shown = await AdConsentService.instance.showPrivacyOptionsForm();
+    if (!mounted) return;
+    if (!shown) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Couldn't open ad preferences. Check your connection and try again.",
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+        ),
+      );
+      return;
+    }
+    // The requirement status can flip once the choice is recorded, which decides
+    // whether this row keeps existing.
+    setState(() {});
   }
 
   Future<void> _signOut() async {
@@ -180,105 +211,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Report a problem ─────────────────────────────────────────────────────
-  Future<void> _reportProblem() async {
-    final subjectController = TextEditingController();
-    final bodyController = TextEditingController();
-
-    final submitted = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Report a Problem'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: subjectController,
-                decoration: InputDecoration(
-                  hintText: 'Brief summary',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bodyController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  hintText: 'Describe the problem...',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Send')),
-        ],
-      ),
-    );
-
-    if (submitted != true) return;
-
-    final subject = subjectController.text.trim().isNotEmpty
-        ? subjectController.text.trim()
-        : 'Bug Report';
-    final body = bodyController.text.trim().isNotEmpty
-        ? bodyController.text.trim()
-        : 'No details provided';
-
-    // Show a loading indicator while submitting
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    try {
-      await FirebaseFirestore.instance.collection('problem_reports').add({
-        'userId': _user.id,
-        'userName': _user.name,
-        'userEmail': _user.email ?? '',
-        'subject': subject,
-        'body': body,
-        'platform': Theme.of(context).platform.name,
-        'createdAt': FieldValue.serverTimestamp(),
-        'emailSent': false,
-      });
-
-      if (mounted) {
-        Navigator.pop(context); // dismiss loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Report submitted — thanks for your feedback!'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // dismiss loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to submit report: $e')),
-        );
-      }
-    }
-  }
+  // The form itself lives in ReportProblemDialog, because the home overflow
+  // menu offers the same action and a second copy would drift.
+  Future<void> _reportProblem() =>
+      ReportProblemDialog.show(context, user: _user);
 
   // ── Help Center ──────────────────────────────────────────────────────────
   void _showHelpCenter() {
@@ -455,7 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 CircleAvatar(
                   radius: 44,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundImage: avatarImage(avatarUrl, radius: 44),
                   backgroundColor: c.surfaceAlt,
                 ),
                 const SizedBox(height: 12),
@@ -555,6 +491,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: _settings.showReadReceipts,
                 onChanged: (v) => setState(() => _settings.showReadReceipts = v),
               ),
+              // UMP requires a permanent way to revisit an ad-consent choice
+              // wherever privacy options apply — so this is a legal obligation in
+              // the EEA/UK, not a convenience. Hidden elsewhere, because UMP
+              // reports no privacy options and the form would be empty.
+              if (AdConsentService.instance.privacyOptionsRequired) ...[
+                _buildStitchDivider(),
+                _buildStitchTile(
+                  icon: Icons.ads_click_rounded,
+                  title: 'Ad preferences',
+                  trailingText: 'Manage',
+                  onTap: _openAdPreferences,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 16),
@@ -562,6 +511,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── 3. Appearance Card (Full Width) ─────────────────────────────────
           _buildStitchCard(
             title: 'Appearance',
+            newAnchor: NewFeatureAnchor.settingsAppearance,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -593,6 +543,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 6),
+              _buildStitchDivider(),
+              // Global default chat theme. Opens the same sheet the chat
+              // overflow menu does, in default mode (`chatRoomId: null`) — a
+              // per-chat pick made from inside a conversation still wins over
+              // whatever is set here.
+              _buildStitchTile(
+                icon: Icons.palette_outlined,
+                title: 'Chat theme',
+                badge: const NewFeatureChip(featureId: NewFeature.chatThemes),
+                trailingText: context
+                    .watch<ChatThemeProvider>()
+                    .resolve(
+                      null,
+                      unlocked:
+                          context.watch<SubscriptionProvider>().isProUnlocked,
+                    )
+                    .name,
+                onTap: () {
+                  WhatsNewService.instance.markSeen(NewFeature.chatThemes);
+                  ChatThemeSheet.show(context);
+                },
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -608,7 +581,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _buildStitchDivider(),
               _buildStitchTile(
-                icon: Icons.description_outlined,
+                icon: Icons.bug_report_outlined,
                 title: 'Report a problem',
                 onTap: _reportProblem,
               ),
@@ -639,15 +612,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.star_rate_rounded,
-                title: 'Leave a review',
+                title: 'Rate us',
                 onTap: () => ReviewPromptService.instance
                     .openStoreListing(context: context),
               ),
               _buildStitchDivider(),
               _buildStitchTile(
+                icon: Icons.auto_awesome_rounded,
+                title: "What's New",
+                onTap: () => showWhatsNewDialog(context),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
                 icon: Icons.info_outline_rounded,
                 title: 'App info',
-                trailingText: 'v1.1.3',
+                // From the changelog's constant, so the number here cannot drift
+                // away from the version the What's New dialog announces.
+                trailingText: 'v$kCurrentVersion',
                 onTap: _showAboutDialog,
               ),
             ],
@@ -691,6 +672,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String title,
     required List<Widget> children,
     EdgeInsetsGeometry? padding,
+    String? newAnchor,
   }) {
     final c = AppThemeColors.of(context);
     return Container(
@@ -704,14 +686,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: c.textHigh,
+          // A dot on the heading, so a new control inside a card that sits below
+          // the fold still announces itself while the user is scrolling past.
+          if (newAnchor != null)
+            NewFeatureDot(
+              anchor: newAnchor,
+              offset: NewFeatureDot.besideText,
+              child: Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                ),
+              ),
+            )
+          else
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.textHigh,
+              ),
             ),
-          ),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -725,6 +723,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String? trailingText,
     VoidCallback? onTap,
     bool compact = false,
+    Widget? badge,
   }) {
     final c = AppThemeColors.of(context);
     return InkWell(
@@ -736,16 +735,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Icon(icon, color: c.textMid, size: 22),
             const SizedBox(width: 12),
+            // The title and its badge share one Expanded slot so tiles without a
+            // badge lay out exactly as they did before, and a badge never steals
+            // width from the trailing value.
             Expanded(
-              child: Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: compact ? 13.5 : 15,
-                  fontWeight: FontWeight.w500,
-                  color: c.textHigh,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        fontSize: compact ? 13.5 : 15,
+                        fontWeight: FontWeight.w500,
+                        color: c.textHigh,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (badge != null) badge,
+                ],
               ),
             ),
             if (trailingText != null) ...[
@@ -1105,9 +1114,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundImage: NetworkImage(
+              backgroundImage: avatarImage(
                 peerUser.photoUrl ??
                     'https://ui-avatars.com/api/?name=${Uri.encodeComponent(peerUser.name)}&background=4CAF50&color=fff&size=128',
+                radius: 18,
               ),
               backgroundColor: c.surfaceAlt,
             ),
@@ -1243,8 +1253,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               else
                 ...blockedUsers.map((user) => ListTile(
                       leading: CircleAvatar(
-                        backgroundImage: NetworkImage(user.photoUrl ??
-                            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
+                        backgroundImage: avatarImage(
+                            user.photoUrl ??
+                                'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                            radius: 20),
                         backgroundColor: c.surfaceAlt,
                       ),
                       title: Text(user.name),
@@ -1291,7 +1303,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.1.3',
+      applicationVersion: kCurrentVersion,
       applicationLegalese: '© 2026 GupShupGo',
     );
   }
@@ -1481,7 +1493,8 @@ class _SafetyNumberContactPickerState
                                 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128';
                             return ListTile(
                               leading: CircleAvatar(
-                                backgroundImage: NetworkImage(avatar),
+                                backgroundImage:
+                                    avatarImage(avatar, radius: 20),
                                 backgroundColor: c.surfaceAlt,
                               ),
                               title: Text(

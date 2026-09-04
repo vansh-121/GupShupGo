@@ -7,7 +7,9 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "test:rules": "firebase emulators:exec --only firestore --project gsg-rules-test \"mocha --timeout 20000 test/*.test.js\""
+    "test": "npm run test:unit && npm run test:rules",
+    "test:unit": "mocha test/*.unit.test.js",
+    "test:rules": "firebase emulators:exec --only firestore --project gsg-rules-test \"mocha --timeout 20000 test/*_rules.test.js\""
   },
   "engines": {
     "node": "22"

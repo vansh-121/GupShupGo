@@ -40,10 +40,15 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/widgets/ads/ad_banner.dart';
+import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
+import 'package:video_chat_app/widgets/ads/post_call_interstitial.dart';
 import 'package:video_chat_app/widgets/vault_pin_custody_dialog.dart';
 import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
 import 'package:video_chat_app/widgets/feature_coach_marks.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
+import 'package:video_chat_app/widgets/report_problem_dialog.dart';
 import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -53,6 +58,7 @@ import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -75,6 +81,13 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
+
+  // Load budgets for the two native ad cards, owned here rather than by the
+  // cards. Both live in lists whose indices shift when content arrives — a new
+  // moment, a new call log — which rebuilds the card and would otherwise reset
+  // its own attempt counter each time. See [NativeAdBudget].
+  final NativeAdBudget _momentsAdBudget = NativeAdBudget();
+  final NativeAdBudget _callsAdBudget = NativeAdBudget();
 
   // ignore: unused_field
   List<UserModel> _recentContacts = [];
@@ -892,7 +905,7 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundImage: avatarImage(contact.avatarUrl, radius: 28),
                   backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
@@ -1316,6 +1329,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Warms the Flutter image cache with contact avatars so profile pictures
   /// render instantly when scrolling through the chat list.
+  ///
+  /// The provider here must match the one the chat tiles actually paint with
+  /// (`avatarImage(..., radius: 28)` in _buildChatTile). ResizeImage folds the
+  /// target width into its cache key, so precaching a bare NetworkImage would
+  /// warm an entry no tile ever reads — and leave both the full-size and the
+  /// resized bitmap resident.
   void _precacheChatAvatars(List<ChatRoom> chatRooms, BuildContext context) {
     final userIds = <String>{};
     for (final room in chatRooms) {
@@ -1327,7 +1346,7 @@ class _HomeScreenState extends State<HomeScreen>
       final cached = _chatCacheService.getCachedUser(uid);
       if (cached?.photoUrl != null && cached!.photoUrl!.isNotEmpty) {
         unawaited(precacheImage(
-          NetworkImage(cached.photoUrl!),
+          avatarImage(cached.photoUrl!, radius: 28),
           context,
           onError: (_, __) {}, // Silently ignore broken URLs
         ));
@@ -1451,7 +1470,7 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundImage: avatarImage(contact.avatarUrl, radius: 28),
                   backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
@@ -1670,6 +1689,15 @@ class _HomeScreenState extends State<HomeScreen>
             if (otherStatuses.isNotEmpty)
               ...otherStatuses.map((status) => _buildStatusTile(status)),
 
+            // Under the moments, not above them: the user came here to see who
+            // posted, and the tab is short enough that the bottom of the list is
+            // still on screen. Skipped entirely when there are no moments, where
+            // the card would otherwise be the only thing in the tab — an ad as
+            // empty state is exactly the impression AdMob's placement guidance
+            // is written against.
+            if (otherStatuses.isNotEmpty)
+              NativeAdCard(placement: 'moments', budget: _momentsAdBudget),
+
             // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
               Padding(
@@ -1742,7 +1770,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             child: CircleAvatar(
               radius: 26,
-              backgroundImage: NetworkImage(avatarUrl),
+              backgroundImage: avatarImage(avatarUrl, radius: 26),
               backgroundColor: c.primaryLt,
             ),
           ),
@@ -1829,7 +1857,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             child: CircleAvatar(
               radius: 26,
-              backgroundImage: NetworkImage(avatarUrl),
+              backgroundImage: avatarImage(avatarUrl, radius: 26),
               backgroundColor: c.primaryLt,
             ),
           ),
@@ -1976,9 +2004,24 @@ class _HomeScreenState extends State<HomeScreen>
         }
 
         final callLogs = snapshot.data!;
+
+        // A single card at a fixed slot, three logs down. Skipped entirely on
+        // short histories: with three or fewer calls the ad would be a
+        // substantial fraction of the tab, which is the "more ad than content"
+        // shape AdMob's placement guidance calls out.
+        const adSlot = 3;
+        final showAd = callLogs.length > adSlot;
+
         return ListView.builder(
-          itemCount: callLogs.length,
-          itemBuilder: (context, index) {
+          itemCount: callLogs.length + (showAd ? 1 : 0),
+          itemBuilder: (context, rawIndex) {
+            if (showAd && rawIndex == adSlot) {
+              return NativeAdCard(placement: 'calls', budget: _callsAdBudget);
+            }
+            // Everything after the slot is shifted by the card that took its
+            // place in the list, so unmap the index before touching callLogs.
+            final index =
+                (showAd && rawIndex > adSlot) ? rawIndex - 1 : rawIndex;
             final log = callLogs[index];
 
             // Get the other person's information
@@ -2028,9 +2071,10 @@ class _HomeScreenState extends State<HomeScreen>
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: CircleAvatar(
                 radius: 28,
-                backgroundImage: NetworkImage(
+                backgroundImage: avatarImage(
                   otherPersonPhotoUrl ??
                       'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=6C5CE7&color=fff&size=128',
+                  radius: 28,
                 ),
                 backgroundColor: c.primaryLt,
               ),
@@ -2194,13 +2238,25 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
+            // The dot is placed inside each branch rather than around the pair,
+            // because the two hosts need different tucks: an avatar fills its
+            // box, while `more_vert` is a narrow column of dots the badge would
+            // otherwise sit on top of.
             icon: (_currentUser?.photoUrl?.isNotEmpty ?? false)
-                ? CircleAvatar(
-                    radius: 16,
-                    backgroundImage: NetworkImage(_currentUser!.photoUrl!),
-                    backgroundColor: c.primaryLt,
+                ? NewFeatureDot(
+                    anchor: NewFeatureAnchor.homeOverflow,
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundImage:
+                          avatarImage(_currentUser!.photoUrl!, radius: 16),
+                      backgroundColor: c.primaryLt,
+                    ),
                   )
-                : const Icon(Icons.more_vert),
+                : const NewFeatureDot(
+                    anchor: NewFeatureAnchor.homeOverflow,
+                    offset: NewFeatureDot.narrowGlyph,
+                    child: Icon(Icons.more_vert),
+                  ),
             onSelected: (value) async {
               if (value == 'profile') {
                 if (_currentUser != null) {
@@ -2222,12 +2278,17 @@ class _HomeScreenState extends State<HomeScreen>
                   );
                   if (updated != null) setState(() => _currentUser = updated);
                 }
-              } else if (value == 'review') {
+              } else if (value == 'rate') {
                 // openStoreListing, not the review sheet: Play's sheet is
                 // quota-limited and may show nothing at all, which is the wrong
                 // thing to hang a tap on.
                 unawaited(ReviewPromptService.instance
                     .openStoreListing(context: context));
+              } else if (value == 'report') {
+                unawaited(
+                    ReportProblemDialog.show(context, user: _currentUser));
+              } else if (value == 'whatsnew') {
+                unawaited(showWhatsNewDialog(context));
               } else if (value == 'logout') {
                 _signOut();
               }
@@ -2252,16 +2313,38 @@ class _HomeScreenState extends State<HomeScreen>
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
                       const Text('Settings'),
+                      const NewFeatureChip(featureId: NewFeature.chatThemes),
                     ],
                   ),
                 ),
                 PopupMenuItem(
-                  value: 'review',
+                  value: 'rate',
                   child: Row(
                     children: [
                       Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Leave a review'),
+                      const Text('Rate us'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'report',
+                  child: Row(
+                    children: [
+                      Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Report Issue'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'whatsnew',
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      const Text("What's New"),
                     ],
                   ),
                 ),
@@ -2282,6 +2365,11 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       body: Column(
         children: [
+          // Renders nothing. Lives here because the home screen is where a call
+          // returns to, and an interstitial has to be fired from the screen it
+          // will appear over — never from the call screen itself. See
+          // [InterstitialAdService.armPostCall].
+          const PostCallInterstitial(),
           if (!_hasFirebaseSession) _buildReverifyBanner(),
           // ── Anonymous Match Banner — only on Gup tab ──────────────
           if (_tabController.index == 0 && _currentUserId != null)
@@ -2310,7 +2398,33 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNavDock(),
+      // The banner lives in the bottomNavigationBar slot, NOT in the body
+      // Column. Scaffold measures this slot when positioning the FAB, so
+      // _buildFABRow() automatically floats above the ad. In the body it would
+      // sit *under* the FAB — an obscured ad (a policy problem) and an
+      // accidental-click risk right where the compose button is.
+      //
+      // Dock first, banner *below* it: the strip under the nav is the least
+      // valuable space on the screen, so the ad costs the chat list nothing.
+      //
+      // The bottom inset is taken here rather than inside _buildBottomNavDock,
+      // because whichever child renders last is the one that has to clear the
+      // system gesture bar — and the banner is absent whenever a call is live,
+      // Pro is active, or the fill comes back empty. ColoredBox carries the
+      // dock's surface colour through that inset so it does not read as a gap.
+      bottomNavigationBar: ColoredBox(
+        color: c.surface,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBottomNavDock(),
+              const AdBanner(),
+            ],
+          ),
+        ),
+      ),
       floatingActionButton: _buildFABRow(),
     );
   }
@@ -2327,94 +2441,93 @@ class _HomeScreenState extends State<HomeScreen>
           top: BorderSide(color: c.border, width: 1.0),
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                index: 0,
-                label: 'Gup',
-                icon: Icons.chat_bubble_rounded,
-                selectedIcon: Icons.chat_bubble_rounded,
-                isSelected: selectedIndex == 0,
-                onTap: () => setState(() => _tabController.animateTo(0)),
-              ),
-              _buildNavItem(
-                index: 1,
-                label: 'Moments',
-                icon: Icons.camera_alt_outlined,
-                selectedIcon: Icons.camera_alt_rounded,
-                isSelected: selectedIndex == 1,
-                onTap: () => setState(() => _tabController.animateTo(1)),
-              ),
-              _buildNavItem(
-                index: 2,
-                label: 'Calls',
-                icon: Icons.call_outlined,
-                selectedIcon: Icons.call_rounded,
-                isSelected: selectedIndex == 2,
-                onTap: () => setState(() => _tabController.animateTo(2)),
-              ),
-              // Profile Tab (Avatar on far right)
-              GestureDetector(
-                onTap: () async {
-                  if (_currentUser != null) {
-                    final updated = await Navigator.push<UserModel>(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              ProfileScreen(currentUser: _currentUser!)),
-                    );
-                    if (updated != null) setState(() => _currentUser = updated);
-                  }
-                },
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: c.border,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Builder(
-                        builder: (_) {
-                          final hasPhoto =
-                              _currentUser?.photoUrl?.isNotEmpty ?? false;
-                          return CircleAvatar(
-                            radius: 13,
-                            backgroundImage: hasPhoto
-                                ? NetworkImage(_currentUser!.photoUrl!)
-                                : null,
-                            backgroundColor: c.primaryLt,
-                            child: hasPhoto
-                                ? null
-                                : Icon(Icons.person,
-                                    size: 14, color: c.textMid),
-                          );
-                        },
+      // No SafeArea here: the bottom inset is taken once around the whole
+      // bottomNavigationBar column, because the banner sits *below* this dock
+      // and is the child that has to clear the system gesture bar.
+      child: SizedBox(
+        height: 60,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(
+              index: 0,
+              label: 'Gup',
+              icon: Icons.chat_bubble_rounded,
+              selectedIcon: Icons.chat_bubble_rounded,
+              isSelected: selectedIndex == 0,
+              onTap: () => setState(() => _tabController.animateTo(0)),
+            ),
+            _buildNavItem(
+              index: 1,
+              label: 'Moments',
+              icon: Icons.camera_alt_outlined,
+              selectedIcon: Icons.camera_alt_rounded,
+              isSelected: selectedIndex == 1,
+              onTap: () => setState(() => _tabController.animateTo(1)),
+            ),
+            _buildNavItem(
+              index: 2,
+              label: 'Calls',
+              icon: Icons.call_outlined,
+              selectedIcon: Icons.call_rounded,
+              isSelected: selectedIndex == 2,
+              onTap: () => setState(() => _tabController.animateTo(2)),
+            ),
+            // Profile Tab (Avatar on far right)
+            GestureDetector(
+              onTap: () async {
+                if (_currentUser != null) {
+                  final updated = await Navigator.push<UserModel>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            ProfileScreen(currentUser: _currentUser!)),
+                  );
+                  if (updated != null) setState(() => _currentUser = updated);
+                }
+              },
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: c.border,
+                        width: 1.5,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Profile',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: c.textMid,
-                      ),
+                    child: Builder(
+                      builder: (_) {
+                        final hasPhoto =
+                            _currentUser?.photoUrl?.isNotEmpty ?? false;
+                        return CircleAvatar(
+                          radius: 13,
+                          backgroundImage: hasPhoto
+                              ? avatarImage(_currentUser!.photoUrl!, radius: 13)
+                              : null,
+                          backgroundColor: c.primaryLt,
+                          child: hasPhoto
+                              ? null
+                              : Icon(Icons.person, size: 14, color: c.textMid),
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Profile',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: c.textMid,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

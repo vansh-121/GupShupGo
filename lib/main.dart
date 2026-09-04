@@ -19,8 +19,10 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/crypto/crypto_worker.dart';
@@ -35,6 +37,7 @@ import 'package:video_chat_app/services/sync_service.dart';import 'package:video
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
+import 'package:video_chat_app/services/whats_new_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/mesh_notification_listener.dart';
 import 'package:video_chat_app/widgets/screen_share_overlay.dart';
@@ -74,6 +77,11 @@ void main() async {
     Firebase.initializeApp(),
     SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
   ]);
+
+  // Decide which newly shipped features still deserve a "NEW" dot. This has to
+  // happen before the home screen calls `maybeShowWhatsNew`, which writes the
+  // stored-version key that distinguishes a first install from an update.
+  WhatsNewService.bootstrap();
 
   // ── Firebase Crashlytics — capture all unhandled errors ────────────────
   // Enable collection on non-debug builds; disable in debug so local errors
@@ -116,6 +124,14 @@ void main() async {
 
   // ── Feature Flags (Remote Config) — fire-and-forget ───────────────────
   unawaited(FeatureFlagService.instance.init().catchError((_) {}));
+
+  // ── AdMob — fire-and-forget ───────────────────────────────────────────
+  // Awaits the flags internally (init() above is idempotent) and does nothing
+  // at all while `ads_enabled` is false: no SDK, no consent form, no network.
+  // The UMP consent form is deliberately NOT shown from here — AdsService defers
+  // it to the first ad-bearing screen, so a new user isn't met by a consent
+  // dialog before they have even signed in.
+  unawaited(AdsService.instance.init().catchError((_) {}));
 
   // ── E2EE: hydrate Signal stores BEFORE runApp() so that by the time
   //         any screen tries to encrypt or decrypt, the service is ready.
@@ -177,6 +193,7 @@ void main() async {
             ChangeNotifierProvider(create: (_) => CallStateNotifier()),
             ChangeNotifierProvider(create: (_) => StatusProvider()),
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider(create: (_) => ChatThemeProvider()),
             ChangeNotifierProvider(create: (_) => SubscriptionProvider()..init()),
             ChangeNotifierProvider.value(value: connectivityProvider),
             ChangeNotifierProvider(

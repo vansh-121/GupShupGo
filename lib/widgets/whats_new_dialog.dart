@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.6';
+const String kCurrentVersion = '1.1.7';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -30,13 +30,23 @@ Future<void> maybeShowWhatsNew(BuildContext context) async {
   // Existing user who updated from an older version → show what changed.
   if (!context.mounted) return;
 
-  await showDialog<void>(
+  await showWhatsNewDialog(context);
+
+  await sharedPrefs.setString(_prefKey, kCurrentVersion);
+}
+
+/// Opens the changelog on demand, with none of [maybeShowWhatsNew]'s gating.
+///
+/// The automatic dialog fires once per update and is easy to dismiss without
+/// reading; this is the way back to it — the overflow menu's "What's New" item.
+/// It deliberately does not touch the stored version, so asking to see the
+/// changelog never suppresses the next update's automatic showing.
+Future<void> showWhatsNewDialog(BuildContext context) {
+  return showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => const _WhatsNewDialog(),
   );
-
-  await sharedPrefs.setString(_prefKey, kCurrentVersion);
 }
 
 class _WhatsNewDialog extends StatelessWidget {
@@ -183,23 +193,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.link_rounded,
-    'Smart Links & Previews',
-    'Tap links directly in chats. Shared links now show rich preview cards with titles, descriptions, and thumbnails.',
+    Icons.palette_rounded,
+    'Chat Themes',
+    'Give every conversation its own look — backgrounds and bubble colours that follow light and dark mode.',
   ),
   _Feature(
-    Icons.reply_rounded,
-    'Swipe to Reply',
-    'Swipe any message to quote it in your reply. Tap any quoted message to quickly jump back to the original.',
+    Icons.picture_as_pdf_rounded,
+    'Export Chats as PDF',
+    'Save a chat as a beautifully laid out PDF you can print or keep — real bubbles, your photos included, not just a text file.',
   ),
   _Feature(
-    Icons.fingerprint_rounded,
-    'Custom Vault PIN & Biometrics',
-    'Set your own secret PIN to protect your private vault, with optional fingerprint unlock for quick access.',
+    Icons.mic_rounded,
+    'Longer Voice Messages',
+    'Voice notes now run up to 2 minutes, so you have plenty of time to say what you need.',
   ),
   _Feature(
-    Icons.person_rounded,
-    'Rich Profile Details',
-    'Tap any contact to see their online status, points, badges, and joined date at a glance.',
+    Icons.hd_rounded,
+    'Higher-Quality Media',
+    'Send sharper photos and status videos up to 90 seconds, so nothing important gets compressed away.',
   ),
 ];

@@ -12,17 +12,31 @@ import 'dart:typed_data';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:video_chat_app/models/subscription_model.dart';
 
 class ImageCompressor {
   /// Compress [src]. Returns the original file on any failure so callers
   /// never get stuck just because compression hit a codec edge case.
-  static Future<File> compressForStatus(File src) =>
-      _compress(src, maxEdge: 1600, quality: 75);
+  ///
+  /// [pro] selects the GupShupGo Pro quality tier. The free path is byte-for-byte
+  /// what shipped before the tier existed, so no existing user sees a
+  /// regression — Pro adds headroom rather than free losing any. The numbers
+  /// themselves live in [PlanLimits] so plan behaviour stays in one place.
+  static Future<File> compressForStatus(File src, {bool pro = false}) =>
+      _compress(
+        src,
+        maxEdge: PlanLimits.statusImageMaxEdge(pro),
+        quality: PlanLimits.statusImageQuality(pro),
+      );
 
   /// Slightly smaller for chat — phones display chat thumbnails at a
   /// fraction of status-viewer size, so quality 70 is plenty.
-  static Future<File> compressForChat(File src) =>
-      _compress(src, maxEdge: 1280, quality: 70);
+  static Future<File> compressForChat(File src, {bool pro = false}) =>
+      _compress(
+        src,
+        maxEdge: PlanLimits.chatImageMaxEdge(pro),
+        quality: PlanLimits.chatImageQuality(pro),
+      );
 
   static Future<File> _compress(File src,
       {required int maxEdge, required int quality}) async {

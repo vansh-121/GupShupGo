@@ -16,6 +16,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   iris_method_channel
   local_auth_windows
   permission_handler_windows
+  share_plus
   sqlite3_flutter_libs
   url_launcher_windows
 )

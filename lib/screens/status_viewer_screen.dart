@@ -7,6 +7,7 @@ import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class StatusViewerScreen extends StatefulWidget {
   final StatusModel statusModel;
@@ -383,9 +384,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                           contentPadding: EdgeInsets.zero,
                           leading: CircleAvatar(
                             radius: 20,
-                            backgroundImage: NetworkImage(
+                            backgroundImage: avatarImage(
                               user.photoUrl ??
                                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                              radius: 20,
                             ),
                           ),
                           title: Text(user.name),
@@ -666,9 +668,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       children: [
                         CircleAvatar(
                           radius: 18,
-                          backgroundImage: NetworkImage(
+                          backgroundImage: avatarImage(
                             widget.statusModel.userPhotoUrl ??
                                 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(widget.statusModel.userName)}&background=4CAF50&color=fff&size=128',
+                            radius: 18,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -969,6 +972,15 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   Widget _buildImageStatus(StatusItem item) {
+    // Status media is an unmodified camera frame — commonly 3000×4000, which
+    // decodes to ~48 MB and is the kind of manual full-size decode Play
+    // Console's bitmap check flags. fit: BoxFit.contain never paints wider
+    // than the screen, so capping the decode at the physical screen width
+    // costs nothing visually and bounds this at ~10 MB on a 1080p device.
+    final decodeWidth = (MediaQuery.of(context).size.width *
+            MediaQuery.of(context).devicePixelRatio)
+        .round();
+
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -977,6 +989,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           ? Image.network(
               item.imageUrl!,
               fit: BoxFit.contain,
+              cacheWidth: decodeWidth,
               loadingBuilder: (context, child, loadingProgress) {
                 if (loadingProgress == null) return child;
                 return Center(

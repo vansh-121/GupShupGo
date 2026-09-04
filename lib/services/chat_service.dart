@@ -1632,10 +1632,11 @@ class ChatService {
   /// A tombstone (`deletedForEveryone`) is deliberately **not** filtered here:
   /// the "This message was deleted" marker is the whole point of it.
   ///
-  /// Static and `@visibleForTesting` because it is pure, and because the
-  /// `deletedFor` half is easy to get subtly wrong — filtering on the peer's
-  /// deletion instead of your own hides the message for the wrong person.
-  @visibleForTesting
+  /// Static and public because it is pure, because the `deletedFor` half is
+  /// easy to get subtly wrong — filtering on the peer's deletion instead of your
+  /// own hides the message for the wrong person — and because [getMessages] is
+  /// no longer its only caller: `ChatExportService` runs the same filter so a
+  /// transcript can never contain a message the user had already hidden.
   static List<MessageModel> visibleMessages(
     List<MessageModel> messages,
     String currentUserId,
@@ -1645,6 +1646,28 @@ class ChatService {
         .where((m) => !m.isDeletedFor(currentUserId))
         .where((m) => clearedAt == null || m.timestamp.isAfter(clearedAt))
         .toList();
+  }
+
+  /// One-shot read of this user's "clear chat" cutoff for [chatRoomId].
+  ///
+  /// [getMessages] tracks the same value with a live listener, but it keeps it
+  /// inside its stream closure where nothing else can reach it. Callers that
+  /// need the cutoff once — chat export — would otherwise have to duplicate the
+  /// parse and get the per-user keying wrong, silently exporting messages the
+  /// user had already cleared.
+  ///
+  /// Returns `null` when the room has never been cleared by this user, which is
+  /// exactly what [visibleMessages] wants for "no cutoff". Deliberately does
+  /// **not** swallow errors: an offline or rules-denied read that returned
+  /// `null` would export messages the user had cleared, so callers have to treat
+  /// a throw as "don't export".
+  Future<DateTime?> getClearedAt(String chatRoomId, String currentUserId) async {
+    final snap =
+        await _firestore.collection(_chatRoomsCollection).doc(chatRoomId).get();
+    if (!snap.exists) return null;
+    final clearedAtMap = snap.data()?['clearedAt'] as Map<String, dynamic>?;
+    final ts = clearedAtMap?[currentUserId];
+    return ts is Timestamp ? ts.toDate() : null;
   }
 
   Stream<List<MessageModel>> getMessages(

@@ -297,32 +297,44 @@ class _PremiumScreenState extends State<PremiumScreen>
         freeLabel: 'Locked',
         proLabel: 'Full access',
       ),
+      // Chat themes are per-conversation backgrounds and bubble colours, not app
+      // light/dark — that stays free for everyone. The counts are the actual
+      // `ChatThemeCatalog` tiers and are asserted against it in
+      // `test/provider/chat_theme_provider_test.dart`, so moving a preset between
+      // tiers fails the test until this copy is updated too.
       _FeatureItem(
         icon: Icons.palette_rounded,
-        title: 'Exclusive Themes',
-        description: 'Premium dark & color themes',
-        freeLabel: 'Light / Dark',
-        proLabel: '+ AMOLED, Ocean, Sunset, Emerald',
+        title: 'Chat Themes',
+        description: 'Patterned backgrounds & gradient bubbles, per chat',
+        freeLabel: '6 themes',
+        proLabel: 'All 12 + your own photo',
       ),
+      // 2 minutes / unlimited. `PlanLimits.maxVoiceDurationSec` returns null for
+      // Pro and 120 for free — keep these two labels in step with it.
       _FeatureItem(
         icon: Icons.mic_rounded,
         title: 'Longer Voice Messages',
         description: 'Record longer voice notes',
-        freeLabel: '1 minute',
-        proLabel: '5 minutes',
+        freeLabel: '2 minutes',
+        proLabel: 'Unlimited',
       ),
+      // A quality tier, not a byte allowance. The old "10 MB / 50 MB" wording
+      // described a limit the app never enforced — and the Storage rules capped
+      // everyone below 50 MB anyway, so a Pro user's large upload would have
+      // been rejected server-side. What Pro actually buys is higher-resolution
+      // images (2560px / q90 vs 1280-1600px / q70-75) and longer status video.
       _FeatureItem(
         icon: Icons.cloud_upload_rounded,
-        title: 'Larger File Uploads',
-        description: 'Send bigger images and videos',
-        freeLabel: '10 MB',
-        proLabel: '50 MB',
+        title: 'Higher Quality Media',
+        description: 'Sharper photos and longer status videos',
+        freeLabel: 'Standard quality',
+        proLabel: 'High quality + 90s videos',
       ),
       _FeatureItem(
         icon: Icons.local_fire_department_rounded,
         title: 'Bond Restore',
         description: 'Restore broken bonds for free',
-        freeLabel: 'Pay with Gup Points',
+        freeLabel: 'Points or watch an ad',
         proLabel: '1 free restore/week',
       ),
       _FeatureItem(
@@ -335,9 +347,19 @@ class _PremiumScreenState extends State<PremiumScreen>
       _FeatureItem(
         icon: Icons.download_rounded,
         title: 'Chat Export',
-        description: 'Export conversations as text files',
+        description: 'Save a chat as a PDF you can print, or as plain text',
         freeLabel: 'Not available',
-        proLabel: 'Export as TXT',
+        proLabel: 'PDF & TXT export',
+      ),
+      // Worded to promise exactly what Pro does: banners go away. Rewarded ads
+      // are opt-in and stay available to Pro members, so claiming a blanket
+      // "no ads" here would be a promise the app then breaks in the Arcade.
+      _FeatureItem(
+        icon: Icons.block_rounded,
+        title: 'Ad-Free Experience',
+        description: 'No banner ads anywhere in the app',
+        freeLabel: 'Banner ads shown',
+        proLabel: 'No banners (reward ads stay optional)',
       ),
     ];
 

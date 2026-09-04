@@ -29,9 +29,37 @@ service cloud.firestore {
         ]);
       }
 
+      // Rewarded-ad payouts. Only the `admobSsv` function may write these, and
+      // only after Google's signed callback verified — a client that could set
+      // adRestoreCredits itself would make the whole SSV round-trip theatre,
+      // since a free Bond Restore is worth real money.
+      //
+      // adRewardDaily / adRestoreWeekly are the cap counters. They are guarded
+      // for the same reason as the balance: resetting a counter is the same
+      // exploit as raising the balance, one ad at a time.
+      function doesNotTouchAdRewards() {
+        return !request.resource.data.keys().hasAny([
+          'adRestoreCredits',
+          'adRewardDaily',
+          'adRestoreWeekly'
+        ]);
+      }
+
+      function doesNotModifyAdRewards() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'adRestoreCredits',
+          'adRewardDaily',
+          'adRestoreWeekly'
+        ]);
+      }
+
       // Users can only create/update their own profile
-      allow create: if request.auth != null && request.auth.uid == userId && doesNotCreateSubscriptions();
-      allow update: if request.auth != null && request.auth.uid == userId && doesNotModifySubscriptions();
+      allow create: if request.auth != null && request.auth.uid == userId
+        && doesNotCreateSubscriptions()
+        && doesNotTouchAdRewards();
+      allow update: if request.auth != null && request.auth.uid == userId
+        && doesNotModifySubscriptions()
+        && doesNotModifyAdRewards();
       
       // Prevent users from deleting profiles
       allow delete: if false;
@@ -424,6 +452,15 @@ service cloud.firestore {
     // Cloud Functions only. Clients must NEVER read or write here directly —
     // tokens are bearer credentials and the Admin SDK enforces all access.
     match /deviceSessions/{tokenHash} {
+      allow read, write: if false;
+    }
+
+    // ==================== AD REWARDS (SSV ledger) ====================
+    // One doc per AdMob `transaction_id`, written only by the `admobSsv` function
+    // inside the transaction that credits the reward. Its existence IS the replay
+    // guard: a client able to delete a row here could re-claim a reward Google
+    // already paid, so nothing outside the Admin SDK gets any access at all.
+    match /adRewards/{transactionId} {
       allow read, write: if false;
     }
 

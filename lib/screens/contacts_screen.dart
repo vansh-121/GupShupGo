@@ -19,6 +19,7 @@ import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
@@ -1009,9 +1010,10 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundImage: NetworkImage(
+                backgroundImage: avatarImage(
                   user.photoUrl ??
                       'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                  radius: 24,
                 ),
                 backgroundColor: c.primaryLt,
               ),
@@ -1850,9 +1852,10 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
             children: [
               CircleAvatar(
                 radius: 30,
-                backgroundImage: NetworkImage(
+                backgroundImage: avatarImage(
                   user.photoUrl ??
                       'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                  radius: 30,
                 ),
                 backgroundColor: c.primaryLt,
               ),
@@ -2114,9 +2117,10 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: CircleAvatar(
         radius: 24,
-        backgroundImage: NetworkImage(
+        backgroundImage: avatarImage(
           user.photoUrl ??
               'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+          radius: 24,
         ),
         backgroundColor: c.primaryLt,
       ),

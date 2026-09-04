@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -19,6 +20,7 @@ import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/screens/status_viewer_screen.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/chat_export_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
@@ -33,10 +35,17 @@ import 'package:video_chat_app/services/streak/streak_state.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/theme/chat_pattern_painter.dart';
+import 'package:video_chat_app/theme/chat_theme.dart';
+import 'package:video_chat_app/provider/chat_theme_provider.dart';
+import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
+import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/export_format_sheet.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
+import 'package:video_chat_app/widgets/new_feature_badge.dart';
 import 'package:video_chat_app/widgets/reply_quote_card.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -45,6 +54,7 @@ import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class Contact {
   final String id;
@@ -79,6 +89,20 @@ class ChatScreen extends StatefulWidget {
   _ChatScreenState createState() => _ChatScreenState();
 }
 
+/// How much history a conversation needs before it carries a native ad card.
+///
+/// The card is only acceptable in a chat because it lands in *scrollback* — old
+/// messages the user has already read. In a short thread there is no scrollback
+/// to land in, so there is no card.
+const int _kChatAdMinMessages = 25;
+
+/// How many messages sit between the card and the newest message.
+///
+/// The chat list is `reverse: true`, so the newest message is at the bottom next
+/// to the composer and the send button. This gap is what keeps the card out of
+/// reach of a mis-tap while typing.
+const int _kChatAdGapFromComposer = 8;
+
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -98,6 +122,35 @@ class _ChatScreenState extends State<ChatScreen> {
   // ─── Mute state ───────────────────────────────────────────────────
   final SettingsService _settingsService = SettingsService();
   late bool _isMuted;
+
+  // ─── Chat theme ───────────────────────────────────────────────────
+  /// Deterministic room id, used to key this conversation's chat theme.
+  late final String _chatRoomId;
+
+  /// Chat theme in force, re-resolved at the top of every [build].
+  ///
+  /// Cached in a field rather than read from the tree because the bubble
+  /// builders (`_buildMessage`, `_buildTypingBubble`, `_buildDateDivider`, …)
+  /// are called from `State.context` rather than from a builder inside the
+  /// message area.
+  ChatTheme _chatTheme = ChatThemeCatalog.defaultTheme;
+
+  /// Palette the message area is drawn against: always the app's own light/dark
+  /// palette.
+  ///
+  /// It used to be the chat theme's, because a preset fixed one brightness and
+  /// the message list was re-rooted on the matching [AppTheme]. Every preset now
+  /// carries both a light and a dark face (see [ChatTheme]), so the theme follows
+  /// the app instead of overriding it and this is a plain read. Kept as a named
+  /// getter because that agreement is the thing worth stating once at the seven
+  /// call sites that draw bubble content.
+  AppThemeColors get _messageColors => AppThemeColors.of(context);
+
+  // ─── Chat export ──────────────────────────────────────────────────
+  /// True while an export is in flight. The overflow menu stays tappable for the
+  /// whole read — the entire local history plus a Firestore round-trip — so
+  /// without this a double tap runs two exports and opens two share sheets.
+  bool _isExporting = false;
 
   // ── Image picker ─────────────────────────────────────────────────
   final ImagePicker _imagePicker = ImagePicker();
@@ -141,6 +194,23 @@ class _ChatScreenState extends State<ChatScreen> {
   // every message would animate on the first build of the chat screen.
   final Set<String> _seenMessageIds = <String>{};
   bool _didInitialMessageBuild = false;
+
+  /// Id of the message the chat's single native ad card sits above, chosen once
+  /// per chat open.
+  ///
+  /// Anchored to a message rather than to an offset from the end of the list: an
+  /// offset would walk the card up through scrollback every time a message
+  /// arrived, and each move would rebuild it into a fresh ad request. Null until
+  /// the thread is long enough — see [_kChatAdMinMessages].
+  String? _chatAdAnchorId;
+
+  /// Load budget for that card, owned here rather than by the card.
+  ///
+  /// The message list is `reverse: true`, so a new message — or the typing bubble
+  /// blinking on and off — shifts every index and rebuilds the card from scratch.
+  /// Its own counter would reset each time; this one doesn't. See
+  /// [NativeAdBudget].
+  final NativeAdBudget _chatAdBudget = NativeAdBudget();
 
   // ─── Mesh messaging state ─────────────────────────────────────────
   StreamSubscription<MessageModel>? _meshMessageSubscription;
@@ -196,6 +266,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _isContactOnline = widget.contact.isOnline; // seed from passed-in value
     final chatRoomId =
         _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+    _chatRoomId = chatRoomId;
     _isMuted = _settingsService.isChatMuted(chatRoomId);
     _messagesStream = _chatService
         .getMessages(widget.currentUserId, widget.contact.id)
@@ -777,7 +848,8 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundImage: NetworkImage(widget.contact.avatarUrl),
+              backgroundImage:
+                  avatarImage(widget.contact.avatarUrl, radius: 18),
               backgroundColor: c.surfaceAlt,
             ),
             const SizedBox(width: 12),
@@ -1214,7 +1286,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildDateDivider(String date) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Center(
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 14),
@@ -1237,8 +1309,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessage(MessageModel message) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     final isMe = message.senderId == widget.currentUserId;
+    final sentGradient = _chatTheme.sentGradientOf(c);
     final isTombstone = message.deletedForEveryone;
     // A deleted message has nothing left to react to, and its reactions left
     // the document along with its ciphertext. Belt-and-braces: a row written by
@@ -1256,7 +1329,14 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
       decoration: BoxDecoration(
-        color: isMe ? c.sent : c.received,
+        // A preset may carry a diagonal gradient for sent bubbles; `color` and
+        // `gradient` are mutually exclusive in practice (BoxDecoration paints the
+        // gradient and ignores the colour), so only one is set to keep that
+        // explicit rather than relying on the precedence.
+        color: isMe && sentGradient != null
+            ? null
+            : (isMe ? _chatTheme.sentOf(c) : _chatTheme.receivedOf(c)),
+        gradient: isMe ? sentGradient : null,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(18),
           topRight: const Radius.circular(18),
@@ -1626,6 +1706,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (localFilePath != null && File(localFilePath).existsSync()) {
       imageWidget = Image.file(File(localFilePath));
     } else if (imageUrl != null) {
+      // Deliberately NOT downsampled, unlike every other image in this file.
+      // This is the pinch-to-zoom viewer, so the source pixels are the point —
+      // a cacheWidth here would show as mush the moment the user zooms in. The
+      // cost is bounded: one image, on a route that disposes it on pop, rather
+      // than a list holding dozens resident at once.
       imageWidget = Image.network(imageUrl);
     } else {
       return; // nothing to show
@@ -1717,7 +1802,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildStatusReplyPreview(MessageModel message, bool isMe) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     final type = message.statusReplyType;
     final mediaUrl = message.statusReplyMediaUrl;
     final previewText = _statusReplyPreviewText(message);
@@ -1733,6 +1818,11 @@ class _ChatScreenState extends State<ChatScreen> {
           Image.network(
             mediaUrl,
             fit: BoxFit.cover,
+            // Painted into a 46×58 box (see the SizedBox below) but the source
+            // is raw status media — a full camera frame. 174 = 58 logical px at
+            // 3× DPR, which is the axis that has to cover for portrait media;
+            // without it a 3000×4000 photo decodes to ~48 MB per thumbnail.
+            cacheWidth: 174,
             errorBuilder: (_, __, ___) => Container(
               color: c.surfaceAlt,
               child: Icon(Icons.broken_image_rounded, color: c.textLow),
@@ -1877,7 +1967,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessagesList(List<MessageModel> messages) {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     if (messages.isEmpty) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1980,9 +2070,25 @@ class _ChatScreenState extends State<ChatScreen> {
     displayItems.add(const _DisplayItem.banner());
     String? lastDate;
 
+    // Pick the chat's single ad anchor, once, on the first build with enough
+    // history. Counted back from the newest message because `reverse: true` puts
+    // the composer at the bottom — the gap is what keeps the card away from the
+    // send button, where a mis-tap would be an accidental click.
+    if (_chatAdAnchorId == null &&
+        displayMessages.length >= _kChatAdMinMessages) {
+      _chatAdAnchorId =
+          displayMessages[displayMessages.length - _kChatAdGapFromComposer].id;
+    }
+
     for (int i = 0; i < displayMessages.length; i++) {
       final message = displayMessages[i];
       final messageDate = _formatMessageDate(message.timestamp);
+
+      // Above the date divider rather than below it, so the card never reads as
+      // the first thing that happened on a given day.
+      if (message.id == _chatAdAnchorId) {
+        displayItems.add(const _DisplayItem.nativeAd());
+      }
 
       if (lastDate != messageDate) {
         displayItems.add(_DisplayItem.dateDivider(messageDate));
@@ -2021,6 +2127,15 @@ class _ChatScreenState extends State<ChatScreen> {
             return _buildTypingBubble();
           case _DisplayItemType.loadingOlder:
             return _buildLoadingOlderIndicator();
+          case _DisplayItemType.nativeAd:
+            // Self-hiding: renders nothing at all unless native ads are on for
+            // chat, the user isn't Pro, and an ad actually filled. Never styled
+            // as a bubble — see [NativeAdCard].
+            return NativeAdCard(
+              placement: 'chat',
+              inChat: true,
+              budget: _chatAdBudget,
+            );
           case _DisplayItemType.message:
             final bubble = _buildMessage(item.message!);
             // RepaintBoundary isolates each message bubble into its own
@@ -2037,7 +2152,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildLoadingOlderIndicator() {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
@@ -2056,8 +2171,16 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    // Resolve the chat theme once per build and cache it for the bubble
+    // builders. They read `State.context`, which sits *above* the themed area
+    // inserted below, so they cannot pick the palette up from the tree — see
+    // `_messageColors`.
+    _chatTheme = context.watch<ChatThemeProvider>().resolve(
+          _chatRoomId,
+          unlocked: context.watch<SubscriptionProvider>().isProUnlocked,
+        );
     return Scaffold(
-      backgroundColor: c.chatBg,
+      backgroundColor: _chatTheme.backgroundOf(c),
       appBar: AppBar(
         foregroundColor: c.textHigh,
         surfaceTintColor: Colors.transparent,
@@ -2079,7 +2202,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 CircleAvatar(
                   radius: 19,
                   backgroundImage: widget.contact.avatarUrl.isNotEmpty
-                      ? NetworkImage(widget.contact.avatarUrl)
+                      ? avatarImage(widget.contact.avatarUrl, radius: 19)
                       : null,
                   backgroundColor: c.primaryLt,
                   child: widget.contact.avatarUrl.isEmpty
@@ -2186,7 +2309,11 @@ class _ChatScreenState extends State<ChatScreen> {
               tooltip: 'Video Call',
             ),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
+              icon: const NewFeatureDot(
+                anchor: NewFeatureAnchor.chatOverflow,
+                offset: NewFeatureDot.narrowGlyph,
+                child: Icon(Icons.more_vert),
+              ),
               onSelected: _onMenuItemSelected,
               itemBuilder: (BuildContext context) {
                 return [
@@ -2197,6 +2324,24 @@ class _ChatScreenState extends State<ChatScreen> {
                   PopupMenuItem(
                       value: 'search',
                       child: Text('Search', style: GoogleFonts.poppins())),
+                  PopupMenuItem(
+                    value: 'chat theme',
+                    child: Row(
+                      children: [
+                        Text('Chat theme', style: GoogleFonts.poppins()),
+                        const NewFeatureChip(featureId: NewFeature.chatThemes),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'export chat',
+                    child: Row(
+                      children: [
+                        Text('Export chat', style: GoogleFonts.poppins()),
+                        const NewFeatureChip(featureId: NewFeature.chatExport),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
                       value: 'mute notifications',
                       child: Text(
@@ -2320,9 +2465,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   },
                 ),
                 Expanded(
-                  child: StreamBuilder<List<MessageModel>>(
-                    stream: _messagesStream,
-                    builder: (context, snapshot) {
+                  child: _ChatThemedArea(
+                    theme: _chatTheme,
+                    colors: c,
+                    child: StreamBuilder<List<MessageModel>>(
+                      stream: _messagesStream,
+                      builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
                         return Center(
@@ -2383,7 +2531,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       });
 
                       return _buildMessagesList(nonReactionMessages);
-                    },
+                      },
+                    ),
                   ),
                 ),
                 // ── Message input bar (or blocked banner) ───────────
@@ -2714,12 +2863,20 @@ class _ChatScreenState extends State<ChatScreen> {
         // Pulsing red dot
         _buildPulsingDot(c),
         const SizedBox(width: 8),
-        // Duration counter
+        // Duration counter. Capped recordings show `elapsed / cap` so the
+        // auto-stop-and-send at the limit is never a surprise; uncapped ones
+        // (Pro) show a plain stopwatch with nothing to count down to.
         ListenableBuilder(
           listenable: _voiceRecorder,
           builder: (context, _) {
+            final cap = _voiceRecorder.maxDurationSec;
+            final elapsed =
+                VoiceRecorderService.formatDuration(_voiceRecorder.elapsed);
             return Text(
-              VoiceRecorderService.formatDuration(_voiceRecorder.elapsed),
+              cap == null
+                  ? elapsed
+                  : '$elapsed / '
+                      '${VoiceRecorderService.formatDuration(Duration(seconds: cap))}',
               style: GoogleFonts.poppins(
                 color: c.textHigh,
                 fontSize: 15,
@@ -2806,8 +2963,43 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _startVoiceRecording() async {
     if (_isBlocked || _isBlockedByContact) return;
     HapticFeedback.mediumImpact();
-    await _voiceRecorder.startRecording();
+
+    // Read the cap before the await: `_voiceRecorder.startRecording` awaits a
+    // permission prompt, and touching `context` after that is exactly what
+    // `use_build_context_synchronously` warns about.
+    //
+    // `maxVoiceDurationSec` is `null` for Pro — and also for everyone while
+    // `pro_enabled` is off, because capping a feature that is unlimited today
+    // while the upgrade path is hidden would strip a capability with no way to
+    // buy it back. See `SubscriptionProvider.isProUnlocked`.
+    final cap = context.read<SubscriptionProvider>().maxVoiceDurationSec;
+
+    await _voiceRecorder.startRecording(
+      maxDurationSec: cap,
+      onLimitReached: cap == null ? null : () => _onVoiceLimitReached(cap),
+    );
     if (mounted) setState(() {});
+  }
+
+  /// Fired once by the recorder's ticker when a capped recording hits its limit.
+  ///
+  /// Stops **and sends** rather than discarding: the user has just spoken for two
+  /// minutes, and throwing that away to teach them about a limit would be the
+  /// wrong trade. The snackbar explains why the recording ended on its own.
+  void _onVoiceLimitReached(int capSeconds) {
+    HapticFeedback.mediumImpact();
+    _stopVoiceRecording();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Voice messages are limited to '
+          '${VoiceRecorderService.formatDuration(Duration(seconds: capSeconds))}'
+          ' — sent what you recorded.',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   Future<void> _stopVoiceRecording() async {
@@ -2895,14 +3087,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildTypingBubble() {
-    final c = AppThemeColors.of(context);
+    final c = _messageColors;
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(left: 16, bottom: 4, top: 4),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         decoration: BoxDecoration(
-          color: c.received,
+          color: _chatTheme.receivedOf(c),
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(18),
             topRight: Radius.circular(18),
@@ -2931,6 +3123,19 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
       case 'search':
         setState(() => _isSearchMode = true);
+        break;
+      case 'chat theme':
+        // Visiting is what clears the badge — merely opening this menu does not.
+        WhatsNewService.instance.markSeen(NewFeature.chatThemes);
+        ChatThemeSheet.show(
+          context,
+          chatRoomId: _chatRoomId,
+          contactName: widget.contact.name,
+        );
+        break;
+      case 'export chat':
+        WhatsNewService.instance.markSeen(NewFeature.chatExport);
+        _exportChat();
         break;
       case 'mute notifications':
         _toggleMute();
@@ -2974,7 +3179,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 CircleAvatar(
                   radius: 48,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundImage: avatarImage(avatarUrl, radius: 48),
                   backgroundColor: c.primaryLt,
                 ),
                 const SizedBox(height: 16),
@@ -3095,6 +3300,90 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ─── Chat export ───────────────────────────────────────────────────
+  /// Renders this conversation to a file and hands it to the OS share sheet.
+  ///
+  /// The heavy lifting — and the reasoning about why the export is built from the
+  /// local plaintext cache and never from a decrypt pass — lives in
+  /// [ChatExportService]. This method is only the gate, the format choice, the
+  /// progress feedback and the share.
+  ///
+  /// The share sheet is also the print path: Android's own print service appears
+  /// in it for a PDF, so "print this chat" needs no dialog of our own.
+  Future<void> _exportChat() async {
+    if (_isExporting) return;
+    if (!PremiumGate.checkAndPrompt(
+      context,
+      featureName: 'Chat Export',
+      featureIcon: Icons.ios_share_rounded,
+      description: 'Save this conversation as a PDF you can keep, print or '
+          'share — or as a plain-text transcript.',
+    )) {
+      return;
+    }
+
+    final format = await ExportFormatSheet.show(context);
+    if (format == null || !mounted) return;
+
+    // Captured after the sheet closes but before the export await: the messenger
+    // is needed again afterwards, and reaching back through `context` there is
+    // what `use_build_context_synchronously` exists to catch.
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _isExporting = true);
+    messenger.showSnackBar(
+      SnackBar(
+        // A PDF with photos in it takes noticeably longer than writing a few KB
+        // of text, so the two get different waits rather than one that is either
+        // a lie or a flicker.
+        content: Text(
+          format == ExportFormat.pdf
+              ? 'Building your PDF…'
+              : 'Preparing export…',
+        ),
+        duration: Duration(seconds: format == ExportFormat.pdf ? 3 : 1),
+      ),
+    );
+
+    try {
+      final isPdf = format == ExportFormat.pdf;
+      final file = isPdf
+          ? await ChatExportService.exportChatPdf(
+              chatRoomId: _chatRoomId,
+              selfUserId: widget.currentUserId,
+              contactName: widget.contact.name,
+            )
+          : await ChatExportService.exportChat(
+              chatRoomId: _chatRoomId,
+              selfUserId: widget.currentUserId,
+              contactName: widget.contact.name,
+            );
+      if (!mounted) return;
+      if (file == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Nothing to export in this chat yet')),
+        );
+        return;
+      }
+      await Share.shareXFiles(
+        [
+          XFile(
+            file.path,
+            mimeType: isPdf ? 'application/pdf' : 'text/plain',
+          ),
+        ],
+        subject: 'GupShupGo chat with ${widget.contact.name}',
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not export chat: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
     if (_isBlocked || _isBlockedByContact) {
@@ -3104,10 +3393,21 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // Read before the picker await, both for the lint and because the picker's
+    // own re-encode has to know the tier.
+    final proMediaQuality =
+        context.read<SubscriptionProvider>().hasProMediaQuality;
+
     try {
       final XFile? picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 70,
+        // The picker re-encodes at this quality *before* ImageCompressor ever
+        // sees the file, so it is a hard upstream ceiling: leaving it at 70
+        // would make the Pro tier's quality-90 pass re-encode an
+        // already-degraded image, spending bytes for no visible gain. Pro skips
+        // the picker's pass (`null` = no re-encode) so `compressForChat` is the
+        // only place quality is decided. Free keeps 70, exactly as before.
+        imageQuality: proMediaQuality ? null : 70,
       );
       if (picked == null) return;
 
@@ -3149,8 +3449,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
         // Compress before upload — 5 MB → ~250 KB JPEG, cuts upload from
         // 10-20s on mobile data to ~1s with no visible quality loss.
-        final compressed =
-            await ImageCompressor.compressForChat(File(picked.path));
+        //
+        // Pro gets a higher-resolution, higher-quality tier (the free numbers
+        // are unchanged). `isPro` is masked by the `pro_enabled` flag, so with
+        // the flag off everyone keeps today's compression and storage costs
+        // don't move.
+        final compressed = await ImageCompressor.compressForChat(
+          File(picked.path),
+          pro: proMediaQuality,
+        );
         await ref.putFile(compressed);
         final imageUrl = await ref.getDownloadURL();
 
@@ -3581,7 +3888,7 @@ class _ChatScreenState extends State<ChatScreen> {
             radius: 20,
             backgroundColor: c.primaryLt,
             backgroundImage: (user?.photoUrl?.isNotEmpty ?? false)
-                ? NetworkImage(user!.photoUrl!)
+                ? avatarImage(user!.photoUrl!, radius: 20)
                 : null,
             child: (user?.photoUrl?.isNotEmpty ?? false)
                 ? null
@@ -3780,8 +4087,10 @@ class _ChatScreenState extends State<ChatScreen> {
                         backgroundImage: (snapshot.data?.data()
                                     as Map<String, dynamic>?)?['avatarUrl'] !=
                                 null
-                            ? NetworkImage((snapshot.data!.data()
-                                as Map<String, dynamic>)['avatarUrl'])
+                            ? avatarImage(
+                                (snapshot.data!.data()
+                                    as Map<String, dynamic>)['avatarUrl'],
+                                radius: 16)
                             : null,
                         child: (snapshot.data?.data()
                                     as Map<String, dynamic>?)?['avatarUrl'] ==
@@ -3905,7 +4214,14 @@ class _TypingDotsIndicatorState extends State<_TypingDotsIndicator>
 // ListView.builder's itemBuilder callback, saving massive CPU on chats with
 // hundreds of messages.
 
-enum _DisplayItemType { banner, dateDivider, message, typing, loadingOlder }
+enum _DisplayItemType {
+  banner,
+  dateDivider,
+  message,
+  typing,
+  loadingOlder,
+  nativeAd,
+}
 
 class _DisplayItem {
   final _DisplayItemType type;
@@ -3927,9 +4243,71 @@ class _DisplayItem {
   const _DisplayItem.loadingOlder()
       : this._(type: _DisplayItemType.loadingOlder);
 
+  const _DisplayItem.nativeAd() : this._(type: _DisplayItemType.nativeAd);
+
   _DisplayItem.dateDivider(String label)
       : this._(type: _DisplayItemType.dateDivider, dateLabel: label);
 
   _DisplayItem.message(MessageModel msg, {bool animate = false})
       : this._(type: _DisplayItemType.message, message: msg, animate: animate);
+}
+
+/// Paints the chat theme's background — colour or gradient or photo, plus its
+/// pattern — behind the message list.
+///
+/// There is deliberately no [Theme] override here. An earlier version re-rooted
+/// the subtree on `AppTheme.light`/`AppTheme.dark` to match a preset that fixed
+/// its own brightness, which is what kept nested bubble content
+/// ([VoiceMessageBubble], [ReplyQuoteCard], [LinkPreviewCard]) legible on a dark
+/// preset inside a light app. Presets now carry a light *and* a dark face and are
+/// resolved against the app's own palette (see [ChatTheme]), so those widgets are
+/// already looking at the right colours and the chat can no longer disagree with
+/// the mode the user picked for the rest of the app.
+class _ChatThemedArea extends StatelessWidget {
+  const _ChatThemedArea({
+    required this.theme,
+    required this.colors,
+    required this.child,
+  });
+
+  final ChatTheme theme;
+
+  /// The app palette. Selects the theme's face and fills in whatever it leaves
+  /// unset.
+  final AppThemeColors colors;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final decoration = theme.decorationOf(colors);
+
+    Widget content = child;
+
+    // The pattern sits between the background and the message list: above the
+    // gradient or photo, below the bubbles. A photo background gets no pattern —
+    // it has texture of its own, and overlaying motifs on someone's chosen image
+    // is defacing it.
+    if (theme.pattern != ChatPattern.none && !theme.hasImage) {
+      content = Stack(
+        children: [
+          Positioned.fill(
+            child: ChatPatternLayer(
+              pattern: theme.pattern,
+              ink: theme.patternInk(colors),
+            ),
+          ),
+          content,
+        ],
+      );
+    }
+
+    // The Scaffold already paints `theme.backgroundOf(colors)`, so a plain
+    // colour needs no extra layer here.
+    if (decoration != null) {
+      content = DecoratedBox(decoration: decoration, child: content);
+    }
+
+    return content;
+  }
 }

@@ -5,9 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
+import 'package:video_chat_app/services/ads/ad_reward_waiter.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
+import 'package:video_chat_app/services/ads/rewarded_ad_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_api.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/ads/watch_ad_for_points_card.dart';
 
 /// A premium dialog for restoring a broken bond (task 8.2).
 ///
@@ -95,9 +99,17 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
   bool _windowExpired = false;
   bool _isRestoring = false;
 
+  /// A rewarded ad is on screen, or its SSV credit is still in flight.
+  bool _watchingAd = false;
+  bool _awaitingReward = false;
+
   /// Distinct, human-readable rendering of the last refusal, if any.
   String? _errorMessage;
   StreakRestoreStatus? _errorStatus;
+
+  /// Neutral status line for the ad flow — not an error, so it isn't rendered
+  /// in the red error style.
+  String? _adMessage;
 
   // ── Quote-derived getters ────────────────────────────────────────────────
 
@@ -108,12 +120,28 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
   /// Server-verified Pro free perk. Never `SubscriptionService`.
   bool get _canRestoreFree => _quote?.canUseFreePerk ?? false;
 
+  /// A restore already paid for by watching an ad, banked server-side by
+  /// `admobSsv`. Spent only after the Pro perk, which the server enforces.
+  bool get _hasAdCredit => (_quote?.adRestoreCredits ?? 0) > 0;
+
+  /// Whether this restore costs no points, by either route.
+  bool get _isFree => _canRestoreFree || _hasAdCredit;
+
+  /// Whether to offer the ad at all: the server says another credit can be
+  /// earned this week, ads are on and consented, and there is nothing free in
+  /// hand already.
+  bool get _canOfferAd =>
+      !_isFree &&
+      !_windowExpired &&
+      (_quote?.canEarnAdRestore ?? false) &&
+      AdsService.instance.canShowRewarded;
+
   /// Tiered Gup Point cost, straight from the quote.
-  int get _cost => _canRestoreFree ? 0 : (_quote?.cost ?? 0);
+  int get _cost => _isFree ? 0 : (_quote?.cost ?? 0);
 
   /// Local affordability hint only — the server makes the real call.
   bool get _canAfford =>
-      _canRestoreFree || _cost == 0 || widget.userGupPoints >= _cost;
+      _isFree || _cost == 0 || widget.userGupPoints >= _cost;
 
   bool get _clockTrusted => ServerClock.trusted;
 
@@ -123,6 +151,8 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
       _quote != null &&
       !_loadingQuote &&
       !_isRestoring &&
+      !_watchingAd &&
+      !_awaitingReward &&
       !_windowExpired &&
       _canAfford &&
       _errorStatus != StreakRestoreStatus.nothingToRestore &&
@@ -142,10 +172,23 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _updateTimeRemaining();
     });
+
+    // Warm an ad while the quote is in flight, so the "watch an ad" tap is
+    // instant if the quote turns out to offer it. No-op when ads are off,
+    // unconsented, or already loaded.
+    unawaited(RewardedAdService.instance.preload());
+    // The SDK may still be initialising when this dialog opens, which would hide
+    // the offer for the life of the dialog otherwise.
+    AdsService.instance.addListener(_onAdsChanged);
+  }
+
+  void _onAdsChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    AdsService.instance.removeListener(_onAdsChanged);
     _countdownTimer?.cancel();
     _anim.dispose();
     super.dispose();
@@ -221,11 +264,15 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
       _isRestoring = true;
       _errorMessage = null;
       _errorStatus = null;
+      _adMessage = null;
     });
 
     final result = await StreakApi.instance.streakRestore(
       widget.chatRoomId,
-      useFreePerk: _canRestoreFree,
+      // One flag covers both free routes. The server decides which is actually
+      // spent — the Pro perk first, an ad credit only when the perk is gone —
+      // so the client never has to know, and can't get it wrong.
+      useFreePerk: _isFree,
     );
 
     if (!mounted) return;
@@ -256,6 +303,77 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
         _timeRemaining = Duration.zero;
       }
     });
+  }
+
+  /// Watches a rewarded ad to earn one free restore.
+  ///
+  /// Nothing here grants anything. The ad's only product is a signed callback to
+  /// `admobSsv`, which credits `adRestoreCredits`; this method then waits for
+  /// that write and re-fetches the quote so the button re-renders itself as free.
+  Future<void> _watchAdForRestore() async {
+    if (_watchingAd || _awaitingReward || _isRestoring) return;
+
+    final creditsBefore = _quote?.adRestoreCredits ?? 0;
+    setState(() {
+      _watchingAd = true;
+      _errorMessage = null;
+      _errorStatus = null;
+      _adMessage = null;
+    });
+
+    final outcome = await RewardedAdService.instance.show(
+      uid: widget.userId,
+      type: AdRewardType.restore,
+      roomId: widget.chatRoomId,
+    );
+
+    if (!mounted) return;
+
+    if (outcome != RewardedAdOutcome.earned) {
+      setState(() {
+        _watchingAd = false;
+        _adMessage = switch (outcome) {
+          RewardedAdOutcome.dismissedEarly =>
+            'Watch the full ad to earn a free restore.',
+          RewardedAdOutcome.unavailable =>
+            'Free restores aren\'t available right now.',
+          _ => 'Couldn\'t load an ad. Please try again in a moment.',
+        };
+      });
+      return;
+    }
+
+    setState(() {
+      _watchingAd = false;
+      _awaitingReward = true;
+      _adMessage = 'Reward on its way…';
+    });
+
+    final credited = await AdRewardWaiter.awaitCredit(
+      uid: widget.userId,
+      satisfied: (u) => AdRewardWaiter.restoreCredits(u) > creditsBefore,
+    );
+    if (!mounted) return;
+
+    if (!credited) {
+      setState(() {
+        _awaitingReward = false;
+        // Deliberately not phrased as a failure: the callback is almost always
+        // just slow, and the credit is banked on the account rather than on this
+        // dialog, so reopening it later will show it.
+        _adMessage = 'Your reward is taking a moment. Reopen this in a minute.';
+      });
+      return;
+    }
+
+    // Re-quote rather than patching state locally: the fresh quote carries the
+    // new credit, the recomputed cost, and a server-fresh deadline.
+    setState(() {
+      _awaitingReward = false;
+      _adMessage = 'Free restore unlocked!';
+      _loadingQuote = true;
+    });
+    await _loadQuote();
   }
 
   /// One distinct message per refusal the server can return.
@@ -468,7 +586,7 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(_canRestoreFree ? '✨' : '🔥',
+                            Text(_isFree ? '✨' : '🔥',
                                 style: const TextStyle(fontSize: 16)),
                             const SizedBox(width: 6),
                             Text(
@@ -476,7 +594,9 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                                   ? 'Window closed'
                                   : _canRestoreFree
                                       ? 'Restore Free (Pro Perk)'
-                                      : 'Restore for ⚡$_cost points',
+                                      : _hasAdCredit
+                                          ? 'Restore Free (ad reward)'
+                                          : 'Restore for ⚡$_cost points',
                               style: GoogleFonts.poppins(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
@@ -486,6 +606,69 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                         ),
                 ),
               ),
+
+              // Earn the restore instead of paying for it. Offered only when the
+              // server says a credit is still earnable this week — the cap is
+              // one, so this disappears once used rather than teasing an ad that
+              // would pay nothing.
+              if (_canOfferAd) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed:
+                        (_watchingAd || _awaitingReward) ? null : _watchAdForRestore,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      foregroundColor: Colors.orange[400],
+                      side: BorderSide(color: Colors.orange.withValues(alpha: 0.45)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: (_watchingAd || _awaitingReward)
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.orange[400],
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.play_circle_outline_rounded,
+                                  size: 18),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Watch an ad to restore free',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
+
+              // Neutral ad status — "on its way", "watch the full ad". Kept out
+              // of the red error style below: none of these is a failure the
+              // user needs to worry about.
+              if (_adMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _adMessage!,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: c.textMid,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
 
               // Local affordability hint (server still has the final say)
               if (!_loadingQuote &&
@@ -538,6 +721,21 @@ class _StreakRestoreDialogState extends State<StreakRestoreDialog>
                     ),
                   ),
                 ],
+              ],
+
+              // Short on points, with no free route left — the one place in the
+              // dialog where an ad offer is help rather than an interruption.
+              //
+              // Suppressed while [_canOfferAd] holds, because that offer buys a
+              // whole restore and this one buys ⚡50 towards it: showing both
+              // would invite the user to take the worse deal. So this is strictly
+              // the fallback for a week whose ad-restore credit is already spent.
+              if (!_loadingQuote &&
+                  !_canAfford &&
+                  !_canOfferAd &&
+                  !_windowExpired) ...[
+                const SizedBox(height: 12),
+                WatchAdForPointsCard(userId: widget.userId, dense: true),
               ],
 
               if (context.watch<SubscriptionProvider>().isProFeatureVisible &&
