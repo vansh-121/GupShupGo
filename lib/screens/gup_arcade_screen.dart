@@ -18,6 +18,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/ads/watch_ad_for_points_card.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class GupArcadeScreen extends StatefulWidget {
   final String currentUserId;
@@ -221,7 +222,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                       child: CircleAvatar(
                         radius: 13,
                         backgroundImage: user.photoUrl != null
-                            ? NetworkImage(user.photoUrl!)
+                            ? avatarImage(user.photoUrl!, radius: 13)
                             : null,
                         backgroundColor: c.primaryLt,
                         child: user.photoUrl == null
@@ -757,7 +758,7 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundImage: avatarImage(avatarUrl, radius: 22),
                     backgroundColor: c.primaryLt,
                   ),
                   Positioned(
@@ -821,7 +822,7 @@ class _OverviewTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundImage: NetworkImage(avatarUrl),
+                    backgroundImage: avatarImage(avatarUrl, radius: 20),
                     backgroundColor: c.primaryLt,
                   ),
                   Positioned(
@@ -1532,9 +1533,10 @@ class _LeaderboardTab extends StatelessWidget {
                           ),
                           CircleAvatar(
                             radius: 18,
-                            backgroundImage: NetworkImage(
+                            backgroundImage: avatarImage(
                               u.photoUrl ??
                                   'https://ui-avatars.com/api/?name=${Uri.encodeComponent(u.name)}&background=6C5CE7&color=fff&size=128',
+                              radius: 18,
                             ),
                             backgroundColor: c.primaryLt,
                           ),
@@ -1684,9 +1686,10 @@ class _LeaderboardTab extends StatelessWidget {
                 const SizedBox(height: 6),
                 CircleAvatar(
                   radius: isFirst ? 26 : 20,
-                  backgroundImage: NetworkImage(
+                  backgroundImage: avatarImage(
                     u.photoUrl ??
                         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(u.name)}&background=6C5CE7&color=fff&size=128',
+                    radius: isFirst ? 26 : 20,
                   ),
                   backgroundColor: c.primaryLt,
                 ),

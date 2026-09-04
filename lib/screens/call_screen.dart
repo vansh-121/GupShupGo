@@ -17,6 +17,7 @@ import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:video_chat_app/services/pip_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// Talk time a call needs before it earns a post-call interstitial.
 ///
@@ -901,7 +902,7 @@ class _CallScreenState extends State<CallScreen> {
               radius: 75,
               backgroundColor: Colors.white24,
               backgroundImage: _calleePhotoUrl != null
-                  ? NetworkImage(_calleePhotoUrl!)
+                  ? avatarImage(_calleePhotoUrl!, radius: 75)
                   : null,
               child: _calleePhotoUrl == null
                   ? const Icon(Icons.person, size: 75, color: Colors.white70)

@@ -58,6 +58,7 @@ import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -904,7 +905,7 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundImage: avatarImage(contact.avatarUrl, radius: 28),
                   backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
@@ -1328,6 +1329,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Warms the Flutter image cache with contact avatars so profile pictures
   /// render instantly when scrolling through the chat list.
+  ///
+  /// The provider here must match the one the chat tiles actually paint with
+  /// (`avatarImage(..., radius: 28)` in _buildChatTile). ResizeImage folds the
+  /// target width into its cache key, so precaching a bare NetworkImage would
+  /// warm an entry no tile ever reads — and leave both the full-size and the
+  /// resized bitmap resident.
   void _precacheChatAvatars(List<ChatRoom> chatRooms, BuildContext context) {
     final userIds = <String>{};
     for (final room in chatRooms) {
@@ -1339,7 +1346,7 @@ class _HomeScreenState extends State<HomeScreen>
       final cached = _chatCacheService.getCachedUser(uid);
       if (cached?.photoUrl != null && cached!.photoUrl!.isNotEmpty) {
         unawaited(precacheImage(
-          NetworkImage(cached.photoUrl!),
+          avatarImage(cached.photoUrl!, radius: 28),
           context,
           onError: (_, __) {}, // Silently ignore broken URLs
         ));
@@ -1463,7 +1470,7 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundImage: NetworkImage(contact.avatarUrl),
+                  backgroundImage: avatarImage(contact.avatarUrl, radius: 28),
                   backgroundColor: c.primaryLt,
                 ),
                 if (contact.isOnline)
@@ -1763,7 +1770,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             child: CircleAvatar(
               radius: 26,
-              backgroundImage: NetworkImage(avatarUrl),
+              backgroundImage: avatarImage(avatarUrl, radius: 26),
               backgroundColor: c.primaryLt,
             ),
           ),
@@ -1850,7 +1857,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             child: CircleAvatar(
               radius: 26,
-              backgroundImage: NetworkImage(avatarUrl),
+              backgroundImage: avatarImage(avatarUrl, radius: 26),
               backgroundColor: c.primaryLt,
             ),
           ),
@@ -2064,9 +2071,10 @@ class _HomeScreenState extends State<HomeScreen>
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: CircleAvatar(
                 radius: 28,
-                backgroundImage: NetworkImage(
+                backgroundImage: avatarImage(
                   otherPersonPhotoUrl ??
                       'https://ui-avatars.com/api/?name=${Uri.encodeComponent(otherPersonName)}&background=6C5CE7&color=fff&size=128',
+                  radius: 28,
                 ),
                 backgroundColor: c.primaryLt,
               ),
@@ -2239,7 +2247,8 @@ class _HomeScreenState extends State<HomeScreen>
                     anchor: NewFeatureAnchor.homeOverflow,
                     child: CircleAvatar(
                       radius: 16,
-                      backgroundImage: NetworkImage(_currentUser!.photoUrl!),
+                      backgroundImage:
+                          avatarImage(_currentUser!.photoUrl!, radius: 16),
                       backgroundColor: c.primaryLt,
                     ),
                   )
@@ -2496,7 +2505,7 @@ class _HomeScreenState extends State<HomeScreen>
                         return CircleAvatar(
                           radius: 13,
                           backgroundImage: hasPhoto
-                              ? NetworkImage(_currentUser!.photoUrl!)
+                              ? avatarImage(_currentUser!.photoUrl!, radius: 13)
                               : null,
                           backgroundColor: c.primaryLt,
                           child: hasPhoto

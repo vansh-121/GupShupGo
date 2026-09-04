@@ -54,6 +54,7 @@ import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 class Contact {
   final String id;
@@ -847,7 +848,8 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundImage: NetworkImage(widget.contact.avatarUrl),
+              backgroundImage:
+                  avatarImage(widget.contact.avatarUrl, radius: 18),
               backgroundColor: c.surfaceAlt,
             ),
             const SizedBox(width: 12),
@@ -1704,6 +1706,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (localFilePath != null && File(localFilePath).existsSync()) {
       imageWidget = Image.file(File(localFilePath));
     } else if (imageUrl != null) {
+      // Deliberately NOT downsampled, unlike every other image in this file.
+      // This is the pinch-to-zoom viewer, so the source pixels are the point —
+      // a cacheWidth here would show as mush the moment the user zooms in. The
+      // cost is bounded: one image, on a route that disposes it on pop, rather
+      // than a list holding dozens resident at once.
       imageWidget = Image.network(imageUrl);
     } else {
       return; // nothing to show
@@ -1811,6 +1818,11 @@ class _ChatScreenState extends State<ChatScreen> {
           Image.network(
             mediaUrl,
             fit: BoxFit.cover,
+            // Painted into a 46×58 box (see the SizedBox below) but the source
+            // is raw status media — a full camera frame. 174 = 58 logical px at
+            // 3× DPR, which is the axis that has to cover for portrait media;
+            // without it a 3000×4000 photo decodes to ~48 MB per thumbnail.
+            cacheWidth: 174,
             errorBuilder: (_, __, ___) => Container(
               color: c.surfaceAlt,
               child: Icon(Icons.broken_image_rounded, color: c.textLow),
@@ -2190,7 +2202,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 CircleAvatar(
                   radius: 19,
                   backgroundImage: widget.contact.avatarUrl.isNotEmpty
-                      ? NetworkImage(widget.contact.avatarUrl)
+                      ? avatarImage(widget.contact.avatarUrl, radius: 19)
                       : null,
                   backgroundColor: c.primaryLt,
                   child: widget.contact.avatarUrl.isEmpty
@@ -3167,7 +3179,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 CircleAvatar(
                   radius: 48,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundImage: avatarImage(avatarUrl, radius: 48),
                   backgroundColor: c.primaryLt,
                 ),
                 const SizedBox(height: 16),
@@ -3876,7 +3888,7 @@ class _ChatScreenState extends State<ChatScreen> {
             radius: 20,
             backgroundColor: c.primaryLt,
             backgroundImage: (user?.photoUrl?.isNotEmpty ?? false)
-                ? NetworkImage(user!.photoUrl!)
+                ? avatarImage(user!.photoUrl!, radius: 20)
                 : null,
             child: (user?.photoUrl?.isNotEmpty ?? false)
                 ? null
@@ -4075,8 +4087,10 @@ class _ChatScreenState extends State<ChatScreen> {
                         backgroundImage: (snapshot.data?.data()
                                     as Map<String, dynamic>?)?['avatarUrl'] !=
                                 null
-                            ? NetworkImage((snapshot.data!.data()
-                                as Map<String, dynamic>)['avatarUrl'])
+                            ? avatarImage(
+                                (snapshot.data!.data()
+                                    as Map<String, dynamic>)['avatarUrl'],
+                                radius: 16)
                             : null,
                         child: (snapshot.data?.data()
                                     as Map<String, dynamic>?)?['avatarUrl'] ==

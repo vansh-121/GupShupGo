@@ -27,6 +27,7 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
+import 'package:video_chat_app/utils/avatar_image.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -390,7 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 CircleAvatar(
                   radius: 44,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundImage: avatarImage(avatarUrl, radius: 44),
                   backgroundColor: c.surfaceAlt,
                 ),
                 const SizedBox(height: 12),
@@ -1113,9 +1114,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundImage: NetworkImage(
+              backgroundImage: avatarImage(
                 peerUser.photoUrl ??
                     'https://ui-avatars.com/api/?name=${Uri.encodeComponent(peerUser.name)}&background=4CAF50&color=fff&size=128',
+                radius: 18,
               ),
               backgroundColor: c.surfaceAlt,
             ),
@@ -1251,8 +1253,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               else
                 ...blockedUsers.map((user) => ListTile(
                       leading: CircleAvatar(
-                        backgroundImage: NetworkImage(user.photoUrl ??
-                            'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128'),
+                        backgroundImage: avatarImage(
+                            user.photoUrl ??
+                                'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128',
+                            radius: 20),
                         backgroundColor: c.surfaceAlt,
                       ),
                       title: Text(user.name),
@@ -1489,7 +1493,8 @@ class _SafetyNumberContactPickerState
                                 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user.name)}&background=4CAF50&color=fff&size=128';
                             return ListTile(
                               leading: CircleAvatar(
-                                backgroundImage: NetworkImage(avatar),
+                                backgroundImage:
+                                    avatarImage(avatar, radius: 20),
                                 backgroundColor: c.surfaceAlt,
                               ),
                               title: Text(
