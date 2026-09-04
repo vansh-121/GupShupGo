@@ -18,6 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Custom themes and color palettes
 
+## [1.1.7] - 2026-09-04
+
+### Added
+- 🎨 **Chat Themes** — Give every conversation its own look with custom backgrounds and bubble colours that automatically adapt to light and dark modes.
+- 📄 **Export Chats as PDF** — Export any chat history as a clean, printable PDF document featuring full chat bubbles and embedded photos.
+- 🎙️ **Extended Voice Notes** — Record voice messages up to 2 minutes with improved audio stability.
+- ✨ **New Feature Discovery** — Subtle, non-intrusive indicator badges to highlight newly released features like chat themes and export options.
+
+### Changed
+- Updated version to 1.1.7 (build code 53).
+- ⚡ **High-Efficiency Avatar Decoding** — Replaced uncompressed full-resolution avatar caching with 3× DPR downsampled decoders, reducing scroll-time memory consumption by ~99% and eliminating scroll stutter.
+- 🛡️ **ProGuard & R8 Optimization** — Streamlined ProGuard keep rules and enabled `-repackageclasses`, boosting bytecode obfuscation to ~30% to clear Google Play store policies.
+
+### Fixed
+- 🔒 **Account Profile & Points Safeguard** — Fixed a critical race condition on app reinstall that previously caused existing user handles, Gup Points, and badges to be overwritten by empty sign-in models.
+- 🛡️ **Handle Claim Race Condition** — Fixed Firestore transaction conflicts when validating previously claimed usernames against security rules.
+
 ## [1.1.6] - 2026-08-19
 
 ### Added
