@@ -34,6 +34,17 @@ jobs:
       - name: Patch Java home for Linux
         run: sed -i "s|org.gradle.java.home=.*|org.gradle.java.home=$JAVA_HOME|" android/gradle.properties
 
+      - name: Accept Android licenses and install NDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          sudo chown -R runner:docker "$SDK_ROOT"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER="sdkmanager"
+          fi
+          yes | $SDKMANAGER --licenses || true
+          $SDKMANAGER --install "ndk;29.0.14033849" || true
+
       - name: Get Flutter dependencies
         run: flutter pub get
 
