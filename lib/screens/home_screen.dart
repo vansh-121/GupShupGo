@@ -48,6 +48,7 @@ import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
 import 'package:video_chat_app/widgets/feature_coach_marks.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
+import 'package:video_chat_app/widgets/report_problem_dialog.dart';
 import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -2268,12 +2269,17 @@ class _HomeScreenState extends State<HomeScreen>
                   );
                   if (updated != null) setState(() => _currentUser = updated);
                 }
-              } else if (value == 'review') {
+              } else if (value == 'rate') {
                 // openStoreListing, not the review sheet: Play's sheet is
                 // quota-limited and may show nothing at all, which is the wrong
                 // thing to hang a tap on.
                 unawaited(ReviewPromptService.instance
                     .openStoreListing(context: context));
+              } else if (value == 'report') {
+                unawaited(
+                    ReportProblemDialog.show(context, user: _currentUser));
+              } else if (value == 'whatsnew') {
+                unawaited(showWhatsNewDialog(context));
               } else if (value == 'logout') {
                 _signOut();
               }
@@ -2303,12 +2309,33 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 PopupMenuItem(
-                  value: 'review',
+                  value: 'rate',
                   child: Row(
                     children: [
                       Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Leave a review'),
+                      const Text('Rate us'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'report',
+                  child: Row(
+                    children: [
+                      Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('Report a problem'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'whatsnew',
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      const Text("What's New"),
                     ],
                   ),
                 ),

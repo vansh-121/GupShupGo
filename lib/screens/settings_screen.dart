@@ -8,6 +8,9 @@ import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
+import 'package:video_chat_app/widgets/report_problem_dialog.dart';
+import 'package:video_chat_app/widgets/whats_new_dialog.dart'
+    show kCurrentVersion, showWhatsNewDialog;
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
@@ -207,105 +210,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Report a problem ─────────────────────────────────────────────────────
-  Future<void> _reportProblem() async {
-    final subjectController = TextEditingController();
-    final bodyController = TextEditingController();
-
-    final submitted = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Report a Problem'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: subjectController,
-                decoration: InputDecoration(
-                  hintText: 'Brief summary',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bodyController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  hintText: 'Describe the problem...',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.primary),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Send')),
-        ],
-      ),
-    );
-
-    if (submitted != true) return;
-
-    final subject = subjectController.text.trim().isNotEmpty
-        ? subjectController.text.trim()
-        : 'Bug Report';
-    final body = bodyController.text.trim().isNotEmpty
-        ? bodyController.text.trim()
-        : 'No details provided';
-
-    // Show a loading indicator while submitting
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    try {
-      await FirebaseFirestore.instance.collection('problem_reports').add({
-        'userId': _user.id,
-        'userName': _user.name,
-        'userEmail': _user.email ?? '',
-        'subject': subject,
-        'body': body,
-        'platform': Theme.of(context).platform.name,
-        'createdAt': FieldValue.serverTimestamp(),
-        'emailSent': false,
-      });
-
-      if (mounted) {
-        Navigator.pop(context); // dismiss loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Report submitted — thanks for your feedback!'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // dismiss loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to submit report: $e')),
-        );
-      }
-    }
-  }
+  // The form itself lives in ReportProblemDialog, because the home overflow
+  // menu offers the same action and a second copy would drift.
+  Future<void> _reportProblem() =>
+      ReportProblemDialog.show(context, user: _user);
 
   // ── Help Center ──────────────────────────────────────────────────────────
   void _showHelpCenter() {
@@ -672,7 +580,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _buildStitchDivider(),
               _buildStitchTile(
-                icon: Icons.description_outlined,
+                icon: Icons.bug_report_outlined,
                 title: 'Report a problem',
                 onTap: _reportProblem,
               ),
@@ -703,15 +611,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.star_rate_rounded,
-                title: 'Leave a review',
+                title: 'Rate us',
                 onTap: () => ReviewPromptService.instance
                     .openStoreListing(context: context),
               ),
               _buildStitchDivider(),
               _buildStitchTile(
+                icon: Icons.auto_awesome_rounded,
+                title: "What's New",
+                onTap: () => showWhatsNewDialog(context),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
                 icon: Icons.info_outline_rounded,
                 title: 'App info',
-                trailingText: 'v1.1.3',
+                // From the changelog's constant, so the number here cannot drift
+                // away from the version the What's New dialog announces.
+                trailingText: 'v$kCurrentVersion',
                 onTap: _showAboutDialog,
               ),
             ],
@@ -1383,7 +1299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'GupShupGo',
-      applicationVersion: '1.1.3',
+      applicationVersion: kCurrentVersion,
       applicationLegalese: '© 2026 GupShupGo',
     );
   }

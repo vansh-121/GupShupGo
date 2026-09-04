@@ -30,13 +30,23 @@ Future<void> maybeShowWhatsNew(BuildContext context) async {
   // Existing user who updated from an older version → show what changed.
   if (!context.mounted) return;
 
-  await showDialog<void>(
+  await showWhatsNewDialog(context);
+
+  await sharedPrefs.setString(_prefKey, kCurrentVersion);
+}
+
+/// Opens the changelog on demand, with none of [maybeShowWhatsNew]'s gating.
+///
+/// The automatic dialog fires once per update and is easy to dismiss without
+/// reading; this is the way back to it — the overflow menu's "What's New" item.
+/// It deliberately does not touch the stored version, so asking to see the
+/// changelog never suppresses the next update's automatic showing.
+Future<void> showWhatsNewDialog(BuildContext context) {
+  return showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => const _WhatsNewDialog(),
   );
-
-  await sharedPrefs.setString(_prefKey, kCurrentVersion);
 }
 
 class _WhatsNewDialog extends StatelessWidget {
