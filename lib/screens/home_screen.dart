@@ -2595,11 +2595,12 @@ class _HomeScreenState extends State<HomeScreen>
     final c = AppThemeColors.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // ── Gup Arcade mini-FAB (bottom-left) ──────────────────────
         if (_currentUserId != null)
           Padding(
-            padding: const EdgeInsets.only(left: 32),
+            padding: const EdgeInsets.only(left: 32, bottom: 12),
             child: StreamBuilder<DocumentSnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('users')
