@@ -2132,6 +2132,7 @@ class _ChatScreenState extends State<ChatScreen> {
             // chat, the user isn't Pro, and an ad actually filled. Never styled
             // as a bubble — see [NativeAdCard].
             return NativeAdCard(
+              key: const ValueKey('native-ad-chat'),
               placement: 'chat',
               inChat: true,
               budget: _chatAdBudget,

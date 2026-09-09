@@ -105,6 +105,15 @@ class _HomeScreenState extends State<HomeScreen>
   // listened to".
   Stream<List<ChatRoom>>? _chatRoomsStream;
 
+  // Cached call-log stream, for the same reason as _chatRoomsStream above.
+  // Built inline in _buildCallsTab, getCallLogs() returned a fresh Firestore
+  // .snapshots() stream on every HomeScreen rebuild — and the frequent
+  // presence/online-badge setState()s make those rebuilds constant. Each new
+  // stream dropped the StreamBuilder back to ConnectionState.waiting, which
+  // flashed the full-screen spinner and tore down the native ad card every
+  // couple of seconds. Created once, reused for the screen's lifetime.
+  Stream<List<CallLogModel>>? _callLogsStream;
+
   // Tracks Firebase Auth presence so we can show a non-blocking re-verify
   // banner when the local session exists but Firebase has no user (typical
   // for phone-auth users on MIUI/HyperOS Redmi devices that wiped Firebase's
@@ -1696,7 +1705,11 @@ class _HomeScreenState extends State<HomeScreen>
             // empty state is exactly the impression AdMob's placement guidance
             // is written against.
             if (otherStatuses.isNotEmpty)
-              NativeAdCard(placement: 'moments', budget: _momentsAdBudget),
+              NativeAdCard(
+                key: const ValueKey('native-ad-moments'),
+                placement: 'moments',
+                budget: _momentsAdBudget,
+              ),
 
             // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
@@ -1955,8 +1968,10 @@ class _HomeScreenState extends State<HomeScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
+    _callLogsStream ??=
+        _callLogService.getCallLogs(_currentUserId!).asBroadcastStream();
     return StreamBuilder<List<CallLogModel>>(
-      stream: _callLogService.getCallLogs(_currentUserId!),
+      stream: _callLogsStream,
       builder: (context, snapshot) {
         final c = AppThemeColors.of(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -2016,7 +2031,11 @@ class _HomeScreenState extends State<HomeScreen>
           itemCount: callLogs.length + (showAd ? 1 : 0),
           itemBuilder: (context, rawIndex) {
             if (showAd && rawIndex == adSlot) {
-              return NativeAdCard(placement: 'calls', budget: _callsAdBudget);
+              return NativeAdCard(
+                key: const ValueKey('native-ad-calls'),
+                placement: 'calls',
+                budget: _callsAdBudget,
+              );
             }
             // Everything after the slot is shifted by the card that took its
             // place in the list, so unmap the index before touching callLogs.
@@ -2390,9 +2409,9 @@ class _HomeScreenState extends State<HomeScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _withVaultBanner(_buildChatsTab()),
-                _buildStatusTab(),
-                _buildCallsTab(),
+                _KeepAliveTab(child: _withVaultBanner(_buildChatsTab())),
+                _KeepAliveTab(child: _buildStatusTab()),
+                _KeepAliveTab(child: _buildCallsTab()),
               ],
             ),
           ),
@@ -3033,5 +3052,37 @@ extension StringExtension on String {
   String capitalize() {
     if (isEmpty) return this;
     return '${this[0].toUpperCase()}${substring(1)}';
+  }
+}
+
+/// Keeps a tab's subtree — and crucially its StreamBuilder subscriptions — alive
+/// when the tab scrolls out of the TabBarView's viewport.
+///
+/// Without this, switching away from a tab disposes its StreamBuilder, which
+/// cancels the underlying Firestore subscription. For the screen's cached
+/// broadcast streams (_chatRoomsStream, _callLogsStream) that is fatal: a
+/// broadcast stream cancels its source when its last listener leaves and never
+/// re-subscribes, so on return the StreamBuilder listens to a dead stream that
+/// never emits — which is why the Calls tab sat on its spinner forever after a
+/// revisit. Kept alive, the sole listener never leaves, the stream stays live,
+/// and the tab shows its last data instantly on return.
+class _KeepAliveTab extends StatefulWidget {
+  const _KeepAliveTab({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAliveTab> createState() => _KeepAliveTabState();
+}
+
+class _KeepAliveTabState extends State<_KeepAliveTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+    return widget.child;
   }
 }
