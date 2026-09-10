@@ -7,12 +7,11 @@
 // silently doing nothing would be the worst possible response to a tap on
 // "Report a problem".
 
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 abstract final class ReportProblemDialog {
   /// Collects a subject and description and files them to `problem_reports`.
@@ -82,36 +81,33 @@ abstract final class ReportProblemDialog {
 
       // Read off the context before the write: everything after the await
       // happens at a point where this context may already be gone.
-      final navigator = Navigator.of(context);
       final messenger = ScaffoldMessenger.of(context);
       final platform = Theme.of(context).platform.name;
 
-      unawaited(showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      ));
-
       try {
-        await FirebaseFirestore.instance.collection('problem_reports').add({
-          'userId': user?.id ?? '',
-          'userName': user?.name ?? '',
-          'userEmail': user?.email ?? '',
-          'subject': subject,
-          'body': body,
-          'platform': platform,
-          'createdAt': FieldValue.serverTimestamp(),
-          'emailSent': false,
-        });
+        // Blocking overlay for the write; `during` removes it in a finally, so
+        // a failure can't leave the spinner stuck on screen.
+        await LoadingOverlay.during(
+          context,
+          () => FirebaseFirestore.instance.collection('problem_reports').add({
+            'userId': user?.id ?? '',
+            'userName': user?.name ?? '',
+            'userEmail': user?.email ?? '',
+            'subject': subject,
+            'body': body,
+            'platform': platform,
+            'createdAt': FieldValue.serverTimestamp(),
+            'emailSent': false,
+          }),
+          message: 'Submitting report…',
+        );
 
-        navigator.pop(); // dismiss loading
         messenger.showSnackBar(
           const SnackBar(
             content: Text('Report submitted — thanks for your feedback!'),
           ),
         );
       } catch (e) {
-        navigator.pop(); // dismiss loading
         messenger.showSnackBar(
           SnackBar(content: Text('Failed to submit report: $e')),
         );

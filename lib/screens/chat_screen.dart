@@ -55,6 +55,10 @@ import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/upload_progress.dart';
+import 'package:video_chat_app/widgets/common/async_button.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 class Contact {
   final String id;
@@ -156,9 +160,25 @@ class _ChatScreenState extends State<ChatScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingImage = false;
 
+  /// Real upload completion (0.0–1.0) for the in-flight image, or null when no
+  /// image is uploading. Drives the determinate ring at the paperclip. See the
+  /// upload-progress convention in [_pickAndSendImage].
+  double? _imageUploadProgress;
+  StreamSubscription<double>? _imageUploadSub;
+
   // ── Voice recording ───────────────────────────────────────────────
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
   bool _isSendingVoice = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight voice note, or null.
+  double? _voiceUploadProgress;
+  StreamSubscription<double>? _voiceUploadSub;
+
+  /// True from the moment the screen-share button is tapped until the Agora
+  /// session is up (or the attempt fails). A real re-entry guard: the old
+  /// `ScreenShareSession.instance.active` check doesn't engage during the
+  /// Firestore-write + FCM + engine-init gap, so a second tap slipped through.
+  bool _startingScreenShare = false;
   bool _hasText = false; // tracks if text field has content for mic/send toggle
 
   // ─── Block state ──────────────────────────────────────────────────
@@ -319,6 +339,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _onlineStatusSubscription?.cancel();
     _typingSubscription?.cancel();
     _meshMessageSubscription?.cancel();
+    _imageUploadSub?.cancel();
+    _voiceUploadSub?.cancel();
     _messageController.removeListener(_onTextChanged);
     _typingTimer?.cancel();
     _previewDebounce?.cancel();
@@ -826,20 +848,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _showSafetyNumberForContact() async {
     final c = AppThemeColors.of(context);
 
-    // Show a loading indicator while computing the 5200-round hash.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final n = await SafetyNumberService().safetyNumberFor(
-      selfUserId: widget.currentUserId,
-      peerUserId: widget.contact.id,
+    // Compute the 5200-round hash behind a blocking overlay. `during` tears the
+    // overlay down in a finally, so a failure can't leave it stuck on screen.
+    final n = await LoadingOverlay.during(
+      context,
+      () => SafetyNumberService().safetyNumberFor(
+        selfUserId: widget.currentUserId,
+        peerUserId: widget.contact.id,
+      ),
+      message: 'Computing safety number…',
     );
 
     if (!mounted) return;
-    Navigator.pop(context); // dismiss loading
 
     showDialog(
       context: context,
@@ -933,7 +953,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ConnectingCallScreen(
@@ -960,7 +980,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ConnectingCallScreen(
@@ -995,29 +1015,48 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // Re-entry guard. The `active` check above doesn't engage during the
+    // Firestore-write → FCM → Agora-init gap (the session isn't active yet),
+    // so without this a second tap could start a duplicate share.
+    if (_startingScreenShare) return;
+
+    AppHaptics.tap();
+    setState(() => _startingScreenShare = true);
+
     try {
       final channelId = CallSignalingService.generateChannelId();
 
       print(
           'Initiating screen share to ${widget.contact.name} on channel $channelId');
 
-      // Create the Firestore signaling document BEFORE notifying the viewer,
-      // so the viewer can listen for the "ended" signal.
-      await CallSignalingService.createCallDocument(
-        channelId: channelId,
-        callerId: widget.currentUserId,
-        calleeId: widget.contact.id,
-      );
+      // Everything up to (and including) the screen-capture consent dialog runs
+      // behind a blocking overlay, so the tap has immediate feedback instead of
+      // a silent multi-second gap. Navigation stays OUTSIDE `during` (see its
+      // doc): we push the share screen only after the overlay is torn down.
+      await LoadingOverlay.during(
+        context,
+        () async {
+          // Create the Firestore signaling document BEFORE notifying the
+          // viewer, so the viewer can listen for the "ended" signal.
+          await CallSignalingService.createCallDocument(
+            channelId: channelId,
+            callerId: widget.currentUserId,
+            calleeId: widget.contact.id,
+          );
 
-      // Notify the other user — they auto-join as a viewer.
-      await FCMService().sendScreenShareNotification(
-          widget.contact.id, widget.currentUserId, channelId);
+          // Notify the other user — they auto-join as a viewer.
+          await FCMService().sendScreenShareNotification(
+              widget.contact.id, widget.currentUserId, channelId);
 
-      // Start the long-lived session (owns the Agora engine so it survives
-      // navigation). This triggers the Android screen-capture consent dialog.
-      await ScreenShareSession.instance.startAsSharer(
-        channelId: channelId,
-        viewerName: widget.contact.name,
+          // Start the long-lived session (owns the Agora engine so it survives
+          // navigation). This triggers the Android screen-capture consent
+          // dialog.
+          await ScreenShareSession.instance.startAsSharer(
+            channelId: channelId,
+            viewerName: widget.contact.name,
+          );
+        },
+        message: 'Preparing screen share…',
       );
 
       if (!mounted) return;
@@ -1035,6 +1074,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start screen sharing: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _startingScreenShare = false);
     }
   }
 
@@ -2291,21 +2332,17 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             )
           else ...[
-            IconButton(
-              icon: Icon(
-                Icons.phone_outlined,
-                color: c.isDark ? Colors.white : c.textHigh,
-                size: 22,
-              ),
+            AsyncIconButton(
+              icon: const Icon(Icons.phone_outlined),
+              color: c.isDark ? Colors.white : c.textHigh,
+              iconSize: 22,
               onPressed: _initiateAudioCall,
               tooltip: 'Audio Call',
             ),
-            IconButton(
-              icon: Icon(
-                Icons.videocam_outlined,
-                color: c.isDark ? Colors.white : c.textHigh,
-                size: 24,
-              ),
+            AsyncIconButton(
+              icon: const Icon(Icons.videocam_outlined),
+              color: c.isDark ? Colors.white : c.textHigh,
+              iconSize: 24,
               onPressed: _initiateVideoCall,
               tooltip: 'Video Call',
             ),
@@ -2714,6 +2751,38 @@ class _ChatScreenState extends State<ChatScreen> {
               onClose: () => setState(() => _linkPreviewSuppressed = true),
             ),
           ),
+        if (_isSendingVoice)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12, top: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    // Determinate once real bytes flow; indeterminate before
+                    // (recording hand-off / offline mesh, which has no %).
+                    value: _voiceUploadProgress,
+                    strokeWidth: 2,
+                    color: c.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Icon(Icons.mic_rounded, size: 16, color: c.primary),
+                const SizedBox(width: 4),
+                Text(
+                  _voiceUploadProgress == null
+                      ? 'Sending voice note…'
+                      : 'Sending voice note… ${(_voiceUploadProgress! * 100).round()}%',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: c.textMid,
+                  ),
+                ),
+              ],
+            ),
+          ),
         _buildComposerRow(c, darkPillBg, darkPillBorder),
       ],
     );
@@ -2730,12 +2799,28 @@ class _ChatScreenState extends State<ChatScreen> {
           _isUploadingImage
               ? Padding(
                   padding: const EdgeInsets.all(8),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: c.primary),
-                  ),
+                  child: _imageUploadProgress == null
+                      // Compression (and the offline mesh path) have no byte
+                      // progress — show an honest indeterminate spinner rather
+                      // than a bogus "0%".
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: c.primary),
+                        )
+                      : UploadProgressRing(
+                          progress: _imageUploadProgress!,
+                          size: 24,
+                          // Keep the spinner visible through the ring's reveal
+                          // delay so a fast upload never flashes back to idle.
+                          placeholder: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: c.primary),
+                          ),
+                        ),
                 )
               : IconButton(
                   icon: Icon(Icons.attach_file_rounded,
@@ -2837,20 +2922,32 @@ class _ChatScreenState extends State<ChatScreen> {
           // Optional Screen Share shortcut
           const SizedBox(width: 4),
           IconButton(
-            icon: Icon(Icons.screen_share_rounded,
-                color: c.isDark ? Colors.white54 : c.textMid, size: 20),
+            icon: _startingScreenShare
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          c.isDark ? Colors.white54 : c.textMid),
+                    ),
+                  )
+                : Icon(Icons.screen_share_rounded,
+                    color: c.isDark ? Colors.white54 : c.textMid, size: 20),
             tooltip: 'Share screen',
-            onPressed: () {
-              if (PremiumGate.checkAndPrompt(
-                context,
-                featureName: 'Screen Sharing',
-                featureIcon: Icons.screen_share_rounded,
-                description:
-                    'Share your screen live during chats with GupShupGo Pro.',
-              )) {
-                _initiateScreenShare();
-              }
-            },
+            onPressed: _startingScreenShare
+                ? null
+                : () {
+                    if (PremiumGate.checkAndPrompt(
+                      context,
+                      featureName: 'Screen Sharing',
+                      featureIcon: Icons.screen_share_rounded,
+                      description:
+                          'Share your screen live during chats with GupShupGo Pro.',
+                    )) {
+                      _initiateScreenShare();
+                    }
+                  },
           ),
         ],
       ),
@@ -3060,7 +3157,22 @@ class _ChatScreenState extends State<ChatScreen> {
             .child('chat_audio/$chatRoomId/$fileName');
 
         final metadata = SettableMetadata(contentType: 'audio/m4a');
-        await ref.putFile(File(filePath), metadata);
+        // Real byte progress in the "Sending voice note…" indicator. Stays
+        // null (→ indeterminate spinner) until the first non-zero fraction, so
+        // a short clip shows a spinner rather than a frozen "0%". The finally
+        // resets to null, so a retry restarts here cleanly.
+        final uploadTask = ref.putFile(File(filePath), metadata);
+        _voiceUploadSub?.cancel();
+        _voiceUploadSub = uploadProgress(uploadTask).listen(
+          (p) {
+            if (mounted) setState(() => _voiceUploadProgress = p);
+          },
+          // Handled by the awaited task + outer catch/finally; swallow the
+          // duplicate stream error.
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
+        await uploadTask;
         final audioUrl = await ref.getDownloadURL();
 
         await _chatService.sendMessage(
@@ -3083,7 +3195,16 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSendingVoice = false);
+      // Reset progress to null so a failure/cancel/leave never leaves the
+      // indicator stuck at a partial percentage.
+      _voiceUploadSub?.cancel();
+      _voiceUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isSendingVoice = false;
+          _voiceUploadProgress = null;
+        });
+      }
     }
   }
 
@@ -3387,6 +3508,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
+    AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send images to this contact')),
@@ -3459,7 +3581,25 @@ class _ChatScreenState extends State<ChatScreen> {
           File(picked.path),
           pro: proMediaQuality,
         );
-        await ref.putFile(compressed);
+
+        // Kick off the upload and surface its real byte progress at the
+        // paperclip (WhatsApp-style %). Progress stays null (→ indeterminate
+        // spinner) until the first non-zero byte fraction arrives, so a small
+        // one-chunk upload shows a brief spinner rather than a frozen "0%".
+        // The finally resets it to null, so a retry cleanly restarts here.
+        final uploadTask = ref.putFile(compressed);
+        _imageUploadSub?.cancel();
+        _imageUploadSub = uploadProgress(uploadTask).listen(
+          (p) {
+            if (mounted) setState(() => _imageUploadProgress = p);
+          },
+          // A failure/cancel is handled by the awaited task below and the
+          // outer catch/finally; swallow the duplicate stream error so it
+          // isn't an unhandled async exception.
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
+        await uploadTask;
         final imageUrl = await ref.getDownloadURL();
 
         await _chatService.sendMessage(
@@ -3481,7 +3621,16 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isUploadingImage = false);
+      // Reset progress to null (not a stale %) so failure, cancel, or leaving
+      // mid-upload never strands the paperclip at e.g. 37%.
+      _imageUploadSub?.cancel();
+      _imageUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isUploadingImage = false;
+          _imageUploadProgress = null;
+        });
+      }
     }
   }
 

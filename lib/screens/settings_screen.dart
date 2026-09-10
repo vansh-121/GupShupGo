@@ -28,6 +28,8 @@ import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -109,7 +111,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {});
   }
 
+  bool _isSigningOut = false;
+
   Future<void> _signOut() async {
+    if (_isSigningOut) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -128,12 +134,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirm != true) return;
 
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
+    AppHaptics.tap();
+    setState(() => _isSigningOut = true);
+    try {
+      // Heavy multi-step teardown (Firestore listeners, presence, tokens) —
+      // a blocking overlay so the confirm tap isn't a silent multi-second gap.
+      // Navigation stays outside `during` (its finally pops the barrier).
+      await LoadingOverlay.during(
+        context,
+        () => _authService.signOut(),
+        message: 'Signing out…',
       );
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (_) => false,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSigningOut = false);
     }
   }
 
@@ -1092,20 +1111,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (peerUser == null || !mounted) return;
 
-    // Show a loading indicator while computing.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final n = await SafetyNumberService().safetyNumberFor(
-      selfUserId: selfUid,
-      peerUserId: peerUser.id,
+    // Compute behind a blocking overlay; `during` tears it down in a finally,
+    // so a failure can't leave the spinner stuck on screen.
+    final n = await LoadingOverlay.during(
+      context,
+      () => SafetyNumberService().safetyNumberFor(
+        selfUserId: selfUid,
+        peerUserId: peerUser.id,
+      ),
+      message: 'Computing safety number…',
     );
 
     if (!mounted) return;
-    Navigator.pop(context); // dismiss loading
 
     showDialog(
       context: context,

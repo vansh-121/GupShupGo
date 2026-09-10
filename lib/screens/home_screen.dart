@@ -59,6 +59,8 @@ import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -834,7 +836,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Material(
       color: c.primary.withOpacity(0.10),
       child: InkWell(
-        onTap: _signOut,
+        onTap: () => _signOut(message: 'Reconnecting…'),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -859,12 +861,30 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _signOut() async {
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
+  bool _isSigningOut = false;
+
+  /// Signs out and returns to login. Shared by the overflow-menu "Log out" and
+  /// the re-verify banner, which passes its own [message] since it reads as
+  /// "reconnect" to the user rather than a deliberate logout.
+  Future<void> _signOut({String message = 'Signing out…'}) async {
+    if (_isSigningOut) return;
+    AppHaptics.tap();
+    setState(() => _isSigningOut = true);
+    try {
+      // Heavy teardown (listeners, presence, tokens) behind a blocking overlay
+      // so the tap isn't a silent gap. Navigation stays outside `during`.
+      await LoadingOverlay.during(
+        context,
+        () => _authService.signOut(),
+        message: message,
       );
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSigningOut = false);
     }
   }
 
