@@ -363,12 +363,13 @@ exports.sendScreenShareNotification = onRequest(
         token: fcmToken,
         // A visible notification so that when the app is backgrounded or
         // terminated, Android shows it in the tray; tapping it opens the
-        // viewer (handled by NotificationService via the `screen` field).
-        // When the app is foregrounded, onMessage fires instead and the
-        // viewer auto-opens — Android does not show the tray notification.
+        // in-app Accept / Reject request screen (handled by NotificationService
+        // via the `screen` field). When the app is foregrounded, onMessage
+        // fires instead and the request screen is shown directly — Android
+        // does not show the tray notification.
         notification: {
-          title: `${sharerName} is sharing their screen`,
-          body: "Tap to view the shared screen",
+          title: `${sharerName} wants to share their screen`,
+          body: "Tap to accept or decline",
         },
         data: {
           viewerId: viewerId,

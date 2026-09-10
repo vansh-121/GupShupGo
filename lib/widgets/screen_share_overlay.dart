@@ -102,6 +102,7 @@ class _ScreenShareOverlayHostState extends State<ScreenShareOverlayHost> {
 
   Widget _buildBubble(ScreenShareSession session) {
     final isSharer = session.role == ScreenShareRole.sharer;
+    final awaiting = session.awaitingAcceptance;
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -109,7 +110,7 @@ class _ScreenShareOverlayHostState extends State<ScreenShareOverlayHost> {
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFF1F8A4C),
+          color: awaiting ? const Color(0xFF6366F1) : const Color(0xFF1F8A4C),
           borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
@@ -131,7 +132,11 @@ class _ScreenShareOverlayHostState extends State<ScreenShareOverlayHost> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    isSharer ? 'Sharing' : 'Viewing',
+                    awaiting
+                        ? 'Requesting'
+                        : isSharer
+                            ? 'Sharing'
+                            : 'Viewing',
                     style: GoogleFonts.poppins(
                       color: Colors.white,
                       fontSize: 12,
@@ -139,7 +144,9 @@ class _ScreenShareOverlayHostState extends State<ScreenShareOverlayHost> {
                     ),
                   ),
                   Text(
-                    session.peerPresent ? session.formattedDuration : 'Tap to open',
+                    (!awaiting && session.peerPresent)
+                        ? session.formattedDuration
+                        : 'Tap to open',
                     style: GoogleFonts.poppins(
                         color: Colors.white70, fontSize: 10),
                   ),

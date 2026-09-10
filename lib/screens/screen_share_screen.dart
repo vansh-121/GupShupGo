@@ -15,6 +15,13 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
 
+  /// Kept so the end-of-session message can name the peer — the session clears
+  /// its own peerName during teardown.
+  String _lastPeerName = '';
+
+  /// Guards the one-shot end message + pop when the session goes inactive.
+  bool _handledEnd = false;
+
   @override
   void initState() {
     super.initState();
@@ -28,6 +35,30 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
   void dispose() {
     _pulseController.dispose();
     super.dispose();
+  }
+
+  /// Shows a one-time message (on the app-level messenger, so it survives this
+  /// screen popping) explaining why a pending request ended without going live.
+  /// `normal` covers a user-initiated stop / cancel and stays silent.
+  void _showEndReasonSnackBar(ScreenShareEndReason reason) {
+    final name = _lastPeerName.isEmpty ? 'They' : _lastPeerName;
+    final String? message = switch (reason) {
+      ScreenShareEndReason.declined => '$name declined your screen share',
+      ScreenShareEndReason.noAnswer => 'No answer',
+      ScreenShareEndReason.error => "Couldn't start screen sharing",
+      ScreenShareEndReason.normal => null,
+    };
+    if (message == null) return;
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   @override
@@ -44,24 +75,40 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
       child: AnimatedBuilder(
         animation: session,
         builder: (context, _) {
+          // Remember the peer name while the session is live so the end-of-
+          // session message can still name them after teardown clears it.
+          if (session.peerName.isNotEmpty) _lastPeerName = session.peerName;
+
           if (!session.active) {
+            final reason = session.lastEndReason;
             WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_handledEnd) return;
+              _handledEnd = true;
+              _showEndReasonSnackBar(reason);
               if (Navigator.of(context).canPop()) Navigator.of(context).pop();
             });
           }
 
+          final awaiting = session.awaitingAcceptance;
           final isLive = session.connected && session.peerPresent;
-          final statusTitle = !session.connected
-              ? 'Initializing Broadcast'
-              : !session.peerPresent
-                  ? 'Waiting for Participant'
-                  : 'Screen Sharing Active';
+          final peerLabel =
+              session.peerName.isEmpty ? _lastPeerName : session.peerName;
 
-          final statusSubtitle = !session.connected
-              ? 'Establishing encrypted stream...'
-              : !session.peerPresent
-                  ? 'Waiting for ${session.peerName.isEmpty ? 'participant' : session.peerName} to join...'
-                  : 'Your entire screen is visible in high definition.';
+          final statusTitle = awaiting
+              ? 'Requesting Permission'
+              : !session.connected
+                  ? 'Initializing Broadcast'
+                  : !session.peerPresent
+                      ? 'Waiting for Participant'
+                      : 'Screen Sharing Active';
+
+          final statusSubtitle = awaiting
+              ? 'Waiting for ${peerLabel.isEmpty ? 'them' : peerLabel} to accept…'
+              : !session.connected
+                  ? 'Establishing encrypted stream...'
+                  : !session.peerPresent
+                      ? 'Waiting for ${session.peerName.isEmpty ? 'participant' : session.peerName} to join...'
+                      : 'Your entire screen is visible in high definition.';
 
           return Scaffold(
             backgroundColor: const Color(0xFF0F1318),
@@ -163,7 +210,11 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        isLive ? 'HD • 60 FPS' : 'CONNECTING',
+                                        awaiting
+                                            ? 'REQUESTING'
+                                            : isLive
+                                                ? 'HD • 60 FPS'
+                                                : 'CONNECTING',
                                         style: GoogleFonts.poppins(
                                           color: Colors.white70,
                                           fontSize: 11,
@@ -366,7 +417,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        'Shared with ',
+                                        awaiting ? 'Requesting ' : 'Shared with ',
                                         style: GoogleFonts.poppins(
                                           color: Colors.white54,
                                           fontSize: 12,
@@ -444,14 +495,16 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(
-                                    Icons.stop_screen_share_rounded,
+                                  Icon(
+                                    awaiting
+                                        ? Icons.close_rounded
+                                        : Icons.stop_screen_share_rounded,
                                     color: Colors.white,
                                     size: 22,
                                   ),
                                   const SizedBox(width: 10),
                                   Text(
-                                    'Stop sharing',
+                                    awaiting ? 'Cancel request' : 'Stop sharing',
                                     style: GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontSize: 16,

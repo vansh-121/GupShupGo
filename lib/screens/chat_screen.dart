@@ -1029,34 +1029,35 @@ class _ChatScreenState extends State<ChatScreen> {
       print(
           'Initiating screen share to ${widget.contact.name} on channel $channelId');
 
-      // Everything up to (and including) the screen-capture consent dialog runs
-      // behind a blocking overlay, so the tap has immediate feedback instead of
-      // a silent multi-second gap. Navigation stays OUTSIDE `during` (see its
-      // doc): we push the share screen only after the overlay is torn down.
+      // The signaling write + push run behind a brief blocking overlay so the
+      // tap has immediate feedback. No screen-capture consent happens here any
+      // more — it fires later, only if the viewer accepts. Navigation stays
+      // OUTSIDE `during` (see its doc): we push the share screen after teardown.
       await LoadingOverlay.during(
         context,
         () async {
           // Create the Firestore signaling document BEFORE notifying the
-          // viewer, so the viewer can listen for the "ended" signal.
+          // viewer, so both sides can listen for accept/decline/end signals.
           await CallSignalingService.createCallDocument(
             channelId: channelId,
             callerId: widget.currentUserId,
             calleeId: widget.contact.id,
           );
 
-          // Notify the other user — they auto-join as a viewer.
+          // Notify the other user — they get an accept/reject request.
           await FCMService().sendScreenShareNotification(
               widget.contact.id, widget.currentUserId, channelId);
 
-          // Start the long-lived session (owns the Agora engine so it survives
-          // navigation). This triggers the Android screen-capture consent
-          // dialog.
-          await ScreenShareSession.instance.startAsSharer(
+          // Start the long-lived session in "requesting" mode (owns the Agora
+          // engine so it survives navigation). NOTHING is captured yet — the
+          // Android screen-capture consent dialog only fires once the viewer
+          // accepts and the session goes live.
+          await ScreenShareSession.instance.requestAsSharer(
             channelId: channelId,
             viewerName: widget.contact.name,
           );
         },
-        message: 'Preparing screen share…',
+        message: 'Sending request…',
       );
 
       if (!mounted) return;

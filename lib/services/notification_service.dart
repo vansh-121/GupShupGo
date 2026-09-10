@@ -400,12 +400,10 @@ class NotificationService {
         break;
 
       case 'screen_share':
-        final channelId = data['channelId'] as String? ?? '';
-        final sharerName = data['sharerName'] as String? ?? 'Someone';
-        FCMService.openScreenShareViewer(
-          channelId: channelId,
-          sharerName: sharerName,
-        );
+        // Notification tapped from background/terminated — open the accept/
+        // reject request UI (not the viewer directly). The FCM data payload
+        // carries channelId, sharerId, sharerName and sharerPhotoUrl.
+        FCMService.showIncomingScreenShareRequest(data);
         break;
 
       case 'home':
