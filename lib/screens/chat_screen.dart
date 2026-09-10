@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -3850,8 +3852,17 @@ class _ChatScreenState extends State<ChatScreen> {
         onError: (Object _) {},
         cancelOnError: true,
       );
+
+      // Extract the first-frame poster while the clip uploads — the two run
+      // concurrently so the thumbnail costs no extra wall-clock. A failure just
+      // yields null (the bubble falls back to the film-glyph placeholder); it
+      // never blocks the send. Awaited below, after the upload, so both are done
+      // before the message commits.
+      final thumbFuture = _generateVideoThumbnail(file);
+
       await uploadTask;
       final videoUrl = await ref.getDownloadURL();
+      final thumbB64 = await thumbFuture;
 
       await _chatService.sendMessage(
         senderId: widget.currentUserId,
@@ -3863,6 +3874,10 @@ class _ChatScreenState extends State<ChatScreen> {
         localFilePath: file.path,
         // Reused field — carries the clip length, not audio. See the doc above.
         audioDuration: duration?.inSeconds,
+        // Base64 JPEG poster; rides inline in the encrypted envelope so the
+        // receiver renders it before downloading the clip. See
+        // _generateVideoThumbnail.
+        videoThumbnailBase64: thumbB64,
       );
 
       _scrollToBottom();
@@ -3902,12 +3917,43 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  /// A dark placeholder tile with a centred play button and, when known, the
-  /// clip length. There is no thumbnail generator in this app, so this is a
-  /// deliberate stand-in rather than a first-frame preview — tapping it opens
-  /// the full-screen player.
+  /// Extracts the first-frame poster of [file] as a base64-encoded JPEG, or null
+  /// if it can't be decoded. Runs on the SENDER only: the string rides inline in
+  /// the encrypted message ([MessageModel.videoThumbnailBase64]), so the receiver
+  /// paints the poster with no plugin call and before downloading the clip.
+  ///
+  /// Downscaled to 360 px wide at quality 60 — a bubble-sized still, kept small
+  /// because it travels inside the envelope. Any failure returns null and the
+  /// bubble falls back to the film-glyph placeholder; it never blocks the send.
+  Future<String?> _generateVideoThumbnail(File file) async {
+    try {
+      final Uint8List? bytes = await VideoThumbnail.thumbnailData(
+        video: file.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 360,
+        quality: 60,
+      );
+      if (bytes == null || bytes.isEmpty) return null;
+      return base64Encode(bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The video bubble: the first-frame poster (decoded from the inline
+  /// [MessageModel.videoThumbnailBase64] the sender attached) under a centred
+  /// play button and, when known, the clip length. Older messages — or any clip
+  /// whose poster couldn't be extracted — fall back to a dark tile with a faint
+  /// film glyph. Tapping it opens the full-screen player.
+  ///
+  /// The poster is decoded once and memoised in [_VideoThumbCache]: Image.memory
+  /// keys on byte-list identity, so decoding inside build would mint a fresh
+  /// MemoryImage every frame and thrash the image cache. Same guard the link
+  /// preview card uses.
   Widget _buildVideoThumbnail(MessageModel message) {
     final durationSec = message.audioDuration; // reused field; see _pickAndSendVideo
+    final poster =
+        _VideoThumbCache.get(message.id, message.videoThumbnailBase64);
     return Container(
       width: 220,
       height: 150,
@@ -3919,9 +3965,31 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Faint film glyph so the empty tile reads as "video", not "broken".
-          Icon(Icons.movie_creation_rounded,
-              color: Colors.white.withOpacity(0.10), size: 64),
+          if (poster != null) ...[
+            Positioned.fill(
+              child: Image.memory(
+                poster,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                // A corrupt/undecodable poster degrades to the film glyph rather
+                // than a broken-image box.
+                errorBuilder: (_, __, ___) => Icon(
+                  Icons.movie_creation_rounded,
+                  color: Colors.white.withOpacity(0.10),
+                  size: 64,
+                ),
+              ),
+            ),
+            // Light scrim so the white play button and duration chip stay legible
+            // over a bright frame.
+            Positioned.fill(
+              child: Container(color: Colors.black.withOpacity(0.18)),
+            ),
+          ] else
+            // No poster (old message or extraction failed): faint film glyph so
+            // the empty tile reads as "video", not "broken".
+            Icon(Icons.movie_creation_rounded,
+                color: Colors.white.withOpacity(0.10), size: 64),
           Container(
             width: 54,
             height: 54,
@@ -4811,6 +4879,41 @@ class _ChatThemedArea extends StatelessWidget {
     }
 
     return content;
+  }
+}
+
+/// Decoded video posters, keyed by message id. The video twin of `_ThumbCache`
+/// in link_preview_card.dart, and there for the same reason: `Image.memory`
+/// compares byte lists with `identical()`, so calling `base64Decode` inside
+/// `build()` mints a fresh image every frame — a new image-cache entry per
+/// rebuild, which in a scrolling list is both a leak and visible jank. Decoding
+/// once and returning the *same* `Uint8List` is what lets the image cache work.
+///
+/// Takes a nullable payload (the field is absent on old messages and on any
+/// clip whose poster couldn't be extracted); a null or unusable payload caches
+/// and returns null so the bubble falls back to its placeholder.
+class _VideoThumbCache {
+  static const int _max = 60;
+  static final Map<String, Uint8List?> _entries = {};
+
+  static Uint8List? get(String key, String? base64Data) {
+    if (_entries.containsKey(key)) return _entries[key];
+
+    Uint8List? decoded;
+    if (base64Data != null && base64Data.isNotEmpty) {
+      try {
+        decoded = base64Decode(base64Data);
+        if (decoded.isEmpty) decoded = null;
+      } catch (_) {
+        // A truncated or corrupted poster is cached as null so we don't retry
+        // the decode on every frame.
+        decoded = null;
+      }
+    }
+
+    if (_entries.length >= _max) _entries.remove(_entries.keys.first);
+    _entries[key] = decoded;
+    return decoded;
   }
 }
 

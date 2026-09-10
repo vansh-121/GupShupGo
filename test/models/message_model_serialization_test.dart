@@ -33,6 +33,7 @@ MessageModel _fullyPopulated() => MessageModel(
       linkPreviewDescription: 'Flutter transforms the app development process.',
       linkPreviewSiteName: 'flutter.dev',
       linkPreviewImageBase64: 'aGVsbG8=',
+      videoThumbnailBase64: 'dmlkZW8=',
       replyToMessageId: 'msg-0',
       replyToSenderId: 'bob',
       replyToSenderName: 'Bob',
@@ -108,6 +109,7 @@ void main() {
       expect(restored.linkPreviewDescription, original.linkPreviewDescription);
       expect(restored.linkPreviewSiteName, original.linkPreviewSiteName);
       expect(restored.linkPreviewImageBase64, original.linkPreviewImageBase64);
+      expect(restored.videoThumbnailBase64, original.videoThumbnailBase64);
       expect(restored.replyToMessageId, original.replyToMessageId);
       expect(restored.replyToSenderId, original.replyToSenderId);
       expect(restored.replyToSenderName, original.replyToSenderName);
@@ -179,6 +181,7 @@ void main() {
       expect(restored.linkPreviewDescription, original.linkPreviewDescription);
       expect(restored.linkPreviewSiteName, original.linkPreviewSiteName);
       expect(restored.linkPreviewImageBase64, original.linkPreviewImageBase64);
+      expect(restored.videoThumbnailBase64, original.videoThumbnailBase64);
       expect(restored.replyToMessageId, original.replyToMessageId);
       expect(restored.replyToSenderId, original.replyToSenderId);
       expect(restored.replyToSenderName, original.replyToSenderName);
@@ -202,6 +205,7 @@ void main() {
         'linkPreviewDescription',
         'linkPreviewSiteName',
         'linkPreviewImageBase64',
+        'videoThumbnailBase64',
         'replyToMessageId',
         'replyToSenderId',
         'replyToSenderName',
@@ -255,6 +259,7 @@ void main() {
       expect(copy.text, 'edited');
       expect(copy.linkPreviewUrl, original.linkPreviewUrl);
       expect(copy.linkPreviewImageBase64, original.linkPreviewImageBase64);
+      expect(copy.videoThumbnailBase64, original.videoThumbnailBase64);
       expect(copy.replyToMessageId, original.replyToMessageId);
       expect(copy.replyToText, original.replyToText);
       expect(copy.replyToType, original.replyToType);

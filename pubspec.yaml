@@ -120,6 +120,15 @@ dependencies:
   url_launcher: ^6.2.1
   video_player: ^2.8.3
 
+  # First-frame poster thumbnails for chat video bubbles. The only frame
+  # extractor in the tree — video_player can play a clip but can't hand back a
+  # still, and nothing else here decodes a video container. Used on the SENDER
+  # only: the generated JPEG is base64'd and rides inline in the encrypted
+  # message (MessageModel.videoThumbnailBase64), so the receiver renders the
+  # poster with no plugin call and before downloading the clip. 0.5.6 is the
+  # newest published line.
+  video_thumbnail: ^0.5.6
+
   # Compress images before encrypted upload (10-20× size reduction).
   flutter_image_compress: ^2.3.0
   path_provider: ^2.1.3
