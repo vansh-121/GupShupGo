@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -107,6 +108,21 @@ const int _kChatAdMinMessages = 25;
 /// reach of a mis-tap while typing.
 const int _kChatAdGapFromComposer = 8;
 
+/// Largest chat video accepted client-side.
+///
+/// Chat video is picked with `image_picker` and uploaded raw — there is no
+/// video compressor anywhere in this app — so this is the real ceiling, not a
+/// plan limit. `storage.rules` (`chat_videos/`) sits above it at 100 MB as pure
+/// headroom. The number matches status video, which caps the same raw capture
+/// the same way. Unlike a status, a chat video has no *duration* cap: it isn't
+/// ephemeral, so the only bound that matters is bytes — upload time and storage.
+const int _kMaxChatVideoBytes = 64 * 1024 * 1024;
+
+/// Human-readable MB for the "video too large" notice. One decimal below 10 MB,
+/// whole numbers above, so the message reads naturally at both ends.
+String _formatMb(int bytes) =>
+    '${(bytes / (1024 * 1024)).toStringAsFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB';
+
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -165,6 +181,16 @@ class _ChatScreenState extends State<ChatScreen> {
   /// upload-progress convention in [_pickAndSendImage].
   double? _imageUploadProgress;
   StreamSubscription<double>? _imageUploadSub;
+
+  // ── Video attachment ──────────────────────────────────────────────
+  bool _isUploadingVideo = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight video, or null when no
+  /// video is uploading. Same paperclip-ring convention as [_pickAndSendImage];
+  /// image and video never upload at once (both share the one attach button),
+  /// so the composer reads whichever of the two is non-null.
+  double? _videoUploadProgress;
+  StreamSubscription<double>? _videoUploadSub;
 
   // ── Voice recording ───────────────────────────────────────────────
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
@@ -340,6 +366,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingSubscription?.cancel();
     _meshMessageSubscription?.cancel();
     _imageUploadSub?.cancel();
+    _videoUploadSub?.cancel();
     _voiceUploadSub?.cancel();
     _messageController.removeListener(_onTextChanged);
     _typingTimer?.cancel();
@@ -1455,6 +1482,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 clipBehavior: Clip.hardEdge,
                 child: _buildImageWidget(message, c),
               ),
+            ),
+            const SizedBox(height: 4),
+          ]
+          // ── Video message ─────────────────────────────────────
+          else if (message.type == MessageType.video &&
+              (message.mediaUrl != null || message.localFilePath != null)) ...[
+            GestureDetector(
+              onTap: () => _showFullScreenVideo(message),
+              child: _buildVideoThumbnail(message),
             ),
             const SizedBox(height: 4),
           ] else
@@ -2797,10 +2833,15 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Attachment Paperclip
-          _isUploadingImage
+          // Attachment Paperclip. One button for photo *and* video — tapping it
+          // opens a chooser sheet; while either is uploading it becomes the
+          // shared progress ring. Image and video never upload together (the
+          // sheet is unreachable behind the ring), so the composer reads
+          // whichever progress is non-null.
+          (_isUploadingImage || _isUploadingVideo)
               ? Padding(
                   padding: const EdgeInsets.all(8),
-                  child: _imageUploadProgress == null
+                  child: (_imageUploadProgress ?? _videoUploadProgress) == null
                       // Compression (and the offline mesh path) have no byte
                       // progress — show an honest indeterminate spinner rather
                       // than a bogus "0%".
@@ -2811,7 +2852,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               strokeWidth: 2, color: c.primary),
                         )
                       : UploadProgressRing(
-                          progress: _imageUploadProgress!,
+                          progress:
+                              (_imageUploadProgress ?? _videoUploadProgress)!,
                           size: 24,
                           // Keep the spinner visible through the ring's reveal
                           // delay so a fast upload never flashes back to idle.
@@ -2826,7 +2868,7 @@ class _ChatScreenState extends State<ChatScreen> {
               : IconButton(
                   icon: Icon(Icons.attach_file_rounded,
                       color: c.isDark ? Colors.white70 : c.textMid, size: 24),
-                  onPressed: _pickAndSendImage,
+                  onPressed: _showAttachmentSheet,
                 ),
           const SizedBox(width: 4),
 
@@ -3633,6 +3675,315 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     }
+  }
+
+  // ─── Attachment chooser ────────────────────────────────────────────
+  /// The paperclip's chooser: Photo or Video. Mirrors the Status media picker so
+  /// the two "attach media" surfaces feel like one app. Each tile pops the sheet
+  /// before running its picker — the sheet has to be gone before the OS gallery
+  /// UI takes over.
+  void _showAttachmentSheet() {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send media to this contact')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final c = AppThemeColors.of(sheetContext);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Share',
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: c.online.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.photo_library_rounded, color: c.online),
+                  ),
+                  title: const Text('Photo',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: const Text('Choose an image from your gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndSendImage();
+                  },
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.video_library_rounded,
+                        color: Colors.orange),
+                  ),
+                  title: const Text('Video',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: const Text('Choose a video from your gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndSendVideo();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─── Video attachment ──────────────────────────────────────────────
+  /// Pick a gallery video and send it. Deliberately parallel to
+  /// [_pickAndSendImage], with three differences that all follow from the
+  /// design decisions for chat video:
+  ///
+  ///  * **Online only.** There is no `sendVideoViaMesh`, so a video needs a real
+  ///    connection — checked *before* the picker so the user learns why up front.
+  ///  * **No compression.** `image_picker` hands back the raw capture and nothing
+  ///    in this app re-encodes video, so the only guard is a byte ceiling
+  ///    ([_kMaxChatVideoBytes]); the clip uploads as-is to `chat_videos/`.
+  ///  * **Duration on the bubble.** The clip length is probed locally and carried
+  ///    in the (already end-to-end-encrypted, already-serialized) `audioDuration`
+  ///    field so the receiver's placeholder can show mm:ss with no schema change.
+  ///    A video message never reaches the voice-note UI, so nothing else reads it.
+  Future<void> _pickAndSendVideo() async {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send videos to this contact')),
+      );
+      return;
+    }
+
+    // Video rides over Firebase Storage only — no mesh path — so check
+    // connectivity before the picker rather than stranding the user on a chosen
+    // clip that can't go anywhere.
+    final connectivity =
+        Provider.of<ConnectivityProvider>(context, listen: false);
+    if (!connectivity.isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Sending a video needs an internet connection')),
+      );
+      return;
+    }
+
+    try {
+      final XFile? picked =
+          await _imagePicker.pickVideo(source: ImageSource.gallery);
+      if (picked == null) return;
+
+      final file = File(picked.path);
+
+      // Size guard first: raw capture with no compressor, so bytes are the real
+      // ceiling. Checked on a `stat` before the duration probe so a huge pick is
+      // rejected without spinning up a decoder.
+      final bytes = await file.length();
+      if (bytes > _kMaxChatVideoBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'This video is ${_formatMb(bytes)}. The most a chat video can '
+                'carry is ${_formatMb(_kMaxChatVideoBytes)} — try a shorter clip.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      setState(() => _isUploadingVideo = true);
+
+      // Length for the bubble label. A probe failure just drops the duration
+      // from the placeholder; it never blocks the send.
+      final duration = await _probeVideoDuration(file);
+
+      final chatRoomId =
+          _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+      final fileName =
+          '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('chat_videos/$chatRoomId/$fileName');
+
+      // Upload raw and surface real byte progress at the paperclip — same
+      // WhatsApp-style % convention as the image path (null → indeterminate
+      // spinner until the first non-zero fraction; finally resets it).
+      final uploadTask = ref.putFile(file);
+      _videoUploadSub?.cancel();
+      _videoUploadSub = uploadProgress(uploadTask).listen(
+        (p) {
+          if (mounted) setState(() => _videoUploadProgress = p);
+        },
+        onError: (Object _) {},
+        cancelOnError: true,
+      );
+      await uploadTask;
+      final videoUrl = await ref.getDownloadURL();
+
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        text: '🎬 Video',
+        senderName: widget.currentUserName,
+        type: MessageType.video,
+        mediaUrl: videoUrl,
+        localFilePath: file.path,
+        // Reused field — carries the clip length, not audio. See the doc above.
+        audioDuration: duration?.inSeconds,
+      );
+
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send video: $e')),
+        );
+      }
+    } finally {
+      // Reset to null (not a stale %) so a failure or cancel never strands the
+      // paperclip mid-percentage.
+      _videoUploadSub?.cancel();
+      _videoUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isUploadingVideo = false;
+          _videoUploadProgress = null;
+        });
+      }
+    }
+  }
+
+  /// Reads a video's duration for the bubble label, or null if it can't be
+  /// determined. Mirrors the status screen's probe: an unreadable file yields
+  /// null rather than blocking the send.
+  Future<Duration?> _probeVideoDuration(File file) async {
+    final probe = VideoPlayerController.file(file);
+    try {
+      await probe.initialize();
+      final d = probe.value.duration;
+      return d == Duration.zero ? null : d;
+    } catch (_) {
+      return null;
+    } finally {
+      await probe.dispose();
+    }
+  }
+
+  /// A dark placeholder tile with a centred play button and, when known, the
+  /// clip length. There is no thumbnail generator in this app, so this is a
+  /// deliberate stand-in rather than a first-frame preview — tapping it opens
+  /// the full-screen player.
+  Widget _buildVideoThumbnail(MessageModel message) {
+    final durationSec = message.audioDuration; // reused field; see _pickAndSendVideo
+    return Container(
+      width: 220,
+      height: 150,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Faint film glyph so the empty tile reads as "video", not "broken".
+          Icon(Icons.movie_creation_rounded,
+              color: Colors.white.withOpacity(0.10), size: 64),
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.55),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withOpacity(0.9), width: 2),
+            ),
+            child: const Icon(Icons.play_arrow_rounded,
+                color: Colors.white, size: 34),
+          ),
+          if (durationSec != null && durationSec > 0)
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.videocam_rounded,
+                        color: Colors.white, size: 12),
+                    const SizedBox(width: 3),
+                    Text(
+                      VoiceRecorderService.formatDuration(
+                          Duration(seconds: durationSec)),
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullScreenVideo(MessageModel message) {
+    final localPath = message.localFilePath;
+    final url = message.mediaUrl;
+    final hasLocal = localPath != null && File(localPath).existsSync();
+    if (!hasLocal && (url == null || url.isEmpty)) return; // nothing to play
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _ChatVideoPlayerScreen(
+          localPath: localPath,
+          url: url,
+          caption: message.text,
+        ),
+      ),
+    );
   }
 
   /// The long-press menu: the reaction pill on top, the action list beneath.
@@ -4460,5 +4811,129 @@ class _ChatThemedArea extends StatelessWidget {
     }
 
     return content;
+  }
+}
+
+/// Full-screen player for a chat video. Prefers the sender's local file and
+/// falls back to streaming the network URL for the receiver, who has no local
+/// copy until they open one. Tap toggles play/pause; the scrubber sits at the
+/// bottom. Kept private to the chat screen — it is the video twin of
+/// [_ChatScreenState._showFullScreenImage].
+class _ChatVideoPlayerScreen extends StatefulWidget {
+  const _ChatVideoPlayerScreen({
+    this.localPath,
+    this.url,
+    required this.caption,
+  });
+
+  final String? localPath;
+  final String? url;
+  final String caption;
+
+  @override
+  State<_ChatVideoPlayerScreen> createState() => _ChatVideoPlayerScreenState();
+}
+
+class _ChatVideoPlayerScreenState extends State<_ChatVideoPlayerScreen> {
+  VideoPlayerController? _ctrl;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final local = widget.localPath;
+    final VideoPlayerController controller;
+    if (local != null && File(local).existsSync()) {
+      controller = VideoPlayerController.file(File(local));
+    } else if (widget.url != null && widget.url!.isNotEmpty) {
+      // Streams directly — no manual download step for the receiver.
+      controller = VideoPlayerController.networkUrl(Uri.parse(widget.url!));
+    } else {
+      if (mounted) setState(() => _error = true);
+      return;
+    }
+    _ctrl = controller;
+    try {
+      await controller.initialize();
+      if (!mounted) return;
+      setState(() {});
+      controller
+        ..setLooping(false)
+        ..play();
+    } catch (_) {
+      if (mounted) setState(() => _error = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return;
+    if (c.value.isPlaying) {
+      c.pause();
+    } else {
+      c.play();
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _ctrl;
+    final Widget body;
+    if (_error) {
+      body = const Text("Couldn't play this video",
+          style: TextStyle(color: Colors.white70));
+    } else if (c == null || !c.value.isInitialized) {
+      body = const CircularProgressIndicator(color: Colors.white70);
+    } else {
+      body = GestureDetector(
+        onTap: _togglePlay,
+        child: AspectRatio(
+          aspectRatio: c.value.aspectRatio,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoPlayer(c),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: VideoProgressIndicator(c, allowScrubbing: true),
+              ),
+              if (!c.value.isPlaying)
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.play_arrow_rounded,
+                      color: Colors.white, size: 48),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(widget.caption,
+            style: const TextStyle(fontSize: 14, color: Colors.white70)),
+      ),
+      body: Center(child: body),
+    );
   }
 }
