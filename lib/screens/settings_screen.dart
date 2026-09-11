@@ -30,6 +30,7 @@ import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/url_opener.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 /// WhatsApp-style settings screen.
@@ -1345,30 +1346,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     switch (result.status) {
       case UpdateCheckStatus.updateAvailable:
-        showDialog<void>(
-          context: context,
-          builder: (dialogCtx) => AlertDialog(
-            title: const Text('Update available'),
-            content: const Text(
-              'A new version of GupShupGo is ready. It downloads in the '
-              'background while you keep using the app, then installs with a '
-              'quick restart.',
+        // When Play won't run the background flexible flow (rare — e.g. a
+        // high-priority update), startFlexibleUpdate would silently no-op, so
+        // send the user to the Play Store listing instead of offering an
+        // "Update" button that does nothing.
+        if (result.flexibleAllowed) {
+          showDialog<void>(
+            context: context,
+            builder: (dialogCtx) => AlertDialog(
+              title: const Text('Update available'),
+              content: const Text(
+                'A new version of GupShupGo is ready. It downloads in the '
+                'background while you keep using the app, then installs with a '
+                'quick restart.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Later'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogCtx);
+                    _startFlexibleUpdate();
+                  },
+                  child: const Text('Update'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogCtx),
-                child: const Text('Later'),
+          );
+        } else {
+          showDialog<void>(
+            context: context,
+            builder: (dialogCtx) => AlertDialog(
+              title: const Text('Update available'),
+              content: const Text(
+                'A new version of GupShupGo is available on the Google Play '
+                'Store. Open the store listing to update.',
               ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(dialogCtx);
-                  _startFlexibleUpdate();
-                },
-                child: const Text('Update'),
-              ),
-            ],
-          ),
-        );
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Later'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogCtx);
+                    openExternalUrl(
+                      context,
+                      'https://play.google.com/store/apps/details?id=com.gupshupgo.app',
+                    );
+                  },
+                  child: const Text('Open Play Store'),
+                ),
+              ],
+            ),
+          );
+        }
         break;
 
       case UpdateCheckStatus.readyToInstall:

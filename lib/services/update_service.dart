@@ -124,7 +124,13 @@ class UpdateService {
         return;
       }
 
-      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
+      // Only nudge when Play will actually run the flexible flow. If flexible
+      // isn't allowed (e.g. a high-priority update Play restricts to the
+      // immediate path this app doesn't use), the notification would dead-end
+      // in startFlexibleUpdate's no-op — so stay quiet rather than post an
+      // un-actionable "Update available".
+      if (info.updateAvailability == UpdateAvailability.updateAvailable &&
+          info.flexibleUpdateAllowed) {
         await _maybeNotify(info.availableVersionCode, ready: false);
       }
     } catch (e) {

@@ -989,6 +989,21 @@ class MeshNetworkService extends ChangeNotifier {
             mediaUrl = await _uploadLocalFile(msg, 'chat_videos', 'mp4');
           }
 
+          // A media message can't be reconciled until its file actually
+          // uploaded. If the upload produced no URL (a transient Storage error,
+          // or — for video — the chat_videos rule not yet deployed), leave it
+          // pending so the next reconnect retries, instead of sending an
+          // unplayable url-less message and dropping the pending item for good.
+          final needsUpload = (msg.type == MessageType.image ||
+                  msg.type == MessageType.audio ||
+                  msg.type == MessageType.video) &&
+              msg.localFilePath != null;
+          if (needsUpload && mediaUrl == null) {
+            debugPrint(
+                '[Mesh] Upload not ready for ${msg.id}; keeping it pending for retry');
+            continue;
+          }
+
           await _chatService.sendMessage(
             senderId: msg.senderId,
             receiverId: msg.receiverId,

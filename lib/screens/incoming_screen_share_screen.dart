@@ -92,13 +92,29 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
     }
   }
 
-  void _accept() {
+  Future<void> _accept() async {
     if (_isResponding) return;
     _isResponding = true;
-    _cancelListeners();
 
-    // Tell the sharer to start capturing + broadcasting.
-    CallSignalingService.answerCall(widget.channelId);
+    // Tell the sharer to start capturing + broadcasting, and only open the
+    // viewer once that signal is actually written. answerCall swallows its
+    // errors, so without gating on the result a transient write failure would
+    // leave the viewer on a black screen while the sharer — never told we
+    // accepted — never starts capture.
+    final answered = await CallSignalingService.answerCall(widget.channelId);
+    if (!mounted) return;
+    if (!answered) {
+      _isResponding = false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't accept the screen share — check your "
+              'connection and try again.'),
+        ),
+      );
+      return;
+    }
+
+    _cancelListeners();
 
     // Pop the request screen first so the viewer isn't stacked on top of it,
     // then open the viewer (owns the session + full-screen view).
