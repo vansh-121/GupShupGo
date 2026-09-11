@@ -55,8 +55,14 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
     // Local fallback: slightly longer than the sharer's 45s request timeout, so
     // the sharer's `missed` signal normally dismisses us first (below). This
     // only fires if that write never lands (e.g. sharer offline).
+    //
+    // Skip while we're responding (`_isResponding`): an Accept tapped near the
+    // 50s mark awaits the `answered` write, and if this timer popped the screen
+    // mid-write the successful response would abort at `if (!mounted)` and never
+    // open the viewer — while the sharer, already told we accepted, starts
+    // broadcasting to nobody. Same guard the signaling listener below uses.
     _autoDismissTimer = Timer(const Duration(seconds: 50), () {
-      if (mounted) _dismiss();
+      if (mounted && !_isResponding) _dismiss();
     });
 
     // Sharer cancelled, declined elsewhere, or timed out → dismiss.
