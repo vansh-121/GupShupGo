@@ -20,6 +20,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
+import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/notification_service.dart';
@@ -640,6 +641,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.auto_awesome_rounded,
                 title: "What's New",
                 onTap: () => showWhatsNewDialog(context),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.system_update_rounded,
+                title: 'Check for updates',
+                onTap: _checkForUpdates,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
@@ -1314,6 +1321,113 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await FirebaseFirestore.instance.collection('users').doc(_user.id).update({
       'blockedUsers': FieldValue.arrayRemove([userId]),
     });
+  }
+
+  // ── Check for updates ──────────────────────────────────────────────────
+  /// Manual update check from the Help & Security card. Shows a brief spinner
+  /// while Play is queried, then reports the outcome: an update offer (whose
+  /// button starts Google Play's background flexible update), a "ready to
+  /// install" restart prompt, an "up to date" confirmation, or a graceful note
+  /// when the check can't run (e.g. the app wasn't installed from Play).
+  Future<void> _checkForUpdates() async {
+    AppHaptics.tap();
+
+    // The check itself is quick (not the download), so a blocking spinner is
+    // fine here; the flexible download runs in the background afterwards.
+    final result = await LoadingOverlay.during(
+      context,
+      () => UpdateService.instance.checkForUpdate(),
+      message: 'Checking for updates…',
+    );
+
+    if (!mounted) return;
+    final c = AppThemeColors.of(context);
+
+    switch (result.status) {
+      case UpdateCheckStatus.updateAvailable:
+        showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Update available'),
+            content: const Text(
+              'A new version of GupShupGo is ready. It downloads in the '
+              'background while you keep using the app, then installs with a '
+              'quick restart.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                  _startFlexibleUpdate();
+                },
+                child: const Text('Update'),
+              ),
+            ],
+          ),
+        );
+        break;
+
+      case UpdateCheckStatus.readyToInstall:
+        showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Update ready'),
+            content: const Text(
+              'An update has finished downloading. Restart GupShupGo to finish '
+              'installing it.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                  _startFlexibleUpdate();
+                },
+                child: const Text('Restart & install'),
+              ),
+            ],
+          ),
+        );
+        break;
+
+      case UpdateCheckStatus.upToDate:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                "You're on the latest version (v$kCurrentVersion)."),
+            backgroundColor: c.success,
+          ),
+        );
+        break;
+
+      case UpdateCheckStatus.unavailable:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Couldn't check for updates. Make sure GupShupGo was installed "
+              'from the Google Play Store.',
+            ),
+          ),
+        );
+        break;
+    }
+  }
+
+  Future<void> _startFlexibleUpdate() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Starting update — it downloads in the background.'),
+      ),
+    );
+    await UpdateService.instance.startFlexibleUpdate();
   }
 
   void _showAboutDialog() {
