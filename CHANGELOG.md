@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Custom themes and color palettes
 
+## [1.1.8] - 2026-09-12
+
+### Added
+- 🎥 **Video Messages in Chats** — Send and receive videos directly in conversations and off-grid mesh chats, with full-screen playback and live progress while sending.
+- 🖼️ **Instant Video Previews** — Videos now appear with crisp preview covers in their true shape, so you can see what they are before tapping play.
+- 📲 **Screen Share Invitations** — A clear incoming invitation screen when someone wants to share their screen, making it effortless to accept or decline.
+- 🔄 **Smoother In-App Updates** — Updates download quietly in the background without interrupting you, with a new "Check for updates" option in Settings anytime you want.
+- 📳 **Crisp Haptic Feedback** — Pleasant, tactile vibration responses when tapping buttons, starting calls, and navigating the app.
+
+### Changed
+- Updated version to 1.1.8 (build code 54).
+- 🎨 **Cleaner Layouts & Snappier Buttons** — Improved spacing, clearer menus, and responsive button states across chats and settings.
+- 🛠️ **Easier Problem Reporting** — Send feedback or report an issue easily right from the Home menu or Settings.
+
 ## [1.1.7] - 2026-09-04
 
 ### Added
