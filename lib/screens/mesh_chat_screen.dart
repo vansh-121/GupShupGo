@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
+import 'package:video_chat_app/widgets/video_message_widgets.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
 /// Direct peer-to-peer chat over the mesh network.
@@ -47,6 +48,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
 
   bool _isSending = false;
   bool _isUploadingImage = false;
+  bool _isUploadingVideo = false;
   bool _hasText = false;
 
   @override
@@ -125,6 +127,80 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
     }
+  }
+
+  Future<void> _pickAndSendVideo() async {
+    try {
+      final picked = await _imagePicker.pickVideo(source: ImageSource.gallery);
+      if (picked == null) return;
+
+      // Mesh videos are streamed peer-to-peer with no server compression and no
+      // progress bar, so they get a tighter cap than an online chat video.
+      // Checked before the poster/duration probes so a huge pick is rejected
+      // without spinning up a decoder.
+      final bytes = await File(picked.path).length();
+      if (bytes > kMaxMeshVideoBytes) {
+        _showError(
+          'This video is too large to send nearby — the limit is '
+          '${(kMaxMeshVideoBytes / (1024 * 1024)).round()} MB. Try a shorter clip.',
+        );
+        return;
+      }
+
+      setState(() => _isUploadingVideo = true);
+      // Both optional — a probe failure just drops the preview, never the send.
+      final poster = await generateMeshVideoPoster(picked.path);
+      final durSec = await probeMeshVideoDurationSeconds(picked.path);
+      final msg = await _mesh.sendVideoViaMesh(
+        receiverId: widget.peer.userId,
+        filePath: picked.path,
+        durationSeconds: durSec,
+        thumbnailBase64: poster,
+      );
+      setState(() => _messages.add(msg));
+      _scrollToBottom();
+    } catch (e) {
+      _showError('Failed to send video: $e');
+    } finally {
+      if (mounted) setState(() => _isUploadingVideo = false);
+    }
+  }
+
+  /// Bottom-sheet chooser behind the composer's paperclip: photo or video.
+  void _showAttachSheet(AppThemeColors c) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.photo_rounded, color: c.primary),
+              title: Text('Photo',
+                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickAndSendImage();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.videocam_rounded, color: c.primary),
+              title: Text('Video',
+                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickAndSendVideo();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _startVoiceRecording() async {
@@ -379,6 +455,20 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                   ),
                 ),
               )
+            else if (msg.type == MessageType.video)
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ChatVideoPlayerScreen(
+                      localPath: msg.localFilePath,
+                      url: msg.mediaUrl,
+                      caption: msg.text,
+                    ),
+                  ),
+                ),
+                child: VideoThumbnailTile(message: msg),
+              )
             else
               LinkifiedText(
                 msg.text,
@@ -436,7 +526,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        _isUploadingImage
+        (_isUploadingImage || _isUploadingVideo)
             ? Padding(
                 padding: const EdgeInsets.all(12),
                 child: SizedBox(
@@ -449,7 +539,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             : IconButton(
                 icon: Icon(Icons.attach_file_rounded,
                     color: c.textMid, size: 22),
-                onPressed: _pickAndSendImage,
+                onPressed: () => _showAttachSheet(c),
               ),
         Expanded(
           child: Container(

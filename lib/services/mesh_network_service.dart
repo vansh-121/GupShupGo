@@ -13,6 +13,21 @@ import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 
+/// Largest video a mesh send will carry, in bytes (25 MB).
+///
+/// The P2P `FILE` channel has no size limit of its own and no progress bar, and
+/// unlike the 64 MB online cap ([_kMaxChatVideoBytes] in chat_screen.dart) a mesh
+/// clip is streamed peer-to-peer with no server compression — so it gets its own,
+/// tighter ceiling. Enforced defensively inside [MeshNetworkService.sendVideoViaMesh]
+/// and pre-checked by the UI so the user is told before a clip is probed.
+const int kMaxMeshVideoBytes = 25 * 1024 * 1024;
+
+/// Safe ceiling for a `file_metadata` BYTES packet. Nearby caps a BYTES payload
+/// at ~32,768 bytes and overflows silently; a video's metadata embeds the base64
+/// poster, so we measure the encoded packet and drop the poster from the wire if
+/// it crosses this — leaving headroom for the rest of the JSON.
+const int _kMeshMetaSafeBytes = 30000;
+
 /// Mesh message wrapper for relay / dedup across peers.
 class _MeshPayload {
   final String messageId;
@@ -668,6 +683,105 @@ class MeshNetworkService extends ChangeNotifier {
   }
 
 
+  /// Send a video over the mesh: streams the clip on the `FILE` channel and a
+  /// companion `file_metadata` BYTES packet, exactly like [sendAudioViaMesh].
+  ///
+  /// [thumbnailBase64] is a small first-frame poster (see [generateMeshVideoPoster])
+  /// and [durationSeconds] the clip length; both are optional and only feed the
+  /// bubble label/preview. The poster is kept on the sender's stored copy, but is
+  /// **stripped from the wire copy** when the metadata packet would otherwise
+  /// exceed Nearby's BYTES cap ([_kMeshMetaSafeBytes]) — the file itself always
+  /// crosses on the FILE channel, so the receiver still gets the clip (falling
+  /// back to the film glyph).
+  Future<MessageModel> sendVideoViaMesh({
+    required String receiverId,
+    required String filePath,
+    int? durationSeconds,
+    String? thumbnailBase64,
+    String? senderName,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw Exception('Video file does not exist: $filePath');
+    }
+
+    // Defensive size guard — the UI pre-checks and shows a friendly message, but
+    // the transport is the source of truth so an uncapped clip can't slip through.
+    final length = await file.length();
+    if (length > kMaxMeshVideoBytes) {
+      throw Exception('Video exceeds the mesh size limit');
+    }
+
+    // Copy the video to app-local storage so it survives temp cleanup.
+    final appDir = await getApplicationDocumentsDirectory();
+    final meshVideoDir = Directory('${appDir.path}/mesh_videos');
+    if (!meshVideoDir.existsSync()) {
+      meshVideoDir.createSync(recursive: true);
+    }
+    final ext = filePath.contains('.') ? filePath.split('.').last : 'mp4';
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_generateId()}.$ext';
+    final savedFile = await file.copy('${meshVideoDir.path}/$fileName');
+
+    final message = MessageModel(
+      id: _generateId(),
+      senderId: _currentUserId,
+      receiverId: receiverId,
+      text: '🎬 Video',
+      type: MessageType.video,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sent,
+      localFilePath: savedFile.path,
+      audioDuration: durationSeconds,
+      videoThumbnailBase64: thumbnailBase64,
+      isOfflineMesh: true,
+      meshHops: 0,
+      syncPending: true,
+    );
+
+    // Store locally for persistence & Firestore sync
+    _cacheService.storePendingMeshMessage(message);
+    _seenMessageIds.add(message.id);
+
+    // For each connected peer:
+    //  1. Send the FILE payload (returns its payloadId).
+    //  2. Send a BYTES metadata payload so receiver can match file → message.
+    for (final endpoint in _connectedEndpoints) {
+      try {
+        final filePayloadId =
+            await Nearby().sendFilePayload(endpoint, savedFile.path);
+
+        // The metadata packet embeds the message JSON, which for a video carries
+        // the base64 poster. Encode it; if it would blow the BYTES cap, drop the
+        // poster from the WIRE copy only (toJson returns a fresh map, so the
+        // stored/returned message keeps its poster).
+        var wireJson = message.toJson();
+        final metadata = <String, dynamic>{
+          'payloadType': 'file_metadata',
+          'filePayloadId': filePayloadId,
+          'fileName': fileName,
+          'messageId': message.id,
+          'messageJson': wireJson,
+          'hops': 0,
+          'ttl': maxHops,
+        };
+        var encoded = utf8.encode(jsonEncode(metadata));
+        if (encoded.length > _kMeshMetaSafeBytes) {
+          wireJson = Map<String, dynamic>.of(wireJson)
+            ..remove('videoThumbnailBase64');
+          metadata['messageJson'] = wireJson;
+          encoded = utf8.encode(jsonEncode(metadata));
+        }
+        await Nearby().sendBytesPayload(endpoint, encoded);
+      } catch (e) {
+        debugPrint('[Mesh] Failed to send video to $endpoint: $e');
+      }
+    }
+
+    return message;
+  }
+
+
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {
     final bytes = utf8.encode(jsonEncode(payload.toJson()));
@@ -868,6 +982,13 @@ class MeshNetworkService extends ChangeNotifier {
             mediaUrl = await _uploadLocalFile(msg, 'chat_audio', 'm4a');
           }
 
+          // If this is a video with a local file, upload it.
+          if (msg.type == MessageType.video &&
+              msg.localFilePath != null &&
+              mediaUrl == null) {
+            mediaUrl = await _uploadLocalFile(msg, 'chat_videos', 'mp4');
+          }
+
           await _chatService.sendMessage(
             senderId: msg.senderId,
             receiverId: msg.receiverId,
@@ -875,6 +996,7 @@ class MeshNetworkService extends ChangeNotifier {
             type: msg.type,
             mediaUrl: mediaUrl,
             audioDuration: msg.audioDuration,
+            videoThumbnailBase64: msg.videoThumbnailBase64,
           );
         }
         synced.add(msg.id);
@@ -890,7 +1012,7 @@ class MeshNetworkService extends ChangeNotifier {
     }
   }
 
-  /// Upload a locally-stored mesh file (image / audio) to Firebase Storage.
+  /// Upload a locally-stored mesh file (image / audio / video) to Firebase Storage.
   Future<String?> _uploadLocalFile(
       MessageModel msg, String folder, String fallbackExt) async {
     try {
@@ -905,7 +1027,11 @@ class MeshNetworkService extends ChangeNotifier {
           .ref()
           .child('$folder/$chatRoomId/$fileName');
 
-      final contentType = fallbackExt == 'm4a' ? 'audio/m4a' : 'image/jpeg';
+      final contentType = switch (fallbackExt) {
+        'm4a' => 'audio/m4a',
+        'mp4' => 'video/mp4',
+        _ => 'image/jpeg',
+      };
       final metadata = SettableMetadata(contentType: contentType);
 
       await ref.putFile(file, metadata);
