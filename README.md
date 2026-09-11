@@ -16,7 +16,7 @@
 [![Agora RTC](https://img.shields.io/badge/Calling-Agora%20RTC-0096E6.svg?style=flat-square&logo=agora)](https://agora.io)
 [![Firebase Suite](https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com)
 
-[📖 Architecture Guide](ARCHITECTURE.md) • [📲 Play Store Pre-Register](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
+[📖 Architecture Guide](ARCHITECTURE.md) • [📲 Download on Google Play](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
 
 <br>
 <img src="assets/images/gupshupgo_portfolio_cover_1783416921910.png" width="900" alt="GupShupGo Hero Graphic">
@@ -42,16 +42,16 @@ GupShupGo is a production-grade, enterprise-ready messaging and real-time commun
 
 ---
 
-## 📲 Pre-Register on Google Play
+## 📲 Available on Google Play
 
 <div align="center">
 
 [![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
-**Be among the first to experience GupShupGo!**  
-Pre-register now on the Google Play Store to receive an automatic notification as soon as the production client is launched. Get access to encrypted chats, mesh networking, HD calling, and arcade gaming instantly on launch day.
+**Experience GupShupGo today!**  
+Download now on the Google Play Store to enjoy zero-knowledge encrypted messaging, off-grid peer-to-peer mesh chats, crystal-clear voice and video calling, and an integrated arcade gaming ecosystem.
 
-[👉 Pre-Register Now on Google Play Store 👈](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+[👉 Download Now on Google Play Store 👈](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
 </div>
 
@@ -76,7 +76,7 @@ Pre-register now on the Google Play Store to receive an automatic notification a
 
 ## 🗺️ Table of Contents
 
-1. [📲 Pre-Register on Google Play](#-pre-register-on-google-play)
+1. [📲 Available on Google Play](#-available-on-google-play)
 2. [⚔️ Feature Parity & Superpowers Matrix](#%EF%B8%8F-feature-parity--superpowers-matrix)
 3. [🏛️ Core System Architecture](#%EF%B8%8F-core-system-architecture)
 4. [✨ Feature Ecosystem](#-feature-ecosystem)
@@ -473,7 +473,7 @@ This repository is licensed under the **MIT License**.
 **Built with ❤️ and Flutter by Vansh Sethi**
 
 [![GitHub](https://img.shields.io/badge/GitHub-vansh--121-181717?style=for-the-badge&logo=github)](https://github.com/vansh-121)
-[![Google Play](https://img.shields.io/badge/Google_Play-Pre--Register-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+[![Google Play](https://img.shields.io/badge/Google_Play-Available_Now-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 [![Repository](https://img.shields.io/badge/Repo-GupShupGo-6366f1?style=for-the-badge&logo=git)](https://github.com/vansh-121/GupShupGo)
 
 *If GupShupGo inspired you or helped your development journey, please consider giving this repository a ⭐!*
