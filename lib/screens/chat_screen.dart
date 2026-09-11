@@ -3988,6 +3988,7 @@ class _ChatScreenState extends State<ChatScreen> {
         builder: (_) => ChatVideoPlayerScreen(
           localPath: localPath,
           url: url,
+          thumbnailBase64: message.videoThumbnailBase64,
           caption: message.text,
         ),
       ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -57,6 +58,141 @@ Future<int?> probeMeshVideoDurationSeconds(String path) async {
     return null;
   } finally {
     await probe.dispose();
+  }
+}
+
+// ─── Display aspect ratio (portrait-rotation fix) ───────────────────────────────
+
+/// The video's **true** on-screen aspect ratio (width / height), or null if it
+/// can't be determined.
+///
+/// Works around a `video_player` limitation on Android **API < 29**: a portrait
+/// clip is reported with a *landscape* [VideoPlayerValue.size] and
+/// `rotationCorrection == 0` (ExoPlayer rotates the surface, but the reported
+/// size isn't swapped — see video_player_android's `sendInitialized`), so
+/// `value.aspectRatio` comes out inverted and the frame is stretched into a
+/// landscape box. On API >= 29 the size is pre-swapped and `value.aspectRatio`
+/// is already correct, so callers fall back to it when this returns null.
+///
+/// A poster produced by `video_thumbnail` (`MediaMetadataRetriever.getFrameAtTime`)
+/// is always rotation-upright, so its own width/height is authoritative on every
+/// API level. We prefer a [posterBase64] the message already carries; failing
+/// that we measure a fresh poster from the local [filePath].
+Future<double?> resolveVideoDisplayAspect({
+  String? posterBase64,
+  String? filePath,
+}) async {
+  final fromPoster = await _aspectFromBase64Image(posterBase64);
+  if (fromPoster != null) return fromPoster;
+
+  if (filePath != null && filePath.isNotEmpty && File(filePath).existsSync()) {
+    try {
+      // A small poster is enough — video_thumbnail scales proportionally, so a
+      // 160px-wide frame carries the same ratio as the full clip, far cheaper.
+      final data = await VideoThumbnail.thumbnailData(
+        video: filePath,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 160,
+        quality: 25,
+      );
+      return _aspectFromBytes(data);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+Future<double?> _aspectFromBase64Image(String? base64Data) async {
+  if (base64Data == null || base64Data.isEmpty) return null;
+  try {
+    return _aspectFromBytes(base64Decode(base64Data));
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Decodes just the intrinsic dimensions of an encoded image and returns w / h.
+Future<double?> _aspectFromBytes(Uint8List? bytes) async {
+  if (bytes == null || bytes.isEmpty) return null;
+  try {
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final w = frame.image.width;
+    final h = frame.image.height;
+    frame.image.dispose();
+    codec.dispose();
+    return (w > 0 && h > 0) ? w / h : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// A [VideoPlayer] wrapped in an [AspectRatio] that uses the clip's **true**
+/// display ratio (via [resolveVideoDisplayAspect]) so portrait videos aren't
+/// stretched on Android API < 29. Drop-in replacement for a plain
+/// `AspectRatio(aspectRatio: controller.value.aspectRatio, child: VideoPlayer(controller))`.
+///
+/// Pass an already-initialized [controller]. Give it a [posterBase64] (the
+/// message already carries one) or a local [measureFilePath] to derive the true
+/// ratio; with neither it falls back to the controller's reported ratio. While a
+/// source is still resolving it paints nothing (the parent's background shows)
+/// rather than flashing the wrong ratio for a frame.
+class AspectAwareVideoPlayer extends StatefulWidget {
+  const AspectAwareVideoPlayer({
+    super.key,
+    required this.controller,
+    this.posterBase64,
+    this.measureFilePath,
+  });
+
+  final VideoPlayerController controller;
+  final String? posterBase64;
+  final String? measureFilePath;
+
+  @override
+  State<AspectAwareVideoPlayer> createState() => _AspectAwareVideoPlayerState();
+}
+
+class _AspectAwareVideoPlayerState extends State<AspectAwareVideoPlayer> {
+  double? _trueAspect;
+  bool _resolved = false;
+
+  bool get _hasSource =>
+      (widget.posterBase64 != null && widget.posterBase64!.isNotEmpty) ||
+      (widget.measureFilePath != null && widget.measureFilePath!.isNotEmpty);
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    final aspect = await resolveVideoDisplayAspect(
+      posterBase64: widget.posterBase64,
+      filePath: widget.measureFilePath,
+    );
+    if (!mounted) return;
+    setState(() {
+      _trueAspect = aspect;
+      _resolved = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Hold the frame until the true ratio is known, so we never show the
+    // inverted fallback first and pop to portrait a moment later.
+    if (_hasSource && !_resolved) return const SizedBox.expand();
+
+    final value = widget.controller.value;
+    final fallback =
+        (value.isInitialized && value.aspectRatio > 0) ? value.aspectRatio : 1.0;
+    return AspectRatio(
+      aspectRatio: _trueAspect ?? fallback,
+      child: VideoPlayer(widget.controller),
+    );
   }
 }
 
@@ -212,11 +348,17 @@ class ChatVideoPlayerScreen extends StatefulWidget {
     super.key,
     this.localPath,
     this.url,
+    this.thumbnailBase64,
     required this.caption,
   });
 
   final String? localPath;
   final String? url;
+
+  /// The sender's rotation-upright poster, when the message carries one. Used to
+  /// derive the true display ratio so a portrait clip isn't stretched on Android
+  /// API < 29 (see [resolveVideoDisplayAspect]).
+  final String? thumbnailBase64;
   final String caption;
 
   @override
@@ -225,6 +367,7 @@ class ChatVideoPlayerScreen extends StatefulWidget {
 
 class _ChatVideoPlayerScreenState extends State<ChatVideoPlayerScreen> {
   VideoPlayerController? _ctrl;
+  double? _trueAspect;
   bool _error = false;
 
   @override
@@ -235,8 +378,9 @@ class _ChatVideoPlayerScreenState extends State<ChatVideoPlayerScreen> {
 
   Future<void> _init() async {
     final local = widget.localPath;
+    final bool hasLocal = local != null && File(local).existsSync();
     final VideoPlayerController controller;
-    if (local != null && File(local).existsSync()) {
+    if (hasLocal) {
       controller = VideoPlayerController.file(File(local));
     } else if (widget.url != null && widget.url!.isNotEmpty) {
       // Streams directly — no manual download step for the receiver.
@@ -248,6 +392,13 @@ class _ChatVideoPlayerScreenState extends State<ChatVideoPlayerScreen> {
     _ctrl = controller;
     try {
       await controller.initialize();
+      if (!mounted) return;
+      // Resolve the true ratio before the first frame paints, so we never show
+      // the stretched fallback and pop to portrait a moment later.
+      _trueAspect = await resolveVideoDisplayAspect(
+        posterBase64: widget.thumbnailBase64,
+        filePath: hasLocal ? local : null,
+      );
       if (!mounted) return;
       setState(() {});
       controller
@@ -288,7 +439,7 @@ class _ChatVideoPlayerScreenState extends State<ChatVideoPlayerScreen> {
       body = GestureDetector(
         onTap: _togglePlay,
         child: AspectRatio(
-          aspectRatio: c.value.aspectRatio,
+          aspectRatio: _trueAspect ?? c.value.aspectRatio,
           child: Stack(
             alignment: Alignment.center,
             children: [

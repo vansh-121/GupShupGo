@@ -463,6 +463,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                     builder: (_) => ChatVideoPlayerScreen(
                       localPath: msg.localFilePath,
                       url: msg.mediaUrl,
+                      thumbnailBase64: msg.videoThumbnailBase64,
                       caption: msg.text,
                     ),
                   ),
