@@ -816,6 +816,8 @@ class SyncService {
       if (payload['mediaUrl'] != null) 'mediaUrl': payload['mediaUrl'],
       if (payload['audioDuration'] != null)
         'audioDuration': payload['audioDuration'],
+      if (payload['videoThumbnailBase64'] != null)
+        'videoThumbnailBase64': payload['videoThumbnailBase64'],
       if (payload['reactionTargetMessageId'] != null)
         'reactionTargetMessageId': payload['reactionTargetMessageId'],
       if (payload['statusReplyOwnerId'] != null) ...{

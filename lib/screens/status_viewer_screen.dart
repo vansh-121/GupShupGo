@@ -8,6 +8,7 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/widgets/video_message_widgets.dart';
 
 class StatusViewerScreen extends StatefulWidget {
   final StatusModel statusModel;
@@ -1031,9 +1032,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       color: Colors.black,
       child: _videoController != null && _isVideoInitialized
           ? Center(
-              child: AspectRatio(
-                aspectRatio: _videoController!.value.aspectRatio,
-                child: VideoPlayer(_videoController!),
+              child: AspectAwareVideoPlayer(
+                controller: _videoController!,
               ),
             )
           : const Center(
@@ -1118,7 +1118,7 @@ class _EncryptedVideoViewState extends State<_EncryptedVideoView> {
     if (c == null || !c.value.isInitialized) {
       return const CircularProgressIndicator(color: Colors.white70);
     }
-    return AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c));
+    return AspectAwareVideoPlayer(controller: c, measureFilePath: widget.file.path);
   }
 }
 

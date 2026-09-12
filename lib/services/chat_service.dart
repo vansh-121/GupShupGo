@@ -1068,6 +1068,7 @@ class ChatService {
       linkPreviewDescription: payload['linkPreviewDescription'] as String?,
       linkPreviewSiteName: payload['linkPreviewSiteName'] as String?,
       linkPreviewImageBase64: payload['linkPreviewImageBase64'] as String?,
+      videoThumbnailBase64: payload['videoThumbnailBase64'] as String?,
       replyToMessageId: payload['replyToMessageId'] as String?,
       replyToSenderId: payload['replyToSenderId'] as String?,
       replyToSenderName: payload['replyToSenderName'] as String?,
@@ -1133,6 +1134,7 @@ class ChatService {
     String? statusReplyCaption,
     String? statusReplyBackgroundColor,
     int? audioDuration,
+    String? videoThumbnailBase64,
     String? localFilePath,
     String? reactionTargetMessageId,
     // ── Link preview (resolved by the SENDER, see LinkPreviewService) ────
@@ -1168,6 +1170,7 @@ class ChatService {
       status: MessageStatus.sent,
       mediaUrl: mediaUrl,
       audioDuration: audioDuration,
+      videoThumbnailBase64: videoThumbnailBase64,
       statusReplyOwnerId: statusReplyOwnerId,
       statusReplyItemId: statusReplyItemId,
       statusReplyOwnerName: statusReplyOwnerName,
@@ -1228,6 +1231,7 @@ class ChatService {
           type: type,
           mediaUrl: mediaUrl,
           audioDuration: audioDuration,
+          videoThumbnailBase64: videoThumbnailBase64,
           statusReplyOwnerId: statusReplyOwnerId,
           statusReplyItemId: statusReplyItemId,
           statusReplyOwnerName: statusReplyOwnerName,
@@ -1284,6 +1288,7 @@ class ChatService {
     required MessageType type,
     String? mediaUrl,
     int? audioDuration,
+    String? videoThumbnailBase64,
     String? statusReplyOwnerId,
     String? statusReplyItemId,
     String? statusReplyOwnerName,
@@ -1338,6 +1343,8 @@ class ChatService {
         'text': text,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (audioDuration != null) 'audioDuration': audioDuration,
+        if (videoThumbnailBase64 != null)
+          'videoThumbnailBase64': videoThumbnailBase64,
         if (reactionTargetMessageId != null)
           'reactionTargetMessageId': reactionTargetMessageId,
         if (statusReplyOwnerId != null) ...{
@@ -1407,6 +1414,8 @@ class ChatService {
           'text': text,
           'mediaUrl': mediaUrl,
           'audioDuration': audioDuration,
+          if (videoThumbnailBase64 != null)
+            'videoThumbnailBase64': videoThumbnailBase64,
           if (reactionTargetMessageId != null)
             'reactionTargetMessageId': reactionTargetMessageId,
           'statusReplyOwnerId': statusReplyOwnerId,
@@ -1508,6 +1517,7 @@ class ChatService {
       statusReplyBackgroundColor:
           schemaVersion == 2 ? null : statusReplyBackgroundColor,
       audioDuration: schemaVersion == 2 ? null : audioDuration,
+      videoThumbnailBase64: schemaVersion == 2 ? null : videoThumbnailBase64,
       schemaVersion: schemaVersion,
       senderDeviceId: senderDeviceId,
       envelopes: envelopes,
@@ -2251,6 +2261,7 @@ class ChatService {
       'linkPreviewDescription': FieldValue.delete(),
       'linkPreviewSiteName': FieldValue.delete(),
       'linkPreviewImageBase64': FieldValue.delete(),
+      'videoThumbnailBase64': FieldValue.delete(),
       'replyToText': FieldValue.delete(),
     });
 

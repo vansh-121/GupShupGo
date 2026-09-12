@@ -20,6 +20,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
 import 'package:video_chat_app/services/settings_service.dart';
+import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/notification_service.dart';
@@ -28,6 +29,9 @@ import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/url_opener.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -109,7 +113,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {});
   }
 
+  bool _isSigningOut = false;
+
   Future<void> _signOut() async {
+    if (_isSigningOut) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -128,12 +136,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirm != true) return;
 
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
+    AppHaptics.tap();
+    setState(() => _isSigningOut = true);
+    try {
+      // Heavy multi-step teardown (Firestore listeners, presence, tokens) —
+      // a blocking overlay so the confirm tap isn't a silent multi-second gap.
+      // Navigation stays outside `during` (its finally pops the barrier).
+      await LoadingOverlay.during(
+        context,
+        () => _authService.signOut(),
+        message: 'Signing out…',
       );
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (_) => false,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSigningOut = false);
     }
   }
 
@@ -624,6 +645,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _buildStitchDivider(),
               _buildStitchTile(
+                icon: Icons.system_update_rounded,
+                title: 'Check for updates',
+                onTap: _checkForUpdates,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
                 icon: Icons.info_outline_rounded,
                 title: 'App info',
                 // From the changelog's constant, so the number here cannot drift
@@ -1092,20 +1119,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (peerUser == null || !mounted) return;
 
-    // Show a loading indicator while computing.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final n = await SafetyNumberService().safetyNumberFor(
-      selfUserId: selfUid,
-      peerUserId: peerUser.id,
+    // Compute behind a blocking overlay; `during` tears it down in a finally,
+    // so a failure can't leave the spinner stuck on screen.
+    final n = await LoadingOverlay.during(
+      context,
+      () => SafetyNumberService().safetyNumberFor(
+        selfUserId: selfUid,
+        peerUserId: peerUser.id,
+      ),
+      message: 'Computing safety number…',
     );
 
     if (!mounted) return;
-    Navigator.pop(context); // dismiss loading
 
     showDialog(
       context: context,
@@ -1297,6 +1322,146 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await FirebaseFirestore.instance.collection('users').doc(_user.id).update({
       'blockedUsers': FieldValue.arrayRemove([userId]),
     });
+  }
+
+  // ── Check for updates ──────────────────────────────────────────────────
+  /// Manual update check from the Help & Security card. Shows a brief spinner
+  /// while Play is queried, then reports the outcome: an update offer (whose
+  /// button starts Google Play's background flexible update), a "ready to
+  /// install" restart prompt, an "up to date" confirmation, or a graceful note
+  /// when the check can't run (e.g. the app wasn't installed from Play).
+  Future<void> _checkForUpdates() async {
+    AppHaptics.tap();
+
+    // The check itself is quick (not the download), so a blocking spinner is
+    // fine here; the flexible download runs in the background afterwards.
+    final result = await LoadingOverlay.during(
+      context,
+      () => UpdateService.instance.checkForUpdate(),
+      message: 'Checking for updates…',
+    );
+
+    if (!mounted) return;
+    final c = AppThemeColors.of(context);
+
+    switch (result.status) {
+      case UpdateCheckStatus.updateAvailable:
+        // When Play won't run the background flexible flow (rare — e.g. a
+        // high-priority update), startFlexibleUpdate would silently no-op, so
+        // send the user to the Play Store listing instead of offering an
+        // "Update" button that does nothing.
+        if (result.flexibleAllowed) {
+          showDialog<void>(
+            context: context,
+            builder: (dialogCtx) => AlertDialog(
+              title: const Text('Update available'),
+              content: const Text(
+                'A new version of GupShupGo is ready. It downloads in the '
+                'background while you keep using the app, then installs with a '
+                'quick restart.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Later'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogCtx);
+                    _startFlexibleUpdate();
+                  },
+                  child: const Text('Update'),
+                ),
+              ],
+            ),
+          );
+        } else {
+          showDialog<void>(
+            context: context,
+            builder: (dialogCtx) => AlertDialog(
+              title: const Text('Update available'),
+              content: const Text(
+                'A new version of GupShupGo is available on the Google Play '
+                'Store. Open the store listing to update.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Later'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogCtx);
+                    openExternalUrl(
+                      context,
+                      'https://play.google.com/store/apps/details?id=com.gupshupgo.app',
+                    );
+                  },
+                  child: const Text('Open Play Store'),
+                ),
+              ],
+            ),
+          );
+        }
+        break;
+
+      case UpdateCheckStatus.readyToInstall:
+        showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Update ready'),
+            content: const Text(
+              'An update has finished downloading. Restart GupShupGo to finish '
+              'installing it.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                  _startFlexibleUpdate();
+                },
+                child: const Text('Restart & install'),
+              ),
+            ],
+          ),
+        );
+        break;
+
+      case UpdateCheckStatus.upToDate:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                "You're on the latest version (v$kCurrentVersion)."),
+            backgroundColor: c.success,
+          ),
+        );
+        break;
+
+      case UpdateCheckStatus.unavailable:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Couldn't check for updates. Make sure GupShupGo was installed "
+              'from the Google Play Store.',
+            ),
+          ),
+        );
+        break;
+    }
+  }
+
+  Future<void> _startFlexibleUpdate() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Starting update — it downloads in the background.'),
+      ),
+    );
+    await UpdateService.instance.startFlexibleUpdate();
   }
 
   void _showAboutDialog() {

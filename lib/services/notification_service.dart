@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:video_chat_app/services/update_service.dart';
 
 // ─── Notification Preference Keys ─────────────────────────────────────────────
 class NotifPrefs {
@@ -61,6 +62,15 @@ const _digestChannel = AndroidNotificationChannel(
   description: 'Your daily GupShupGo morning summary',
   importance: Importance.low,
   playSound: false,
+);
+
+const _updateChannel = AndroidNotificationChannel(
+  'update_notifications',
+  'App Updates',
+  description: 'Alerts when a new version of GupShupGo is available',
+  importance: Importance.high,
+  playSound: true,
+  enableVibration: true,
 );
 
 // ─── NotificationService ───────────────────────────────────────────────────────
@@ -118,6 +128,7 @@ class NotificationService {
       await androidPlugin?.createNotificationChannel(_chatMessageChannel);
       await androidPlugin?.createNotificationChannel(_reminderChannel);
       await androidPlugin?.createNotificationChannel(_digestChannel);
+      await androidPlugin?.createNotificationChannel(_updateChannel);
     }
 
     // Handle tap when app was TERMINATED (notification opened cold start)
@@ -207,10 +218,12 @@ class NotificationService {
     final androidDetails = AndroidNotificationDetails(
       channelId,
       _channelNameFor(channelId),
-      importance: channelId == 'streak_notifications'
+      importance: (channelId == 'streak_notifications' ||
+              channelId == 'update_notifications')
           ? Importance.high
           : Importance.defaultImportance,
-      priority: channelId == 'streak_notifications'
+      priority: (channelId == 'streak_notifications' ||
+              channelId == 'update_notifications')
           ? Priority.high
           : Priority.defaultPriority,
       icon: '@mipmap/ic_launcher',
@@ -230,6 +243,25 @@ class NotificationService {
       body,
       NotificationDetails(android: androidDetails, iOS: iosDetails),
       payload: payload,
+    );
+  }
+
+  /// Posts the "Update available" nudge. Tapping it opens the app and starts
+  /// Google Play's flexible (background) update via [_navigateFromData]'s
+  /// `update` route. [ready] switches the copy for the case where a flexible
+  /// download has already finished and only needs a restart to install.
+  Future<void> showUpdateAvailable({bool ready = false}) async {
+    // The launch update check can reach here before FCM setup has run
+    // initialize(); it's idempotent, so ensure the channel exists first.
+    await initialize();
+    await showLocalNotification(
+      id: 1008,
+      title: ready ? 'Update ready to install' : '🚀 Update available',
+      body: ready
+          ? 'Tap to restart GupShupGo and finish installing the update.'
+          : 'A new version of GupShupGo is available. Tap to update.',
+      channelId: 'update_notifications',
+      payload: jsonEncode({'screen': 'update'}),
     );
   }
 
@@ -320,6 +352,7 @@ class NotificationService {
       'chat_message_notifications' => 'Chat Messages',
       'reminder_notifications' => 'Reminders',
       'digest_notifications' => 'Daily Digest',
+      'update_notifications' => 'App Updates',
       _ => 'GupShupGo',
     };
   }
@@ -371,6 +404,15 @@ class NotificationService {
 
   static void _navigateFromData(Map<String, dynamic> data) {
     final screen = data['screen'] as String? ?? '';
+
+    // The update nudge doesn't navigate anywhere — it kicks off Google Play's
+    // flexible update flow directly, so it must run even before the navigator
+    // is ready (e.g. a cold start from tapping the notification).
+    if (screen == 'update') {
+      UpdateService.instance.startFlexibleUpdate();
+      return;
+    }
+
     final nav = navigatorKey.currentState;
     if (nav == null) return;
 
@@ -400,12 +442,10 @@ class NotificationService {
         break;
 
       case 'screen_share':
-        final channelId = data['channelId'] as String? ?? '';
-        final sharerName = data['sharerName'] as String? ?? 'Someone';
-        FCMService.openScreenShareViewer(
-          channelId: channelId,
-          sharerName: sharerName,
-        );
+        // Notification tapped from background/terminated — open the accept/
+        // reject request UI (not the viewer directly). The FCM data payload
+        // carries channelId, sharerId, sharerName and sharerPhotoUrl.
+        FCMService.showIncomingScreenShareRequest(data);
         break;
 
       case 'home':

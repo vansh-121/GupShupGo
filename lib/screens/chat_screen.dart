@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +10,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -51,10 +54,15 @@ import 'package:video_chat_app/widgets/streak_restore_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/swipe_to_reply.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
+import 'package:video_chat_app/widgets/video_message_widgets.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/upload_progress.dart';
+import 'package:video_chat_app/widgets/common/async_button.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 class Contact {
   final String id;
@@ -102,6 +110,21 @@ const int _kChatAdMinMessages = 25;
 /// to the composer and the send button. This gap is what keeps the card out of
 /// reach of a mis-tap while typing.
 const int _kChatAdGapFromComposer = 8;
+
+/// Largest chat video accepted client-side.
+///
+/// Chat video is picked with `image_picker` and uploaded raw — there is no
+/// video compressor anywhere in this app — so this is the real ceiling, not a
+/// plan limit. `storage.rules` (`chat_videos/`) sits above it at 100 MB as pure
+/// headroom. The number matches status video, which caps the same raw capture
+/// the same way. Unlike a status, a chat video has no *duration* cap: it isn't
+/// ephemeral, so the only bound that matters is bytes — upload time and storage.
+const int _kMaxChatVideoBytes = 64 * 1024 * 1024;
+
+/// Human-readable MB for the "video too large" notice. One decimal below 10 MB,
+/// whole numbers above, so the message reads naturally at both ends.
+String _formatMb(int bytes) =>
+    '${(bytes / (1024 * 1024)).toStringAsFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB';
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
@@ -156,9 +179,35 @@ class _ChatScreenState extends State<ChatScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingImage = false;
 
+  /// Real upload completion (0.0–1.0) for the in-flight image, or null when no
+  /// image is uploading. Drives the determinate ring at the paperclip. See the
+  /// upload-progress convention in [_pickAndSendImage].
+  double? _imageUploadProgress;
+  StreamSubscription<double>? _imageUploadSub;
+
+  // ── Video attachment ──────────────────────────────────────────────
+  bool _isUploadingVideo = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight video, or null when no
+  /// video is uploading. Same paperclip-ring convention as [_pickAndSendImage];
+  /// image and video never upload at once (both share the one attach button),
+  /// so the composer reads whichever of the two is non-null.
+  double? _videoUploadProgress;
+  StreamSubscription<double>? _videoUploadSub;
+
   // ── Voice recording ───────────────────────────────────────────────
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
   bool _isSendingVoice = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight voice note, or null.
+  double? _voiceUploadProgress;
+  StreamSubscription<double>? _voiceUploadSub;
+
+  /// True from the moment the screen-share button is tapped until the Agora
+  /// session is up (or the attempt fails). A real re-entry guard: the old
+  /// `ScreenShareSession.instance.active` check doesn't engage during the
+  /// Firestore-write + FCM + engine-init gap, so a second tap slipped through.
+  bool _startingScreenShare = false;
   bool _hasText = false; // tracks if text field has content for mic/send toggle
 
   // ─── Block state ──────────────────────────────────────────────────
@@ -319,6 +368,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _onlineStatusSubscription?.cancel();
     _typingSubscription?.cancel();
     _meshMessageSubscription?.cancel();
+    _imageUploadSub?.cancel();
+    _videoUploadSub?.cancel();
+    _voiceUploadSub?.cancel();
     _messageController.removeListener(_onTextChanged);
     _typingTimer?.cancel();
     _previewDebounce?.cancel();
@@ -826,20 +878,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _showSafetyNumberForContact() async {
     final c = AppThemeColors.of(context);
 
-    // Show a loading indicator while computing the 5200-round hash.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final n = await SafetyNumberService().safetyNumberFor(
-      selfUserId: widget.currentUserId,
-      peerUserId: widget.contact.id,
+    // Compute the 5200-round hash behind a blocking overlay. `during` tears the
+    // overlay down in a finally, so a failure can't leave it stuck on screen.
+    final n = await LoadingOverlay.during(
+      context,
+      () => SafetyNumberService().safetyNumberFor(
+        selfUserId: widget.currentUserId,
+        peerUserId: widget.contact.id,
+      ),
+      message: 'Computing safety number…',
     );
 
     if (!mounted) return;
-    Navigator.pop(context); // dismiss loading
 
     showDialog(
       context: context,
@@ -933,7 +983,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ConnectingCallScreen(
@@ -960,7 +1010,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ConnectingCallScreen(
@@ -995,29 +1045,49 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // Re-entry guard. The `active` check above doesn't engage during the
+    // Firestore-write → FCM → Agora-init gap (the session isn't active yet),
+    // so without this a second tap could start a duplicate share.
+    if (_startingScreenShare) return;
+
+    AppHaptics.tap();
+    setState(() => _startingScreenShare = true);
+
     try {
       final channelId = CallSignalingService.generateChannelId();
 
       print(
           'Initiating screen share to ${widget.contact.name} on channel $channelId');
 
-      // Create the Firestore signaling document BEFORE notifying the viewer,
-      // so the viewer can listen for the "ended" signal.
-      await CallSignalingService.createCallDocument(
-        channelId: channelId,
-        callerId: widget.currentUserId,
-        calleeId: widget.contact.id,
-      );
+      // The signaling write + push run behind a brief blocking overlay so the
+      // tap has immediate feedback. No screen-capture consent happens here any
+      // more — it fires later, only if the viewer accepts. Navigation stays
+      // OUTSIDE `during` (see its doc): we push the share screen after teardown.
+      await LoadingOverlay.during(
+        context,
+        () async {
+          // Create the Firestore signaling document BEFORE notifying the
+          // viewer, so both sides can listen for accept/decline/end signals.
+          await CallSignalingService.createCallDocument(
+            channelId: channelId,
+            callerId: widget.currentUserId,
+            calleeId: widget.contact.id,
+          );
 
-      // Notify the other user — they auto-join as a viewer.
-      await FCMService().sendScreenShareNotification(
-          widget.contact.id, widget.currentUserId, channelId);
+          // Notify the other user — they get an accept/reject request.
+          await FCMService().sendScreenShareNotification(
+              widget.contact.id, widget.currentUserId, channelId);
 
-      // Start the long-lived session (owns the Agora engine so it survives
-      // navigation). This triggers the Android screen-capture consent dialog.
-      await ScreenShareSession.instance.startAsSharer(
-        channelId: channelId,
-        viewerName: widget.contact.name,
+          // Start the long-lived session in "requesting" mode (owns the Agora
+          // engine so it survives navigation). NOTHING is captured yet — the
+          // Android screen-capture consent dialog only fires once the viewer
+          // accepts and the session goes live.
+          await ScreenShareSession.instance.requestAsSharer(
+            channelId: channelId,
+            viewerName: widget.contact.name,
+          );
+        },
+        message: 'Sending request…',
       );
 
       if (!mounted) return;
@@ -1035,6 +1105,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to start screen sharing: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _startingScreenShare = false);
     }
   }
 
@@ -1413,6 +1485,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 clipBehavior: Clip.hardEdge,
                 child: _buildImageWidget(message, c),
               ),
+            ),
+            const SizedBox(height: 4),
+          ]
+          // ── Video message ─────────────────────────────────────
+          else if (message.type == MessageType.video &&
+              (message.mediaUrl != null || message.localFilePath != null)) ...[
+            GestureDetector(
+              onTap: () => _showFullScreenVideo(message),
+              child: _buildVideoThumbnail(message),
             ),
             const SizedBox(height: 4),
           ] else
@@ -2132,6 +2213,7 @@ class _ChatScreenState extends State<ChatScreen> {
             // chat, the user isn't Pro, and an ad actually filled. Never styled
             // as a bubble — see [NativeAdCard].
             return NativeAdCard(
+              key: const ValueKey('native-ad-chat'),
               placement: 'chat',
               inChat: true,
               budget: _chatAdBudget,
@@ -2290,21 +2372,17 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             )
           else ...[
-            IconButton(
-              icon: Icon(
-                Icons.phone_outlined,
-                color: c.isDark ? Colors.white : c.textHigh,
-                size: 22,
-              ),
+            AsyncIconButton(
+              icon: const Icon(Icons.phone_outlined),
+              color: c.isDark ? Colors.white : c.textHigh,
+              iconSize: 22,
               onPressed: _initiateAudioCall,
               tooltip: 'Audio Call',
             ),
-            IconButton(
-              icon: Icon(
-                Icons.videocam_outlined,
-                color: c.isDark ? Colors.white : c.textHigh,
-                size: 24,
-              ),
+            AsyncIconButton(
+              icon: const Icon(Icons.videocam_outlined),
+              color: c.isDark ? Colors.white : c.textHigh,
+              iconSize: 24,
               onPressed: _initiateVideoCall,
               tooltip: 'Video Call',
             ),
@@ -2713,6 +2791,38 @@ class _ChatScreenState extends State<ChatScreen> {
               onClose: () => setState(() => _linkPreviewSuppressed = true),
             ),
           ),
+        if (_isSendingVoice)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12, top: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    // Determinate once real bytes flow; indeterminate before
+                    // (recording hand-off / offline mesh, which has no %).
+                    value: _voiceUploadProgress,
+                    strokeWidth: 2,
+                    color: c.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Icon(Icons.mic_rounded, size: 16, color: c.primary),
+                const SizedBox(width: 4),
+                Text(
+                  _voiceUploadProgress == null
+                      ? 'Sending voice note…'
+                      : 'Sending voice note… ${(_voiceUploadProgress! * 100).round()}%',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: c.textMid,
+                  ),
+                ),
+              ],
+            ),
+          ),
         _buildComposerRow(c, darkPillBg, darkPillBorder),
       ],
     );
@@ -2726,20 +2836,42 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Attachment Paperclip
-          _isUploadingImage
+          // Attachment Paperclip. One button for photo *and* video — tapping it
+          // opens a chooser sheet; while either is uploading it becomes the
+          // shared progress ring. Image and video never upload together (the
+          // sheet is unreachable behind the ring), so the composer reads
+          // whichever progress is non-null.
+          (_isUploadingImage || _isUploadingVideo)
               ? Padding(
                   padding: const EdgeInsets.all(8),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: c.primary),
-                  ),
+                  child: (_imageUploadProgress ?? _videoUploadProgress) == null
+                      // Compression (and the offline mesh path) have no byte
+                      // progress — show an honest indeterminate spinner rather
+                      // than a bogus "0%".
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: c.primary),
+                        )
+                      : UploadProgressRing(
+                          progress:
+                              (_imageUploadProgress ?? _videoUploadProgress)!,
+                          size: 24,
+                          // Keep the spinner visible through the ring's reveal
+                          // delay so a fast upload never flashes back to idle.
+                          placeholder: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: c.primary),
+                          ),
+                        ),
                 )
               : IconButton(
                   icon: Icon(Icons.attach_file_rounded,
                       color: c.isDark ? Colors.white70 : c.textMid, size: 24),
-                  onPressed: _pickAndSendImage,
+                  onPressed: _showAttachmentSheet,
                 ),
           const SizedBox(width: 4),
 
@@ -2836,20 +2968,32 @@ class _ChatScreenState extends State<ChatScreen> {
           // Optional Screen Share shortcut
           const SizedBox(width: 4),
           IconButton(
-            icon: Icon(Icons.screen_share_rounded,
-                color: c.isDark ? Colors.white54 : c.textMid, size: 20),
+            icon: _startingScreenShare
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          c.isDark ? Colors.white54 : c.textMid),
+                    ),
+                  )
+                : Icon(Icons.screen_share_rounded,
+                    color: c.isDark ? Colors.white54 : c.textMid, size: 20),
             tooltip: 'Share screen',
-            onPressed: () {
-              if (PremiumGate.checkAndPrompt(
-                context,
-                featureName: 'Screen Sharing',
-                featureIcon: Icons.screen_share_rounded,
-                description:
-                    'Share your screen live during chats with GupShupGo Pro.',
-              )) {
-                _initiateScreenShare();
-              }
-            },
+            onPressed: _startingScreenShare
+                ? null
+                : () {
+                    if (PremiumGate.checkAndPrompt(
+                      context,
+                      featureName: 'Screen Sharing',
+                      featureIcon: Icons.screen_share_rounded,
+                      description:
+                          'Share your screen live during chats with GupShupGo Pro.',
+                    )) {
+                      _initiateScreenShare();
+                    }
+                  },
           ),
         ],
       ),
@@ -3059,7 +3203,22 @@ class _ChatScreenState extends State<ChatScreen> {
             .child('chat_audio/$chatRoomId/$fileName');
 
         final metadata = SettableMetadata(contentType: 'audio/m4a');
-        await ref.putFile(File(filePath), metadata);
+        // Real byte progress in the "Sending voice note…" indicator. Stays
+        // null (→ indeterminate spinner) until the first non-zero fraction, so
+        // a short clip shows a spinner rather than a frozen "0%". The finally
+        // resets to null, so a retry restarts here cleanly.
+        final uploadTask = ref.putFile(File(filePath), metadata);
+        _voiceUploadSub?.cancel();
+        _voiceUploadSub = uploadProgress(uploadTask).listen(
+          (p) {
+            if (mounted) setState(() => _voiceUploadProgress = p);
+          },
+          // Handled by the awaited task + outer catch/finally; swallow the
+          // duplicate stream error.
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
+        await uploadTask;
         final audioUrl = await ref.getDownloadURL();
 
         await _chatService.sendMessage(
@@ -3082,7 +3241,16 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSendingVoice = false);
+      // Reset progress to null so a failure/cancel/leave never leaves the
+      // indicator stuck at a partial percentage.
+      _voiceUploadSub?.cancel();
+      _voiceUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isSendingVoice = false;
+          _voiceUploadProgress = null;
+        });
+      }
     }
   }
 
@@ -3386,6 +3554,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Image attachment ──────────────────────────────────────────────
   Future<void> _pickAndSendImage() async {
+    AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send images to this contact')),
@@ -3458,7 +3627,25 @@ class _ChatScreenState extends State<ChatScreen> {
           File(picked.path),
           pro: proMediaQuality,
         );
-        await ref.putFile(compressed);
+
+        // Kick off the upload and surface its real byte progress at the
+        // paperclip (WhatsApp-style %). Progress stays null (→ indeterminate
+        // spinner) until the first non-zero byte fraction arrives, so a small
+        // one-chunk upload shows a brief spinner rather than a frozen "0%".
+        // The finally resets it to null, so a retry cleanly restarts here.
+        final uploadTask = ref.putFile(compressed);
+        _imageUploadSub?.cancel();
+        _imageUploadSub = uploadProgress(uploadTask).listen(
+          (p) {
+            if (mounted) setState(() => _imageUploadProgress = p);
+          },
+          // A failure/cancel is handled by the awaited task below and the
+          // outer catch/finally; swallow the duplicate stream error so it
+          // isn't an unhandled async exception.
+          onError: (Object _) {},
+          cancelOnError: true,
+        );
+        await uploadTask;
         final imageUrl = await ref.getDownloadURL();
 
         await _chatService.sendMessage(
@@ -3480,8 +3667,332 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isUploadingImage = false);
+      // Reset progress to null (not a stale %) so failure, cancel, or leaving
+      // mid-upload never strands the paperclip at e.g. 37%.
+      _imageUploadSub?.cancel();
+      _imageUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isUploadingImage = false;
+          _imageUploadProgress = null;
+        });
+      }
     }
+  }
+
+  // ─── Attachment chooser ────────────────────────────────────────────
+  /// The paperclip's chooser: Photo or Video. Mirrors the Status media picker so
+  /// the two "attach media" surfaces feel like one app. Each tile pops the sheet
+  /// before running its picker — the sheet has to be gone before the OS gallery
+  /// UI takes over.
+  void _showAttachmentSheet() {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send media to this contact')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final c = AppThemeColors.of(sheetContext);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Share',
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: c.online.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.photo_library_rounded, color: c.online),
+                  ),
+                  title: const Text('Photo',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: const Text('Choose an image from your gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndSendImage();
+                  },
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.video_library_rounded,
+                        color: Colors.orange),
+                  ),
+                  title: const Text('Video',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: const Text('Choose a video from your gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndSendVideo();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─── Video attachment ──────────────────────────────────────────────
+  /// Pick a gallery video and send it. Deliberately parallel to
+  /// [_pickAndSendImage], with three differences that all follow from the
+  /// design decisions for chat video:
+  ///
+  ///  * **Online only.** There is no `sendVideoViaMesh`, so a video needs a real
+  ///    connection — checked *before* the picker so the user learns why up front.
+  ///  * **No compression.** `image_picker` hands back the raw capture and nothing
+  ///    in this app re-encodes video, so the only guard is a byte ceiling
+  ///    ([_kMaxChatVideoBytes]); the clip uploads as-is to `chat_videos/`.
+  ///  * **Duration on the bubble.** The clip length is probed locally and carried
+  ///    in the (already end-to-end-encrypted, already-serialized) `audioDuration`
+  ///    field so the receiver's placeholder can show mm:ss with no schema change.
+  ///    A video message never reaches the voice-note UI, so nothing else reads it.
+  Future<void> _pickAndSendVideo() async {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send videos to this contact')),
+      );
+      return;
+    }
+
+    // The mesh has a tighter cap than the online path — a P2P clip is streamed
+    // peer-to-peer with no server compression and no progress bar — so the
+    // connectivity read decides the ceiling, but either way we branch after the
+    // pick rather than blocking the picker.
+    final connectivity =
+        Provider.of<ConnectivityProvider>(context, listen: false);
+    final isOnline = connectivity.isOnline;
+
+    try {
+      final XFile? picked =
+          await _imagePicker.pickVideo(source: ImageSource.gallery);
+      if (picked == null) return;
+
+      final file = File(picked.path);
+
+      // Size guard first: raw capture with no compressor, so bytes are the real
+      // ceiling. Checked on a `stat` before the duration probe so a huge pick is
+      // rejected without spinning up a decoder.
+      final bytes = await file.length();
+      final maxBytes = isOnline ? _kMaxChatVideoBytes : kMaxMeshVideoBytes;
+      if (bytes > maxBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'This video is ${_formatMb(bytes)}. The most a '
+                '${isOnline ? 'chat' : 'nearby'} video can carry is '
+                '${_formatMb(maxBytes)} — try a shorter clip.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      setState(() => _isUploadingVideo = true);
+
+      if (!isOnline) {
+        // ── Offline: send via the mesh ──────────────────────────────
+        // The clip streams on the P2P FILE channel; a small poster + duration
+        // ride the metadata packet (both optional — failure just drops the
+        // preview, never the send).
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final poster = await generateMeshVideoPoster(picked.path);
+          final durSec = await probeMeshVideoDurationSeconds(picked.path);
+          final meshMsg = await meshService.sendVideoViaMesh(
+            receiverId: widget.contact.id,
+            filePath: picked.path,
+            durationSeconds: durSec,
+            thumbnailBase64: poster,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content:
+                      Text('No internet & mesh unavailable. Video not sent.')),
+            );
+          }
+        }
+        return;
+      }
+
+      // ── Online: upload to Firebase Storage ──────────────────────
+      // Length for the bubble label. A probe failure just drops the duration
+      // from the placeholder; it never blocks the send.
+      final duration = await _probeVideoDuration(file);
+
+      final chatRoomId =
+          _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+      final fileName =
+          '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('chat_videos/$chatRoomId/$fileName');
+
+      // Upload raw and surface real byte progress at the paperclip — same
+      // WhatsApp-style % convention as the image path (null → indeterminate
+      // spinner until the first non-zero fraction; finally resets it).
+      final uploadTask = ref.putFile(file);
+      _videoUploadSub?.cancel();
+      _videoUploadSub = uploadProgress(uploadTask).listen(
+        (p) {
+          if (mounted) setState(() => _videoUploadProgress = p);
+        },
+        onError: (Object _) {},
+        cancelOnError: true,
+      );
+
+      // Extract the first-frame poster while the clip uploads — the two run
+      // concurrently so the thumbnail costs no extra wall-clock. A failure just
+      // yields null (the bubble falls back to the film-glyph placeholder); it
+      // never blocks the send. Awaited below, after the upload, so both are done
+      // before the message commits.
+      final thumbFuture = _generateVideoThumbnail(file);
+
+      await uploadTask;
+      final videoUrl = await ref.getDownloadURL();
+      final thumbB64 = await thumbFuture;
+
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        text: '🎬 Video',
+        senderName: widget.currentUserName,
+        type: MessageType.video,
+        mediaUrl: videoUrl,
+        localFilePath: file.path,
+        // Reused field — carries the clip length, not audio. See the doc above.
+        audioDuration: duration?.inSeconds,
+        // Base64 JPEG poster; rides inline in the encrypted envelope so the
+        // receiver renders it before downloading the clip. See
+        // _generateVideoThumbnail.
+        videoThumbnailBase64: thumbB64,
+      );
+
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send video: $e')),
+        );
+      }
+    } finally {
+      // Reset to null (not a stale %) so a failure or cancel never strands the
+      // paperclip mid-percentage.
+      _videoUploadSub?.cancel();
+      _videoUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isUploadingVideo = false;
+          _videoUploadProgress = null;
+        });
+      }
+    }
+  }
+
+  /// Reads a video's duration for the bubble label, or null if it can't be
+  /// determined. Mirrors the status screen's probe: an unreadable file yields
+  /// null rather than blocking the send.
+  Future<Duration?> _probeVideoDuration(File file) async {
+    final probe = VideoPlayerController.file(file);
+    try {
+      await probe.initialize();
+      final d = probe.value.duration;
+      return d == Duration.zero ? null : d;
+    } catch (_) {
+      return null;
+    } finally {
+      await probe.dispose();
+    }
+  }
+
+  /// Extracts the first-frame poster of [file] as a base64-encoded JPEG, or null
+  /// if it can't be decoded. Runs on the SENDER only: the string rides inline in
+  /// the encrypted message ([MessageModel.videoThumbnailBase64]), so the receiver
+  /// paints the poster with no plugin call and before downloading the clip.
+  ///
+  /// Downscaled to 360 px wide at quality 60 — a bubble-sized still, kept small
+  /// because it travels inside the envelope. Any failure returns null and the
+  /// bubble falls back to the film-glyph placeholder; it never blocks the send.
+  Future<String?> _generateVideoThumbnail(File file) async {
+    try {
+      final Uint8List? bytes = await VideoThumbnail.thumbnailData(
+        video: file.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 360,
+        quality: 60,
+      );
+      if (bytes == null || bytes.isEmpty) return null;
+      return base64Encode(bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The video bubble tile — see [VideoThumbnailTile], shared with the mesh chat
+  /// so both surfaces render a video the same way. Tapping it (at the call site)
+  /// opens [ChatVideoPlayerScreen] via [_showFullScreenVideo].
+  Widget _buildVideoThumbnail(MessageModel message) =>
+      VideoThumbnailTile(message: message);
+
+  void _showFullScreenVideo(MessageModel message) {
+    final localPath = message.localFilePath;
+    final url = message.mediaUrl;
+    final hasLocal = localPath != null && File(localPath).existsSync();
+    if (!hasLocal && (url == null || url.isEmpty)) return; // nothing to play
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatVideoPlayerScreen(
+          localPath: localPath,
+          url: url,
+          thumbnailBase64: message.videoThumbnailBase64,
+          caption: message.text,
+        ),
+      ),
+    );
   }
 
   /// The long-press menu: the reaction pill on top, the action list beneath.
@@ -4311,3 +4822,4 @@ class _ChatThemedArea extends StatelessWidget {
     return content;
   }
 }
+

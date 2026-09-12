@@ -59,6 +59,8 @@ import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -104,6 +106,15 @@ class _HomeScreenState extends State<HomeScreen>
   // during the rebuild handoff, throwing "Stream has already been
   // listened to".
   Stream<List<ChatRoom>>? _chatRoomsStream;
+
+  // Cached call-log stream, for the same reason as _chatRoomsStream above.
+  // Built inline in _buildCallsTab, getCallLogs() returned a fresh Firestore
+  // .snapshots() stream on every HomeScreen rebuild — and the frequent
+  // presence/online-badge setState()s make those rebuilds constant. Each new
+  // stream dropped the StreamBuilder back to ConnectionState.waiting, which
+  // flashed the full-screen spinner and tore down the native ad card every
+  // couple of seconds. Created once, reused for the screen's lifetime.
+  Stream<List<CallLogModel>>? _callLogsStream;
 
   // Tracks Firebase Auth presence so we can show a non-blocking re-verify
   // banner when the local session exists but Firebase has no user (typical
@@ -825,7 +836,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Material(
       color: c.primary.withOpacity(0.10),
       child: InkWell(
-        onTap: _signOut,
+        onTap: () => _signOut(message: 'Reconnecting…'),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -850,12 +861,30 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _signOut() async {
-    await _authService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
+  bool _isSigningOut = false;
+
+  /// Signs out and returns to login. Shared by the overflow-menu "Log out" and
+  /// the re-verify banner, which passes its own [message] since it reads as
+  /// "reconnect" to the user rather than a deliberate logout.
+  Future<void> _signOut({String message = 'Signing out…'}) async {
+    if (_isSigningOut) return;
+    AppHaptics.tap();
+    setState(() => _isSigningOut = true);
+    try {
+      // Heavy teardown (listeners, presence, tokens) behind a blocking overlay
+      // so the tap isn't a silent gap. Navigation stays outside `during`.
+      await LoadingOverlay.during(
+        context,
+        () => _authService.signOut(),
+        message: message,
       );
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSigningOut = false);
     }
   }
 
@@ -1696,7 +1725,11 @@ class _HomeScreenState extends State<HomeScreen>
             // empty state is exactly the impression AdMob's placement guidance
             // is written against.
             if (otherStatuses.isNotEmpty)
-              NativeAdCard(placement: 'moments', budget: _momentsAdBudget),
+              NativeAdCard(
+                key: const ValueKey('native-ad-moments'),
+                placement: 'moments',
+                budget: _momentsAdBudget,
+              ),
 
             // Empty state (Stitch Tactical Moments style)
             if (otherStatuses.isEmpty)
@@ -1955,8 +1988,10 @@ class _HomeScreenState extends State<HomeScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
+    _callLogsStream ??=
+        _callLogService.getCallLogs(_currentUserId!).asBroadcastStream();
     return StreamBuilder<List<CallLogModel>>(
-      stream: _callLogService.getCallLogs(_currentUserId!),
+      stream: _callLogsStream,
       builder: (context, snapshot) {
         final c = AppThemeColors.of(context);
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -2016,7 +2051,11 @@ class _HomeScreenState extends State<HomeScreen>
           itemCount: callLogs.length + (showAd ? 1 : 0),
           itemBuilder: (context, rawIndex) {
             if (showAd && rawIndex == adSlot) {
-              return NativeAdCard(placement: 'calls', budget: _callsAdBudget);
+              return NativeAdCard(
+                key: const ValueKey('native-ad-calls'),
+                placement: 'calls',
+                budget: _callsAdBudget,
+              );
             }
             // Everything after the slot is shifted by the card that took its
             // place in the list, so unmap the index before touching callLogs.
@@ -2390,9 +2429,9 @@ class _HomeScreenState extends State<HomeScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _withVaultBanner(_buildChatsTab()),
-                _buildStatusTab(),
-                _buildCallsTab(),
+                _KeepAliveTab(child: _withVaultBanner(_buildChatsTab())),
+                _KeepAliveTab(child: _buildStatusTab()),
+                _KeepAliveTab(child: _buildCallsTab()),
               ],
             ),
           ),
@@ -2576,11 +2615,12 @@ class _HomeScreenState extends State<HomeScreen>
     final c = AppThemeColors.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // ── Gup Arcade mini-FAB (bottom-left) ──────────────────────
         if (_currentUserId != null)
           Padding(
-            padding: const EdgeInsets.only(left: 32),
+            padding: const EdgeInsets.only(left: 32, bottom: 12),
             child: StreamBuilder<DocumentSnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('users')
@@ -3033,5 +3073,37 @@ extension StringExtension on String {
   String capitalize() {
     if (isEmpty) return this;
     return '${this[0].toUpperCase()}${substring(1)}';
+  }
+}
+
+/// Keeps a tab's subtree — and crucially its StreamBuilder subscriptions — alive
+/// when the tab scrolls out of the TabBarView's viewport.
+///
+/// Without this, switching away from a tab disposes its StreamBuilder, which
+/// cancels the underlying Firestore subscription. For the screen's cached
+/// broadcast streams (_chatRoomsStream, _callLogsStream) that is fatal: a
+/// broadcast stream cancels its source when its last listener leaves and never
+/// re-subscribes, so on return the StreamBuilder listens to a dead stream that
+/// never emits — which is why the Calls tab sat on its spinner forever after a
+/// revisit. Kept alive, the sole listener never leaves, the stream stays live,
+/// and the tab shows its last data instantly on return.
+class _KeepAliveTab extends StatefulWidget {
+  const _KeepAliveTab({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAliveTab> createState() => _KeepAliveTabState();
+}
+
+class _KeepAliveTabState extends State<_KeepAliveTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+    return widget.child;
   }
 }

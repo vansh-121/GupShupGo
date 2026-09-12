@@ -18,6 +18,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
+import 'package:video_chat_app/screens/incoming_screen_share_screen.dart';
 import 'package:video_chat_app/screens/screen_share_viewer_screen.dart';
 import 'package:video_chat_app/services/screen_share_session.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
@@ -50,6 +51,10 @@ class FCMService {
   /// viewer would spin up a second Agora engine for the same channel and
   /// cause resource conflicts. Reset when the viewer is popped.
   static bool _isScreenShareViewerShowing = false;
+
+  /// Prevents stacking multiple IncomingScreenShareScreens (the accept/reject
+  /// request UI). Reset when the request screen is popped.
+  static bool _isScreenShareRequestShowing = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static const _deviceIdKey = 'gsg_fcm_device_id_v1';
   static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
@@ -58,6 +63,35 @@ class FCMService {
   /// Public getter so the global CallKit listener in main.dart can check
   /// whether IncomingCallScreen is already handling the accept flow.
   static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
+
+  /// Shows the accept/reject request UI ([IncomingScreenShareScreen]) for an
+  /// incoming screen share. Used by both the foreground FCM handler and the
+  /// background notification-tap router. No-ops if a request is already
+  /// showing, a session is already active, an incoming call is up, the
+  /// channelId is missing, or the navigator isn't ready.
+  static void showIncomingScreenShareRequest(Map<String, dynamic> data) {
+    final channelId = (data['channelId'] ?? '') as String;
+    if (channelId.isEmpty) return;
+    if (_isScreenShareRequestShowing ||
+        _isIncomingCallScreenShowing ||
+        ScreenShareSession.instance.active) {
+      return;
+    }
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+
+    _isScreenShareRequestShowing = true;
+    nav
+        .push(MaterialPageRoute(
+          builder: (_) => IncomingScreenShareScreen(
+            channelId: channelId,
+            sharerId: (data['sharerId'] ?? '') as String,
+            sharerName: (data['sharerName'] ?? 'Someone') as String,
+            sharerPhotoUrl: data['sharerPhotoUrl'] as String?,
+          ),
+        ))
+        .then((_) => _isScreenShareRequestShowing = false);
+  }
 
   /// Starts the viewer-side screen-share session (owns the Agora engine so it
   /// survives navigation) and opens the full-screen viewer. Used by both the
@@ -214,15 +248,10 @@ class FCMService {
             return;
           }
 
-          // Auto-open the viewer so the shared screen appears without an
-          // explicit accept step (one-way screen share). Skip if a call is
-          // already ringing or a share session is already active.
-          if (!_isIncomingCallScreenShowing) {
-            await openScreenShareViewer(
-              channelId: message.data['channelId'] ?? '',
-              sharerName: message.data['sharerName'] ?? 'Someone',
-            );
-          }
+          // Show the accept/reject request UI — the viewer only opens once the
+          // user accepts. showIncomingScreenShareRequest guards against a call
+          // already ringing or a share session already being active.
+          showIncomingScreenShareRequest(message.data);
         } else if (messageType == 'streak_broken' ||
             messageType == 'streak_warning' ||
             messageType == 'streak_milestone' ||

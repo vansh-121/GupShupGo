@@ -8,7 +8,7 @@
 
 **The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
-[![Release: 1.1.7](https://img.shields.io/badge/Release-v1.1.7-blue.svg?style=flat-square)](CHANGELOG.md)
+[![Release: 1.1.8](https://img.shields.io/badge/Release-v1.1.8-blue.svg?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
 [![Flutter SDK](https://img.shields.io/badge/Flutter-%E2%89%A53.2.0-02569B.svg?style=flat-square&logo=flutter)](https://flutter.dev)
 [![Signal Protocol E2EE](https://img.shields.io/badge/Security-Signal%20E2EE-10B981.svg?style=flat-square&logo=signal)](https://signal.org)
@@ -16,7 +16,7 @@
 [![Agora RTC](https://img.shields.io/badge/Calling-Agora%20RTC-0096E6.svg?style=flat-square&logo=agora)](https://agora.io)
 [![Firebase Suite](https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com)
 
-[📖 Architecture Guide](ARCHITECTURE.md) • [📲 Play Store Pre-Register](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
+[📖 Architecture Guide](ARCHITECTURE.md) • [📲 Download on Google Play](https://play.google.com/store/apps/details?id=com.gupshupgo.app) • [📽️ Core System Demo](https://drive.google.com/file/d/1SiRGrnEmd6NfMtUpOwt14ZydMXcQpD0l/view?usp=drive_link) • [📽️ Background Call Demo](https://drive.google.com/file/d/1rzKF0wo0TkwQmZVnYHOweSIJxczKQAmL/view?usp=sharing)
 
 <br>
 <img src="assets/images/gupshupgo_portfolio_cover_1783416921910.png" width="900" alt="GupShupGo Hero Graphic">
@@ -42,16 +42,16 @@ GupShupGo is a production-grade, enterprise-ready messaging and real-time commun
 
 ---
 
-## 📲 Pre-Register on Google Play
+## 📲 Available on Google Play
 
 <div align="center">
 
 [![Get it on Google Play](https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
-**Be among the first to experience GupShupGo!**  
-Pre-register now on the Google Play Store to receive an automatic notification as soon as the production client is launched. Get access to encrypted chats, mesh networking, HD calling, and arcade gaming instantly on launch day.
+**Experience GupShupGo today!**  
+Download now on the Google Play Store to enjoy zero-knowledge encrypted messaging, off-grid peer-to-peer mesh chats, crystal-clear voice and video calling, and an integrated arcade gaming ecosystem.
 
-[👉 Pre-Register Now on Google Play Store 👈](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+[👉 Download Now on Google Play Store 👈](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 
 </div>
 
@@ -76,7 +76,7 @@ Pre-register now on the Google Play Store to receive an automatic notification a
 
 ## 🗺️ Table of Contents
 
-1. [📲 Pre-Register on Google Play](#-pre-register-on-google-play)
+1. [📲 Available on Google Play](#-available-on-google-play)
 2. [⚔️ Feature Parity & Superpowers Matrix](#%EF%B8%8F-feature-parity--superpowers-matrix)
 3. [🏛️ Core System Architecture](#%EF%B8%8F-core-system-architecture)
 4. [✨ Feature Ecosystem](#-feature-ecosystem)
@@ -441,6 +441,8 @@ GupShupGo is built to meet strict performance requirements:
 * [x] **Bond Streak Engine:** Interactive daily messaging streaks and streak restoration system.
 * [x] **Android 16 KB Page-Size & Play Integrity:** 16 KB page-size memory compliance for Android 15+ and Google Play Integrity protection.
 * [x] **Self-Healing Message Recovery & Silent Sync:** Automatic background re-encryption and silent FCM sync for 100% reliable, zero-drop messaging.
+* [x] **In-Chat Video Messaging & Poster Thumbnails:** Direct and mesh network video sharing with live upload progress and true aspect ratio playback.
+* [x] **Flexible In-App Updates & Screen Share Request Flow:** Google Play Core background updates and full-screen incoming screen share call UI.
 
 ### 📅 Phase 2: Future Pipeline
 * [ ] **E2EE Multi-Party Group Calling:** Extending the Double Ratchet protocol to support group calls.
@@ -471,7 +473,7 @@ This repository is licensed under the **MIT License**.
 **Built with ❤️ and Flutter by Vansh Sethi**
 
 [![GitHub](https://img.shields.io/badge/GitHub-vansh--121-181717?style=for-the-badge&logo=github)](https://github.com/vansh-121)
-[![Google Play](https://img.shields.io/badge/Google_Play-Pre--Register-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
+[![Google Play](https://img.shields.io/badge/Google_Play-Available_Now-00875F?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.gupshupgo.app)
 [![Repository](https://img.shields.io/badge/Repo-GupShupGo-6366f1?style=for-the-badge&logo=git)](https://github.com/vansh-121/GupShupGo)
 
 *If GupShupGo inspired you or helped your development journey, please consider giving this repository a ⭐!*

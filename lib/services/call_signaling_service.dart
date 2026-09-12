@@ -52,16 +52,23 @@ class CallSignalingService {
 
   // ─── Status transitions ────────────────────────────────────────────────────
 
-  /// Callee accepted the call.
-  static Future<void> answerCall(String channelId) async {
+  /// Callee accepted the call. Returns true when the `answered` transition was
+  /// written, false when it failed (the error is logged). Callers that must not
+  /// proceed until the peer is actually notified — e.g. the screen-share
+  /// viewer, which otherwise opens on a black screen while the sharer, never
+  /// told we accepted, never starts capture — should gate on the result;
+  /// call-style callers may ignore it.
+  static Future<bool> answerCall(String channelId) async {
     try {
       await _firestore.collection(_collection).doc(channelId).update({
         'status': CallSignalStatus.answered.name,
         'answeredAt': FieldValue.serverTimestamp(),
       });
+      return true;
     } catch (e, stack) {
       print('CallSignaling: error answering call: $e');
       CrashlyticsService.logError(e, stack, reason: 'CallSignaling.answerCall failed');
+      return false;
     }
   }
 

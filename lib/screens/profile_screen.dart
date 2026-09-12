@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,6 +18,8 @@ import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/upload_progress.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -38,6 +41,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _isSaving = false;
   bool _isUploadingPhoto = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight profile photo, or null
+  /// when not uploading / before byte progress is known.
+  double? _photoUploadProgress;
+  StreamSubscription<double>? _photoUploadSub;
   String? _photoUrl;
   String? _errorMessage;
   String? _username;
@@ -56,12 +64,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    _photoUploadSub?.cancel();
     _nameController.dispose();
     _aboutController.dispose();
     super.dispose();
   }
 
   Future<void> _pickAndUploadPhoto() async {
+    AppHaptics.tap();
     try {
       final XFile? picked = await _picker.pickImage(
           source: ImageSource.gallery, imageQuality: 70);
@@ -73,16 +83,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .ref()
           .child('profile_photos/${widget.currentUser.id}.jpg');
 
-      await ref.putFile(File(picked.path));
+      // Real byte progress on the avatar. Stays null (→ indeterminate spinner)
+      // until the first non-zero fraction arrives, so a small photo shows a
+      // brief spinner rather than a frozen "0%". The finally resets it to null,
+      // so a retry restarts here cleanly.
+      final uploadTask = ref.putFile(File(picked.path));
+      _photoUploadSub?.cancel();
+      _photoUploadSub = uploadProgress(uploadTask).listen(
+        (p) {
+          if (mounted) setState(() => _photoUploadProgress = p);
+        },
+        // Failure/cancel is handled by the awaited task + catch below; swallow
+        // the duplicate stream error so it isn't an unhandled async exception.
+        onError: (Object _) {},
+        cancelOnError: true,
+      );
+      await uploadTask;
       final url = await ref.getDownloadURL();
 
-      setState(() {
-        _photoUrl = url;
-        _isUploadingPhoto = false;
-      });
+      if (mounted) setState(() => _photoUrl = url);
     } catch (e) {
-      setState(() => _isUploadingPhoto = false);
       _showError('Failed to upload photo: $e');
+    } finally {
+      // Reset to null (not a stale %) so failure, cancel, or leaving
+      // mid-upload never strands the avatar at a partial percentage.
+      _photoUploadSub?.cancel();
+      _photoUploadSub = null;
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+          _photoUploadProgress = null;
+        });
+      }
     }
   }
 
@@ -168,7 +200,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     backgroundImage: avatarImage(avatarUrl, radius: 60),
                     backgroundColor: c.surfaceAlt,
                     child: _isUploadingPhoto
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? SizedBox(
+                            width: 56,
+                            height: 56,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                CircularProgressIndicator(
+                                  // Null → indeterminate (picker hand-off /
+                                  // before bytes); a value → determinate %.
+                                  value: _photoUploadProgress,
+                                  strokeWidth: 3,
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                ),
+                                if (_photoUploadProgress != null)
+                                  Text(
+                                    '${(_photoUploadProgress! * 100).round()}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          )
                         : null,
                   ),
                   Container(

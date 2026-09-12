@@ -557,9 +557,11 @@ class _AuthGateState extends State<_AuthGate> {
         .onConnectivityChanged
         .listen(_onConnectivityChanged);
 
-    // Check for Play Store update on EVERY launch — auth screen or home,
-    // logged in or not. This fires before any user-visible screen is shown.
-    UpdateService().checkAndPromptUpdate();
+    // Check for a Play Store update on EVERY launch — auth screen or home,
+    // logged in or not. Non-blocking: if a newer version exists it posts an
+    // "Update available" notification and lets the user opt into Play's
+    // background (flexible) update; it never forces a full-screen update.
+    UpdateService.instance.checkAndNotifyOnLaunch();
   }
 
   @override

@@ -9,6 +9,7 @@ import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/video_message_widgets.dart';
 
 /// Largest video status this device can actually post, in bytes.
 ///
@@ -71,6 +72,11 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   bool _isPicking = false;
   VideoPlayerController? _videoController;
 
+  /// The clip's true display aspect ratio, derived from a rotation-upright
+  /// poster so a portrait video isn't stretched on Android API < 29 (see
+  /// [resolveVideoDisplayAspect]). Null until resolved / when unavailable.
+  double? _trueVideoAspect;
+
   @override
   void initState() {
     super.initState();
@@ -91,7 +97,12 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   void _initVideoPlayer() {
     if (_selectedFile == null) return;
     _videoController = VideoPlayerController.file(_selectedFile!)
-      ..initialize().then((_) {
+      ..initialize().then((_) async {
+        // Resolve the true ratio before first paint so a portrait clip doesn't
+        // flash stretched and pop upright a moment later.
+        _trueVideoAspect =
+            await resolveVideoDisplayAspect(filePath: _selectedFile!.path);
+        if (!mounted) return;
         setState(() {});
         _videoController!.setLooping(true);
         _videoController!.play();
@@ -747,7 +758,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
 
     return Center(
       child: AspectRatio(
-        aspectRatio: _videoController!.value.aspectRatio,
+        aspectRatio: _trueVideoAspect ?? _videoController!.value.aspectRatio,
         child: Stack(
           alignment: Alignment.center,
           children: [

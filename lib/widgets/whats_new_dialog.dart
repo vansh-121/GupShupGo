@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.7';
+const String kCurrentVersion = '1.1.8';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,23 +193,18 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.palette_rounded,
-    'Chat Themes',
-    'Give every conversation its own look — backgrounds and bubble colours that follow light and dark mode.',
+    Icons.videocam_rounded,
+    'Video Messages in Chat',
+    'Share videos directly in conversations and offline mesh chats with instant previews, true aspect ratio, and full-screen playback.',
   ),
   _Feature(
-    Icons.picture_as_pdf_rounded,
-    'Export Chats as PDF',
-    'Save a chat as a beautifully laid out PDF you can print or keep — real bubbles, your photos included, not just a text file.',
+    Icons.screen_share_rounded,
+    'Incoming Screen Share Flow',
+    'Accept or decline screen share requests seamlessly with a dedicated full-screen call UI and live notification alerts.',
   ),
   _Feature(
-    Icons.mic_rounded,
-    'Longer Voice Messages',
-    'Voice notes now run up to 2 minutes, so you have plenty of time to say what you need.',
-  ),
-  _Feature(
-    Icons.hd_rounded,
-    'Higher-Quality Media',
-    'Send sharper photos and status videos up to 90 seconds, so nothing important gets compressed away.',
+    Icons.system_update_rounded,
+    'Flexible In-App Updates',
+    'Download the latest app updates in the background without interruptions, and manually check for updates in Settings.',
   ),
 ];

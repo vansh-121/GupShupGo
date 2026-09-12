@@ -7,6 +7,11 @@ import 'package:video_chat_app/services/call_signaling_service.dart';
 /// Which side of a one-way screen share this session represents.
 enum ScreenShareRole { sharer, viewer }
 
+/// Why a sharer-side session ended. Read once by ScreenShareScreen after
+/// teardown so it can show the right message (declined / no answer / error),
+/// then reset on the next [ScreenShareSession.requestAsSharer].
+enum ScreenShareEndReason { normal, declined, noAnswer, error }
+
 /// A long-lived, app-global screen-share session.
 ///
 /// The Agora [RtcEngine] is owned here — NOT by the screen widget — so the
@@ -59,15 +64,34 @@ class ScreenShareSession extends ChangeNotifier {
   bool _ending = false;
   StreamSubscription<CallSignalStatus?>? _signalingSub;
 
+  /// Sharer side only: true from the moment the request is sent until the
+  /// viewer accepts. While true, NO screen capture has started — the Agora
+  /// engine is not created until [_goLiveAsSharer] runs on acceptance.
+  bool _awaitingAcceptance = false;
+  bool get awaitingAcceptance => _awaitingAcceptance;
+
+  /// Why the last session ended (sharer side). Consumed by ScreenShareScreen to
+  /// surface a message; reset at the next [requestAsSharer].
+  ScreenShareEndReason _lastEndReason = ScreenShareEndReason.normal;
+  ScreenShareEndReason get lastEndReason => _lastEndReason;
+
+  /// Sharer side: fires if the viewer never accepts within the request window.
+  Timer? _requestTimeout;
+
   /// Fired when the session fully ends, so the overlay host / routes can
   /// react (e.g. pop the full-screen view if it is open).
   VoidCallback? onEnded;
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────
 
-  /// Start sharing this device's screen on [channelId]. Triggers the Android
-  /// MediaProjection consent dialog. Throws on failure (caller resets state).
-  Future<void> startAsSharer({
+  /// Send a screen-share request to the viewer and wait for acceptance.
+  ///
+  /// Nothing is captured or broadcast here — the Agora engine is only created
+  /// once the viewer accepts (the signaling doc flips to `answered`), at which
+  /// point [_goLiveAsSharer] runs and triggers the Android MediaProjection
+  /// consent dialog. This is what makes the flow a real request: the screen is
+  /// never captured before the peer consents.
+  Future<void> requestAsSharer({
     required String channelId,
     required String viewerName,
   }) async {
@@ -76,53 +100,103 @@ class ScreenShareSession extends ChangeNotifier {
     _peerName = viewerName;
     _active = true;
     _expanded = true;
+    _awaitingAcceptance = true;
+    _lastEndReason = ScreenShareEndReason.normal;
     notifyListeners();
 
-    _engine = await AgoraService.initAgoraForScreenShare();
-    _engine!.registerEventHandler(
-      RtcEngineEventHandler(
-        onJoinChannelSuccess: (RtcConnection c, int elapsed) {
-          _connected = true;
-          notifyListeners();
-        },
-        onUserJoined: (RtcConnection c, int remoteUid, int elapsed) {
-          _peerPresent = true;
-          _startTimer();
-          notifyListeners();
-        },
-        onUserOffline: (RtcConnection c, int remoteUid,
-            UserOfflineReasonType reason) {
-          if (_peerPresent && !_ending) end();
-        },
-        onError: (ErrorCodeType err, String msg) {
-          if (kDebugMode) debugPrint('Agora screen share error: $err - $msg');
-        },
-      ),
-    );
+    // No answer within the window → treat as a missed request and clean up.
+    _requestTimeout = Timer(const Duration(seconds: 45), () {
+      if (_awaitingAcceptance && !_ending) {
+        _lastEndReason = ScreenShareEndReason.noAnswer;
+        CallSignalingService.missCall(channelId);
+        end();
+      }
+    });
 
-    await AgoraService.startScreenShare(_engine!);
+    // React to the viewer's response on the shared signaling doc. This same
+    // subscription keeps running after go-live, so a later decline/end from the
+    // viewer also tears the session down.
+    _signalingSub =
+        CallSignalingService.listenToCallStatus(channelId).listen((status) {
+      if (status == CallSignalStatus.answered) {
+        if (_awaitingAcceptance && !_ending) _goLiveAsSharer();
+      } else if (status == CallSignalStatus.declined) {
+        if (!_ending) {
+          _lastEndReason = ScreenShareEndReason.declined;
+          end();
+        }
+      } else if (status == CallSignalStatus.ended ||
+          status == CallSignalStatus.missed) {
+        if (!_ending) end();
+      }
+    });
+  }
 
-    // The Agora project enforces token auth, so a token-less join is now
-    // rejected with errInvalidToken. Mint a short-lived token for this channel
-    // (built with uid 0, so it is valid for the uid: 0 join below). Falls back
-    // to '' only if enforcement is disabled or the server is unreachable.
-    final rtcToken = await AgoraService.generateToken(channelId);
+  /// Viewer accepted: create the engine, start screen capture (this triggers
+  /// the Android consent dialog) and join the channel to broadcast.
+  Future<void> _goLiveAsSharer() async {
+    final channelId = _channelId;
+    if (channelId == null) return;
 
-    await _engine!.joinChannel(
-      token: rtcToken ?? '',
-      channelId: channelId,
-      uid: 0,
-      options: const ChannelMediaOptions(
-        clientRoleType: ClientRoleType.clientRoleBroadcaster,
-        channelProfile: ChannelProfileType.channelProfileCommunication,
-        publishScreenCaptureVideo: true,
-        publishScreenCaptureAudio: true,
-        publishCameraTrack: false,
-        publishMicrophoneTrack: false,
-        autoSubscribeVideo: false,
-        autoSubscribeAudio: false,
-      ),
-    );
+    _requestTimeout?.cancel();
+    _awaitingAcceptance = false;
+    notifyListeners();
+
+    try {
+      _engine = await AgoraService.initAgoraForScreenShare();
+      _engine!.registerEventHandler(
+        RtcEngineEventHandler(
+          onJoinChannelSuccess: (RtcConnection c, int elapsed) {
+            _connected = true;
+            notifyListeners();
+          },
+          onUserJoined: (RtcConnection c, int remoteUid, int elapsed) {
+            _peerPresent = true;
+            _startTimer();
+            notifyListeners();
+          },
+          onUserOffline: (RtcConnection c, int remoteUid,
+              UserOfflineReasonType reason) {
+            if (_peerPresent && !_ending) end();
+          },
+          onError: (ErrorCodeType err, String msg) {
+            if (kDebugMode) debugPrint('Agora screen share error: $err - $msg');
+          },
+        ),
+      );
+
+      await AgoraService.startScreenShare(_engine!);
+
+      // The Agora project enforces token auth, so a token-less join is now
+      // rejected with errInvalidToken. Mint a short-lived token for this channel
+      // (built with uid 0, so it is valid for the uid: 0 join below). Falls back
+      // to '' only if enforcement is disabled or the server is unreachable.
+      final rtcToken = await AgoraService.generateToken(channelId);
+
+      await _engine!.joinChannel(
+        token: rtcToken ?? '',
+        channelId: channelId,
+        uid: 0,
+        options: const ChannelMediaOptions(
+          clientRoleType: ClientRoleType.clientRoleBroadcaster,
+          channelProfile: ChannelProfileType.channelProfileCommunication,
+          publishScreenCaptureVideo: true,
+          publishScreenCaptureAudio: true,
+          publishCameraTrack: false,
+          publishMicrophoneTrack: false,
+          autoSubscribeVideo: false,
+          autoSubscribeAudio: false,
+        ),
+      );
+    } catch (e) {
+      // Consent denied, engine init failed, etc. Tear down and let the sharer
+      // screen surface the error (end() also signals the viewer via endCall).
+      if (kDebugMode) debugPrint('Error going live as sharer: $e');
+      if (!_ending) {
+        _lastEndReason = ScreenShareEndReason.error;
+        await end();
+      }
+    }
   }
 
   /// Join an existing screen share as the viewer.
@@ -234,6 +308,7 @@ class ScreenShareSession extends ChangeNotifier {
     _ending = true;
 
     _timer?.cancel();
+    _requestTimeout?.cancel();
     await _signalingSub?.cancel();
     _signalingSub = null;
 
@@ -246,6 +321,7 @@ class ScreenShareSession extends ChangeNotifier {
     _expanded = false;
     _connected = false;
     _peerPresent = false;
+    _awaitingAcceptance = false;
     _remoteUid = null;
     _engine = null;
     notifyListeners();
