@@ -545,8 +545,19 @@ class ChatService {
         // Fire-and-forget: memo is the source of truth for rendering;
         // SQLite is only for crash/restart recovery.
         unawaited(store.save(msg.id, vaultPayload));
+        return _applyPayload(msg, vaultPayload);
       }
-      return vaultPayload != null ? _applyPayload(msg, vaultPayload) : null;
+      final pending = await _requestResend(
+        msg: msg,
+        selfUid: selfUid,
+        selfDeviceId: deviceId,
+        store: store,
+      );
+      return _applyPayload(msg, <String, dynamic>{
+        'text': pending
+            ? _pendingRetryPlaceholderText
+            : _undecryptablePlaceholderText,
+      });
     }
 
     // Recently failed on this exact ciphertext — don't re-run libsignal for
@@ -913,7 +924,11 @@ class ChatService {
     required PlaintextStore store,
   }) async {
     // Without a device id we can't tell the sender who to encrypt for.
-    if (selfDeviceId == null) return false;
+    if (selfDeviceId == null ||
+        (msg.senderId == selfUid &&
+            (msg.senderDeviceId ?? 1) == selfDeviceId)) {
+      return false;
+    }
 
     final now = DateTime.now();
     final state = await store.getRetryState(msg.id);
@@ -1447,21 +1462,18 @@ class ChatService {
         // snapshot for our own message never needs any async lookup.
         _addToMemo(messageRef.id, outgoingPayload);
 
-        // Fire SQLite persistence in the background — the in-memory memo
-        // is already set, so rendering is instant. SQLite is only needed
-        // for crash recovery / cold restart.
         final ps = await PlaintextStore.instance();
-        unawaited(Future.wait([
-          if (type != MessageType.reaction)
-            ps.saveRoomPreview(
-              chatRoomId: chatRoomId,
-              messageId: messageRef.id,
-              text: statusReplyOwnerId != null
-                  ? 'Replied to status: $text'
-                  : text,
-            ),
-          ps.save(messageRef.id, outgoingPayload),
-        ]));
+        await ps.save(messageRef.id, outgoingPayload);
+        await SignalService.instance.stores.flush();
+        if (type != MessageType.reaction) {
+          unawaited(ps.saveRoomPreview(
+            chatRoomId: chatRoomId,
+            messageId: messageRef.id,
+            text: statusReplyOwnerId != null
+                ? 'Replied to status: $text'
+                : text,
+          ));
+        }
         // Mirror to the cross-install vault so the sender's history
         // survives a reinstall (new device ID loses the Firestore envelope
         // but can recover from the vault).

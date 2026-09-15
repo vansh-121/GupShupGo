@@ -856,10 +856,7 @@ class SyncService {
       SignalService.invalidateDeviceCache(requesterUid);
       await signal.listDeviceIdsCached(requesterUid);
 
-      // Tear down, then encrypt: `encrypt` calls `ensureSession`, which with
-      // no session present performs the X3DH that makes this a prekey message.
-      await signal.resetSessionFor(requesterUid, requesterDeviceId);
-      final env = await signal.encrypt(
+      final env = await signal.encryptWithFreshSession(
         requesterUid,
         requesterDeviceId,
         Uint8List.fromList(utf8.encode(jsonEncode(wire))),

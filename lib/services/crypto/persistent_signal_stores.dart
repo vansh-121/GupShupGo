@@ -82,6 +82,7 @@ class PersistentSignalStores {
 
   /// Set by [suspendAutoFlush]. Never reset — see that method.
   bool _autoFlushSuspended = false;
+  bool _closed = false;
 
   /// The exact JSON last written to secure storage, or null if we haven't
   /// written yet this session. [flush] compares a fresh snapshot against this
@@ -216,6 +217,12 @@ class PersistentSignalStores {
     _debounce = null;
   }
 
+  Future<void> close() async {
+    _closed = true;
+    suspendAutoFlush();
+    await _inFlight;
+  }
+
   /// Writes a snapshot of all four stores to secure storage and does not
   /// return until it is durably on disk.
   ///
@@ -225,6 +232,9 @@ class PersistentSignalStores {
   ///  • Skips the Keystore write entirely when the snapshot is unchanged,
   ///    which is the common case for repeated calls.
   Future<void> flush() {
+    if (_closed) {
+      return Future<void>.error(StateError('Signal stores are closed'));
+    }
     final chained = (_inFlight ?? Future<void>.value()).then((_) => _write());
     // Swallow errors on the chain itself so one failed write doesn't poison
     // every subsequent flush. The returned future still surfaces the error

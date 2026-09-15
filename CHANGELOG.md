@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Close replaced Signal stores before reload or wipe: cancel delayed writes, await already queued writes, and reject later writes from stale references.
+- Share concurrent encryption initialization so callers use the same identity and session stores.
+- Serialize session prewarming, resets, and device cleanup with encryption/decryption; rebuild resend sessions and encrypt their replies under one lock.
+- Request encrypted recovery when a message has no envelope for the current device, instead of leaving it without a recovery attempt.
+- Await outgoing message and Signal-state persistence before publishing encrypted messages, preserving the sender's recovery copy across app termination.
+
 ### Planned Features
 - Group messaging support
 - End-to-end encryption for messages
