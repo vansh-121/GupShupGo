@@ -126,4 +126,57 @@ void main() {
     await sender.resetSessionFor('bob', 1);
     expect(await sender.hasSession('bob', 1), isFalse);
   });
+
+  test('a service whose stores were closed rejects mutation instead of '
+      'dropping persistence', () async {
+    // The reviewer's scenario: something still holds a SignalService after a
+    // reloadFromDisk / wipe closed its stores. Before the guard, encrypt() ran
+    // on the live in-memory session and markDirty() silently skipped the write
+    // (a closed store is also suspended), so the sender emitted ciphertext it
+    // never persisted — the ratchet advanced on disk-state it would reload from
+    // on next launch, desyncing the peer permanently. Both the per-address
+    // guard and markDirty must now reject.
+    final senderStores = await PersistentSignalStores.load();
+    senderStores.suspendAutoFlush();
+    storage.clear();
+    final receiverStores = await PersistentSignalStores.load();
+    receiverStores.suspendAutoFlush();
+    final signedKey = generateSignedPreKey(receiverStores.identityKeyPair, 1);
+    await receiverStores.signedPreKeyStore.storeSignedPreKey(1, signedKey);
+
+    final signedPreKeyPub = signedKey.getKeyPair().publicKey.serialize();
+    final signedPreKeySig = signedKey.signature;
+    final identityPub =
+        receiverStores.identityKeyPair.getPublicKey().serialize();
+    final sender = SignalService.forTesting(senderStores,
+        loadBundle: (_, __) async => PreKeyBundle(
+              receiverStores.registrationId,
+              1,
+              null,
+              null,
+              1,
+              Curve.decodePoint(Uint8List.fromList(signedPreKeyPub), 0),
+              Uint8List.fromList(signedPreKeySig),
+              IdentityKey.fromBytes(Uint8List.fromList(identityPub), 0),
+            ));
+
+    // Establish a live session first, so the rejection below is the close and
+    // not a missing bundle — i.e. without the guard this encrypt would succeed.
+    await sender.ensureSession('bob', 1);
+    expect(await sender.hasSession('bob', 1), isTrue);
+
+    await senderStores.close();
+    expect(senderStores.isClosed, isTrue);
+
+    // Persistence chokepoints both reject.
+    expect(senderStores.markDirty, throwsStateError);
+    await expectLater(senderStores.flush(), throwsStateError);
+
+    // And the encrypt a stale caller still holds fails loudly, so no
+    // unpersisted ciphertext is ever produced.
+    await expectLater(
+      sender.encrypt('bob', 1, Uint8List.fromList(utf8.encode('nope'))),
+      throwsStateError,
+    );
+  });
 }

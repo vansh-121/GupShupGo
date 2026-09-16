@@ -100,8 +100,22 @@ class SignalService {
   /// purpose — `SessionBuilder.processPreKeyBundle` rewrites the same
   /// SessionRecord a concurrent decrypt would be walking.
   Future<T> _lockedForAddress<T>(
-          String peerUid, int peerDeviceId, Future<T> Function() action) =>
-      _addressLock.run('$peerUid:$peerDeviceId', action);
+      String peerUid, int peerDeviceId, Future<T> Function() action) {
+    // A stale SignalService that outlived a reloadFromDisk / wipe still routes
+    // every session mutation through here. Reject before touching the ratchet
+    // (or a Firestore prekey fetch) rather than after: a closed store no longer
+    // persists, so an encrypt allowed through would advance the ratchet in
+    // memory and emit ciphertext whose advance is silently dropped — the exact
+    // sender/receiver desync that shows as an undecryptable message. This
+    // synchronous check closes the common case; markDirty() throws as the
+    // backstop if the store closes mid-action, after this check has passed.
+    if (_stores.isClosed) {
+      return Future<T>.error(StateError(
+          'SignalService stores are closed; cannot mutate session state for '
+          '$peerUid:$peerDeviceId.'));
+    }
+    return _addressLock.run('$peerUid:$peerDeviceId', action);
+  }
 
   static SignalService? _instance;
   static Future<SignalService>? _initializing;
