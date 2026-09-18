@@ -82,6 +82,7 @@ class PersistentSignalStores {
 
   /// Set by [suspendAutoFlush]. Never reset — see that method.
   bool _autoFlushSuspended = false;
+  bool _closed = false;
 
   /// The exact JSON last written to secure storage, or null if we haven't
   /// written yet this session. [flush] compares a fresh snapshot against this
@@ -181,7 +182,22 @@ class PersistentSignalStores {
   /// `await flush()` instead. See [flush].
   ///
   /// Does nothing once [suspendAutoFlush] has been called.
+  ///
+  /// Throws [StateError] once [close] has been called, and checks that before
+  /// the suspend short-circuit so closing wins over suspending. The asymmetry
+  /// is deliberate: a *suspended* store is a live store deferring its own
+  /// writes (the FCM isolate), so a dropped mark is harmless; a *closed* store
+  /// is being discarded, so a caller still mutating it — a stale
+  /// [SignalService] that outlived a reload or wipe — has just advanced a
+  /// ratchet that can never be persisted. Before this guard `markDirty` skipped
+  /// silently there (the closed store is also suspended), so the mutation was
+  /// lost with no signal while [flush] rejected: encrypt would emit ciphertext
+  /// the sender never saved, desyncing the peer. Failing loudly here makes the
+  /// two paths agree.
   void markDirty() {
+    if (_closed) {
+      throw StateError('Signal stores are closed');
+    }
     if (_autoFlushSuspended) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 3000), () {
@@ -216,6 +232,19 @@ class PersistentSignalStores {
     _debounce = null;
   }
 
+  Future<void> close() async {
+    _closed = true;
+    suspendAutoFlush();
+    await _inFlight;
+  }
+
+  /// Whether [close] has been called. Once true the instance is inert: every
+  /// mutation-persisting path ([markDirty] and [flush]) rejects, so a caller
+  /// that still holds this — or the [SignalService] wrapping it — after a
+  /// reload or wipe fails loudly instead of advancing a ratchet that can never
+  /// be saved.
+  bool get isClosed => _closed;
+
   /// Writes a snapshot of all four stores to secure storage and does not
   /// return until it is durably on disk.
   ///
@@ -225,6 +254,9 @@ class PersistentSignalStores {
   ///  • Skips the Keystore write entirely when the snapshot is unchanged,
   ///    which is the common case for repeated calls.
   Future<void> flush() {
+    if (_closed) {
+      return Future<void>.error(StateError('Signal stores are closed'));
+    }
     final chained = (_inFlight ?? Future<void>.value()).then((_) => _write());
     // Swallow errors on the chain itself so one failed write doesn't poison
     // every subsequent flush. The returned future still surfaces the error

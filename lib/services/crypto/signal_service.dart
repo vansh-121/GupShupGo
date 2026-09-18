@@ -38,8 +38,15 @@ import 'address_lock.dart';
 import 'persistent_signal_stores.dart';
 
 class SignalService {
-  SignalService._(this._stores);
+  SignalService._(this._stores) : _bundleLoader = null;
+
+  @visibleForTesting
+  SignalService.forTesting(this._stores,
+      {required Future<PreKeyBundle?> Function(String, int) loadBundle})
+      : _bundleLoader = loadBundle;
+
   final PersistentSignalStores _stores;
+  final Future<PreKeyBundle?> Function(String, int)? _bundleLoader;
 
   Future<T> _runSignalAction<T>(Future<T> Function() action) {
     final completer = Completer<T>();
@@ -93,10 +100,25 @@ class SignalService {
   /// purpose — `SessionBuilder.processPreKeyBundle` rewrites the same
   /// SessionRecord a concurrent decrypt would be walking.
   Future<T> _lockedForAddress<T>(
-          String peerUid, int peerDeviceId, Future<T> Function() action) =>
-      _addressLock.run('$peerUid:$peerDeviceId', action);
+      String peerUid, int peerDeviceId, Future<T> Function() action) {
+    // A stale SignalService that outlived a reloadFromDisk / wipe still routes
+    // every session mutation through here. Reject before touching the ratchet
+    // (or a Firestore prekey fetch) rather than after: a closed store no longer
+    // persists, so an encrypt allowed through would advance the ratchet in
+    // memory and emit ciphertext whose advance is silently dropped — the exact
+    // sender/receiver desync that shows as an undecryptable message. This
+    // synchronous check closes the common case; markDirty() throws as the
+    // backstop if the store closes mid-action, after this check has passed.
+    if (_stores.isClosed) {
+      return Future<T>.error(StateError(
+          'SignalService stores are closed; cannot mutate session state for '
+          '$peerUid:$peerDeviceId.'));
+    }
+    return _addressLock.run('$peerUid:$peerDeviceId', action);
+  }
 
   static SignalService? _instance;
+  static Future<SignalService>? _initializing;
   static SignalService get instance {
     final i = _instance;
     if (i == null) {
@@ -106,11 +128,19 @@ class SignalService {
     return i;
   }
 
-  static Future<SignalService> init() async {
-    if (_instance != null) return _instance!;
-    final stores = await PersistentSignalStores.load();
-    _instance = SignalService._(stores);
-    return _instance!;
+  static Future<SignalService> init() {
+    final current = _instance;
+    if (current != null) return Future.value(current);
+    return _initializing ??= _loadInstance();
+  }
+
+  static Future<SignalService> _loadInstance() async {
+    try {
+      final stores = await PersistentSignalStores.load();
+      return _instance = SignalService._(stores);
+    } finally {
+      _initializing = null;
+    }
   }
 
   /// Drops the cached instance so the next [init] builds a genuinely fresh set
@@ -127,6 +157,8 @@ class SignalService {
   /// Never call this from the main isolate. Everything holding a reference to
   /// the old instance would keep mutating stores that no longer get persisted.
   static Future<SignalService> reloadFromDisk() async {
+    await _initializing;
+    await _instance?.stores.close();
     _instance = null;
     return init();
   }
@@ -146,6 +178,11 @@ class SignalService {
   /// Build a session by fetching the peer's PreKeyBundle from Firestore.
   /// Idempotent — bails out cheaply if a session already exists.
   Future<void> ensureSession(String peerUid, int peerDeviceId) {
+    return _runSignalAction(() => _lockedForAddress(peerUid, peerDeviceId,
+        () => _ensureSessionLocked(peerUid, peerDeviceId)));
+  }
+
+  Future<void> _ensureSessionLocked(String peerUid, int peerDeviceId) {
     return _runSignalAction(() async {
       final addr = SignalProtocolAddress(peerUid, peerDeviceId);
       if (await _stores.sessionStore.containsSession(addr)) return;
@@ -193,6 +230,11 @@ class SignalService {
   /// the subsequent encrypt so the teardown and the new session persist
   /// together in one Keystore write.
   Future<void> resetSessionFor(String peerUid, int peerDeviceId) {
+    return _runSignalAction(() => _lockedForAddress(peerUid, peerDeviceId,
+        () => _resetSessionLocked(peerUid, peerDeviceId)));
+  }
+
+  Future<void> _resetSessionLocked(String peerUid, int peerDeviceId) {
     return _runSignalAction(() async {
       final addr = SignalProtocolAddress(peerUid, peerDeviceId);
       await _stores.sessionStore.deleteSession(addr);
@@ -209,6 +251,8 @@ class SignalService {
   /// skip the Firestore round-trip when prewarmSessions has already fetched
   /// the bundle.
   Future<PreKeyBundle?> _fetchPreKeyBundle(String peerUid, int deviceId) async {
+    final loader = _bundleLoader;
+    if (loader != null) return loader(peerUid, deviceId);
     final cacheKey = '$peerUid:$deviceId';
 
     // ── Check the bundle-data cache first ──────────────────────────────
@@ -279,24 +323,36 @@ class SignalService {
   /// Encrypt for a single peer device.
   Future<EncryptedEnvelope> encrypt(
       String peerUid, int peerDeviceId, Uint8List plaintext) {
+    return _runSignalAction(() => _lockedForAddress(peerUid, peerDeviceId,
+        () => _encryptLocked(peerUid, peerDeviceId, plaintext)));
+  }
+
+  Future<EncryptedEnvelope> encryptWithFreshSession(
+      String peerUid, int peerDeviceId, Uint8List plaintext) {
     return _runSignalAction(
         () => _lockedForAddress(peerUid, peerDeviceId, () async {
-              await ensureSession(peerUid, peerDeviceId);
-              final addr = SignalProtocolAddress(peerUid, peerDeviceId);
-              final cipher = SessionCipher(
-                _stores.sessionStore,
-                _stores.preKeyStore,
-                _stores.signedPreKeyStore,
-                _stores.identityStore,
-                addr,
-              );
-              final ct = await cipher.encrypt(plaintext);
-              _stores.markDirty();
-              return EncryptedEnvelope(
-                bytes: ct.serialize(),
-                isPreKeyMessage: ct.getType() == CiphertextMessage.prekeyType,
-              );
+              await _resetSessionLocked(peerUid, peerDeviceId);
+              return _encryptLocked(peerUid, peerDeviceId, plaintext);
             }));
+  }
+
+  Future<EncryptedEnvelope> _encryptLocked(
+      String peerUid, int peerDeviceId, Uint8List plaintext) async {
+    await _ensureSessionLocked(peerUid, peerDeviceId);
+    final addr = SignalProtocolAddress(peerUid, peerDeviceId);
+    final cipher = SessionCipher(
+      _stores.sessionStore,
+      _stores.preKeyStore,
+      _stores.signedPreKeyStore,
+      _stores.identityStore,
+      addr,
+    );
+    final ciphertext = await cipher.encrypt(plaintext);
+    _stores.markDirty();
+    return EncryptedEnvelope(
+      bytes: ciphertext.serialize(),
+      isPreKeyMessage: ciphertext.getType() == CiphertextMessage.prekeyType,
+    );
   }
 
   /// Decrypt from a single peer device.
@@ -569,20 +625,21 @@ class SignalService {
             // Check if identity key changed (indicating a reinstall on the same deviceId)
             final identityPubStr = bundle['identityPub'] as String?;
             if (identityPubStr != null) {
-              final addr = SignalProtocolAddress(uid, deviceId);
-              final trustedKey = _stores.identityStore.trustedKeys[addr];
-              if (trustedKey != null) {
-                final currentPubBytes = trustedKey.serialize();
-                final newPubBytes = base64Decode(identityPubStr);
-                if (!listEquals(currentPubBytes, newPubBytes)) {
-                  // ignore: avoid_print
-                  print(
-                      '[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
-                  await _stores.sessionStore.deleteSession(addr);
-                  _stores.identityStore.trustedKeys.remove(addr);
-                  _stores.markDirty();
+              await _lockedForAddress(uid, deviceId, () async {
+                final addr = SignalProtocolAddress(uid, deviceId);
+                final trustedKey = _stores.identityStore.trustedKeys[addr];
+                if (trustedKey != null) {
+                  final currentPubBytes = trustedKey.serialize();
+                  final newPubBytes = base64Decode(identityPubStr);
+                  if (!listEquals(currentPubBytes, newPubBytes)) {
+                    debugPrint(
+                        '[Signal] Identity key changed for $uid:$deviceId (reinstall). Wiping session.');
+                    await _stores.sessionStore.deleteSession(addr);
+                    _stores.identityStore.trustedKeys.remove(addr);
+                    _stores.markDirty();
+                  }
                 }
-              }
+              });
             }
           }
         }
@@ -606,9 +663,7 @@ class SignalService {
             // 27+ microtask hops that interleaved with GC pauses.
             await Future.wait(removed.map((d) async {
               try {
-                await _stores.sessionStore.deleteSession(
-                  SignalProtocolAddress(uid, d),
-                );
+                await resetSessionFor(uid, d);
               } catch (_) {}
               _bundleDataCache.remove('$uid:$d');
             }));
@@ -814,6 +869,8 @@ class SignalService {
 
   // ── Wipe (used by signOut and "Reset encryption") ───────────────────────
   static Future<void> wipe() async {
+    await _initializing;
+    await _instance?.stores.close();
     await PersistentSignalStores.wipe();
     _instance = null;
   }
