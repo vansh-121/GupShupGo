@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.8';
+const String kCurrentVersion = '1.1.9';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,18 +193,18 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.videocam_rounded,
-    'Video Messages in Chat',
-    'Share videos directly in conversations and offline mesh chats with instant previews, true aspect ratio, and full-screen playback.',
+    Icons.security_rounded,
+    'Chat Reliability Fixes',
+    'Fixed an issue where secret messages could occasionally fail to open or show errors after restarting the app.',
   ),
   _Feature(
-    Icons.screen_share_rounded,
-    'Incoming Screen Share Flow',
-    'Accept or decline screen share requests seamlessly with a dedicated full-screen call UI and live notification alerts.',
+    Icons.auto_mode_rounded,
+    'Automatic Message Recovery',
+    'Messages that encounter network or delivery hiccups now quietly self-heal in the background.',
   ),
   _Feature(
-    Icons.system_update_rounded,
-    'Flexible In-App Updates',
-    'Download the latest app updates in the background without interruptions, and manually check for updates in Settings.',
+    Icons.bolt_rounded,
+    'Smoother Background Delivery',
+    'Enjoy faster and more reliable chat delivery, even when receiving multiple messages while the app is in the background.',
   ),
 ];

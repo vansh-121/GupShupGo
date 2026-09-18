@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Close replaced Signal stores before reload or wipe: cancel delayed writes, await already queued writes, and reject later writes from stale references.
-- Share concurrent encryption initialization so callers use the same identity and session stores.
-- Serialize session prewarming, resets, and device cleanup with encryption/decryption; rebuild resend sessions and encrypt their replies under one lock.
-- Request encrypted recovery when a message has no envelope for the current device, instead of leaving it without a recovery attempt.
-- Await outgoing message and Signal-state persistence before publishing encrypted messages, preserving the sender's recovery copy across app termination.
-
 ### Planned Features
 - Group messaging support
 - End-to-end encryption for messages
@@ -24,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search functionality for messages and users
 - User blocking with UI improvements
 - Custom themes and color palettes
+
+## [1.1.9] - 2026-09-17
+
+### Fixed
+- 🔒 **Rock-Solid Message Encryption** — Fixed an issue where conversations could occasionally become out of sync or show "Message cannot be decrypted" after restarting the app or re-logging in.
+- 🔄 **Self-Healing Message Recovery** — Messages that encounter delivery issues or missing keys now automatically repair and recover in the background without any interruptions.
+- ⚡ **Background Delivery Reliability** — Fixed rare conflicts and delays when receiving multiple encrypted messages simultaneously or while the app is running in the background.
+- 🛡️ **Message & Session Protection** — Ensured all encryption keys and message states are safely stored before sending, preventing dropped messages during unexpected app closures.
+
+### Changed
+- Updated version to 1.1.9 (build code 56).
+- 🚀 **Performance & Stability** — General performance optimizations for faster, more dependable chat syncing.
 
 ## [1.1.8] - 2026-09-12
 
@@ -334,6 +339,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.1.9 | September 2026 | Chat Encryption Fixes, Self-Healing Message Recovery, Delivery Stability |
+| 1.1.8 | September 2026 | Video Messages in Chat, Instant Video Previews, Incoming Screen Share UI |
+| 1.1.7 | September 2026 | Chat Themes, PDF Chat Export, 2-Minute Voice Notes, Avatar Memory Optimization |
 | 1.1.3 | August 2026 | Picture-in-Picture Video Calls, Username Handles & QR Sharing, Bond Streaks, Android 16 KB Page Size Alignment |
 | 1.0.6 | May 2026 | Video quality, call controls fixed, camera-off signalling, timer UI |
 | 1.0.5 | May 2026 | Device Session Mgmt, FCM Token Mgmt, Status Replies, Connectivity Monitoring, MIUI/HyperOS Optimization |
