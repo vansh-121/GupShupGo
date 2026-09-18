@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 🔔 **Update Reminders on Open** — When a new version is waiting on the Play Store, GupShupGo now tells you when you open the app instead of only when you go looking in Settings. It's the same one-tap update, shown at most once a day so it nudges rather than nags.
+- ⏳ **Advance Notice Before a Version Retires** — Older builds now get a countdown ("this version stops working in 15 days") that gets more insistent as the date approaches, so an update is never a surprise. Your messages and chats stay exactly where they are.
+- 🔄 **A Clear Way Back** — If a version does reach the end of its life, the app explains what happened and takes you straight to the update, rather than failing in confusing ways.
+
+### Changed
+- The update prompt shown on open is the same dialog as Settings → Check for updates, so you're never told about the same update two different ways.
+
 ### Planned Features
 - Group messaging support
 - End-to-end encryption for messages

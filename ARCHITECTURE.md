@@ -1909,6 +1909,107 @@ StatusItem:
 
 ---
 
+## 🔄 App Update & Version Support Architecture
+
+Two separate mechanisms, often confused:
+
+| Question | Answered by | Source of truth |
+|---|---|---|
+| "Is there a newer build?" | `UpdateService` → Google Play In-App Updates | Play Store |
+| "Is *this* build still allowed to run?" | `VersionPolicyService` | Firebase Remote Config |
+
+Play knows what's newest; it has no opinion on what's acceptable. The
+supported-version policy is ours, and it is the only thing that can lock a
+user out — which is why it ships switched off.
+
+### Where the prompts appear
+
+```
+Cold start (signed in)
+  HomeScreen post-frame chain
+    → maybeShowWhatsNew()               (awaited, so nothing stacks on it)
+    → UpdateService.runLaunchPrompts()  (at most ONE dialog)
+         │
+         ├─ policy.blocks  → return; _AuthGate renders UnsupportedVersionScreen
+         ├─ policy.warns   → showVersionExpiringDialog()   [escalating throttle]
+         └─ otherwise      → Play check → showUpdateAvailableDialog()  [24h/version]
+
+Cold start (signed out)
+  _AuthGate → UpdateService.checkAndNotifyOnLaunch()  → notification, no dialog
+
+Resume after ≥ 4h backgrounded, on the Home route
+  → runLaunchPrompts() again
+```
+
+The signed-out launch posts a *notification* rather than a dialog because
+there is no home screen to host one; the signed-in launch gets the dialog and
+deliberately **not** the notification, so one update never produces two
+prompts. The launch dialog is literally the same widget as Settings → Check
+for updates (`lib/widgets/update_dialogs.dart`) for the same reason.
+
+### The three-state lifecycle
+
+`lib/services/version_policy.dart` — `evaluateWith()` is a pure function, fully
+covered by `test/services/version_policy_test.dart`.
+
+```
+        ok ──────────► expiring ──────────► unsupported
+             installed <          deadline passed,
+             deprecated_below     or installed < min_supported
+```
+
+Four Remote Config keys, and the split between them is the important part:
+
+| Key | Type | Effect |
+|---|---|---|
+| `force_update_enabled` | bool | **Master switch.** Everything below is inert while false. |
+| `deprecated_below_version_code` | int | Builds under this start warning. Soft. |
+| `support_deadline_iso` | string | UTC ISO-8601. When it passes, deprecated builds block *themselves* — nobody has to flip a switch at midnight. |
+| `min_supported_version_code` | int | Hard floor. Immediate, no clock consulted. |
+
+The soft path is the normal one. `min_supported_version_code` exists for
+"that build is broken, cut it off now" and because it never reads a clock, it
+is the lever a doctored device date cannot dodge.
+
+**Clock tampering.** Time comes from `ServerClock`, not `DateTime.now()`. Once
+a device has actually observed the unsupported state it latches in prefs, so
+winding the date back afterwards changes nothing. The latch *clears* when the
+policy stops condemning the build — that is what makes rolling back a bad
+config value actually release the users it caught.
+
+**The kill switch is checked first**, before the hard floor and before the
+latch. A mistyped version code is the one config error in this project that
+can lock out the entire install base, and the recovery has to be one boolean
+rather than working out which of three numbers was wrong.
+
+### Release checklist
+
+Three edits in lockstep — `test/app_version_consistency_test.dart` fails the
+build if any two disagree:
+
+1. `pubspec.yaml` → `version: <name>+<code>`
+2. `lib/widgets/whats_new_dialog.dart` → `kCurrentVersion`
+3. `lib/services/version_policy.dart` → `kAppVersionCode`
+
+A stale `kAppVersionCode` is the dangerous one: ship 57 while the constant
+still reads 56, set `deprecated_below_version_code: 57`, and the new build
+condemns itself — everyone who did what they were asked gets locked out.
+
+To retire a version:
+
+1. Ship the replacement and let adoption settle.
+2. Set `deprecated_below_version_code` to the first *good* code, and
+   `support_deadline_iso` **≥ 15 days out** — the countdown is worthless if
+   users meet it already expired.
+3. Only then set `force_update_enabled: true`. Users below the line start
+   seeing the countdown; the block arrives on its own at the deadline.
+4. Reserve `min_supported_version_code` for emergencies.
+
+To undo any of it: set `force_update_enabled: false`. Remote Config pushes in
+real time, and latched devices are released on their next evaluation.
+
+---
+
 **This architecture supports:**
 - ✅ Unlimited concurrent users
 - ✅ Real-time presence updates
@@ -1917,6 +2018,6 @@ StatusItem:
 - ✅ Cold-start call handling
 - ✅ Instant chat list rendering via local cache
 - ✅ Per-user privacy controls
-- ✅ Mandatory in-app updates
+- ✅ Non-blocking in-app updates, with a configurable support lifecycle
 - ✅ Offline capability
 - ✅ Scalable to millions of users
