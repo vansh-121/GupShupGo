@@ -845,6 +845,15 @@ class SyncService {
         'replyToType': payload['replyToType'],
         'replyToText': payload['replyToText'],
       },
+      if (payload['fileName'] != null) 'fileName': payload['fileName'],
+      if (payload['mediaKey'] != null) 'mediaKey': payload['mediaKey'],
+      if (payload['latitude'] != null) ...{
+        'latitude': payload['latitude'],
+        'longitude': payload['longitude'],
+      },
+      // Omitted when false so a resent ordinary photo produces the same wire
+      // bytes as the original send — see the matching note in _commitMessage.
+      if (payload['viewOnce'] == true) 'viewOnce': true,
     };
 
     try {

@@ -32,6 +32,21 @@ import 'package:video_chat_app/services/database/app_database.dart';
 
 class PlaintextStore {
   PlaintextStore._(this._db);
+
+  /// Binds a store to a caller-supplied database — an in-memory
+  /// `NativeDatabase.memory()` in tests, so the FTS index can be exercised
+  /// without touching the on-device file or the [instance] singleton.
+  ///
+  /// Tests need this because the index is maintained at *four* separate write
+  /// sites in this class ([saveMessage], [saveMessagesBatch], [deleteMessage],
+  /// [wipe]); asserting on raw SQL instead would test the schema while leaving
+  /// the sync points — the part that actually rots — uncovered.
+  ///
+  /// Not annotated `@visibleForTesting`: `drift.dart` exports its own
+  /// `visibleForTesting` symbol, which shadows the `meta` annotation here and
+  /// fails to compile. [AppDatabase.forTesting] is declared the same way.
+  PlaintextStore.forTesting(AppDatabase db) : _db = db;
+
   final AppDatabase _db;
 
   static PlaintextStore? _instance;
@@ -341,6 +356,11 @@ class PlaintextStore {
       await _db.delete(_db.messagePlaintexts).go();
       await _db.delete(_db.chatRoomPreviews).go();
       await _db.delete(_db.localMessages).go();
+      // FTS sync point 1 of 4. The index holds decrypted message bodies, so it
+      // has to go out with the rest of the plaintext — and inside the same
+      // transaction, or a crash mid-wipe would leave a searchable residue of
+      // the signed-out account.
+      await _db.customStatement('DELETE FROM ${AppDatabase.ftsTableName}');
     });
   }
 
@@ -386,6 +406,8 @@ class PlaintextStore {
       ),
       mode: InsertMode.insertOrReplace,
     );
+    // FTS sync point 2 of 4.
+    await _reindex(message, chatRoomId);
   }
 
   /// Batch save messages locally
@@ -405,6 +427,13 @@ class PlaintextStore {
         );
       }
     });
+    // FTS sync point 3 of 4. Outside the batch: `batch` only accepts Drift's
+    // own generated statements, and `message_fts` is a virtual table with no
+    // generated class. A separate pass is also cheap — FTS5 inserts are append
+    // only and this runs off the UI isolate's critical path.
+    for (final msg in messages) {
+      await _reindex(msg, chatRoomId);
+    }
   }
 
   /// Fetch all messages for a chat room, sorted by timestamp ascending
@@ -471,6 +500,128 @@ class PlaintextStore {
     await (_db.delete(_db.localMessages)
           ..where((tbl) => tbl.id.equals(messageId)))
         .go();
+    // FTS sync point 4 of 4.
+    await _unindex(messageId);
+  }
+
+  // ─── Full-text search ─────────────────────────────────────────────────────
+  //
+  // Four write paths above keep `message_fts` in step with `local_messages`.
+  // Routing every write through them is what makes deletion correct for free:
+  // a "delete for everyone" arrives as `asTombstone()` through [saveMessage],
+  // whose text is the deleted-message placeholder, so the original body leaves
+  // the index without any tombstone-specific code. An **edit** works the same
+  // way — [saveMessage] is insertOrReplace and [_reindex] deletes before
+  // inserting, so the pre-edit text stops matching the moment the edit lands.
+
+  /// Replaces [message]'s row in the full-text index.
+  ///
+  /// Delete-then-insert rather than an UPDATE, to mirror the `insertOrReplace`
+  /// on the table it shadows: a plain FTS5 table has no unique constraint on
+  /// `message_id`, so an insert alone would accumulate a duplicate row per
+  /// save and make an edited message match both its old and new text.
+  ///
+  /// Only `text` is indexed. Media messages carry a human-readable fallback
+  /// there (the filename for a document, `📍 Location` for a pin, `🎬 Video`),
+  /// so they are findable by name without indexing anything that isn't already
+  /// rendered in the bubble. Messages with nothing to index — reactions, a
+  /// payload this device can't decrypt — are removed rather than indexed empty.
+  Future<void> _reindex(MessageModel message, String chatRoomId) async {
+    try {
+      await _unindex(message.id);
+      final body = message.text.trim();
+      if (body.isEmpty) return;
+      await _db.customInsert(
+        'INSERT INTO ${AppDatabase.ftsTableName}'
+        '(body, message_id, chat_room_id) VALUES (?, ?, ?)',
+        variables: [
+          Variable<String>(body),
+          Variable<String>(message.id),
+          Variable<String>(chatRoomId),
+        ],
+      );
+    } catch (_) {
+      // Search is an enhancement; a failure here must never fail the save that
+      // triggered it and lose the message itself.
+    }
+  }
+
+  Future<void> _unindex(String messageId) async {
+    try {
+      await _db.customStatement(
+        'DELETE FROM ${AppDatabase.ftsTableName} WHERE message_id = ?',
+        [messageId],
+      );
+    } catch (_) {}
+  }
+
+  /// Full-text search within one chat room, newest first.
+  ///
+  /// Unlike the in-memory filter this replaces, it searches the whole local
+  /// history rather than the page window currently scrolled into the list — a
+  /// word from six months ago is found without paging back to it.
+  ///
+  /// Returns at most [limit] messages. Ordering is applied after the id lookup
+  /// because [getMessagesByIds] is an `IN (…)` query with no inherent order.
+  Future<List<MessageModel>> searchMessages(
+    String chatRoomId,
+    String query, {
+    int limit = 200,
+  }) async {
+    final match = buildFtsQuery(query);
+    if (match == null) return [];
+
+    try {
+      final rows = await _db.customSelect(
+        'SELECT message_id FROM ${AppDatabase.ftsTableName} '
+        'WHERE chat_room_id = ? AND ${AppDatabase.ftsTableName} MATCH ? '
+        'ORDER BY rank LIMIT ?',
+        variables: [
+          Variable<String>(chatRoomId),
+          Variable<String>(match),
+          Variable<int>(limit),
+        ],
+      ).get();
+
+      final ids = rows.map((r) => r.read<String>('message_id')).toList();
+      final found = await getMessagesByIds(ids);
+      found.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return found;
+    } catch (_) {
+      // A malformed MATCH throws inside SQLite rather than returning nothing.
+      // [buildFtsQuery] is supposed to make that impossible; this is the
+      // belt-and-braces so a search box can never crash a chat.
+      return [];
+    }
+  }
+
+  /// Turns a raw search box string into a safe FTS5 MATCH expression, or null
+  /// if there is nothing to search for.
+  ///
+  /// **This escaping is load-bearing.** FTS5's query language treats `"`, `*`,
+  /// `:`, `^`, `(`, `)`, `-`, and the bare words `AND`, `OR`, `NOT` and `NEAR`
+  /// as syntax. A user typing `NEAR` or an unbalanced quote would otherwise
+  /// throw a SqliteException out of a keystroke handler. Wrapping every token
+  /// in double quotes makes it a literal string token, which neutralises all of
+  /// it at once — the only character that then matters is `"` itself, escaped
+  /// FTS5-style by doubling.
+  ///
+  /// A trailing `*` on each token gives prefix matching, so results appear
+  /// while the user is still typing the word. It goes *outside* the quotes,
+  /// where FTS5 reads it as the prefix operator rather than a literal asterisk.
+  ///
+  /// Exposed (not private) so the escaping can be tested directly — it is the
+  /// part most likely to break, and the hardest to notice breaking.
+  static String? buildFtsQuery(String raw) {
+    final tokens = raw
+        .split(RegExp(r'\s+'))
+        .map((t) => t.replaceAll('"', '""').trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (tokens.isEmpty) return null;
+    // Implicit AND between tokens: FTS5 treats a space-separated sequence as a
+    // conjunction, which is what a multi-word search should mean.
+    return tokens.map((t) => '"$t"*').join(' ');
   }
 
   /// Returns a reactive stream of messages for [chatRoomId], updating whenever

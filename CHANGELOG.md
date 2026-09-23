@@ -9,22 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned Features
+- Group messaging support
+- Message forwarding
+- Backup and restore functionality
+- Global search across all conversations and users (in-chat search shipped in 1.2.0)
+- User blocking with UI improvements
+- Live location sharing and map-based pin picking
+
+## [1.2.0] - 2026-09-22
+
 ### Added
+- 📄 **Send Any File** — Share PDFs, Office documents, archives and anything else up to 64 MB straight from the attachment menu. Files are encrypted end-to-end before they leave your device and arrive byte-for-byte identical — no compression, no quality loss. Doubles as the way to send a photo at its original quality.
+- 🔍 **Search Every Message** — Chat search now looks through your entire conversation history stored on this device, not just the messages currently loaded on screen. Results are found instantly, work offline, and never leave your phone.
+- 📍 **Share Your Location** — Drop a pin from the attachment menu and open it in any maps app. Coordinates are shown before anything is sent, and a pin travels over the offline mesh just like a text message.
+- 👁️ **View Once Photos & Videos** — Send a photo or video that can be opened exactly one time. The encryption key is destroyed the moment it's opened, so the copy on the server becomes unreadable to everyone — including us. Screenshots are blocked while it's on screen on Android.
 - 🔔 **Update Reminders on Open** — When a new version is waiting on the Play Store, GupShupGo now tells you when you open the app instead of only when you go looking in Settings. It's the same one-tap update, shown at most once a day so it nudges rather than nags.
 - ⏳ **Advance Notice Before a Version Retires** — Older builds now get a countdown ("this version stops working in 15 days") that gets more insistent as the date approaches, so an update is never a surprise. Your messages and chats stay exactly where they are.
 - 🔄 **A Clear Way Back** — If a version does reach the end of its life, the app explains what happened and takes you straight to the update, rather than failing in confusing ways.
 
 ### Changed
+- Updated version to 1.2.0 (build code 57).
 - The update prompt shown on open is the same dialog as Settings → Check for updates, so you're never told about the same update two different ways.
+- Reply previews and chat exports now recognise documents and location pins instead of falling back to a generic label.
 
-### Planned Features
-- Group messaging support
-- End-to-end encryption for messages
-- Message forwarding
-- Backup and restore functionality
-- Search functionality for messages and users
-- User blocking with UI improvements
-- Custom themes and color palettes
+### Note for people on older versions
+Documents, pins and view-once media are new message types. Someone still on 1.1.9 or earlier will see the file name or "📍 Location" as plain text rather than the full bubble — nothing is lost, but both sides should update to see them properly.
 
 ## [1.1.9] - 2026-09-17
 

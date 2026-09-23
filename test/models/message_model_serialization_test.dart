@@ -41,12 +41,66 @@ MessageModel _fullyPopulated() => MessageModel(
       replyToText: 'here is the screenshot',
     );
 
+/// A document attachment, a location pin and a view-once flag, in one model.
+///
+/// Kept apart from [_fullyPopulated] because these three never co-occur on a
+/// real message — a location carries no [MessageModel.mediaKey] and a document
+/// is never view-once — and because [_fullyPopulated] is the base for the
+/// "applyPayload cannot clear what the base already had" test, whose invariant
+/// is deliberately different for `viewOnce`.
+MessageModel _attachmentPopulated() => MessageModel(
+      id: 'msg-2',
+      senderId: 'alice',
+      receiverId: 'bob',
+      text: 'Q3 report.pdf',
+      type: MessageType.document,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(1700000000000),
+      schemaVersion: 2,
+      senderDeviceId: 7,
+      fileName: 'Q3 report.pdf',
+      mediaKey: const <String, dynamic>{
+        'k': 'a2V5',
+        'i': 'aXY=',
+        'h': 'aGFzaA==',
+        'u': 'https://example.test/o/blob',
+        's': 1234,
+        'c': 'application/pdf',
+      },
+      latitude: 12.9716,
+      longitude: 77.5946,
+      viewOnce: true,
+      viewOnceOpenedBy: const ['bob'],
+    );
+
+/// Sentinels for the content keys that are not Strings.
+///
+/// Kept as a table rather than a chain of ternaries in [_sentinelPayload]: five
+/// of the thirty keys are now non-String, and the next one added should be a
+/// one-line entry here rather than another branch.
+const Map<String, Object> _kNonStringSentinels = <String, Object>{
+  'audioDuration': 4242,
+  'latitude': 12.9716,
+  'longitude': 77.5946,
+  'viewOnce': true,
+  // Shaped like a real MediaKeyBundle.toMap() — the compact wire keys are
+  // k/i/h/u/s/c. A plain String here would pass applyPayload's `is Map` check
+  // by failing it, i.e. silently, which is the exact class of bug this file
+  // exists to catch.
+  'mediaKey': <String, dynamic>{
+    'k': 'a2V5',
+    'i': 'aXY=',
+    'h': 'aGFzaA==',
+    'u': 'https://example.test/o/blob',
+    's': 1234,
+    'c': 'application/pdf',
+  },
+};
+
 /// Every key in [kMessageContentKeys] mapped to a sentinel of the right type.
 Map<String, dynamic> _sentinelPayload() {
   final payload = <String, dynamic>{};
   for (final key in kMessageContentKeys) {
-    // audioDuration is the one non-String content key.
-    payload[key] = key == 'audioDuration' ? 4242 : 'sentinel::$key';
+    payload[key] = _kNonStringSentinels[key] ?? 'sentinel::$key';
   }
   return payload;
 }
@@ -211,6 +265,12 @@ void main() {
         'replyToSenderName',
         'replyToType',
         'replyToText',
+        'fileName',
+        'mediaKey',
+        'latitude',
+        'longitude',
+        'viewOnce',
+        'viewOnceOpenedBy',
       ]) {
         expect(map.containsKey(key), isFalse,
             reason: '$key should be absent, not an explicit null');
@@ -339,6 +399,82 @@ void main() {
       // copyWith — a non-null String field cannot hold null, and a bubble with
       // no text is a legitimate state (an image with no caption).
       expect(ChatService.applyPayload(_fullyPopulated(), const {}).text, '');
+    });
+  });
+
+  group('attachment, location and view-once fields', () {
+    test('round-trip through toJson / fromJson', () {
+      // The local Drift cache and the mesh wire. A document that loses its
+      // mediaKey here is a bubble that can never be opened again after a cold
+      // restart — the ciphertext in Storage stays, but the only key is gone.
+      final original = _attachmentPopulated();
+      final restored = MessageModel.fromJson(original.toJson());
+
+      expect(restored.type, MessageType.document);
+      expect(restored.fileName, 'Q3 report.pdf');
+      expect(restored.mediaKey, original.mediaKey);
+      expect(restored.latitude, 12.9716);
+      expect(restored.longitude, 77.5946);
+      expect(restored.viewOnce, isTrue);
+      expect(restored.viewOnceOpenedBy, const ['bob']);
+    });
+
+    test('round-trip through toMap / fromMap', () {
+      final original = _attachmentPopulated();
+      final restored = MessageModel.fromMap(original.toMap(), original.id);
+
+      expect(restored.type, MessageType.document);
+      expect(restored.fileName, 'Q3 report.pdf');
+      expect(restored.mediaKey, original.mediaKey);
+      expect(restored.latitude, 12.9716);
+      expect(restored.longitude, 77.5946);
+      expect(restored.viewOnce, isTrue);
+      expect(restored.viewOnceOpenedBy, const ['bob']);
+    });
+
+    test('a whole-number coordinate survives as a double', () {
+      // JSON gives back an int for 0.0, and `as double?` would throw on it.
+      // Null Island is a real coordinate and so is the prime meridian.
+      final restored = MessageModel.fromJson(const {
+        'id': 'm',
+        'senderId': 'a',
+        'receiverId': 'b',
+        'text': '',
+        'timestamp': 1700000000000,
+        'type': 'location',
+        'latitude': 0,
+        'longitude': 51,
+      });
+
+      expect(restored.latitude, 0.0);
+      expect(restored.longitude, 51.0);
+    });
+
+    test('an unknown type from a newer build degrades to text', () {
+      // Forward compatibility in the direction we cannot control. This is why
+      // the send path also puts a human-readable fallback in `text`.
+      final restored = MessageModel.fromJson(const {
+        'id': 'm',
+        'senderId': 'a',
+        'receiverId': 'b',
+        'text': '📍 Location',
+        'timestamp': 1700000000000,
+        'type': 'hologram',
+      });
+
+      expect(restored.type, MessageType.text);
+      expect(restored.text, '📍 Location');
+    });
+
+    test('viewOnceOpenedBy is NOT a content key', () {
+      // The mirror of the deletedFor/editedAt rule. It has to live on the
+      // plaintext Firestore document or the sender never learns their media was
+      // opened, and a reinstalled receiver loses the one flag that keeps it
+      // unopenable. If a later change "fixes" it into the envelope, view-once
+      // stops working across devices and this test is the warning.
+      expect(kMessageContentKeys, isNot(contains('viewOnceOpenedBy')));
+      expect(_attachmentPopulated().toMap()['viewOnceOpenedBy'],
+          const ['bob']);
     });
   });
 

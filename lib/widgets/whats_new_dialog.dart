@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.1.9';
+const String kCurrentVersion = '1.2.0';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,18 +193,23 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.security_rounded,
-    'Chat Reliability Fixes',
-    'Fixed an issue where secret messages could occasionally fail to open or show errors after restarting the app.',
+    Icons.insert_drive_file_rounded,
+    'Send Any File',
+    'Share PDFs, Office files and archives up to 64 MB — encrypted end-to-end, with no compression.',
   ),
   _Feature(
-    Icons.auto_mode_rounded,
-    'Automatic Message Recovery',
-    'Messages that encounter network or delivery hiccups now quietly self-heal in the background.',
+    Icons.search_rounded,
+    'Search Every Message',
+    'Chat search now looks through your whole conversation history on this device',
   ),
   _Feature(
-    Icons.bolt_rounded,
-    'Smoother Background Delivery',
-    'Enjoy faster and more reliable chat delivery, even when receiving multiple messages while the app is in the background.',
+    Icons.location_on_rounded,
+    'Share Your Location',
+    'Drop a pin from the attachment menu and open it in any maps app. Works over the offline mesh too.',
+  ),
+  _Feature(
+    Icons.lock_clock_rounded,
+    'View Once',
+    'Send a photo or video that can be opened a single time. Screenshots are blocked for view once.',
   ),
 ];

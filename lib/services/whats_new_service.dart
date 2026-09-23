@@ -38,6 +38,14 @@ abstract final class NewFeatureAnchor {
   static const String settingsMenuItem = 'settings_menu_item';
   static const String settingsAppearance = 'settings_appearance';
   static const String chatOverflow = 'chat_overflow';
+
+  /// The composer's paperclip — the attachment sheet behind it.
+  ///
+  /// Added in 1.2.0, where three of the four new features live in that one
+  /// sheet. It is a busier anchor than the others by design: the sheet is
+  /// already the place a user looks when they want to send something that
+  /// isn't text, so the dot points at a door they half expect to open.
+  static const String chatAttachment = 'chat_attachment';
 }
 
 /// Ids of the features worth pointing at.
@@ -49,6 +57,12 @@ abstract final class NewFeatureAnchor {
 abstract final class NewFeature {
   static const String chatThemes = 'chat_themes';
   static const String chatExport = 'chat_export';
+
+  // ── 1.2.0 ────────────────────────────────────────────────────────────────
+  static const String documents = 'documents';
+  static const String chatSearch = 'chat_search';
+  static const String locationShare = 'location_share';
+  static const String viewOnce = 'view_once';
 }
 
 /// One discoverable feature and the entry points that should advertise it.
@@ -90,6 +104,31 @@ class WhatsNewService extends ChangeNotifier {
       NewFeatureAnchor.chatOverflow,
     }),
     _Discoverable(NewFeature.chatExport, {
+      NewFeatureAnchor.chatOverflow,
+    }),
+
+    // ── 1.2.0 ──────────────────────────────────────────────────────────────
+    // Three of the four sit behind the paperclip. That is one dot advertising
+    // three things, which is the cascade working as intended: the dot says
+    // "look in here", and the pills inside say which ones.
+    _Discoverable(NewFeature.documents, {
+      NewFeatureAnchor.chatAttachment,
+    }),
+    _Discoverable(NewFeature.locationShare, {
+      NewFeatureAnchor.chatAttachment,
+    }),
+    // View once is a switch rather than a destination, but it is a switch the
+    // user has to *find*, and the sheet is where it lives — so it earns an
+    // entry on the same terms as the two above.
+    _Discoverable(NewFeature.viewOnce, {
+      NewFeatureAnchor.chatAttachment,
+    }),
+    // The only entry here for a menu row that already existed. What changed is
+    // what it can reach: the filter used to see the loaded page window, and now
+    // searches the whole local history. A user who tried search once and found
+    // nothing has no reason to try again, so this is the one that most needs a
+    // nudge — it advertises a fix, not a new door.
+    _Discoverable(NewFeature.chatSearch, {
       NewFeatureAnchor.chatOverflow,
     }),
   ];

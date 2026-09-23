@@ -104,6 +104,29 @@ service firebase.storage {
             || request.resource.contentType == 'application/octet-stream');
     }
 
+    // Chat document attachments (PDFs, Office files, archives — anything).
+    //
+    // The only chat media path that is genuinely E2EE at rest: documents go
+    // through EncryptedMediaService (AES-256-GCM on-device), not the plaintext
+    // putFile that chat images and videos use, because a resume or a bank
+    // statement can't be left readable to every authenticated caller who
+    // happens to hold the URL. So unlike the blocks above there is no
+    // `matches(...)` alternative here — the contentType is ALWAYS
+    // application/octet-stream, and anything else is a client that skipped the
+    // encryption. The object name is an opaque 128-bit random string, never the
+    // filename; the real name travels only inside the Signal payload.
+    //
+    // 100 MB is headroom: the client rejects anything over 64 MB
+    // (`_kMaxChatVideoBytes` in chat_screen.dart, shared with video for the same
+    // 3× encrypt-then-upload heap reason), so this only fires against a
+    // tampered client.
+    match /chat_documents/{chatRoomId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+    }
+
     // Encrypted E2EE backup blobs. Only the owner can read or write.
     // Max 20 MB — covers very active users with thousands of messages.
     // Firebase sees opaque AES-GCM ciphertext; the passphrase never leaves

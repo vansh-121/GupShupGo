@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/streak/streak_state.dart';
 
-enum MessageType { text, image, audio, video, reaction }
+enum MessageType { text, image, audio, video, reaction, document, location }
 
 enum MessageStatus {
   // Local-only state. The message is in the outbox: the bubble is on
@@ -73,6 +73,11 @@ const List<String> kMessageContentKeys = <String>[
   'replyToSenderName',
   'replyToType',
   'replyToText',
+  'fileName',
+  'mediaKey',
+  'latitude',
+  'longitude',
+  'viewOnce',
 ];
 
 /// Longest reply snippet we snapshot into a quote. Long enough to identify the
@@ -184,6 +189,66 @@ class MessageModel {
   /// Snapshot of the original's text, capped at [kReplySnippetMaxLength].
   final String? replyToText;
 
+  // ─── Encrypted attachments (documents, view-once media) ─────────────────
+  //
+  // Unlike a chat image or video — which upload in the clear to Storage, with
+  // only the URL inside the envelope — these upload as AES-256-GCM ciphertext
+  // via `EncryptedMediaService`, and the *key* rides inside the envelope. The
+  // server holds an opaque blob it cannot open.
+
+  /// Original filename with its extension, exactly as the sender picked it
+  /// ("Q3-invoice.pdf"). Encrypted: the Storage object is named with a UUID
+  /// instead, so the filename is never visible server-side. Null for anything
+  /// that isn't a document.
+  final String? fileName;
+
+  /// A serialised `MediaKeyBundle` (`{k, i, h, u, s, c}` — key, IV, ciphertext
+  /// SHA-256, URL, size, content type). Non-null iff the attachment is
+  /// client-side encrypted; the receiver rebuilds the bundle from this and
+  /// hands it to `EncryptedMediaService.downloadAndDecrypt`.
+  ///
+  /// Destroying this is how a view-once message is deleted — see [viewOnce].
+  final Map<String, dynamic>? mediaKey;
+
+  // ─── Location pin ───────────────────────────────────────────────────────
+
+  /// WGS-84 latitude of a shared pin. Non-null iff [type] is
+  /// [MessageType.location]. A location message carries no media at all, just
+  /// this pair, so it travels over the mesh transport like a text message.
+  final double? latitude;
+
+  /// WGS-84 longitude of a shared pin. See [latitude].
+  final double? longitude;
+
+  // ─── View once ──────────────────────────────────────────────────────────
+
+  /// Media that self-destructs the first time the receiver opens it.
+  ///
+  /// This is content, not metadata: it lives inside the envelope so the server
+  /// never learns which photos were sent this way. The media itself is always
+  /// routed through `EncryptedMediaService` (so [mediaKey] is set, not
+  /// [mediaUrl]), because **key destruction is the deletion mechanism** — on
+  /// open, the local payload row holding [mediaKey] is purged, and the Signal
+  /// ciphertext that carried it can only ever be decrypted once. What's left in
+  /// Storage is a blob nobody has a key for.
+  final bool viewOnce;
+
+  /// UIDs that have opened this view-once message, destroying their local key
+  /// copy in the act. **Cleartext metadata**, exactly like [deletedFor] below,
+  /// and governed by the same rules: it is absent from [kMessageContentKeys],
+  /// lives on the plaintext Firestore document, and must **never** gain a
+  /// `schemaVersion == 2 ? null : …` guard. It has to be server-visible because
+  /// it does two jobs that only work off the document:
+  ///
+  ///  • it reaches the *sender's* devices so their bubble flips to "Opened";
+  ///  • it outlives a reinstall, so a fresh device refuses to render a
+  ///    view-once media whose key it already destroyed — the second of the two
+  ///    belt-and-braces guarantees in [viewOnce]'s deletion model.
+  ///
+  /// It reveals nothing the server didn't already know: that a participant
+  /// opened a message addressed to them.
+  final List<String> viewOnceOpenedBy;
+
   // ─── Delete & edit ──────────────────────────────────────────────────────
   //
   // These three are **cleartext metadata**, and deliberately so. They are
@@ -256,6 +321,12 @@ class MessageModel {
     this.replyToSenderName,
     this.replyToType,
     this.replyToText,
+    this.fileName,
+    this.mediaKey,
+    this.latitude,
+    this.longitude,
+    this.viewOnce = false,
+    this.viewOnceOpenedBy = const [],
     this.deletedFor = const [],
     this.deletedForEveryone = false,
     this.editedAt,
@@ -300,6 +371,43 @@ class MessageModel {
         meshHops: meshHops,
         deletedFor: deletedFor,
         deletedForEveryone: true,
+        editedAt: editedAt,
+      );
+
+  /// This view-once message after [uid] has opened it: the local AES key and
+  /// every path to the plaintext bytes destroyed, the opened-marker set.
+  ///
+  /// A constructor call and not [copyWith], for the same reason as
+  /// [asTombstone] — `copyWith` is `x ?? this.x` and so cannot *clear* a field,
+  /// and the entire deletion here **is** the clearing of [mediaKey]. What is
+  /// deliberately dropped by omission: [mediaKey] (the AES key), [mediaUrl] and
+  /// [localFilePath] (paths to the bytes), and [videoThumbnailBase64] (a poster
+  /// frame is still a frame). What survives is only enough to render the
+  /// "Opened" placeholder: identity, routing, [type] (so the bubble knows it
+  /// was a photo or a video) and [viewOnce] itself (so it renders as view-once
+  /// rather than a blank media bubble).
+  ///
+  /// Once the row this produces is saved, the key exists nowhere on the device
+  /// and the Signal ciphertext that delivered it decrypts only once — see
+  /// [viewOnce].
+  MessageModel asViewOnceConsumed(String uid) => MessageModel(
+        id: id,
+        senderId: senderId,
+        receiverId: receiverId,
+        text: text,
+        type: type,
+        timestamp: timestamp,
+        status: status,
+        schemaVersion: schemaVersion,
+        senderDeviceId: senderDeviceId,
+        isOfflineMesh: isOfflineMesh,
+        meshHops: meshHops,
+        viewOnce: viewOnce,
+        viewOnceOpenedBy: viewOnceOpenedBy.contains(uid)
+            ? viewOnceOpenedBy
+            : [...viewOnceOpenedBy, uid],
+        deletedFor: deletedFor,
+        deletedForEveryone: deletedForEveryone,
         editedAt: editedAt,
       );
 
@@ -359,12 +467,28 @@ class MessageModel {
       if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
       if (replyToType != null) 'replyToType': replyToType,
       if (replyToText != null) 'replyToText': replyToText,
+      // Encrypted-attachment + location content. On a v2 message every one of
+      // these is already null by the time toMap runs — `_commitMessage` nulls
+      // them behind the `schemaVersion == 2` guard so the real values ride
+      // inside `envelopes` — and an absent key reads back as null. On a legacy
+      // v1 message they carry the content in the clear, exactly like `mediaUrl`
+      // one field up. Writing them conditionally is what keeps a v2 document
+      // from ever holding these in plaintext (checklist site 5).
+      if (fileName != null) 'fileName': fileName,
+      if (mediaKey != null) 'mediaKey': mediaKey,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (viewOnce) 'viewOnce': true,
       // Written conditionally for the same reason as the block above, and with
       // one extra benefit: a conditional key can never clobber. The real
       // delete/edit writes are targeted `update()` calls, but if this map is
       // ever handed to a merging `set()`, an unconditional `deletedFor: []`
       // would wipe the other participant's deletion.
       if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      // Cleartext metadata (see the field doc): rides on the plaintext document
+      // by design, never behind the content guard, so the sender's devices and
+      // a reinstalled client can both see the message has been opened.
+      if (viewOnceOpenedBy.isNotEmpty) 'viewOnceOpenedBy': viewOnceOpenedBy,
       if (deletedForEveryone) 'deletedForEveryone': true,
       if (editedAt != null) 'editedAt': Timestamp.fromDate(editedAt!),
     };
@@ -414,7 +538,18 @@ class MessageModel {
       if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
       if (replyToType != null) 'replyToType': replyToType,
       if (replyToText != null) 'replyToText': replyToText,
+      // Unlike toMap, these are NOT guarded: toJson is the local decrypted copy
+      // (local_messages) and the mesh wire. The row must hold the real mediaKey
+      // and viewOnce state so the bubble renders correctly after a cold restart,
+      // and a location pin's lat/lng must survive the mesh hop. The site-5 guard
+      // is a Firestore-only concern.
+      if (fileName != null) 'fileName': fileName,
+      if (mediaKey != null) 'mediaKey': mediaKey,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (viewOnce) 'viewOnce': true,
       if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
+      if (viewOnceOpenedBy.isNotEmpty) 'viewOnceOpenedBy': viewOnceOpenedBy,
       if (deletedForEveryone) 'deletedForEveryone': true,
       if (editedAt != null) 'editedAt': editedAt!.millisecondsSinceEpoch,
     };
@@ -463,6 +598,12 @@ class MessageModel {
       replyToSenderName: map['replyToSenderName'],
       replyToType: map['replyToType'],
       replyToText: map['replyToText'],
+      fileName: map['fileName'] as String?,
+      mediaKey: _parseStringDynamicMap(map['mediaKey']),
+      latitude: (map['latitude'] as num?)?.toDouble(),
+      longitude: (map['longitude'] as num?)?.toDouble(),
+      viewOnce: map['viewOnce'] == true,
+      viewOnceOpenedBy: _parseStringList(map['viewOnceOpenedBy']),
       deletedFor: _parseStringList(map['deletedFor']),
       deletedForEveryone: map['deletedForEveryone'] ?? false,
       editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
@@ -483,6 +624,18 @@ class MessageModel {
   static List<String> _parseStringList(dynamic raw) {
     if (raw is! List) return const [];
     return raw.whereType<String>().toList(growable: false);
+  }
+
+  /// Tolerant parse for an embedded JSON object — currently only [mediaKey], a
+  /// serialised `MediaKeyBundle`. Returns null for a missing or non-map value,
+  /// and otherwise copies into a fresh `Map<String, dynamic>` so the caller
+  /// gets a correctly-typed, mutable map regardless of the source's static type
+  /// (Firestore hands back `Map<String, dynamic>`, a Drift-decoded JSON row a
+  /// `Map<String, dynamic>`, but a nested libsignal payload can surface as
+  /// `Map<dynamic, dynamic>`, which would throw on a direct cast).
+  static Map<String, dynamic>? _parseStringDynamicMap(dynamic raw) {
+    if (raw is! Map) return null;
+    return Map<String, dynamic>.from(raw);
   }
 
   // Create MessageModel from Firestore document
@@ -525,6 +678,12 @@ class MessageModel {
       replyToSenderName: map['replyToSenderName'],
       replyToType: map['replyToType'],
       replyToText: map['replyToText'],
+      fileName: map['fileName'] as String?,
+      mediaKey: _parseStringDynamicMap(map['mediaKey']),
+      latitude: (map['latitude'] as num?)?.toDouble(),
+      longitude: (map['longitude'] as num?)?.toDouble(),
+      viewOnce: map['viewOnce'] == true,
+      viewOnceOpenedBy: _parseStringList(map['viewOnceOpenedBy']),
       deletedFor: _parseStringList(map['deletedFor']),
       deletedForEveryone: map['deletedForEveryone'] ?? false,
       editedAt: map['editedAt'] != null ? _parseTimestamp(map['editedAt']) : null,
@@ -546,6 +705,10 @@ class MessageModel {
         return MessageType.video;
       case 'reaction':
         return MessageType.reaction;
+      case 'document':
+        return MessageType.document;
+      case 'location':
+        return MessageType.location;
       default:
         return MessageType.text;
     }
@@ -620,6 +783,12 @@ class MessageModel {
     String? replyToSenderName,
     String? replyToType,
     String? replyToText,
+    String? fileName,
+    Map<String, dynamic>? mediaKey,
+    double? latitude,
+    double? longitude,
+    bool? viewOnce,
+    List<String>? viewOnceOpenedBy,
     List<String>? deletedFor,
     bool? deletedForEveryone,
     DateTime? editedAt,
@@ -667,6 +836,12 @@ class MessageModel {
       replyToSenderName: replyToSenderName ?? this.replyToSenderName,
       replyToType: replyToType ?? this.replyToType,
       replyToText: replyToText ?? this.replyToText,
+      fileName: fileName ?? this.fileName,
+      mediaKey: mediaKey ?? this.mediaKey,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      viewOnce: viewOnce ?? this.viewOnce,
+      viewOnceOpenedBy: viewOnceOpenedBy ?? this.viewOnceOpenedBy,
       deletedFor: deletedFor ?? this.deletedFor,
       deletedForEveryone: deletedForEveryone ?? this.deletedForEveryone,
       editedAt: editedAt ?? this.editedAt,

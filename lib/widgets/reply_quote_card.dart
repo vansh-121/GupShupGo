@@ -56,6 +56,15 @@ class ReplyQuoteCard extends StatelessWidget {
 
   bool get _isMedia => type == 'image' || type == 'video';
 
+  /// Whether [_icon] resolves to something more specific than the generic
+  /// quote mark. Derived rather than listed a second time at the call site, so
+  /// a new [MessageType] only has to be added to [_icon] and [_placeholder].
+  bool get _hasTypeIcon =>
+      _isMedia ||
+      type == 'audio' ||
+      type == 'document' ||
+      type == 'location';
+
   IconData get _icon {
     switch (type) {
       case 'image':
@@ -64,6 +73,10 @@ class ReplyQuoteCard extends StatelessWidget {
         return Icons.videocam_rounded;
       case 'audio':
         return Icons.mic_rounded;
+      case 'document':
+        return Icons.insert_drive_file_rounded;
+      case 'location':
+        return Icons.location_on_rounded;
       default:
         return Icons.format_quote_rounded;
     }
@@ -78,6 +91,10 @@ class ReplyQuoteCard extends StatelessWidget {
         return 'Video';
       case 'audio':
         return 'Voice message';
+      case 'document':
+        return 'Document';
+      case 'location':
+        return 'Location';
       default:
         return 'Message';
     }
@@ -88,7 +105,7 @@ class ReplyQuoteCard extends StatelessWidget {
     final c = AppThemeColors.of(context);
     final snippet =
         (text != null && text!.trim().isNotEmpty) ? text!.trim() : _placeholder;
-    final showIcon = _isMedia || type == 'audio';
+    final showIcon = _hasTypeIcon;
 
     final thumbFile = localThumbPath == null ? null : File(localThumbPath!);
 
