@@ -13,6 +13,8 @@ import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
+import 'package:video_chat_app/widgets/location_bubble.dart';
+import 'package:video_chat_app/widgets/location_share_sheet.dart';
 import 'package:video_chat_app/widgets/video_message_widgets.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 
@@ -197,10 +199,41 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 _pickAndSendVideo();
               },
             ),
+            ListTile(
+              leading: Icon(Icons.location_on_rounded, color: c.primary),
+              title: Text('Location',
+                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickAndSendLocation();
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// Paperclip → Location: acquire a pin through the shared confirm flow and
+  /// broadcast it over the mesh. A pin carries no file, so it rides the same
+  /// BYTES channel as a text message — see
+  /// [MeshNetworkService.sendLocationViaMesh]. [pickLocationToShare] is the same
+  /// helper the online chat uses, so the sensitive permission flow stays
+  /// identical on both transports.
+  Future<void> _pickAndSendLocation() async {
+    final pos = await pickLocationToShare(context);
+    if (pos == null || !mounted) return;
+    try {
+      final msg = await _mesh.sendLocationViaMesh(
+        receiverId: widget.peer.userId,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+      setState(() => _messages.add(msg));
+      _scrollToBottom();
+    } catch (e) {
+      _showError('Failed to send location: $e');
+    }
   }
 
   Future<void> _startVoiceRecording() async {
@@ -470,6 +503,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 ),
                 child: VideoThumbnailTile(message: msg),
               )
+            else if (msg.type == MessageType.location)
+              LocationBubble(message: msg, isMe: isMe)
             else
               LinkifiedText(
                 msg.text,

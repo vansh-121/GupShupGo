@@ -544,6 +544,49 @@ class MeshNetworkService extends ChangeNotifier {
     return message;
   }
 
+  /// Send a location pin via the mesh network.
+  ///
+  /// A pin is just two doubles — no media, no Storage upload — so it rides the
+  /// same BYTES channel as a text message rather than a FILE transfer. The
+  /// [MessageModel.toJson] wire format already carries `latitude`/`longitude`,
+  /// and the receive path rebuilds any BYTES message with
+  /// [MessageModel.fromJson], so a pin renders on the far side with no
+  /// receiver-side change. `text` is set to `📍 Location` as the fallback label
+  /// for a client that predates the location type.
+  Future<MessageModel> sendLocationViaMesh({
+    required String receiverId,
+    required double latitude,
+    required double longitude,
+    String? senderName,
+  }) async {
+    final message = MessageModel(
+      id: _generateId(),
+      senderId: _currentUserId,
+      receiverId: receiverId,
+      text: '📍 Location',
+      type: MessageType.location,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sent,
+      latitude: latitude,
+      longitude: longitude,
+      isOfflineMesh: true,
+      meshHops: 0,
+      syncPending: true,
+    );
+
+    _cacheService.storePendingMeshMessage(message);
+    _seenMessageIds.add(message.id);
+
+    final payload = _MeshPayload(
+      messageId: message.id,
+      messageJson: message.toJson(),
+      hops: 0,
+    );
+    await _broadcastToAllPeers(payload);
+
+    return message;
+  }
+
   /// Send an image file via the mesh network.
   /// Returns a [MessageModel] with [localFilePath] set to the picked image.
   Future<MessageModel> sendImageViaMesh({
@@ -1012,6 +1055,11 @@ class MeshNetworkService extends ChangeNotifier {
             mediaUrl: mediaUrl,
             audioDuration: msg.audioDuration,
             videoThumbnailBase64: msg.videoThumbnailBase64,
+            // A location pin carries its coordinates in the message itself, not
+            // in a media file. Without these two the pin would reconcile to the
+            // cloud as an empty bubble the online chat can't render.
+            latitude: msg.latitude,
+            longitude: msg.longitude,
           );
         }
         synced.add(msg.id);

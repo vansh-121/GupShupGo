@@ -6,7 +6,6 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -53,6 +52,7 @@ import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/location_bubble.dart';
+import 'package:video_chat_app/widgets/location_share_sheet.dart';
 import 'package:video_chat_app/widgets/export_format_sheet.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -4469,12 +4469,12 @@ class _ChatScreenState extends State<ChatScreen> {
   /// encrypted payload — so it needs no Storage upload and rides the mesh
   /// transport for free, unlike a document. That also means no online guard.
   ///
-  /// The position is **never sent silently.** Location is the most sensitive
-  /// thing this app can transmit, so the fetched coordinate and its accuracy
-  /// are shown in a confirmation sheet first; nothing leaves the device until
-  /// the user taps Send. `text` is set to `📍 Location` so an older client that
-  /// doesn't know the type renders that instead of a blank bubble, and it
-  /// doubles as the reply snippet and notification preview.
+  /// The acquire + confirm flow (permission, GPS fix, and the confirmation
+  /// sheet that ensures the position is **never sent silently**) lives in the
+  /// shared [pickLocationToShare] so the online and mesh transports can't drift
+  /// apart. `text` is set to `📍 Location` so an older client that doesn't know
+  /// the type renders that instead of a blank bubble, and it doubles as the
+  /// reply snippet and notification preview.
   Future<void> _pickAndSendLocation() async {
     AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
@@ -4484,75 +4484,8 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    Position? position;
-    try {
-      // 1. Location services (the OS-level GPS toggle) must be on — a
-      //    permission grant is meaningless while they're off.
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Turn on location services to share a pin.')),
-          );
-        }
-        return;
-      }
-
-      // 2. Permission. `whileInUse` is all a one-shot pin needs; we never ask
-      //    for background/"always".
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-      }
-      if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(perm == LocationPermission.deniedForever
-                  ? 'Location is blocked. Enable it in Settings to share a pin.'
-                  : 'Location permission is needed to share a pin.'),
-            ),
-          );
-        }
-        return;
-      }
-
-      // 3. Fix. Show an indeterminate spinner while the GPS settles — a first
-      //    fix can take a few seconds. Timeout so a device that never gets one
-      //    fails cleanly instead of hanging the sheet open.
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => const Center(child: CircularProgressIndicator()),
-        );
-      }
-      try {
-        position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 20),
-        );
-      } finally {
-        // Drop the spinner however the fix turns out.
-        if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't get your location.")),
-        );
-      }
-      return;
-    }
-
-    // The try/catch above returns on any failure, so reaching here means the
-    // fix succeeded and `position` is non-null.
-    if (!mounted) return;
-
-    // 4. Confirm before anything is sent.
-    final confirmed = await _confirmLocationSend(position);
-    if (confirmed != true || !mounted) return;
+    final pos = await pickLocationToShare(context);
+    if (pos == null || !mounted) return;
 
     try {
       await _chatService.sendMessage(
@@ -4561,8 +4494,8 @@ class _ChatScreenState extends State<ChatScreen> {
         text: '📍 Location',
         senderName: widget.currentUserName,
         type: MessageType.location,
-        latitude: position.latitude,
-        longitude: position.longitude,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
       );
       _scrollToBottom();
     } catch (e) {
@@ -4572,90 +4505,6 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
-  }
-
-  /// Bottom sheet that shows the fetched coordinate and its accuracy and asks
-  /// the user to confirm. Returns true only on an explicit Send tap.
-  Future<bool?> _confirmLocationSend(Position position) {
-    final c = AppThemeColors.of(context);
-    final coords = '${position.latitude.toStringAsFixed(5)}, '
-        '${position.longitude.toStringAsFixed(5)}';
-    final accuracy = position.accuracy > 0
-        ? 'Accurate to about ${position.accuracy.round()} m'
-        : null;
-
-    return showModalBottomSheet<bool>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: c.primary.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.location_on_rounded, color: c.primary),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Share your location',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 16, fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text(coords,
-                              style: GoogleFonts.poppins(
-                                  fontSize: 12.5, color: c.textMid)),
-                          if (accuracy != null) ...[
-                            const SizedBox(height: 1),
-                            Text(accuracy,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 11, color: c.textLow)),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(sheetContext, false),
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () => Navigator.pop(sheetContext, true),
-                        icon: const Icon(Icons.send_rounded, size: 18),
-                        label: const Text('Send'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   /// Reads a video's duration for the bubble label, or null if it can't be
