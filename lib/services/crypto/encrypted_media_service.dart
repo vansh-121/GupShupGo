@@ -18,6 +18,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -64,6 +65,23 @@ class MediaKeyBundle {
 class EncryptedMediaService {
   static final _gcm = AesGcm.with256bits();
   final FirebaseStorage _storage = FirebaseStorage.instance;
+
+  /// An opaque, unguessable Storage object name.
+  ///
+  /// Deliberately not a timestamp and not the filename: for an encrypted upload
+  /// the object path is the one part the server sees in the clear, so it is made
+  /// to carry no information at all. 16 bytes from [Random.secure] is 128 bits
+  /// of name — collision-free across the whole app, and no `uuid` dependency.
+  ///
+  /// Lives here rather than at a call site because every caller of it is already
+  /// a caller of this service, and a second copy would be a second thing to keep
+  /// honest.
+  static String opaqueObjectName() {
+    final r = Random.secure();
+    return List.generate(16, (_) => r.nextInt(256))
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
 
   /// Encrypts and uploads a file. Returns the bundle the sender embeds
   /// inside the Signal payload.

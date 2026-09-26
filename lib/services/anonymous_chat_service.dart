@@ -1,9 +1,33 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
 import 'package:video_chat_app/models/friend_request_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+
+/// The three media types an anonymous chat carries.
+///
+/// A deliberately smaller set than a real chat's: no documents, because an
+/// archive or an APK handed over by an unvetted stranger is a different risk
+/// class from a photo, and no location, because a pin is the one attachment that
+/// identifies you. The enum exists so the wire name and the plaintext fallback
+/// label can't drift apart between the service and the screen.
+enum AnonymousMediaType {
+  image('image', '📷 Photo'),
+  video('video', '🎬 Video'),
+  audio('audio', '🎤 Voice message');
+
+  const AnonymousMediaType(this.wireName, this.fallbackText);
+
+  /// The `type` field written to Firestore — matches `MessageType`'s names so a
+  /// synthesized [MessageModel] parses it.
+  final String wireName;
+
+  /// Rendered by any client that doesn't know the type. See [sendMediaMessage].
+  final String fallbackText;
+}
 
 /// Singleton service handling anonymous chat matchmaking, messaging,
 /// session lifecycle, and reporting.
@@ -303,6 +327,77 @@ class AnonymousChatService {
         .collection('messages')
         .orderBy('timestamp', descending: false)
         .snapshots();
+  }
+
+  // ── Media ────────────────────────────────────────────────────────────
+
+  /// Uploads a photo, video or voice note for an anonymous room and returns its
+  /// download URL.
+  ///
+  /// **Not encrypted, and that is structural rather than an omission.** E2EE in
+  /// this app is Signal sessions between two identities that have exchanged
+  /// keys; an anonymous pairing has no identity to bind a session to, so there is
+  /// no key to seal the bytes with and nowhere to put one. The trade is stated
+  /// plainly in the UI, and received media is gated behind a tap for it.
+  ///
+  /// The object path embeds [senderId] because the Storage rule binds writes and
+  /// deletes to it, so a participant can only ever clean up their own sends. The
+  /// objects are ephemeral and are reaped by a GCS Object Lifecycle rule on the
+  /// `anonymous_media/` prefix — a room can end with either client killed, so no
+  /// client-side delete can be relied on.
+  Future<String> uploadAnonymousMedia({
+    required String roomId,
+    required String senderId,
+    required File file,
+    required String contentType,
+    String fallbackExt = 'bin',
+  }) async {
+    final path = file.path;
+    final dot = path.lastIndexOf('.');
+    final ext = (dot > 0 && path.length - dot <= 6)
+        ? path.substring(dot + 1)
+        : fallbackExt;
+    final objectName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_random.nextInt(1 << 32)}.$ext';
+
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('anonymous_media/$roomId/$senderId/$objectName');
+    await ref.putFile(file, SettableMetadata(contentType: contentType));
+    return ref.getDownloadURL();
+  }
+
+  /// Sends a media message in the anonymous room.
+  ///
+  /// Same document shape as [sendMessage] plus `mediaUrl` and the two optional
+  /// preview fields, so the stream and the rules need no special-casing. `text`
+  /// carries the `📷 Photo` / `🎬 Video` / `🎤 Voice message` label rather than
+  /// being left empty: a build that predates this change branches on
+  /// `type == 'system'` and falls through to rendering `text`, so without it the
+  /// other side would see a blank bubble.
+  Future<void> sendMediaMessage({
+    required String roomId,
+    required String senderId,
+    required AnonymousMediaType type,
+    required String mediaUrl,
+    int? audioDuration,
+    String? videoThumbnailBase64,
+  }) async {
+    await _firestore
+        .collection('anonymous_rooms')
+        .doc(roomId)
+        .collection('messages')
+        .add({
+      'senderId': senderId,
+      'text': type.fallbackText,
+      'type': type.wireName,
+      'mediaUrl': mediaUrl,
+      if (audioDuration != null) 'audioDuration': audioDuration,
+      if (videoThumbnailBase64 != null)
+        'videoThumbnailBase64': videoThumbnailBase64,
+      'timestamp': FieldValue.serverTimestamp(),
+      'status': 'sent',
+    });
   }
 
   /// Inserts a centred "system" message (e.g. "You are now friends! 🎉").

@@ -46,6 +46,14 @@ abstract final class NewFeatureAnchor {
   /// already the place a user looks when they want to send something that
   /// isn't text, so the dot points at a door they half expect to open.
   static const String chatAttachment = 'chat_attachment';
+
+  /// The anonymous chat composer's paperclip.
+  ///
+  /// Deliberately separate from [chatAttachment] even though both are a
+  /// paperclip: a dot means "something unseen is reachable *through here*", and
+  /// these two sheets reach different things. A stranger chat had no paperclip
+  /// at all before 1.2.0, so this one advertises a door that did not exist.
+  static const String anonymousAttachment = 'anonymous_attachment';
 }
 
 /// Ids of the features worth pointing at.
@@ -63,6 +71,7 @@ abstract final class NewFeature {
   static const String chatSearch = 'chat_search';
   static const String locationShare = 'location_share';
   static const String viewOnce = 'view_once';
+  static const String anonymousMedia = 'anonymous_media';
 }
 
 /// One discoverable feature and the entry points that should advertise it.
@@ -130,6 +139,12 @@ class WhatsNewService extends ChangeNotifier {
     // nudge — it advertises a fix, not a new door.
     _Discoverable(NewFeature.chatSearch, {
       NewFeatureAnchor.chatOverflow,
+    }),
+    // A stranger chat was text-only, so its paperclip is a control that did not
+    // exist rather than a sheet that gained a row. Its own anchor: a dot on the
+    // ordinary composer must not be cleared by opening this one, or vice versa.
+    _Discoverable(NewFeature.anonymousMedia, {
+      NewFeatureAnchor.anonymousAttachment,
     }),
   ];
 

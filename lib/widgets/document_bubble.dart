@@ -45,6 +45,14 @@ class _DocumentBubbleState extends State<DocumentBubble> {
   /// re-hitting the filesystem on every rebuild.
   String? _localPath;
 
+  /// Plaintext length of the local copy, resolved off the build path.
+  ///
+  /// Only consulted when the message has no `mediaKey` to read a size from —
+  /// which is exactly a mesh document: it was handed over peer-to-peer and has
+  /// never been uploaded, so there is no bundle yet. Without this the bubble
+  /// shows its extension and no size until reconciliation.
+  int? _localSize;
+
   @override
   void initState() {
     super.initState();
@@ -59,12 +67,29 @@ class _DocumentBubbleState extends State<DocumentBubble> {
   /// file exists, so this is that call with the network branch unreachable.
   Future<void> _probeCache() async {
     final seeded = _localPath;
-    if (seeded != null && await File(seeded).exists()) return;
+    if (seeded != null && await File(seeded).exists()) {
+      await _probeLocalSize(seeded);
+      return;
+    }
 
     // A miss leaves the tile in its "download" state, which is correct.
     final path = await ChatService.instance
         .cachedEncryptedMediaPath(widget.message);
-    if (path != null && mounted) setState(() => _localPath = path);
+    if (path != null && mounted) {
+      setState(() => _localPath = path);
+      await _probeLocalSize(path);
+    }
+  }
+
+  /// A `stat` for the size, skipped entirely when the bundle already carries one.
+  Future<void> _probeLocalSize(String path) async {
+    if (widget.message.mediaKey?['s'] is num) return;
+    try {
+      final len = await File(path).length();
+      if (mounted) setState(() => _localSize = len);
+    } catch (_) {
+      // A size is decoration; a failed stat just leaves it off the tile.
+    }
   }
 
   Future<void> _onTap() async {
@@ -109,7 +134,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
 
     final name = _displayName(widget.message);
     final ext = _extensionOf(name);
-    final size = _fileSize(widget.message);
+    final size = _fileSize(widget.message, _localSize);
     final cached = _localPath != null;
 
     return InkWell(
@@ -220,11 +245,21 @@ class _DocumentBubbleState extends State<DocumentBubble> {
   /// GCM tag appended by `EncryptedMediaService`. Read raw rather than through
   /// `MediaKeyBundle.fromMap` so a malformed bundle degrades to "no size shown"
   /// instead of throwing inside `build`.
-  static String? _fileSize(MessageModel m) {
+  ///
+  /// [localBytes] is the fallback for a document that has no bundle at all — a
+  /// mesh send, which arrives as a local file and is only encrypted later. That
+  /// length is already plaintext, so no tag is subtracted from it.
+  static String? _fileSize(MessageModel m, int? localBytes) {
     final raw = m.mediaKey?['s'];
     final cipherBytes = raw is num ? raw.toInt() : null;
-    if (cipherBytes == null || cipherBytes <= 16) return null;
-    final bytes = cipherBytes - 16;
+    final int? bytes;
+    if (cipherBytes != null && cipherBytes > 16) {
+      bytes = cipherBytes - 16;
+    } else if (cipherBytes == null && localBytes != null && localBytes > 0) {
+      bytes = localBytes;
+    } else {
+      return null;
+    }
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';

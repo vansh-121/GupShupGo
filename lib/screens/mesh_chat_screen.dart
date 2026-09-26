@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +13,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/location_bubble.dart';
 import 'package:video_chat_app/widgets/location_share_sheet.dart';
@@ -51,6 +53,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   bool _isSending = false;
   bool _isUploadingImage = false;
   bool _isUploadingVideo = false;
+  bool _isUploadingDocument = false;
   bool _hasText = false;
 
   @override
@@ -168,6 +171,48 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     }
   }
 
+  /// Pick any file and hand it to the peer over the mesh.
+  ///
+  /// Mirrors [_pickAndSendVideo]: size-check on a `stat` before anything else,
+  /// then straight to the transport. Nothing is encrypted or uploaded — there is
+  /// no network here. The message is left `syncPending` and [MeshNetworkService]
+  /// seals it into `chat_documents/` when connectivity returns.
+  Future<void> _pickAndSendDocument() async {
+    try {
+      // `withData: false` — we want the path, not the bytes in memory.
+      final result = await FilePicker.platform.pickFiles(withData: false);
+      final picked = result?.files.single;
+      final path = picked?.path;
+      if (picked == null || path == null) return;
+
+      final bytes = await File(path).length();
+      if (bytes > kMaxMeshDocumentBytes) {
+        _showError(
+          'This file is too large to send nearby — the limit is '
+          '${(kMaxMeshDocumentBytes / (1024 * 1024)).round()} MB.',
+        );
+        return;
+      }
+      if (bytes == 0) {
+        _showError('That file is empty.');
+        return;
+      }
+
+      setState(() => _isUploadingDocument = true);
+      final msg = await _mesh.sendDocumentViaMesh(
+        receiverId: widget.peer.userId,
+        filePath: path,
+        fileName: picked.name,
+      );
+      setState(() => _messages.add(msg));
+      _scrollToBottom();
+    } catch (e) {
+      _showError('Failed to send file: $e');
+    } finally {
+      if (mounted) setState(() => _isUploadingDocument = false);
+    }
+  }
+
   /// Bottom-sheet chooser behind the composer's paperclip: photo or video.
   void _showAttachSheet(AppThemeColors c) {
     HapticFeedback.selectionClick();
@@ -197,6 +242,15 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _pickAndSendVideo();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.insert_drive_file_rounded, color: c.primary),
+              title: Text('Document',
+                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickAndSendDocument();
               },
             ),
             ListTile(
@@ -505,6 +559,11 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
               )
             else if (msg.type == MessageType.location)
               LocationBubble(message: msg, isMe: isMe)
+            else if (msg.type == MessageType.document)
+              // The bubble opens straight from `localFilePath` and degrades on a
+              // missing `mediaKey`, which is exactly a mesh document's shape: a
+              // local file that has never been uploaded.
+              DocumentBubble(message: msg, isMe: isMe)
             else
               LinkifiedText(
                 msg.text,
@@ -562,7 +621,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        (_isUploadingImage || _isUploadingVideo)
+        (_isUploadingImage || _isUploadingVideo || _isUploadingDocument)
             ? Padding(
                 padding: const EdgeInsets.all(12),
                 child: SizedBox(

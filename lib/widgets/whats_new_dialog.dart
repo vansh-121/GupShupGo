@@ -195,13 +195,13 @@ const List<_Feature> _features = [
   _Feature(
     Icons.insert_drive_file_rounded,
     'Send Any File',
-    'Share PDFs, Office files and archives up to 64 MB — encrypted end-to-end, with no compression.',
+    'Share PDFs, Office files and archives up to 64 MB — encrypted end-to-end, with no compression. Works over the offline mesh too.',
   ),
-  _Feature(
-    Icons.search_rounded,
-    'Search Every Message',
-    'Chat search now looks through your whole conversation history on this device',
-  ),
+  // _Feature(
+  //   Icons.search_rounded,
+  //   'Search Every Message',
+  //   'Chat search now looks through your whole conversation history on this device',
+  // ),
   _Feature(
     Icons.location_on_rounded,
     'Share Your Location',
@@ -211,5 +211,10 @@ const List<_Feature> _features = [
     Icons.lock_clock_rounded,
     'View Once',
     'Send a photo or video that can be opened a single time. Screenshots are blocked for view once.',
+  ),
+  _Feature(
+    Icons.blur_on_rounded,
+    'Media in Anonymous Chat',
+    'Send photos, video and voice notes to strangers. Anything they send you stays blurred until you tap to reveal it.',
   ),
 ];

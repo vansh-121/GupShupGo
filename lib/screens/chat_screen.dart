@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
@@ -4324,10 +4323,13 @@ class _ChatScreenState extends State<ChatScreen> {
   ///
   /// Four consequences follow from that choice, all of them deliberate:
   ///
-  ///  * **Online only.** There is no mesh document transport, and the blob has
-  ///    to reach Storage for the key to be worth anything. Checked before the
-  ///    picker so the user learns why up front, exactly as [_pickAndSendVideo]
-  ///    does.
+  ///  * **Encryption happens where the network is.** Online, the file is sealed
+  ///    here and uploaded before the message is sent. Offline it goes over the
+  ///    mesh in the clear on a direct peer-to-peer link — there is no server in
+  ///    the path to protect it from — and
+  ///    [MeshNetworkService._uploadEncryptedLocalFile] seals it on the way to
+  ///    Storage when connectivity returns. Either way the blob that lands in
+  ///    `chat_documents/` is ciphertext.
   ///  * **No compression, ever.** Sending the original bytes *is* the feature —
   ///    it's also the workaround for sending a photo without gallery
   ///    re-encoding. The only guard is the [_kMaxChatVideoBytes] ceiling, shared
@@ -4350,17 +4352,14 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    // The mesh carries documents too, on the same FILE channel the photo, voice
+    // and video paths already use — so connectivity picks the ceiling and the
+    // transport, rather than blocking the picker. The mesh cap is tighter for the
+    // same reason the video one is: a P2P stream has no progress bar and no
+    // resume.
     final connectivity =
         Provider.of<ConnectivityProvider>(context, listen: false);
-    if (!connectivity.isOnline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Files need an internet connection — they can\'t go over nearby.'),
-        ),
-      );
-      return;
-    }
+    final isOnline = connectivity.isOnline;
 
     try {
       // `withData: false` keeps the picker from reading the whole file into
@@ -4373,13 +4372,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final file = File(path);
       final bytes = await file.length();
-      if (bytes > _kMaxChatVideoBytes) {
+      final maxBytes = isOnline ? _kMaxChatVideoBytes : kMaxMeshDocumentBytes;
+      if (bytes > maxBytes) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'This file is ${_formatMb(bytes)}. The most a chat file can '
-                'carry is ${_formatMb(_kMaxChatVideoBytes)}.',
+                'This file is ${_formatMb(bytes)}. The most a '
+                '${isOnline ? 'chat' : 'nearby'} file can '
+                'carry is ${_formatMb(maxBytes)}.',
               ),
             ),
           );
@@ -4399,6 +4400,35 @@ class _ChatScreenState extends State<ChatScreen> {
         _isUploadingDocument = true;
         _documentUploadProgress = null;
       });
+
+      if (!isOnline) {
+        // ── Offline: hand it to the peer over the mesh ───────────────
+        // Nothing is encrypted or uploaded here — there is no network to upload
+        // to. The file streams plaintext on the P2P FILE channel and the message
+        // is left `syncPending`; [MeshNetworkService] encrypts and uploads it to
+        // `chat_documents/` when the connection returns.
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendDocumentViaMesh(
+            receiverId: widget.contact.id,
+            filePath: path,
+            fileName: picked.name,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content:
+                      Text('No internet & mesh unavailable. File not sent.')),
+            );
+          }
+        }
+        return;
+      }
 
       final chatRoomId =
           _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
@@ -4449,17 +4479,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// An opaque, unguessable Storage object name.
   ///
-  /// Deliberately not a timestamp and not the filename: the object path is the
-  /// one part of a document send the server sees in the clear, so it is made to
-  /// carry no information at all. 16 bytes from [Random.secure] is 128 bits of
-  /// name — collision-free across the whole app, and no `uuid` dependency for a
-  /// single call site.
-  static String _opaqueObjectName() {
-    final r = Random.secure();
-    return List.generate(16, (_) => r.nextInt(256))
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
-  }
+  /// Delegates to [EncryptedMediaService.opaqueObjectName] — the mesh service
+  /// needs the same name for a document it reconciles after the fact, and two
+  /// copies of a naming rule is two things to keep honest.
+  static String _opaqueObjectName() => EncryptedMediaService.opaqueObjectName();
 
   // ─── Location attachment ───────────────────────────────────────────
   /// Fetch the current position and, after an explicit confirm, send it as a

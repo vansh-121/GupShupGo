@@ -2031,7 +2031,8 @@ key-destruction mechanism view-once depends on for free.
 ```
 _pickAndSendDocument()                       lib/screens/chat_screen.dart
   │
-  ├─ online guard          no mesh document transport — checked before the picker
+  ├─ connectivity fork     offline → MeshNetworkService.sendDocumentViaMesh
+  │                        ("Over the mesh" below); online path continues ↓
   ├─ FilePicker(withData: false)             path only; a 64 MB pick is not
   │                                          copied into the Dart heap twice
   ├─ size guard  > 64 MB → reject            encrypt-then-upload holds ~3× the
@@ -2087,6 +2088,48 @@ uniqueness guarantee and the reason two sends of `invoice.pdf` don't collide.
 **Size display.** `bundle.sizeBytes` is the **ciphertext** length: plaintext
 plus the 16-byte GCM tag. The bubble subtracts 16 before formatting, so a
 1.00 MB file doesn't read as 1.000016 MB.
+
+### Over the mesh (offline)
+
+With no internet, the connectivity fork sends the document to a nearby phone via
+`MeshNetworkService.sendDocumentViaMesh` — the fourth file sender beside audio,
+image and video, and the same shape as all three. On the wire it is **not
+encrypted**: it rides Nearby Connections' type-agnostic `FILE` payload as
+plaintext bytes, exactly as a mesh photo or voice note does, with a companion
+`file_metadata` BYTES packet carrying the message JSON. Guarded by
+`kMaxMeshDocumentBytes` (25 MB — lower than the 64 MB online cap, because a P2P
+stream has no progress bar and no server-side resume).
+
+The **two-name split is the same as online**: the file is copied into
+`mesh_documents/` under an opaque `${ts}_${id}.$ext`, while the real name travels
+in the message's `fileName` field (and in `text`, the old-client fallback). The
+wire `fileName` is clamped so a pathological name can't blow the ~30 KB BYTES
+metadata cap.
+
+A mesh document arrives with a local file and **no `mediaKey`** — nothing was
+uploaded. Reconciliation (`_syncPendingToFirestore`) is therefore the one place a
+document is encrypted: when the network returns it runs
+`EncryptedMediaService.encryptAndUpload` into `chat_documents/` — exactly the
+upload the online send would have done — and only then writes the plaintext
+Firestore document with `mediaKey` set. Readiness keys on **`mediaKey != null`**
+(`meshMessageNeedsUpload`), not the `mediaUrl` the other three types use, so a
+document that can't upload yet stays pending and retries on the next reconnect
+rather than committing an unopenable bubble — which matters because
+`chat_documents/` is one of the undeployed rules below.
+
+**Two latent bugs fixed in passing**, both of which a fourth file type makes
+worse:
+
+- Received mesh files all landed in `mesh_images/` regardless of type (a mesh
+  voice note or video was already misfiled today). A pure
+  `meshDirNameForType(MessageType)` now routes each arrival to
+  `mesh_images` / `mesh_audio` / `mesh_videos` / `mesh_documents`. Absolute paths
+  already on disk are unaffected, so received messages keep working.
+- `meta.fileName` was interpolated into a filesystem path unsanitised — and it
+  arrives from an **unauthenticated peer**, so a `../../` in it wrote outside the
+  sandbox. `sanitiseMeshFileName` now `basename`s it, strips anything outside
+  `[A-Za-z0-9._-]`, clamps the length, and regenerates a name when the result is
+  empty or dot-leading.
 
 ### Storage rule
 
@@ -2207,8 +2250,10 @@ second paging mechanism.
 ## 📍 Location Pin Sharing
 
 A pin is two doubles — `latitude` / `longitude` in the encrypted payload — and
-no media at all, which is why it travels over the **mesh transport for free**
-while documents cannot.
+no media at all, so it rides the **mesh transport for free**: no `FILE` payload,
+no later reconciliation, just two numbers in the same BYTES packet a text message
+uses. (A document goes over the mesh too now, but it pays for it — a file
+transfer on the wire and an encrypt-and-upload when the network returns.)
 
 **There is no inline map image, deliberately.** Rendering a static map tile
 would send the exact coordinate to Google's or OSM's servers on every render, on
@@ -2321,6 +2366,74 @@ the key.
 
 ---
 
+## 🕵️ Anonymous Chat Media
+
+Anonymous ("talk to a stranger") rooms pair two accounts that have exchanged no
+identity, so there is **no Signal session to encrypt to** — anonymous messages
+have always been plaintext, text included. Adding photos, video and voice notes
+doesn't change that fact; it makes it visible. This section exists to say so
+plainly, because it is the one media path in the app that is **not** E2EE, and
+that must be a deliberate, documented choice rather than a quiet omission.
+
+### Plaintext by construction — and no octet-stream escape hatch
+
+Media uploads to `anonymous_media/{roomId}/{userId}/{fileName}` and is readable
+by any authenticated user holding the URL, exactly like the older `chat_images/`
+path. The storage rule binds the uploader (`request.auth.uid == userId`), caps
+size, and — unlike **every other** media block in `storage.rules` — permits only
+`image/*`, `video/*` and `audio/*`, with **no `application/octet-stream`
+alternative**. Everywhere else that alternative is how genuine E2EE ciphertext
+(which has no honest MIME type) gets through; here there is no ciphertext, so an
+opaque blob on this path could only be a client dodging the content-type check.
+The rule also grants `allow delete` to the uploader, for the best-effort
+self-cleanup below.
+
+Firestore needs no rule change: `anonymous_rooms/{roomId}/messages` already lets
+a participant create a message as themselves and doesn't constrain the field set,
+so `mediaUrl` and the optional `audioDuration` / `videoThumbnailBase64` ride the
+existing document shape. `text` is set to a `📷 Photo` / `🎬 Video` /
+`🎤 Voice message` fallback so a build predating this feature shows a label
+rather than an empty bubble.
+
+### Blurred until tapped
+
+You can't stop a stranger sending you an image, but you can stop it ambushing the
+eye. Received **photos and videos** render behind an `ImageFiltered(blur 18px)`
+scrim with a lock glyph and "Tap to view"; one tap reveals. The revealed-id set
+lives on the screen's `State`, so **leaving and re-entering re-blurs** — a new
+stranger is a new decision. Two things are deliberately *not* gated:
+
+- **Your own sent media** — you chose it; hiding it from yourself is pointless.
+- **Voice notes** — the bubble doesn't autoplay, so audio can't ambush the way an
+  image can, and blurring a waveform communicates nothing.
+
+The app-bar Report/flag action is untouched and stays one tap away.
+
+### Reusing the bubbles
+
+Rendering reuses the ordinary chat widgets — `VoiceMessageBubble`,
+`VideoThumbnailTile`, `ChatVideoPlayerScreen` — each of which reads only a few
+`MessageModel` fields. Rather than write anonymous-specific copies, the builder
+**synthesizes a throwaway `MessageModel`** from the Firestore map. There is no
+`localFilePath` and no `mediaKey`; these bubbles load straight from `mediaUrl`.
+
+### Orphaned media — a bucket rule, not client code
+
+There is no Cloud Function cleanup for `anonymous_rooms`, and rooms are ephemeral
+by design, so without intervention every photo sent to a stranger would live in
+the bucket forever. A client-side delete on session end is best-effort at most —
+the leaver's app may be killed first, and the other party's uploads aren't theirs
+to delete. The real fix is a **GCS Object Lifecycle rule** (`matchesPrefix:
+anonymous_media/`, age 7 days, action delete): zero code, applies no matter which
+client path ran, and correct for genuinely ephemeral media. It is a
+console/`gcloud` change, so it lives on the deploy checklist, not in the diff.
+
+> ⚠️ Like `chat_documents` above, the `anonymous_media` block is **in the repo
+> but undeployed** — every anonymous media send fails with a permission error
+> until `firebase deploy --only storage` runs.
+
+---
+
 **This architecture supports:**
 - ✅ Unlimited concurrent users
 - ✅ Real-time presence updates
@@ -2330,9 +2443,11 @@ the key.
 - ✅ Instant chat list rendering via local cache
 - ✅ Per-user privacy controls
 - ✅ End-to-end encrypted document sharing, with filenames hidden from the server
+- ✅ Documents sent phone-to-phone over the offline mesh, encrypted on reconnect
 - ✅ Full-history on-device message search that never reaches a server
 - ✅ Location pins with no third-party map request
 - ✅ View-once media enforced by key destruction, not by a delete permission
+- ✅ Photos, video and voice notes in anonymous chat — plaintext by design, blurred until tapped
 - ✅ Non-blocking in-app updates, with a configurable support lifecycle
 - ✅ Offline capability
 - ✅ Scalable to millions of users

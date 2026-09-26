@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mime/mime.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,6 +13,11 @@ import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
+import 'package:video_chat_app/services/mesh_file_utils.dart';
+
+export 'package:video_chat_app/services/mesh_file_utils.dart'
+    show kMaxMeshDocumentBytes;
 
 /// Largest video a mesh send will carry, in bytes (25 MB).
 ///
@@ -825,6 +831,111 @@ class MeshNetworkService extends ChangeNotifier {
   }
 
 
+  /// Send a document over the mesh: the file streams on the `FILE` channel with a
+  /// companion `file_metadata` BYTES packet, exactly like [sendAudioViaMesh] and
+  /// [sendVideoViaMesh].
+  ///
+  /// [fileName] is the user-visible original name, and it is the one thing about a
+  /// document that has to survive the trip. The stored copy is named opaquely
+  /// (`${ts}_${id}.ext`, as the other three senders do), so the real name travels
+  /// inside the message as [MessageModel.fileName] and is what the bubble renders —
+  /// the same split the online document path uses. `text` carries that name too, as
+  /// the plaintext fallback that makes a build predating documents show something
+  /// instead of an empty bubble, and that feeds the reply snippet and notification.
+  ///
+  /// Nothing is uploaded here: a mesh document has no `mediaKey`. It is encrypted
+  /// and uploaded by [_syncPendingToFirestore] when the network comes back.
+  Future<MessageModel> sendDocumentViaMesh({
+    required String receiverId,
+    required String filePath,
+    required String fileName,
+    String? senderName,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw Exception('Document does not exist: $filePath');
+    }
+
+    // Defensive size guard — the UI pre-checks and shows a friendly message, but
+    // the transport is the source of truth so an uncapped file can't slip through.
+    final length = await file.length();
+    if (length > kMaxMeshDocumentBytes) {
+      throw Exception('Document exceeds the mesh size limit');
+    }
+    if (length == 0) {
+      throw Exception('Document is empty');
+    }
+
+    // Clamp and scrub the display name here, once, so the sender's stored copy and
+    // the wire copy are the same string — and so a pathological name can't be the
+    // thing that pushes the metadata packet over Nearby's BYTES cap.
+    final displayName = sanitiseMeshFileName(fileName);
+
+    // Copy into app-local storage so the file survives temp cleanup: file_picker
+    // hands back a cache path that Android is free to reap at any time.
+    final appDir = await getApplicationDocumentsDirectory();
+    final meshDocDir =
+        Directory('${appDir.path}/${meshDirNameForType(MessageType.document)}');
+    if (!meshDocDir.existsSync()) {
+      meshDocDir.createSync(recursive: true);
+    }
+    final dot = displayName.lastIndexOf('.');
+    final ext = (dot > 0 && displayName.length - dot <= 6)
+        ? displayName.substring(dot + 1)
+        : 'bin';
+    final storedName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_generateId()}.$ext';
+    final savedFile = await file.copy('${meshDocDir.path}/$storedName');
+
+    final message = MessageModel(
+      id: _generateId(),
+      senderId: _currentUserId,
+      receiverId: receiverId,
+      text: displayName,
+      type: MessageType.document,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sent,
+      localFilePath: savedFile.path,
+      fileName: displayName,
+      isOfflineMesh: true,
+      meshHops: 0,
+      syncPending: true,
+    );
+
+    // Store locally for persistence & Firestore sync
+    _cacheService.storePendingMeshMessage(message);
+    _seenMessageIds.add(message.id);
+
+    // For each connected peer:
+    //  1. Send the FILE payload (returns its payloadId).
+    //  2. Send a BYTES metadata payload so receiver can match file → message.
+    for (final endpoint in _connectedEndpoints) {
+      try {
+        final filePayloadId =
+            await Nearby().sendFilePayload(endpoint, savedFile.path);
+
+        final metadata = <String, dynamic>{
+          'payloadType': 'file_metadata',
+          'filePayloadId': filePayloadId,
+          // The opaque on-disk name, not the display name — this is what the
+          // receiver builds its local path from.
+          'fileName': storedName,
+          'messageId': message.id,
+          'messageJson': message.toJson(),
+          'hops': 0,
+          'ttl': maxHops,
+        };
+        final bytes = utf8.encode(jsonEncode(metadata));
+        await Nearby().sendBytesPayload(endpoint, bytes);
+      } catch (e) {
+        debugPrint('[Mesh] Failed to send document to $endpoint: $e');
+      }
+    }
+
+    return message;
+  }
+
+
   /// Broadcast a mesh payload to every connected endpoint.
   Future<void> _broadcastToAllPeers(_MeshPayload payload) async {
     final bytes = utf8.encode(jsonEncode(payload.toJson()));
@@ -956,18 +1067,28 @@ class MeshNetworkService extends ChangeNotifier {
     if (meta == null || uri == null || !isComplete) return; // not ready yet
 
     try {
-      // Move the received file to a permanent app-local directory.
+      final base = MessageModel.fromJson(meta.messageJson);
+
+      // Move the received file to a permanent app-local directory, keyed on the
+      // message's own type. This used to be `mesh_images` for everything, which
+      // put received voice notes and video in the photos folder and would have
+      // dropped documents there too. Only new arrivals move — a message already
+      // received holds an absolute path and keeps resolving.
       final appDir = await getApplicationDocumentsDirectory();
-      final meshImagesDir = Directory('${appDir.path}/mesh_images');
-      if (!meshImagesDir.existsSync()) {
-        meshImagesDir.createSync(recursive: true);
+      final destDir = Directory('${appDir.path}/${meshDirNameForType(base.type)}');
+      if (!destDir.existsSync()) {
+        destDir.createSync(recursive: true);
       }
-      final destPath = '${meshImagesDir.path}/${meta.fileName}';
+      // `meta.fileName` arrives from an unauthenticated peer over an open Nearby
+      // link. Our own senders generate an opaque name, but a tampered one could
+      // send `../../databases/app.db` and write straight through the sandbox.
+      final safeName = sanitiseMeshFileName(meta.fileName);
+      final destPath = '${destDir.path}/$safeName';
 
       await Nearby().copyFileAndDeleteOriginal(uri, destPath);
 
       // Build the MessageModel with the local file path.
-      final message = MessageModel.fromJson(meta.messageJson).copyWith(
+      final message = base.copyWith(
         localFilePath: destPath,
         isOfflineMesh: true,
         meshHops: (meta.messageJson['meshHops'] ?? 0) + 1,
@@ -980,7 +1101,7 @@ class MeshNetworkService extends ChangeNotifier {
         _incomingMeshMessages.add(message);
         _meshMessageController.add(message);
         _cacheService.storePendingMeshMessage(message);
-        debugPrint('[Mesh] Received image for me: ${meta.fileName}');
+        debugPrint('[Mesh] Received ${base.type.name} for me: $safeName');
       }
 
       // Clean up tracking maps.
@@ -1010,6 +1131,7 @@ class MeshNetworkService extends ChangeNotifier {
         // Only sync messages that we sent (not relayed ones for other users)
         if (msg.senderId == _currentUserId) {
           String? mediaUrl = msg.mediaUrl;
+          Map<String, dynamic>? mediaKey = msg.mediaKey;
 
           // If this is an image with a local file, upload it first.
           if (msg.type == MessageType.image &&
@@ -1032,16 +1154,28 @@ class MeshNetworkService extends ChangeNotifier {
             mediaUrl = await _uploadLocalFile(msg, 'chat_videos', 'mp4');
           }
 
+          // A document is the one mesh media type that is encrypted at rest, so
+          // it goes through EncryptedMediaService rather than the plaintext
+          // putFile above — the same pipeline the online send uses. Its readiness
+          // signal is the key bundle, not a URL.
+          if (msg.type == MessageType.document &&
+              msg.localFilePath != null &&
+              (mediaKey == null || mediaKey.isEmpty)) {
+            mediaKey = await _uploadEncryptedLocalFile(msg);
+          }
+
           // A media message can't be reconciled until its file actually
-          // uploaded. If the upload produced no URL (a transient Storage error,
-          // or — for video — the chat_videos rule not yet deployed), leave it
-          // pending so the next reconnect retries, instead of sending an
-          // unplayable url-less message and dropping the pending item for good.
-          final needsUpload = (msg.type == MessageType.image ||
-                  msg.type == MessageType.audio ||
-                  msg.type == MessageType.video) &&
-              msg.localFilePath != null;
-          if (needsUpload && mediaUrl == null) {
+          // uploaded. If the upload produced nothing (a transient Storage error,
+          // or — for video and documents — the chat_videos / chat_documents rule
+          // not yet deployed), leave it pending so the next reconnect retries,
+          // instead of sending an unopenable message and dropping the pending
+          // item for good.
+          if (meshMessageNeedsUpload(
+            msg.type,
+            localFilePath: msg.localFilePath,
+            mediaUrl: mediaUrl,
+            mediaKey: mediaKey,
+          )) {
             debugPrint(
                 '[Mesh] Upload not ready for ${msg.id}; keeping it pending for retry');
             continue;
@@ -1060,6 +1194,11 @@ class MeshNetworkService extends ChangeNotifier {
             // cloud as an empty bubble the online chat can't render.
             latitude: msg.latitude,
             longitude: msg.longitude,
+            // A document's real name and its key bundle both live inside the
+            // envelope; without them the receiver gets a bubble it can neither
+            // label nor decrypt.
+            fileName: msg.fileName,
+            mediaKey: mediaKey,
           );
         }
         synced.add(msg.id);
@@ -1101,6 +1240,42 @@ class MeshNetworkService extends ChangeNotifier {
       return await ref.getDownloadURL();
     } catch (e) {
       debugPrint('[Mesh] Failed to upload file for ${msg.id}: $e');
+      return null;
+    }
+  }
+
+  /// Encrypt and upload a locally-stored mesh document, returning the
+  /// `MediaKeyBundle` map the message carries inside its envelope.
+  ///
+  /// Separate from [_uploadLocalFile] because that one is a plaintext `putFile`
+  /// by design: images, voice notes and video reconcile to the legacy unencrypted
+  /// paths. Documents don't — they are AES-256-GCM sealed on-device and land in
+  /// `chat_documents/` under an opaque name as `application/octet-stream`, so the
+  /// server sees neither the contents nor the filename. Same call shape as the
+  /// online send in `chat_screen._pickAndSendDocument`.
+  ///
+  /// Returns `null` on any failure so the caller keeps the message pending.
+  Future<Map<String, dynamic>?> _uploadEncryptedLocalFile(
+      MessageModel msg) async {
+    try {
+      final file = File(msg.localFilePath!);
+      if (!file.existsSync()) return null;
+
+      final chatRoomId =
+          _chatService.getChatRoomId(msg.senderId, msg.receiverId);
+      final bundle = await EncryptedMediaService().encryptAndUpload(
+        file: file,
+        storagePath:
+            'chat_documents/$chatRoomId/${EncryptedMediaService.opaqueObjectName()}',
+        // The real type is recorded in the bundle, not on the Storage object —
+        // it is what tells the receiver which app to open the file with.
+        contentType:
+            lookupMimeType(msg.fileName ?? msg.localFilePath!) ??
+                'application/octet-stream',
+      );
+      return bundle.toMap();
+    } catch (e) {
+      debugPrint('[Mesh] Failed to upload document for ${msg.id}: $e');
       return null;
     }
   }
