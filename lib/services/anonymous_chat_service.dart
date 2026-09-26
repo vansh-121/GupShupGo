@@ -375,6 +375,14 @@ class AnonymousChatService {
   /// being left empty: a build that predates this change branches on
   /// `type == 'system'` and falls through to rendering `text`, so without it the
   /// other side would see a blank bubble.
+  ///
+  /// [viewOnce] marks a photo or video as show-once. It is a UX guarantee, not a
+  /// cryptographic one: the upload is still plaintext and the object still lives
+  /// until the `anonymous_media/` lifecycle rule reaps it. What the flag buys is
+  /// the receiver-side viewer that blocks capture (FLAG_SECURE) and refuses to
+  /// reopen once seen — see `AnonymousViewOnceViewer`. Since the message
+  /// subcollection is immutable by rule, "opened" is tracked on the receiver's
+  /// client for the life of the session, the same as the tap-to-reveal gate.
   Future<void> sendMediaMessage({
     required String roomId,
     required String senderId,
@@ -382,6 +390,7 @@ class AnonymousChatService {
     required String mediaUrl,
     int? audioDuration,
     String? videoThumbnailBase64,
+    bool viewOnce = false,
   }) async {
     await _firestore
         .collection('anonymous_rooms')
@@ -395,6 +404,7 @@ class AnonymousChatService {
       if (audioDuration != null) 'audioDuration': audioDuration,
       if (videoThumbnailBase64 != null)
         'videoThumbnailBase64': videoThumbnailBase64,
+      if (viewOnce) 'viewOnce': true,
       'timestamp': FieldValue.serverTimestamp(),
       'status': 'sent',
     });

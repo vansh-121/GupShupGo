@@ -15,6 +15,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
+import 'package:video_chat_app/screens/anonymous/anonymous_view_once_viewer.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/ads/interstitial_ad_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -70,6 +71,10 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   /// time, and the paperclip is the only thing that reads it.
   bool _isUploadingMedia = false;
 
+  /// Whether the attach sheet's "View once" toggle is on. Reset to false every
+  /// time the sheet opens, so it is a per-send opt-in and never sticky.
+  bool _viewOnceArmed = false;
+
   /// True while the text field holds something, so the trailing circle can swap
   /// between send and mic. Kept as state rather than read off the controller in
   /// `build` because the controller doesn't rebuild the tree on its own.
@@ -80,6 +85,15 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   /// Deliberately State-local rather than persisted: leaving the chat re-blurs
   /// everything, and a new stranger is a new decision.
   final Set<String> _revealedMedia = {};
+
+  /// View-once message ids the user has already opened this session.
+  ///
+  /// Local and State-scoped for the same reason as [_revealedMedia]: the
+  /// anonymous message subcollection is immutable by security rule, so "opened"
+  /// can't be persisted to the doc, and leaving the room ends the session
+  /// anyway. Opening flips the bubble to "Opened" and blocks a second view for
+  /// as long as this screen lives.
+  final Set<String> _consumedViewOnce = {};
 
   @override
   void initState() {
@@ -166,51 +180,82 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     // Opening the sheet *is* the discovery — the tiles inside are the feature,
     // so there is nothing further to find and nothing to pill.
     WhatsNewService.instance.markSeen(NewFeature.anonymousMedia);
+    // A fresh sheet always opens with view-once off — it is a per-send choice.
+    _viewOnceArmed = false;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: c.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.photo_rounded, color: c.primary),
-              title: Text('Photo',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendImage();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.videocam_rounded, color: c.primary),
-              title: Text('Video',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendVideo();
-              },
-            ),
-            // No Document tile, and no Location tile. An archive or an APK from
-            // an unvetted stranger is a different risk class from a photo, and a
-            // pin is the one attachment that identifies you.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Text(
-                'Anonymous media is not end-to-end encrypted.',
-                style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
+      // Local to the sheet — the toggle only needs to survive until a tile is
+      // tapped, and a fresh sheet should always open with view-once off.
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.photo_rounded, color: c.primary),
+                title: Text('Photo',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendImage(viewOnce: _viewOnceArmed);
+                },
               ),
-            ),
-          ],
+              ListTile(
+                leading: Icon(Icons.videocam_rounded, color: c.primary),
+                title: Text('Video',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendVideo(viewOnce: _viewOnceArmed);
+                },
+              ),
+              // View-once applies to the next photo or video only. Voice notes
+              // reach the mic button outside this sheet, so they are unaffected.
+              SwitchListTile(
+                value: _viewOnceArmed,
+                activeColor: c.primary,
+                secondary: Icon(
+                  _viewOnceArmed
+                      ? Icons.timer_rounded
+                      : Icons.timer_outlined,
+                  color: _viewOnceArmed ? c.primary : c.textMid,
+                ),
+                title: Text('View once',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                subtitle: Text(
+                  'Opens one time, and screenshots are blocked on Android.',
+                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
+                ),
+                onChanged: (v) {
+                  setSheetState(() => _viewOnceArmed = v);
+                  HapticFeedback.selectionClick();
+                },
+              ),
+              // No Document tile, and no Location tile. An archive or an APK from
+              // an unvetted stranger is a different risk class from a photo, and a
+              // pin is the one attachment that identifies you.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Text(
+                  'Anonymous media is not end-to-end encrypted.',
+                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Future<void> _pickAndSendImage() async {
+  Future<void> _pickAndSendImage({bool viewOnce = false}) async {
     try {
       // No `proMediaQuality` bump: anonymous chat isn't a Pro surface, and a
       // stranger photo has no reason to be the largest thing the app uploads.
@@ -233,6 +278,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         senderId: widget.currentUserId,
         type: AnonymousMediaType.image,
         mediaUrl: url,
+        viewOnce: viewOnce,
       );
       _scrollToBottom();
     } catch (e) {
@@ -242,7 +288,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     }
   }
 
-  Future<void> _pickAndSendVideo() async {
+  Future<void> _pickAndSendVideo({bool viewOnce = false}) async {
     try {
       final picked = await _imagePicker.pickVideo(source: ImageSource.gallery);
       if (picked == null) return;
@@ -277,6 +323,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         mediaUrl: url,
         audioDuration: durSec,
         videoThumbnailBase64: poster,
+        viewOnce: viewOnce,
       );
       _scrollToBottom();
     } catch (e) {
@@ -412,6 +459,22 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
       return _buildTextBubble(c, text, isMe);
     }
 
+    // View-once photos and videos never render inline — not a thumbnail, not a
+    // blurred preview, because a preview is a copy that survives the one view.
+    // They get a placeholder bubble that opens the capture-blocked viewer.
+    final isViewOnce =
+        (msg['viewOnce'] == true) && (type == 'image' || type == 'video');
+    if (isViewOnce) {
+      return _buildViewOnceBubble(
+        c,
+        docId: docId,
+        isMe: isMe,
+        isVideo: type == 'video',
+        mediaUrl: mediaUrl,
+        thumbnailBase64: msg['videoThumbnailBase64'] as String?,
+      );
+    }
+
     final model = MessageModel(
       id: docId,
       senderId: msg['senderId'] as String? ?? '',
@@ -518,6 +581,174 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     return _StrangerMediaGate(
       onReveal: () => setState(() => _revealedMedia.add(docId)),
       child: child,
+    );
+  }
+
+  /// The placeholder bubble for a view-once photo or video. Mirrors the E2EE
+  /// chat's `ViewOnceBubble` in spirit: it never shows the media, and the four
+  /// states are derived from `isMe` and the local [_consumedViewOnce] set.
+  ///
+  ///  * sender — inert "View once", never tappable (they can't reopen either).
+  ///  * receiver, unopened — tappable → confirm → capture-blocked viewer.
+  ///  * receiver, opened — inert "Opened".
+  Widget _buildViewOnceBubble(
+    AppThemeColors c, {
+    required String docId,
+    required bool isMe,
+    required bool isVideo,
+    required String mediaUrl,
+    String? thumbnailBase64,
+  }) {
+    final opened = _consumedViewOnce.contains(docId);
+    final tappable = !isMe && !opened;
+    final fg = isMe ? Colors.white : c.textHigh;
+    final fgLow = isMe ? Colors.white.withOpacity(0.75) : c.textLow;
+    final glyphColor = opened ? fgLow : fg;
+
+    final String title = opened ? 'Opened' : (isVideo ? 'Video' : 'Photo');
+    final String subtitle;
+    if (opened) {
+      subtitle = 'View once · no longer available';
+    } else if (isMe) {
+      subtitle = 'View once · sent';
+    } else {
+      subtitle = isVideo ? 'View once · tap to play' : 'View once · tap to view';
+    }
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMe ? c.primary : c.surfaceAlt,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(isMe ? 16 : 4),
+            bottomRight: Radius.circular(isMe ? 4 : 16),
+          ),
+        ),
+        child: InkWell(
+          onTap: tappable
+              ? () => _openViewOnce(
+                    docId: docId,
+                    isVideo: isVideo,
+                    mediaUrl: mediaUrl,
+                    thumbnailBase64: thumbnailBase64,
+                  )
+              : null,
+          borderRadius: BorderRadius.circular(12),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 168, maxWidth: 240),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border:
+                        Border.all(color: glyphColor.withOpacity(0.55)),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    opened
+                        ? Icons.visibility_off_rounded
+                        : (isVideo
+                            ? Icons.play_circle_outline_rounded
+                            : Icons.looks_one_rounded),
+                    size: 20,
+                    color: glyphColor,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          color: opened ? fgLow : fg,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                          fontStyle:
+                              opened ? FontStyle.italic : FontStyle.normal,
+                          height: 1.25,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            GoogleFonts.poppins(color: fgLow, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Confirms, marks the message consumed, then opens the capture-blocked
+  /// viewer. Consuming *before* the push is deliberate: it flips the bubble to
+  /// "Opened" the instant the user commits, so a back-swipe or a crash inside
+  /// the viewer can't hand them a second look.
+  Future<void> _openViewOnce({
+    required String docId,
+    required bool isVideo,
+    required String mediaUrl,
+    String? thumbnailBase64,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          isVideo ? 'Play once?' : 'Open once?',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        ),
+        content: Text(
+          "You can only open this ${isVideo ? 'video' : 'photo'} one time. "
+          "Once you close it, it's gone.",
+          style: GoogleFonts.poppins(fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Open',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _consumedViewOnce.add(docId));
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AnonymousViewOnceViewer(
+          isVideo: isVideo,
+          mediaUrl: mediaUrl,
+          thumbnailBase64: thumbnailBase64,
+        ),
+      ),
     );
   }
 
