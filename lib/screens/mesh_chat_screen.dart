@@ -14,6 +14,7 @@ import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/screens/plaintext_view_once_viewer.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/location_bubble.dart';
@@ -56,10 +57,6 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   bool _isUploadingVideo = false;
   bool _isUploadingDocument = false;
   bool _hasText = false;
-
-  /// Whether the attach sheet's "View once" toggle is on. Reset to false every
-  /// time the sheet opens, so it is a per-send opt-in and never sticky.
-  bool _viewOnceArmed = false;
 
   /// View-once message ids the user has already opened this session. Local and
   /// State-scoped: mesh messages are peer-to-peer with no shared server to write
@@ -226,88 +223,36 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     }
   }
 
-  /// Bottom-sheet chooser behind the composer's paperclip: photo or video.
-  void _showAttachSheet(AppThemeColors c) {
-    HapticFeedback.selectionClick();
-    // A fresh sheet always opens with view-once off — it is a per-send choice.
-    _viewOnceArmed = false;
-    showModalBottomSheet<void>(
+  /// Bottom-sheet chooser behind the composer's paperclip. Same chrome and
+  /// tiles as every other chat surface (see [showAttachmentSheet]); the tiles
+  /// route to the mesh send paths. The view-once note stays neutral about the
+  /// mechanism because here it's the one-time viewer, not a destroyed key, that
+  /// enforces it — and arming it now greys out Document and Location, which it
+  /// can't apply to, rather than silently ignoring the flag.
+  void _showAttachSheet() {
+    showAttachmentSheet(
       context: context,
-      backgroundColor: c.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetCtx) => StatefulBuilder(
-        builder: (sheetCtx, setSheetState) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.photo_rounded, color: c.primary),
-                title: Text('Photo',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendImage(viewOnce: _viewOnceArmed);
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.videocam_rounded, color: c.primary),
-                title: Text('Video',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendVideo(viewOnce: _viewOnceArmed);
-                },
-              ),
-              // View-once applies to the next photo or video only. Documents,
-              // location and voice notes are unaffected — a view-once document
-              // has no meaning offline, and a pin/voice note isn't visual.
-              SwitchListTile(
-                value: _viewOnceArmed,
-                activeColor: c.primary,
-                secondary: Icon(
-                  _viewOnceArmed ? Icons.timer_rounded : Icons.timer_outlined,
-                  color: _viewOnceArmed ? c.primary : c.textMid,
-                ),
-                title: Text('View once',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                subtitle: Text(
-                  'Opens one time, and screenshots are blocked on Android.',
-                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
-                ),
-                onChanged: (v) {
-                  setSheetState(() => _viewOnceArmed = v);
-                  HapticFeedback.selectionClick();
-                },
-              ),
-              ListTile(
-                leading:
-                    Icon(Icons.insert_drive_file_rounded, color: c.primary),
-                title: Text('Document',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendDocument();
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.location_on_rounded, color: c.primary),
-                title: Text('Location',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendLocation();
-                },
-              ),
-            ],
-          ),
+      actions: [
+        AttachmentAction(
+          kind: AttachmentKind.photo,
+          onTap: (viewOnce) => _pickAndSendImage(viewOnce: viewOnce),
         ),
+        AttachmentAction(
+          kind: AttachmentKind.video,
+          onTap: (viewOnce) => _pickAndSendVideo(viewOnce: viewOnce),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.document,
+          onTap: (_) => _pickAndSendDocument(),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.location,
+          onTap: (_) => _pickAndSendLocation(),
+        ),
+      ],
+      viewOnce: const AttachmentViewOnce(
+        subtitleOff: 'Opens one time, and screenshots are blocked on Android.',
+        subtitleOn: 'Opens one time, and screenshots are blocked on Android.',
       ),
     );
   }
@@ -822,7 +767,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             : IconButton(
                 icon: Icon(Icons.attach_file_rounded,
                     color: c.textMid, size: 22),
-                onPressed: () => _showAttachSheet(c),
+                onPressed: _showAttachSheet,
               ),
         Expanded(
           child: Container(

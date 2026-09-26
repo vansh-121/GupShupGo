@@ -22,6 +22,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/services/whats_new_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
 import 'package:video_chat_app/widgets/video_message_widgets.dart';
@@ -70,10 +71,6 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   /// One flag for all three media paths — the composer only ever runs one at a
   /// time, and the paperclip is the only thing that reads it.
   bool _isUploadingMedia = false;
-
-  /// Whether the attach sheet's "View once" toggle is on. Reset to false every
-  /// time the sheet opens, so it is a per-send opt-in and never sticky.
-  bool _viewOnceArmed = false;
 
   /// True while the text field holds something, so the trailing circle can swap
   /// between send and mic. Kept as state rather than read off the controller in
@@ -175,83 +172,31 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   // is no key to seal it with. That is stated in the UI, and everything the
   // stranger sends arrives behind [_StrangerMediaGate].
 
-  void _showAttachSheet(AppThemeColors c) {
-    HapticFeedback.selectionClick();
+  void _showAttachSheet() {
     // Opening the sheet *is* the discovery — the tiles inside are the feature,
     // so there is nothing further to find and nothing to pill.
     WhatsNewService.instance.markSeen(NewFeature.anonymousMedia);
-    // A fresh sheet always opens with view-once off — it is a per-send choice.
-    _viewOnceArmed = false;
-    showModalBottomSheet<void>(
+    // Photo and video only — no Document, no Location. An archive or an APK from
+    // an unvetted stranger is a different risk class from a photo, and a pin is
+    // the one attachment that identifies you. The footer states the trade-off
+    // the transport makes: a stranger upload has no Signal session to seal it.
+    showAttachmentSheet(
       context: context,
-      backgroundColor: c.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      // Local to the sheet — the toggle only needs to survive until a tile is
-      // tapped, and a fresh sheet should always open with view-once off.
-      builder: (sheetCtx) => StatefulBuilder(
-        builder: (sheetCtx, setSheetState) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.photo_rounded, color: c.primary),
-                title: Text('Photo',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendImage(viewOnce: _viewOnceArmed);
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.videocam_rounded, color: c.primary),
-                title: Text('Video',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  _pickAndSendVideo(viewOnce: _viewOnceArmed);
-                },
-              ),
-              // View-once applies to the next photo or video only. Voice notes
-              // reach the mic button outside this sheet, so they are unaffected.
-              SwitchListTile(
-                value: _viewOnceArmed,
-                activeColor: c.primary,
-                secondary: Icon(
-                  _viewOnceArmed
-                      ? Icons.timer_rounded
-                      : Icons.timer_outlined,
-                  color: _viewOnceArmed ? c.primary : c.textMid,
-                ),
-                title: Text('View once',
-                    style:
-                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-                subtitle: Text(
-                  'Opens one time, and screenshots are blocked on Android.',
-                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
-                ),
-                onChanged: (v) {
-                  setSheetState(() => _viewOnceArmed = v);
-                  HapticFeedback.selectionClick();
-                },
-              ),
-              // No Document tile, and no Location tile. An archive or an APK from
-              // an unvetted stranger is a different risk class from a photo, and a
-              // pin is the one attachment that identifies you.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: Text(
-                  'Anonymous media is not end-to-end encrypted.',
-                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
-                ),
-              ),
-            ],
-          ),
+      actions: [
+        AttachmentAction(
+          kind: AttachmentKind.photo,
+          onTap: (viewOnce) => _pickAndSendImage(viewOnce: viewOnce),
         ),
+        AttachmentAction(
+          kind: AttachmentKind.video,
+          onTap: (viewOnce) => _pickAndSendVideo(viewOnce: viewOnce),
+        ),
+      ],
+      viewOnce: const AttachmentViewOnce(
+        subtitleOff: 'Opens one time, and screenshots are blocked on Android.',
+        subtitleOn: 'Opens one time, and screenshots are blocked on Android.',
       ),
+      footer: 'Anonymous media is not end-to-end encrypted.',
     );
   }
 
@@ -1493,7 +1438,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   child: Icon(Icons.attach_file_rounded,
                       color: c.textMid, size: 22),
                 ),
-                onPressed: () => _showAttachSheet(c),
+                onPressed: _showAttachSheet,
               ),
         Expanded(
           child: TextField(

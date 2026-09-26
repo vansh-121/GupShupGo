@@ -48,6 +48,7 @@ import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
+import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/location_bubble.dart';
@@ -3891,207 +3892,49 @@ class _ChatScreenState extends State<ChatScreen> {
   /// the sheet before running its picker — the sheet has to be gone before the
   /// OS gallery UI takes over.
   void _showAttachmentSheet() {
-    AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send media to this contact')),
       );
       return;
     }
-    showModalBottomSheet(
+    // Chrome and tiles live in [showAttachmentSheet]; this screen supplies only
+    // the four send paths and the online chat's discovery badges. View once is
+    // armed here, before the picker — there is no preview step to host the
+    // switch after the pick, and arming first keeps the ordinary send at zero
+    // extra taps. Its wording is chat-specific: the key really is destroyed.
+    showAttachmentSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      actions: [
+        AttachmentAction(
+          kind: AttachmentKind.photo,
+          onTap: (viewOnce) => _pickAndSendImage(viewOnce: viewOnce),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.video,
+          onTap: (viewOnce) => _pickAndSendVideo(viewOnce: viewOnce),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.document,
+          newFeatureId: NewFeature.documents,
+          onTap: (_) => _pickAndSendDocument(),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.location,
+          newFeatureId: NewFeature.locationShare,
+          onTap: (_) => _pickAndSendLocation(),
+        ),
+      ],
+      viewOnce: const AttachmentViewOnce(
+        // Worded to promise only what the mechanism delivers. The key really is
+        // destroyed on open — but a receiver can still point another camera at
+        // the screen, and on iOS they can screenshot (no FLAG_SECURE
+        // equivalent). Saying "can't be saved" would be a guarantee we can't
+        // keep.
+        subtitleOff: 'Photo or video disappears after it\'s opened',
+        subtitleOn: 'Encrypted, and the key is destroyed when they open it',
+        newFeatureId: NewFeature.viewOnce,
       ),
-      builder: (sheetContext) {
-        final c = AppThemeColors.of(sheetContext);
-        // View once is **armed here, before the picker**, rather than confirmed
-        // on a preview screen after it. There is no preview step for photo or
-        // video in this app — both pick and send in one shot — and adding one
-        // just to host this switch would put a confirmation in front of every
-        // ordinary photo send to serve the rare case. Arming first keeps the
-        // common path at its current zero taps and still makes the choice
-        // explicit and reversible before any bytes are read.
-        //
-        // Local to the sheet, so it resets every time: a mode this destructive
-        // must never be sticky across sends.
-        bool viewOnce = false;
-        return StatefulBuilder(
-          builder: (context, setSheetState) => SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(sheetContext).colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Share',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: c.online.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.photo_library_rounded, color: c.online),
-                    ),
-                    title: const Text('Photo',
-                        style: TextStyle(fontWeight: FontWeight.w500)),
-                    subtitle: Text(viewOnce
-                        ? 'Opens once, then it\'s gone'
-                        : 'Choose an image from your gallery'),
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _pickAndSendImage(viewOnce: viewOnce);
-                    },
-                  ),
-                  ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.video_library_rounded,
-                          color: Colors.orange),
-                    ),
-                    title: const Text('Video',
-                        style: TextStyle(fontWeight: FontWeight.w500)),
-                    subtitle: Text(viewOnce
-                        ? 'Plays once, then it\'s gone'
-                        : 'Choose a video from your gallery'),
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _pickAndSendVideo(viewOnce: viewOnce);
-                    },
-                  ),
-                  // Documents and pins can't be view-once: the mechanism is the
-                  // destruction of a media key, and neither has one to destroy
-                  // (a pin carries no media at all). Disabled rather than hidden
-                  // so the sheet doesn't reshuffle under the user's thumb.
-                  ListTile(
-                    enabled: !viewOnce,
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo
-                            .withOpacity(viewOnce ? 0.04 : 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.insert_drive_file_rounded,
-                          color: Colors.indigo
-                              .withValues(alpha: viewOnce ? 0.4 : 1)),
-                    ),
-                    title: const Row(
-                      children: [
-                        Text('Document',
-                            style: TextStyle(fontWeight: FontWeight.w500)),
-                        NewFeatureChip(featureId: NewFeature.documents),
-                      ],
-                    ),
-                    subtitle: Text(viewOnce
-                        ? 'Not available for view once'
-                        : 'PDF, Office file, archive — sent as-is'),
-                    onTap: () {
-                      WhatsNewService.instance.markSeen(NewFeature.documents);
-                      Navigator.pop(sheetContext);
-                      _pickAndSendDocument();
-                    },
-                  ),
-                  ListTile(
-                    enabled: !viewOnce,
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent
-                            .withOpacity(viewOnce ? 0.04 : 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.location_on_rounded,
-                          color: Colors.redAccent
-                              .withValues(alpha: viewOnce ? 0.4 : 1)),
-                    ),
-                    title: const Row(
-                      children: [
-                        Text('Location',
-                            style: TextStyle(fontWeight: FontWeight.w500)),
-                        NewFeatureChip(featureId: NewFeature.locationShare),
-                      ],
-                    ),
-                    subtitle: Text(viewOnce
-                        ? 'Not available for view once'
-                        : 'Share your current location'),
-                    onTap: () {
-                      WhatsNewService.instance
-                          .markSeen(NewFeature.locationShare);
-                      Navigator.pop(sheetContext);
-                      _pickAndSendLocation();
-                    },
-                  ),
-                  const Divider(height: 20, indent: 16, endIndent: 16),
-                  SwitchListTile(
-                    value: viewOnce,
-                    onChanged: (v) {
-                      // Turning it *on* is visiting it; turning it back off is
-                      // not, and would clear the badge for a user who only
-                      // brushed the switch.
-                      if (v) {
-                        WhatsNewService.instance.markSeen(NewFeature.viewOnce);
-                      }
-                      setSheetState(() => viewOnce = v);
-                    },
-                    secondary: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: c.primary.withOpacity(viewOnce ? 0.16 : 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        viewOnce
-                            ? Icons.lock_clock_rounded
-                            : Icons.timer_outlined,
-                        color: c.primary,
-                      ),
-                    ),
-                    title: const Row(
-                      children: [
-                        Text('View once',
-                            style: TextStyle(fontWeight: FontWeight.w500)),
-                        NewFeatureChip(featureId: NewFeature.viewOnce),
-                      ],
-                    ),
-                    // Worded to promise only what the mechanism delivers. The
-                    // key really is destroyed on open — but a receiver can still
-                    // point another camera at the screen, and on iOS they can
-                    // screenshot (no FLAG_SECURE equivalent). Saying "can't be
-                    // saved" would be a guarantee we cannot keep.
-                    subtitle: Text(
-                      viewOnce
-                          ? 'Encrypted, and the key is destroyed when they open it'
-                          : 'Photo or video disappears after it\'s opened',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
