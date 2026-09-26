@@ -599,6 +599,7 @@ class MeshNetworkService extends ChangeNotifier {
     required String receiverId,
     required String filePath,
     String? senderName,
+    bool viewOnce = false,
   }) async {
     final file = File(filePath);
     if (!file.existsSync()) {
@@ -628,6 +629,7 @@ class MeshNetworkService extends ChangeNotifier {
       isOfflineMesh: true,
       meshHops: 0,
       syncPending: true,
+      viewOnce: viewOnce,
     );
 
     // Store locally for persistence & Firestore sync
@@ -748,6 +750,7 @@ class MeshNetworkService extends ChangeNotifier {
     int? durationSeconds,
     String? thumbnailBase64,
     String? senderName,
+    bool viewOnce = false,
   }) async {
     final file = File(filePath);
     if (!file.existsSync()) {
@@ -786,6 +789,7 @@ class MeshNetworkService extends ChangeNotifier {
       isOfflineMesh: true,
       meshHops: 0,
       syncPending: true,
+      viewOnce: viewOnce,
     );
 
     // Store locally for persistence & Firestore sync
@@ -1130,6 +1134,25 @@ class MeshNetworkService extends ChangeNotifier {
       try {
         // Only sync messages that we sent (not relayed ones for other users)
         if (msg.senderId == _currentUserId) {
+          // A view-once photo/video is ephemeral by intent — it must never
+          // become a permanent, plaintext cloud object. It was already shown
+          // (or not) over the mesh; reconcile it as a short note so the online
+          // history isn't a silent gap, and drop the local media instead of
+          // uploading it.
+          if (msg.viewOnce &&
+              (msg.type == MessageType.image ||
+                  msg.type == MessageType.video)) {
+            await _chatService.sendMessage(
+              senderId: msg.senderId,
+              receiverId: msg.receiverId,
+              text: msg.type == MessageType.video
+                  ? '🎬 View-once video sent nearby'
+                  : '📷 View-once photo sent nearby',
+            );
+            synced.add(msg.id);
+            continue;
+          }
+
           String? mediaUrl = msg.mediaUrl;
           Map<String, dynamic>? mediaKey = msg.mediaKey;
 

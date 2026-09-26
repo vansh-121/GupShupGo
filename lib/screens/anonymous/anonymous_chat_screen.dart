@@ -15,7 +15,7 @@ import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
-import 'package:video_chat_app/screens/anonymous/anonymous_view_once_viewer.dart';
+import 'package:video_chat_app/screens/plaintext_view_once_viewer.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/services/ads/interstitial_ad_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -743,7 +743,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AnonymousViewOnceViewer(
+        builder: (_) => PlaintextViewOnceViewer(
           isVideo: isVideo,
           mediaUrl: mediaUrl,
           thumbnailBase64: thumbnailBase64,

@@ -12,6 +12,7 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
+import 'package:video_chat_app/screens/plaintext_view_once_viewer.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -55,6 +56,16 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   bool _isUploadingVideo = false;
   bool _isUploadingDocument = false;
   bool _hasText = false;
+
+  /// Whether the attach sheet's "View once" toggle is on. Reset to false every
+  /// time the sheet opens, so it is a per-send opt-in and never sticky.
+  bool _viewOnceArmed = false;
+
+  /// View-once message ids the user has already opened this session. Local and
+  /// State-scoped: mesh messages are peer-to-peer with no shared server to write
+  /// "opened" back to, so this is the same in-session model the anonymous chat
+  /// uses. Opening flips the bubble to "Opened" and blocks a second view.
+  final Set<String> _consumedViewOnce = {};
 
   @override
   void initState() {
@@ -113,7 +124,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     }
   }
 
-  Future<void> _pickAndSendImage() async {
+  Future<void> _pickAndSendImage({bool viewOnce = false}) async {
     try {
       final picked = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -124,6 +135,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
       final msg = await _mesh.sendImageViaMesh(
         receiverId: widget.peer.userId,
         filePath: picked.path,
+        viewOnce: viewOnce,
       );
       setState(() => _messages.add(msg));
       _scrollToBottom();
@@ -134,7 +146,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     }
   }
 
-  Future<void> _pickAndSendVideo() async {
+  Future<void> _pickAndSendVideo({bool viewOnce = false}) async {
     try {
       final picked = await _imagePicker.pickVideo(source: ImageSource.gallery);
       if (picked == null) return;
@@ -161,6 +173,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
         filePath: picked.path,
         durationSeconds: durSec,
         thumbnailBase64: poster,
+        viewOnce: viewOnce,
       );
       setState(() => _messages.add(msg));
       _scrollToBottom();
@@ -216,53 +229,84 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   /// Bottom-sheet chooser behind the composer's paperclip: photo or video.
   void _showAttachSheet(AppThemeColors c) {
     HapticFeedback.selectionClick();
+    // A fresh sheet always opens with view-once off — it is a per-send choice.
+    _viewOnceArmed = false;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: c.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.photo_rounded, color: c.primary),
-              title: Text('Photo',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendImage();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.videocam_rounded, color: c.primary),
-              title: Text('Video',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendVideo();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.insert_drive_file_rounded, color: c.primary),
-              title: Text('Document',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendDocument();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.location_on_rounded, color: c.primary),
-              title: Text('Location',
-                  style: GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _pickAndSendLocation();
-              },
-            ),
-          ],
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.photo_rounded, color: c.primary),
+                title: Text('Photo',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendImage(viewOnce: _viewOnceArmed);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.videocam_rounded, color: c.primary),
+                title: Text('Video',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendVideo(viewOnce: _viewOnceArmed);
+                },
+              ),
+              // View-once applies to the next photo or video only. Documents,
+              // location and voice notes are unaffected — a view-once document
+              // has no meaning offline, and a pin/voice note isn't visual.
+              SwitchListTile(
+                value: _viewOnceArmed,
+                activeColor: c.primary,
+                secondary: Icon(
+                  _viewOnceArmed ? Icons.timer_rounded : Icons.timer_outlined,
+                  color: _viewOnceArmed ? c.primary : c.textMid,
+                ),
+                title: Text('View once',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                subtitle: Text(
+                  'Opens one time, and screenshots are blocked on Android.',
+                  style: GoogleFonts.poppins(fontSize: 11, color: c.textLow),
+                ),
+                onChanged: (v) {
+                  setSheetState(() => _viewOnceArmed = v);
+                  HapticFeedback.selectionClick();
+                },
+              ),
+              ListTile(
+                leading:
+                    Icon(Icons.insert_drive_file_rounded, color: c.primary),
+                title: Text('Document',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendDocument();
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.location_on_rounded, color: c.primary),
+                title: Text('Location',
+                    style:
+                        GoogleFonts.poppins(color: c.textHigh, fontSize: 15)),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _pickAndSendLocation();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -528,6 +572,10 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 constraints: const BoxConstraints(minWidth: 200),
                 child: VoiceMessageBubble(message: msg, isMe: isMe),
               )
+            else if (msg.viewOnce &&
+                (msg.type == MessageType.image ||
+                    msg.type == MessageType.video))
+              _buildViewOnceBubble(c, msg: msg, isMe: isMe)
             else if (msg.type == MessageType.image &&
                 msg.localFilePath != null &&
                 File(msg.localFilePath!).existsSync())
@@ -591,6 +639,146 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Placeholder bubble for a view-once photo/video. It never renders the media
+  /// itself — that only happens once, full-screen, inside [PlaintextViewOnceViewer].
+  ///
+  ///  - Sender side: inert "sent" chip; there is nothing to open on your own end.
+  ///  - Receiver, unopened: tappable, invites the one look.
+  ///  - Receiver, opened (tracked for the session in [_consumedViewOnce]): "Opened",
+  ///    can't be reopened.
+  ///
+  /// Like the anonymous surface this is UX-only: the mesh has no server and no
+  /// Signal session, so there is no key to destroy. The honesty lives in the
+  /// viewer's footer and in never re-showing the frame.
+  Widget _buildViewOnceBubble(
+    AppThemeColors c, {
+    required MessageModel msg,
+    required bool isMe,
+  }) {
+    final isVideo = msg.type == MessageType.video;
+    final opened = _consumedViewOnce.contains(msg.id);
+    final label = isVideo ? 'Video' : 'Photo';
+
+    if (isMe) {
+      return _viewOnceChip(
+        c,
+        isMe: true,
+        icon: isVideo ? Icons.videocam_outlined : Icons.photo_camera_outlined,
+        text: '$label · View once · sent',
+        onTap: null,
+      );
+    }
+
+    if (opened) {
+      return _viewOnceChip(
+        c,
+        isMe: false,
+        icon: Icons.check_circle_outline_rounded,
+        text: 'Opened',
+        onTap: null,
+      );
+    }
+
+    return _viewOnceChip(
+      c,
+      isMe: false,
+      icon: isVideo ? Icons.videocam_rounded : Icons.photo_camera_rounded,
+      text: 'Tap to view · $label',
+      onTap: () => _openViewOnce(msg),
+    );
+  }
+
+  Widget _viewOnceChip(
+    AppThemeColors c, {
+    required bool isMe,
+    required IconData icon,
+    required String text,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 18, color: isMe ? Colors.white : c.primary),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: GoogleFonts.poppins(
+                color: isMe ? Colors.white : c.textHigh,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Confirm, mark consumed for the session, then open the media full-screen.
+  /// The message is flipped to "Opened" the instant we push the route, so the
+  /// bubble can't be tapped a second time even if the viewer is dismissed early.
+  Future<void> _openViewOnce(MessageModel msg) async {
+    final path = msg.localFilePath;
+    if (path == null || path.isEmpty || !File(path).existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This media is no longer available.')),
+      );
+      return;
+    }
+
+    final c = AppThemeColors.of(context);
+    final isVideo = msg.type == MessageType.video;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text('View once',
+            style: GoogleFonts.poppins(
+                color: c.textHigh, fontWeight: FontWeight.w600)),
+        content: Text(
+          "You can only open this ${isVideo ? 'video' : 'photo'} one time. "
+          "It closes for good when you leave.",
+          style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.poppins(color: c.textMid)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: Text('Open',
+                style: GoogleFonts.poppins(
+                    color: c.primary, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _consumedViewOnce.add(msg.id));
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => PlaintextViewOnceViewer(
+          isVideo: isVideo,
+          localFilePath: path,
+          thumbnailBase64: msg.videoThumbnailBase64,
         ),
       ),
     );
