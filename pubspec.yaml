@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.9+56
+version: 1.2.0+57
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
@@ -183,8 +183,10 @@ dependencies:
   # and raised its Dart SDK floor; 10.x is the newest line that resolves against
   # this project's other constraints without dragging anything else along. The
   # one side effect it does have is transitive: share_plus_platform_interface
-  # pins `mime: ^1.0.4`, which holds `mime` at 1.0.6 instead of 2.0.0. Nothing in
-  # lib/ imports `mime` directly, so that is invisible here.
+  # pins `mime: ^1.0.4`, which holds `mime` at 1.0.6 instead of 2.0.0. That used
+  # to be invisible, but the document-attachment path now imports `mime`
+  # directly — see the `mime` entry below, which is declared at the version this
+  # pin already forces.
   share_plus: ^10.0.0
 
   # PDF generation for chat export (lib/services/chat_pdf_builder.dart).
@@ -206,6 +208,38 @@ dependencies:
   # pinned by the Flutter SDK, so the constraint is a formality.
   meta: ^1.15.0
 
+  # ── Document attachments (chat_documents/) ──────────────────────────────
+  #
+  # Pinned to the 8.0.x line, NOT the latest (13.x). Everything above 8.0.7
+  # depends on `web ^1.0.0`, which is the same conflict with firebase_core 2.x /
+  # firebase_app_check 0.2.x that already holds drift below 2.19.2 — pub resolves
+  # to 8.0.7 on its own, and this constraint just records why so nobody "fixes"
+  # it later. 8.0.7 pulls `ffi` and `win32`, both already in the tree via
+  # path_provider, so it adds no new native surface on the platforms we ship.
+  file_picker: ^8.0.7
+
+  # Hands a decrypted document to whatever app on the device can open it.
+  # Deliberately not `url_launcher` for this: launching a `file://` URI needs a
+  # FileProvider + grantUriPermissions declaration, which open_filex already
+  # ships and configures. Falls back to share_plus's share sheet when the device
+  # has no handler for the type (see DocumentBubble).
+  open_filex: ^4.7.0
+
+  # Current position for location pin sharing.
+  #
+  # Pinned to the 12.x line: 13.x+ raises its compileSdk/AGP floor and 14.x needs
+  # a newer Flutter than the 3.38.10 in .fvmrc. No manifest change is needed —
+  # ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION are already declared for
+  # nearby_connections.
+  geolocator: ^12.0.0
+
+  # Extension → content type for document attachments. Already in the tree as a
+  # transitive of share_plus_platform_interface, which pins it to the 1.x line;
+  # declared here because lib/ now imports it directly, which is what
+  # `depend_on_referenced_packages` asks for. The constraint matches what that
+  # pin already forces, so this changes no resolution.
+  mime: ^1.0.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -217,6 +251,13 @@ dev_dependencies:
   # Property-based testing for the streak domain layer
   # (test/services/streak/**). Test-only: never imported by lib/.
   glados: 1.1.7
+
+  # Declared only so `test/support/sqlite_test_setup.dart` can call
+  # `open.overrideFor` — it is already in the tree transitively via
+  # sqlite3_flutter_libs, and the version is left to that constraint so the
+  # test VM and the device use the same SQLite bindings. Test-only: `lib/`
+  # reaches SQLite exclusively through drift.
+  sqlite3: any
 
 flutter_launcher_icons:
   android: true

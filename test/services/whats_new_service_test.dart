@@ -78,6 +78,7 @@ void main() {
       expect(service.hasUnseenAt(NewFeatureAnchor.settingsMenuItem), isFalse);
       expect(service.hasUnseenAt(NewFeatureAnchor.settingsAppearance), isFalse);
       expect(service.hasUnseenAt(NewFeatureAnchor.chatOverflow), isFalse);
+      expect(service.hasUnseenAt(NewFeatureAnchor.chatAttachment), isFalse);
     });
 
     // The suppression must survive the changelog dialog writing its version key
@@ -110,6 +111,7 @@ void main() {
       expect(service.hasUnseenAt(NewFeatureAnchor.settingsMenuItem), isTrue);
       expect(service.hasUnseenAt(NewFeatureAnchor.settingsAppearance), isTrue);
       expect(service.hasUnseenAt(NewFeatureAnchor.chatOverflow), isTrue);
+      expect(service.hasUnseenAt(NewFeatureAnchor.chatAttachment), isTrue);
     });
 
     test('every unseen feature has its countdown started', () {
@@ -141,14 +143,23 @@ void main() {
       expect(service.hasUnseenAt(NewFeatureAnchor.homeOverflow), isFalse);
     });
 
-    test('leaves a shared anchor lit while the other feature is unseen',
+    test('leaves a shared anchor lit while another feature is unseen',
         () async {
       await service.markSeen(NewFeature.chatThemes);
 
-      // Export still lives behind the chat overflow menu.
+      // Export still lives behind the chat overflow menu — and, since 1.2.0, so
+      // does search.
       expect(service.hasUnseenAt(NewFeatureAnchor.chatOverflow), isTrue);
 
-      await service.markSeen(NewFeature.chatExport);
+      // The dot goes dark only once *nothing* behind it is unseen. Driven off
+      // the registry rather than a hand-listed pair: the roster behind this
+      // anchor grows with each release, and it is the rule that is being pinned
+      // here, not the 1.1.7 line-up. Hard-coding the pair made this test start
+      // failing the moment search was registered behind the same anchor —
+      // correct behaviour reported as a regression.
+      for (final id in WhatsNewService.registeredIds) {
+        await service.markSeen(id);
+      }
       expect(service.hasUnseenAt(NewFeatureAnchor.chatOverflow), isFalse);
     });
 

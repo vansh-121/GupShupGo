@@ -156,6 +156,12 @@ class _MeshNotificationListenerState extends State<MeshNotificationListener> {
         return '🎤 Voice message';
       case MessageType.video:
         return '🎬 Video';
+      case MessageType.document:
+        // Documents have no mesh transport (the encrypted blob lives in
+        // Storage), so this only fires if a future build adds one.
+        return '📄 ${msg.fileName ?? 'Document'}';
+      case MessageType.location:
+        return '📍 Location';
       case MessageType.text:
         return msg.text;
       case MessageType.reaction:

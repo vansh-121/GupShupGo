@@ -11,12 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned Features
 - Group messaging support
-- End-to-end encryption for messages
 - Message forwarding
 - Backup and restore functionality
-- Search functionality for messages and users
+- Global search across all conversations and users (in-chat search shipped in 1.2.0)
 - User blocking with UI improvements
-- Custom themes and color palettes
+- Live location sharing and map-based pin picking
+
+## [1.2.0] - 2026-09-27
+
+### Added
+- 📄 **Send Any File** — Share PDFs, Office documents, archives and anything else up to 64 MB straight from the attachment menu. Files are encrypted end-to-end before they leave your device and arrive byte-for-byte identical — no compression, no quality loss. Doubles as the way to send a photo at its original quality. With no internet at all, a file hands off straight to a nearby phone over the offline mesh, then syncs to the cloud — still encrypted end-to-end — the moment you're back online.
+- 🔍 **Search Every Message** — Chat search now looks through your entire conversation history stored on this device, not just the messages currently loaded on screen. Results are found instantly, work offline, and never leave your phone.
+- 📍 **Share Your Location** — Drop a pin from the attachment menu and open it in any maps app. Coordinates are shown before anything is sent, and a pin travels over the offline mesh just like a text message.
+- 👁️ **View Once Photos & Videos** — Send a photo or video that can be opened exactly one time across online, offline mesh, and anonymous stranger chats. For private chats, the encryption key is destroyed the moment it's opened. Screenshots and screen recordings are blocked while on screen on Android.
+- 🕵️ **Media in Anonymous Chat** — Send photos, video and voice notes in anonymous rooms, not just text. Because there's no shared identity to encrypt to a stranger, anything they send you stays blurred until you tap to reveal it, so an unsolicited image can't ambush you — and your own media is never hidden from you.
+- 🔔 **Update Reminders on Open** — When a new version is waiting on the Play Store, GupShupGo now tells you when you open the app instead of only when you go looking in Settings. It's the same one-tap update, shown at most once a day so it nudges rather than nags.
+- ⏳ **Advance Notice Before a Version Retires** — Older builds now get a countdown ("this version stops working in 15 days") that gets more insistent as the date approaches, so an update is never a surprise. Your messages and chats stay exactly where they are.
+- 🔄 **A Clear Way Back** — If a version does reach the end of its life, the app explains what happened and takes you straight to the update, rather than failing in confusing ways.
+
+### Changed
+- Updated version to 1.2.0 (build code 57).
+- The update prompt shown on open is the same dialog as Settings → Check for updates, so you're never told about the same update two different ways.
+- Reply previews and chat exports now recognise documents and location pins instead of falling back to a generic label.
+
+### Note for people on older versions
+Documents, pins, view-once media and anonymous-room photos, videos and voice notes are all new message types. Someone still on 1.1.9 or earlier will see the file name, "📍 Location", or a "📷 Photo"-style label as plain text rather than the full bubble — nothing is lost, but both sides should update to see them properly.
 
 ## [1.1.9] - 2026-09-17
 
@@ -339,6 +358,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.0 | September 2026 | Document & Location Sharing, View-Once Media, Anonymous Chat Media, Full History Search |
 | 1.1.9 | September 2026 | Chat Encryption Fixes, Self-Healing Message Recovery, Delivery Stability |
 | 1.1.8 | September 2026 | Video Messages in Chat, Instant Video Previews, Incoming Screen Share UI |
 | 1.1.7 | September 2026 | Chat Themes, PDF Chat Export, 2-Minute Voice Notes, Avatar Memory Optimization |

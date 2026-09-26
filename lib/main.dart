@@ -34,6 +34,8 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/screens/unsupported_version_screen.dart';
+import 'package:video_chat_app/services/version_policy.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/subscription_service.dart';
@@ -539,7 +541,7 @@ class _AuthGate extends StatefulWidget {
   State<_AuthGate> createState() => _AuthGateState();
 }
 
-class _AuthGateState extends State<_AuthGate> {
+class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   // null = still resolving the initial auth state.
   bool? _resolvedLoggedIn;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
@@ -549,28 +551,70 @@ class _AuthGateState extends State<_AuthGate> {
   bool _needsReauthOnReconnect = false;
   bool _reauthInFlight = false;
 
+  /// Whether this build has been retired. See [_refreshVersionPolicy].
+  bool _versionBlocked = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _resolveInitialAuth();
     _connectivitySub = Connectivity()
         .onConnectivityChanged
         .listen(_onConnectivityChanged);
 
-    // Check for a Play Store update on EVERY launch — auth screen or home,
-    // logged in or not. Non-blocking: if a newer version exists it posts an
-    // "Update available" notification and lets the user opt into Play's
-    // background (flexible) update; it never forces a full-screen update.
-    UpdateService.instance.checkAndNotifyOnLaunch();
+    // Remote Config is fetched fire-and-forget before runApp, so this first
+    // evaluation almost always reads the inert defaults. The listener is what
+    // makes the policy actually take effect: FeatureFlagService notifies when
+    // the first fetch lands (and on every real-time update after), and without
+    // it a freshly-retired build would run normally for the whole session.
+    unawaited(_refreshVersionPolicy());
+    FeatureFlagService.instance.addListener(_refreshVersionPolicy);
+
+    // Check for a Play Store update on launches that have no home screen to
+    // put a dialog on — a signed-out user sitting on LoginScreen. The signed-in
+    // case is handled by HomeScreen calling UpdateService.runLaunchPrompts,
+    // which shows the same dialog as Settings → Check for updates; running both
+    // would mean a dialog and a notification for one update.
+    if (sharedPrefs.getString('user_id') == null) {
+      UpdateService.instance.checkAndNotifyOnLaunch();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    FeatureFlagService.instance.removeListener(_refreshVersionPolicy);
     _connectivitySub?.cancel();
     // The gate is the root of the authenticated app: when it goes away the
     // hourly clock refresh has nothing left to serve.
     ServerClock.stop();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // The deadline can pass while the app sits in the background, and no
+    // config change fires when it does — the client is what notices. Purely
+    // local arithmetic over cached values, so it costs nothing to re-check.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshVersionPolicy());
+    }
+  }
+
+  /// Latches the supported-version verdict and rebuilds if it changed.
+  ///
+  /// Also the release valve: when the policy stops condemning this build (the
+  /// kill switch is flipped, or a bad version code is corrected) this clears
+  /// the block without a reinstall — Remote Config pushes in real time, so the
+  /// listener above turns a rollback into a recovery the user sees at once.
+  Future<void> _refreshVersionPolicy() async {
+    final policy = await VersionPolicyService.instance.evaluateAndLatch();
+    if (!mounted) return;
+    if (policy.blocks != _versionBlocked) {
+      setState(() => _versionBlocked = policy.blocks);
+    }
   }
 
   void _onConnectivityChanged(List<ConnectivityResult> results) {
@@ -643,6 +687,11 @@ class _AuthGateState extends State<_AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    // Checked before auth, because an unsupported build has no business
+    // signing anybody in either. Rendered *in place of* the app rather than
+    // pushed over it, so there is nothing underneath to pop back to.
+    if (_versionBlocked) return const UnsupportedVersionScreen();
+
     if (_resolvedLoggedIn == null) {
       // Tiny splash while we resolve auth — usually a single frame.
       return const Scaffold(

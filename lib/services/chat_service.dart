@@ -11,6 +11,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
+import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
@@ -290,6 +291,26 @@ class ChatService {
           .collection(_vaultCollection)
           .doc(messageId)
           .set({...enc, 'createdAt': FieldValue.serverTimestamp()});
+    } catch (_) {}
+  }
+
+  /// Removes a message from [uid]'s cross-install vault.
+  ///
+  /// The vault is the one plaintext tier [forgetCachedPayload] can't reach —
+  /// it lives in Firestore, not on the device — so it needs its own eraser.
+  /// View-once consumption is the only caller: destroying the key everywhere
+  /// *except* the vault would leave a copy that outlives the reinstall the
+  /// vault exists to survive, and a motivated receiver could restore it to
+  /// re-derive a "consumed" media's AES key. Fire-and-forget like the write it
+  /// undoes; a failure here is caught by the render guard on [viewOnceOpenedBy].
+  Future<void> _deleteFromVault(String uid, String messageId) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection(_vaultCollection)
+          .doc(messageId)
+          .delete();
     } catch (_) {}
   }
 
@@ -1089,6 +1110,25 @@ class ChatService {
       replyToSenderName: payload['replyToSenderName'] as String?,
       replyToType: payload['replyToType'] as String?,
       replyToText: payload['replyToText'] as String?,
+      fileName: payload['fileName'] as String?,
+      // Re-typed rather than cast: the payload arrives as `Map<String, dynamic>`
+      // straight from jsonDecode, but as `Map<dynamic, dynamic>` when it came
+      // back out of the local store or the vault, and a blind cast throws on
+      // the second shape.
+      mediaKey: payload['mediaKey'] is Map
+          ? Map<String, dynamic>.from(payload['mediaKey'] as Map)
+          : null,
+      // `as num?` because JSON hands back an int for a whole-number coordinate
+      // — 0 degrees longitude is a real place, and `as double?` would throw on it.
+      latitude: (payload['latitude'] as num?)?.toDouble(),
+      longitude: (payload['longitude'] as num?)?.toDouble(),
+      // `true` or null, never `false`: every other key here resolves to null
+      // when absent and copyWith's `?? this.x` then preserves the base. Passing
+      // a literal `false` would be the one key able to *clear* a base value,
+      // which would un-mark a view-once message that had already been flagged
+      // locally — the consumed copy written by markViewOnceConsumed is exactly
+      // that shape.
+      viewOnce: payload['viewOnce'] == true ? true : null,
     );
   }
 
@@ -1164,6 +1204,20 @@ class ChatService {
     String? replyToSenderName,
     String? replyToType,
     String? replyToText,
+    // ── Document attachment (MessageType.document) ───────────────────────
+    /// The attachment's real filename. Travels only inside the envelope — the
+    /// Storage object is named with a UUID so the server cannot tell a payslip
+    /// from a holiday photo.
+    String? fileName,
+    /// `MediaKeyBundle.toMap()` for media that went through
+    /// `EncryptedMediaService` — documents always, and view-once photos and
+    /// videos. Absent for the legacy plaintext `chat_images/` path.
+    Map<String, dynamic>? mediaKey,
+    // ── Location pin (MessageType.location) ──────────────────────────────
+    double? latitude,
+    double? longitude,
+    // ── View once ────────────────────────────────────────────────────────
+    bool viewOnce = false,
   }) async {
     String chatRoomId = getChatRoomId(senderId, receiverId);
     final chatRoomRef =
@@ -1207,6 +1261,11 @@ class ChatService {
       replyToSenderName: replyToSenderName,
       replyToType: replyToType,
       replyToText: replyToText,
+      fileName: fileName,
+      mediaKey: mediaKey,
+      latitude: latitude,
+      longitude: longitude,
+      viewOnce: viewOnce,
     );
     final ps = await PlaintextStore.instance();
 
@@ -1268,6 +1327,11 @@ class ChatService {
           replyToSenderName: replyToSenderName,
           replyToType: replyToType,
           replyToText: replyToText,
+          fileName: fileName,
+          mediaKey: mediaKey,
+          latitude: latitude,
+          longitude: longitude,
+          viewOnce: viewOnce,
         ).timeout(_sendTimeout, onTimeout: () {
           throw TimeoutException(
               'Send timed out after ${_sendTimeout.inSeconds}s');
@@ -1325,6 +1389,11 @@ class ChatService {
     String? replyToSenderName,
     String? replyToType,
     String? replyToText,
+    String? fileName,
+    Map<String, dynamic>? mediaKey,
+    double? latitude,
+    double? longitude,
+    bool viewOnce = false,
   }) async {
     final sw = Stopwatch()..start();
     // ── E2EE: build the inner plaintext payload, encrypt for every device
@@ -1390,6 +1459,23 @@ class ChatService {
           'replyToType': replyToType,
           'replyToText': replyToText,
         },
+        // The attachment's real name, and the AES key that opens it. Both are
+        // the whole reason the Storage object can be a meaningless UUID full of
+        // octet-stream: without this block the blob is unreadable to anyone,
+        // including us.
+        if (fileName != null) 'fileName': fileName,
+        if (mediaKey != null) 'mediaKey': mediaKey,
+        // A pin is two doubles and nothing else — no media, no Storage object —
+        // so a location message needs no download path and travels over mesh
+        // for free.
+        if (latitude != null) ...{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+        // Deliberately only written when true: `false` is the default on every
+        // deserializer, so omitting it keeps the envelope of an ordinary photo
+        // byte-identical to what pre-1.2.0 builds produced.
+        if (viewOnce) 'viewOnce': true,
       });
 
       try {
@@ -1457,6 +1543,13 @@ class ChatService {
             'replyToText': replyToText,
           },
           if (localFilePath != null) 'localFilePath': localFilePath,
+          if (fileName != null) 'fileName': fileName,
+          if (mediaKey != null) 'mediaKey': mediaKey,
+          if (latitude != null) ...{
+            'latitude': latitude,
+            'longitude': longitude,
+          },
+          if (viewOnce) 'viewOnce': true,
         };
         // Populate the in-memory memo SYNCHRONOUSLY so the stream's
         // snapshot for our own message never needs any async lookup.
@@ -1551,6 +1644,20 @@ class ChatService {
       replyToSenderName: schemaVersion == 2 ? null : replyToSenderName,
       replyToType: schemaVersion == 2 ? null : replyToType,
       replyToText: schemaVersion == 2 ? null : replyToText,
+      // Same rule again, and here it is at its sharpest. `fileName` is often
+      // the most revealing thing about an attachment ("Offer letter.pdf"),
+      // `mediaKey` is literally the key that decrypts the Storage blob, and a
+      // pair of coordinates is the entire message. Committing any of them on a
+      // v2 send would hand the server exactly what the envelope exists to hide.
+      fileName: schemaVersion == 2 ? null : fileName,
+      mediaKey: schemaVersion == 2 ? null : mediaKey,
+      latitude: schemaVersion == 2 ? null : latitude,
+      longitude: schemaVersion == 2 ? null : longitude,
+      // Guarded like the rest, so the server never learns that a given message
+      // is the self-destructing kind. `viewOnceOpenedBy` is the deliberate
+      // exception and is NOT set here — it starts empty and is only ever
+      // appended to by the receiver, via arrayUnion on the committed doc.
+      viewOnce: schemaVersion == 2 ? false : viewOnce,
     );
     final lastMessagePreview = schemaVersion == 2
         ? _encryptedPreviewPlaceholder
@@ -2356,6 +2463,93 @@ class ChatService {
     await store.delete(messageId);
   }
 
+  /// Consumes a view-once message: destroys the media's AES key everywhere it
+  /// could be recovered, marks the message opened, and tells the sender.
+  ///
+  /// This is the deletion mechanism for [MessageModel.viewOnce]. The Storage
+  /// blob is AES-256-GCM ciphertext whose only key is [MessageModel.mediaKey],
+  /// which reached this device inside a Signal envelope that decrypts exactly
+  /// once. Erase every copy of that key and the blob is permanently
+  /// unrecoverable — which is why no `allow delete` on the object is needed, and
+  /// that matters: the receiver isn't the blob's uploader and couldn't be
+  /// granted one cleanly.
+  ///
+  /// The key lives in four places on the receiver, and all four are cleared:
+  ///   1-3. the in-memory memo, the SQLite payload row, and any in-flight
+  ///        decrypt — all via [forgetCachedPayload];
+  ///   4.   this device's cross-install vault entry — via [_deleteFromVault],
+  ///        the one tier [forgetCachedPayload] can't reach because it lives in
+  ///        Firestore, not on the device.
+  /// The rendered `local_messages` row is then overwritten with a stripped
+  /// "opened" marker ([MessageModel.asViewOnceConsumed], which carries no key,
+  /// URL or thumbnail), and the decrypted file is removed from disk.
+  ///
+  /// Finally `viewOnceOpenedBy` is unioned onto the Firestore document. That is
+  /// cleartext metadata by design (see the field's doc): it reaches the
+  /// *sender's* devices so their bubble flips to "Opened", and it is the second,
+  /// belt-and-braces guarantee — a reinstalled client refuses to render a
+  /// view-once message it has already opened, even in the impossible case that
+  /// a key copy somehow survived.
+  ///
+  /// Receiver-only: the sender keeps its own vault copy (it backs the resend
+  /// protocol, and the media was the sender's to begin with), so a call where
+  /// [currentUserId] is the sender is a no-op. Idempotent and best-effort —
+  /// it's invoked from a viewer's teardown and must never throw.
+  Future<void> markViewOnceConsumed({
+    required MessageModel message,
+    required String currentUserId,
+  }) async {
+    // Only the recipient consumes. Destroying the sender's key copies would
+    // break the resend protocol for a message that is theirs anyway.
+    if (currentUserId == message.senderId) return;
+
+    final chatRoomId = getChatRoomId(message.senderId, message.receiverId);
+
+    // 1-3. On-device tiers: memo, in-flight decrypt, SQLite payload row.
+    try {
+      await forgetCachedPayload(message.id);
+    } catch (_) {}
+
+    // 4. This device's vault copy — the tier forgetCachedPayload can't reach.
+    await _deleteFromVault(currentUserId, message.id);
+
+    // The decrypted bytes on disk.
+    try {
+      final path = await _encryptedMediaCachePath(message);
+      if (path != null) {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      }
+    } catch (_) {}
+
+    // Overwrite the rendered row with the stripped "opened" marker so the
+    // bubble re-renders without the key ever being held again. insertOrReplace.
+    try {
+      final ps = await PlaintextStore.instance();
+      await ps.saveMessage(
+          message.asViewOnceConsumed(currentUserId), chatRoomId);
+    } catch (_) {}
+
+    // Cleartext metadata, deliberately — reaches the sender and outlives a
+    // reinstall. arrayUnion is idempotent, so a repeat open is one no-op write.
+    // Best-effort: a mesh-only or already-deleted document just means there is
+    // nothing server-side to flip, and the local marker already stands.
+    try {
+      await _firestore
+          .collection(_chatRoomsCollection)
+          .doc(chatRoomId)
+          .collection(_messagesCollection)
+          .doc(message.id)
+          .update({
+        'viewOnceOpenedBy': FieldValue.arrayUnion([currentUserId]),
+      });
+    } on FirebaseException catch (e) {
+      if (e.code != 'not-found' && kDebugMode) {
+        debugPrint('[ChatService] viewOnce mark failed: $e');
+      }
+    } catch (_) {}
+  }
+
   /// Edits the text of a message we sent. Sender-only, and only inside
   /// [editWindow].
   ///
@@ -2619,6 +2813,113 @@ class ChatService {
       if (kDebugMode) debugPrint('[ChatService] Error downloading media: $e');
       return null;
     }
+  }
+
+  /// Downloads, verifies and decrypts an AES-256-GCM media blob, then caches
+  /// the plaintext locally. Returns the local path, or null if anything failed.
+  ///
+  /// The encrypted sibling of [downloadAndCacheMedia]. The two can't be merged:
+  /// that one is a straight `http.get` to disk, which is right for the plaintext
+  /// `chat_images/` and `chat_videos/` blobs, and wrong here — the bytes at
+  /// [MediaKeyBundle.url] are ciphertext, and the key to open them lives only
+  /// inside the Signal payload the caller has already decrypted.
+  ///
+  /// [message.mediaKey] must therefore be the *decrypted* bundle map: on a v2
+  /// message the field is stripped from Firestore at commit and only reappears
+  /// once `applyPayload` has merged the envelope in. A message that hasn't been
+  /// through that yet returns null rather than throwing.
+  Future<String?> downloadAndCacheEncryptedMedia(MessageModel message) async {
+    final keyMap = message.mediaKey;
+    if (keyMap == null || keyMap.isEmpty) return null;
+
+    try {
+      final bundle = MediaKeyBundle.fromMap(keyMap);
+
+      final localPath = await _encryptedMediaCachePath(message);
+      if (localPath == null) return null;
+      final localFile = File(localPath);
+      if (await localFile.exists()) return localPath;
+
+      // Constant-time SHA-256 verify + AES-GCM decrypt, isolate-offloaded above
+      // 32 KB. Throws StateError if the ciphertext was tampered with.
+      final plaintext =
+          await EncryptedMediaService().downloadAndDecrypt(bundle);
+      await localFile.writeAsBytes(plaintext, flush: true);
+      return localPath;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ChatService] Error downloading encrypted media: $e');
+      }
+      return null;
+    }
+  }
+
+  /// The already-decrypted local path for [message], or null if it isn't
+  /// cached. Never touches the network.
+  ///
+  /// Lets a bubble render its "open" affordance on first build instead of
+  /// showing "download" for a file that is already on disk — and, for view-once
+  /// media, lets the caller check whether a payload has been consumed without
+  /// re-fetching it.
+  Future<String?> cachedEncryptedMediaPath(MessageModel message) async {
+    try {
+      final path = await _encryptedMediaCachePath(message);
+      if (path == null) return null;
+      return await File(path).exists() ? path : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Where [message]'s decrypted bytes live once downloaded, creating the cache
+  /// directory if needed.
+  ///
+  /// The cached file keeps the sender's real filename so the handler app picked
+  /// by `open_filex` sees the extension it expects. The name is sanitised and
+  /// prefixed with the message id, which is both the uniqueness guarantee and
+  /// the reason two sends of `invoice.pdf` don't collide.
+  Future<String?> _encryptedMediaCachePath(MessageModel message) async {
+    final dbDir = (await getApplicationSupportDirectory()).path;
+    final cacheDir = Directory(p.join(dbDir, 'gsg_chat_media'));
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    final safeName = _sanitiseFileName(message.fileName, message.type);
+    return p.join(cacheDir.path, '${message.id}_$safeName');
+  }
+
+  /// Reduces a sender-supplied filename to something safe to concatenate into a
+  /// path. Strips directory separators and anything exotic, collapses runs, and
+  /// caps the length — a peer controls this string, so it is treated as hostile
+  /// even though it arrived inside an authenticated envelope.
+  static String _sanitiseFileName(String? raw, MessageType type) {
+    final fallback = switch (type) {
+      MessageType.image => 'photo.jpg',
+      MessageType.video => 'video.mp4',
+      MessageType.audio => 'audio.m4a',
+      _ => 'file.bin',
+    };
+
+    final trimmed = (raw ?? '').trim();
+    if (trimmed.isEmpty) return fallback;
+
+    // `p.basename` first, so `../../etc/passwd` can't escape the cache dir even
+    // before the character filter runs.
+    final base = p.basename(trimmed);
+    final cleaned = base
+        .replaceAll(RegExp(r'[^A-Za-z0-9._\- ]'), '_')
+        .replaceAll(RegExp(r'_{2,}'), '_')
+        .replaceAll(RegExp(r'^[._]+'), '');
+
+    if (cleaned.isEmpty) return fallback;
+    // Long names blow past filesystem limits once the message id is prepended.
+    // Truncate the stem, never the extension — the extension is what makes the
+    // file openable.
+    const maxLen = 120;
+    if (cleaned.length <= maxLen) return cleaned;
+    final ext = p.extension(cleaned);
+    final stem = cleaned.substring(0, cleaned.length - ext.length);
+    return stem.substring(0, (maxLen - ext.length).clamp(1, maxLen)) + ext;
   }
 
   /// Wipes all in-memory caches. Call on sign-out to free memory and

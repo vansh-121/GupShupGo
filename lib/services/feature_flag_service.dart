@@ -10,6 +10,8 @@
 /// - `ads_*` — the AdMob kill switches and tuning knobs. All default to
 ///   off/zero so a release ships dark and ads only appear once they are
 ///   deliberately enabled in the console.
+/// - `force_update_enabled` + the three `*_version_code` / deadline keys —
+///   the supported-version policy. Off by default; see [VersionPolicyService].
 
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/foundation.dart';
@@ -40,6 +42,17 @@ class FeatureFlagService extends ChangeNotifier {
       'ads_interstitial_min_gap_seconds';
   static const _kAdsInterstitialCallMinGapSeconds =
       'ads_interstitial_call_min_gap_seconds';
+
+  // Version support policy. See [VersionPolicyService] for the state machine
+  // these four drive; the short version is that `force_update_enabled` is the
+  // master switch and **nothing here does anything while it is off**. That is
+  // deliberate: a mistyped version code is the one config error in this file
+  // that can lock every user out of the app, so the recovery lever is a single
+  // boolean rather than having to work out which number was wrong.
+  static const _kForceUpdateEnabled = 'force_update_enabled';
+  static const _kMinSupportedVersionCode = 'min_supported_version_code';
+  static const _kDeprecatedBelowVersionCode = 'deprecated_below_version_code';
+  static const _kSupportDeadlineIso = 'support_deadline_iso';
 
   // Fallbacks used when the console holds a value Remote Config can't parse as
   // a positive int — getInt() returns 0 in that case, and a 0-point reward or a
@@ -126,6 +139,39 @@ class FeatureFlagService extends ChangeNotifier {
     );
   }
 
+  // ── Version support policy ───────────────────────────────────────────────
+
+  /// Master switch for the whole retire-old-builds machinery.
+  ///
+  /// While this is `false` the other three keys are inert no matter what they
+  /// hold, so a release can ship the client code long before any version is
+  /// actually retired — and a bad policy is undone by flipping one boolean.
+  bool get forceUpdateEnabled => _remoteConfig.getBool(_kForceUpdateEnabled);
+
+  /// Builds below this are blocked **immediately**, with no countdown.
+  ///
+  /// Clock-independent, which makes it the dependable lever: unlike
+  /// [supportDeadline] it cannot be dodged (or triggered early) by a device
+  /// whose date is wrong. `0` disables it.
+  int get minSupportedVersionCode =>
+      _remoteConfig.getInt(_kMinSupportedVersionCode);
+
+  /// Builds below this are on notice: they still work, but they start warning
+  /// the user and are blocked once [supportDeadline] passes. `0` disables it.
+  int get deprecatedBelowVersionCode =>
+      _remoteConfig.getInt(_kDeprecatedBelowVersionCode);
+
+  /// When [deprecatedBelowVersionCode] stops being merely deprecated and
+  /// becomes unsupported. ISO-8601; `null` when unset or unparseable.
+  ///
+  /// An unparseable string reads as "no deadline set" rather than as "now",
+  /// so a typo here downgrades to a nagging warning instead of a lockout.
+  DateTime? get supportDeadline {
+    final raw = _remoteConfig.getString(_kSupportDeadlineIso).trim();
+    if (raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toUtc();
+  }
+
   Future<void>? _initFuture;
 
   /// Initialise Remote Config with defaults and fetch latest values.
@@ -154,6 +200,13 @@ class FeatureFlagService extends ChangeNotifier {
         _kAdsInterstitialMinGapSeconds: _kDefaultInterstitialMinGapSeconds,
         _kAdsInterstitialCallMinGapSeconds:
             _kDefaultInterstitialCallMinGapSeconds,
+        // Version policy ships inert. Because enforcement is gated on the
+        // boolean below, a device that never manages to fetch — offline on
+        // first run, or fetch errored — cannot lock itself out on defaults.
+        _kForceUpdateEnabled: false,
+        _kMinSupportedVersionCode: 0,
+        _kDeprecatedBelowVersionCode: 0,
+        _kSupportDeadlineIso: '',
       });
 
       // Configure fetch settings

@@ -57,6 +57,8 @@
 	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>GupShupGo needs camera access to scan profile QR codes and for video calls.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>GupShupGo uses your location only when you choose to share a location pin in a chat. It is never accessed in the background.</string>
 	<!-- AdMob. GADApplicationIdentifier is not optional: with google_mobile_ads
 	     linked, the SDK raises at launch if this key is absent or malformed, so
 	     the iOS build would crash on start even though ads are Android-first.

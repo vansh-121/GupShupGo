@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mime/mime.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
@@ -25,6 +27,8 @@ import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/chat_export_service.dart';
 import 'package:video_chat_app/services/crypto/safety_number_service.dart';
+import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
+import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
@@ -44,7 +48,11 @@ import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
+import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/document_bubble.dart';
+import 'package:video_chat_app/widgets/location_bubble.dart';
+import 'package:video_chat_app/widgets/location_share_sheet.dart';
 import 'package:video_chat_app/widgets/export_format_sheet.dart';
 import 'package:video_chat_app/widgets/link_preview_card.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -55,6 +63,7 @@ import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/widgets/swipe_to_reply.dart';
 import 'package:video_chat_app/widgets/voice_message_bubble.dart';
 import 'package:video_chat_app/widgets/video_message_widgets.dart';
+import 'package:video_chat_app/widgets/view_once_bubble.dart';
 import 'package:video_chat_app/services/notification_service.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
@@ -142,6 +151,26 @@ class _ChatScreenState extends State<ChatScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
+  /// FTS5 hits for [_searchQuery], newest first, or null while the first
+  /// query for the current text is still running.
+  ///
+  /// Search used to be `messages.where((m) => m.text.contains(q))` over
+  /// whatever the list had paged in, which quietly answered "no results" for
+  /// anything older than the scroll window. It now goes through
+  /// `PlaintextStore.searchMessages`, which indexes the whole local history —
+  /// so the results are no longer a subset of what's on screen and have to be
+  /// held separately rather than filtered out of the stream.
+  List<MessageModel>? _searchResults;
+
+  /// Debounce for the box. 250 ms is long enough that a normal typing cadence
+  /// issues one query per word rather than one per keystroke, and short enough
+  /// that results feel like they arrive as you type.
+  Timer? _searchDebounce;
+
+  /// Guards against an out-of-order reply: a slow query for "inv" must not
+  /// overwrite the results for "invoice" typed after it.
+  int _searchSeq = 0;
+
   // ─── Mute state ───────────────────────────────────────────────────
   final SettingsService _settingsService = SettingsService();
   late bool _isMuted;
@@ -194,6 +223,19 @@ class _ChatScreenState extends State<ChatScreen> {
   /// so the composer reads whichever of the two is non-null.
   double? _videoUploadProgress;
   StreamSubscription<double>? _videoUploadSub;
+
+  // ── Document attachment ───────────────────────────────────────────
+  bool _isUploadingDocument = false;
+
+  /// Real upload completion (0.0–1.0) for the in-flight document, or null.
+  ///
+  /// Stays null through the encrypt that precedes the upload — AES-GCM over a
+  /// large file is a meaningful slice of the wall-clock but reports no
+  /// progress, so the paperclip shows an indeterminate spinner until
+  /// `EncryptedMediaService`'s first `onProgress` callback arrives. Unlike the
+  /// image and video paths this is a plain field, not a stream subscription:
+  /// the service owns the `UploadTask` and hands us a callback instead.
+  double? _documentUploadProgress;
 
   // ── Voice recording ───────────────────────────────────────────────
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
@@ -381,6 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _composerFocus.dispose();
     _searchController.dispose();
     _searchQuery = '';
+    _searchDebounce?.cancel();
     // Re-enable global mesh banners when leaving this conversation.
     _meshService.setActiveConversation(null);
     // Re-enable foreground chat notifications.
@@ -1294,6 +1337,48 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  // ─── In-chat search ────────────────────────────────────────────────
+  /// Debounced FTS5 query against the local message index.
+  ///
+  /// Replaces an in-memory `contains` over the loaded page window, which meant
+  /// search could only ever find what the user had already scrolled past. The
+  /// index covers the whole local history, so a hit may well be a message the
+  /// list hasn't built — see [_jumpToMessage], which reports that honestly.
+  void _onSearchChanged(String query) {
+    final trimmed = query.trim();
+    _searchDebounce?.cancel();
+
+    if (trimmed.isEmpty) {
+      setState(() {
+        _searchQuery = '';
+        _searchResults = null;
+      });
+      return;
+    }
+
+    // Null results render the spinner, so the list doesn't flash "No messages
+    // found" for the quarter-second before the first query returns.
+    setState(() {
+      _searchQuery = trimmed;
+      _searchResults = null;
+    });
+
+    final seq = ++_searchSeq;
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () async {
+      try {
+        final store = await PlaintextStore.instance();
+        final hits = await store.searchMessages(_chatRoomId, trimmed);
+        // A slower query for a shorter prefix must not land on top of a newer
+        // one; the sequence check is the only ordering guarantee here.
+        if (!mounted || seq != _searchSeq) return;
+        setState(() => _searchResults = hits);
+      } catch (_) {
+        if (!mounted || seq != _searchSeq) return;
+        setState(() => _searchResults = const []);
+      }
+    });
+  }
+
   String _formatTime(DateTime dateTime) {
     String hour = dateTime.hour > 12
         ? (dateTime.hour - 12).toString()
@@ -1468,6 +1553,24 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ]
+          // ── View once photo / video ───────────────────────────
+          // Must precede the image and video branches: a view-once message
+          // reuses those two types, and falling into them would paint the
+          // media inline — which is the one thing this feature exists to
+          // prevent. Deliberately *not* guarded on `mediaKey`, unlike the
+          // document and location branches: an unmerged or already-consumed
+          // view-once message has none, and the placeholder is exactly what
+          // should render in both cases (`ViewOnceBubble` tells them apart).
+          else if (message.viewOnce &&
+              (message.type == MessageType.image ||
+                  message.type == MessageType.video)) ...[
+            ViewOnceBubble(
+              message: message,
+              isMe: isMe,
+              currentUserId: widget.currentUserId,
+            ),
+            const SizedBox(height: 4),
+          ]
           // ── Image message ─────────────────────────────────────
           else if (message.type == MessageType.image &&
               (message.mediaUrl != null || message.localFilePath != null)) ...[
@@ -1495,6 +1598,26 @@ class _ChatScreenState extends State<ChatScreen> {
               onTap: () => _showFullScreenVideo(message),
               child: _buildVideoThumbnail(message),
             ),
+            const SizedBox(height: 4),
+          ]
+          // ── Document message ──────────────────────────────────
+          // Guarded on `mediaKey` rather than `mediaUrl`: a document's URL lives
+          // *inside* the bundle, so a message whose payload hasn't been merged
+          // yet (undecryptable, or awaiting a resend) has neither and correctly
+          // falls through to the text branch, where `text` holds the filename.
+          else if (message.type == MessageType.document &&
+              message.mediaKey != null) ...[
+            DocumentBubble(message: message, isMe: isMe),
+            const SizedBox(height: 4),
+          ]
+          // ── Location message ──────────────────────────────────
+          // Guarded on `latitude` for the same reason the document branch
+          // guards on `mediaKey`: the coordinates live inside the encrypted
+          // payload, so an unmerged/undecryptable pin has none and falls
+          // through to the text branch, where `text` holds `📍 Location`.
+          else if (message.type == MessageType.location &&
+              message.latitude != null) ...[
+            LocationBubble(message: message, isMe: isMe),
             const SizedBox(height: 4),
           ] else
             LinkifiedText(
@@ -2105,14 +2228,24 @@ class _ChatScreenState extends State<ChatScreen> {
       _messageKeys.removeWhere((id, _) => !live.contains(id));
     }
 
-    // ── Filter by search query when in search mode ────────────────────
-    final displayMessages = _isSearchMode && _searchQuery.isNotEmpty
-        ? messages
-            .where((m) => m.text.toLowerCase().contains(_searchQuery))
-            .toList()
-        : messages;
+    // ── Search results ────────────────────────────────────────────────
+    // Search no longer filters `messages`: the FTS5 index covers the whole
+    // local history, so a hit is frequently a message the list hasn't paged in
+    // and couldn't be filtered *to*. Results are their own list.
+    final searching = _isSearchMode && _searchQuery.isNotEmpty;
+    final displayMessages = searching ? (_searchResults ?? const []) : messages;
 
-    if (_isSearchMode && _searchQuery.isNotEmpty && displayMessages.isEmpty) {
+    if (searching && _searchResults == null) {
+      return Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2, color: c.primary),
+        ),
+      );
+    }
+
+    if (searching && displayMessages.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2356,18 +2489,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.close_rounded, size: 20),
                       onPressed: () {
+                        _searchDebounce?.cancel();
                         setState(() {
                           _isSearchMode = false;
                           _searchQuery = '';
+                          _searchResults = null;
                           _searchController.clear();
                         });
                       },
                     ),
                   ),
                   style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
-                  onChanged: (query) {
-                    setState(() => _searchQuery = query.trim().toLowerCase());
-                  },
+                  onChanged: _onSearchChanged,
                 ),
               ),
             )
@@ -2400,8 +2533,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       child:
                           Text('Contact info', style: GoogleFonts.poppins())),
                   PopupMenuItem(
-                      value: 'search',
-                      child: Text('Search', style: GoogleFonts.poppins())),
+                    value: 'search',
+                    child: Row(
+                      children: [
+                        Text('Search', style: GoogleFonts.poppins()),
+                        const NewFeatureChip(featureId: NewFeature.chatSearch),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
                     value: 'chat theme',
                     child: Row(
@@ -2836,18 +2975,21 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Attachment Paperclip
-          // Attachment Paperclip. One button for photo *and* video — tapping it
-          // opens a chooser sheet; while either is uploading it becomes the
-          // shared progress ring. Image and video never upload together (the
-          // sheet is unreachable behind the ring), so the composer reads
+          // Attachment Paperclip. One button for photo, video *and* document —
+          // tapping it opens a chooser sheet; while any of them is uploading it
+          // becomes the shared progress ring. Only one can ever be in flight
+          // (the sheet is unreachable behind the ring), so the composer reads
           // whichever progress is non-null.
-          (_isUploadingImage || _isUploadingVideo)
+          (_isUploadingImage || _isUploadingVideo || _isUploadingDocument)
               ? Padding(
                   padding: const EdgeInsets.all(8),
-                  child: (_imageUploadProgress ?? _videoUploadProgress) == null
-                      // Compression (and the offline mesh path) have no byte
-                      // progress — show an honest indeterminate spinner rather
-                      // than a bogus "0%".
+                  child: (_imageUploadProgress ??
+                              _videoUploadProgress ??
+                              _documentUploadProgress) ==
+                          null
+                      // Compression, document encryption, and the offline mesh
+                      // path have no byte progress — show an honest
+                      // indeterminate spinner rather than a bogus "0%".
                       ? SizedBox(
                           width: 24,
                           height: 24,
@@ -2855,8 +2997,9 @@ class _ChatScreenState extends State<ChatScreen> {
                               strokeWidth: 2, color: c.primary),
                         )
                       : UploadProgressRing(
-                          progress:
-                              (_imageUploadProgress ?? _videoUploadProgress)!,
+                          progress: (_imageUploadProgress ??
+                              _videoUploadProgress ??
+                              _documentUploadProgress)!,
                           size: 24,
                           // Keep the spinner visible through the ring's reveal
                           // delay so a fast upload never flashes back to idle.
@@ -2869,8 +3012,15 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                 )
               : IconButton(
-                  icon: Icon(Icons.attach_file_rounded,
-                      color: c.isDark ? Colors.white70 : c.textMid, size: 24),
+                  icon: NewFeatureDot(
+                    anchor: NewFeatureAnchor.chatAttachment,
+                    // The paperclip is a narrow glyph in a wide box, same as
+                    // the overflow ⋮ — without the nudge the dot lands on the
+                    // clip's head instead of beside it.
+                    offset: NewFeatureDot.narrowGlyph,
+                    child: Icon(Icons.attach_file_rounded,
+                        color: c.isDark ? Colors.white70 : c.textMid, size: 24),
+                  ),
                   onPressed: _showAttachmentSheet,
                 ),
           const SizedBox(width: 4),
@@ -3290,6 +3440,9 @@ class _ChatScreenState extends State<ChatScreen> {
         _showContactInfo();
         break;
       case 'search':
+        // The row is old; what it reaches is not. See the registry note on
+        // [NewFeature.chatSearch].
+        WhatsNewService.instance.markSeen(NewFeature.chatSearch);
         setState(() => _isSearchMode = true);
         break;
       case 'chat theme':
@@ -3553,7 +3706,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ─── Image attachment ──────────────────────────────────────────────
-  Future<void> _pickAndSendImage() async {
+  Future<void> _pickAndSendImage({bool viewOnce = false}) async {
     AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3587,6 +3740,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (!connectivity.isOnline) {
         // ── Offline: send via mesh network ──────────────────────────
+        // ...unless this is a view-once send. Its deletion model is the
+        // destruction of a key to a blob in Storage, and the mesh path has
+        // neither: it streams the plaintext image peer-to-peer, so there would
+        // be nothing to destroy and the promise on the switch would be a lie.
+        if (viewOnce) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'View once needs a connection — it can\'t be sent over '
+                      'a nearby link.')),
+            );
+          }
+          return;
+        }
         try {
           final meshService =
               Provider.of<MeshNetworkService>(context, listen: false);
@@ -3627,6 +3795,44 @@ class _ChatScreenState extends State<ChatScreen> {
           File(picked.path),
           pro: proMediaQuality,
         );
+
+        if (viewOnce) {
+          // ── View once: encrypted upload, no plaintext URL ──────────
+          // Routed through EncryptedMediaService instead of the plaintext
+          // putFile the ordinary path uses, because **key destruction is the
+          // deletion mechanism**: on open the receiver purges every copy of
+          // `mediaKey`, and what's left in Storage is AES-GCM ciphertext nobody
+          // holds a key for. A plaintext upload would leave a readable object
+          // behind that any authenticated caller with the URL could still fetch.
+          //
+          // `chat_images/` is unchanged as the path — that rule block already
+          // accepts `application/octet-stream`, so no storage-rules change is
+          // needed — but the object name is opaque, like a document's.
+          final bundle = await EncryptedMediaService().encryptAndUpload(
+            file: compressed,
+            storagePath: 'chat_images/$chatRoomId/${_opaqueObjectName()}',
+            onProgress: (p) {
+              if (mounted) setState(() => _imageUploadProgress = p);
+            },
+          );
+
+          await _chatService.sendMessage(
+            senderId: widget.currentUserId,
+            receiverId: widget.contact.id,
+            text: '📷 Photo',
+            senderName: widget.currentUserName,
+            type: MessageType.image,
+            mediaKey: bundle.toMap(),
+            viewOnce: true,
+            // Deliberately no `mediaUrl` and no `localFilePath`. The URL lives
+            // inside the bundle, and keeping a local plaintext copy would let
+            // the *sender's* own bubble re-render the image forever — the one
+            // thing "view once" is supposed to rule out on both ends.
+          );
+
+          _scrollToBottom();
+          return;
+        }
 
         // Kick off the upload and surface its real byte progress at the
         // paperclip (WhatsApp-style %). Progress stays null (→ indeterminate
@@ -3681,88 +3887,54 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ─── Attachment chooser ────────────────────────────────────────────
-  /// The paperclip's chooser: Photo or Video. Mirrors the Status media picker so
-  /// the two "attach media" surfaces feel like one app. Each tile pops the sheet
-  /// before running its picker — the sheet has to be gone before the OS gallery
-  /// UI takes over.
+  /// The paperclip's chooser: Photo, Video or Document. Mirrors the Status media
+  /// picker so the two "attach media" surfaces feel like one app. Each tile pops
+  /// the sheet before running its picker — the sheet has to be gone before the
+  /// OS gallery UI takes over.
   void _showAttachmentSheet() {
-    AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send media to this contact')),
       );
       return;
     }
-    showModalBottomSheet(
+    // Chrome and tiles live in [showAttachmentSheet]; this screen supplies only
+    // the four send paths and the online chat's discovery badges. View once is
+    // armed here, before the picker — there is no preview step to host the
+    // switch after the pick, and arming first keeps the ordinary send at zero
+    // extra taps. Its wording is chat-specific: the key really is destroyed.
+    showAttachmentSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      actions: [
+        AttachmentAction(
+          kind: AttachmentKind.photo,
+          onTap: (viewOnce) => _pickAndSendImage(viewOnce: viewOnce),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.video,
+          onTap: (viewOnce) => _pickAndSendVideo(viewOnce: viewOnce),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.document,
+          newFeatureId: NewFeature.documents,
+          onTap: (_) => _pickAndSendDocument(),
+        ),
+        AttachmentAction(
+          kind: AttachmentKind.location,
+          newFeatureId: NewFeature.locationShare,
+          onTap: (_) => _pickAndSendLocation(),
+        ),
+      ],
+      viewOnce: const AttachmentViewOnce(
+        // Worded to promise only what the mechanism delivers. The key really is
+        // destroyed on open — but a receiver can still point another camera at
+        // the screen, and on iOS they can screenshot (no FLAG_SECURE
+        // equivalent). Saying "can't be saved" would be a guarantee we can't
+        // keep.
+        subtitleOff: 'Photo or video disappears after it\'s opened',
+        subtitleOn: 'Encrypted, and the key is destroyed when they open it',
+        newFeatureId: NewFeature.viewOnce,
       ),
-      builder: (sheetContext) {
-        final c = AppThemeColors.of(sheetContext);
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Share',
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: c.online.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.photo_library_rounded, color: c.online),
-                  ),
-                  title: const Text('Photo',
-                      style: TextStyle(fontWeight: FontWeight.w500)),
-                  subtitle: const Text('Choose an image from your gallery'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _pickAndSendImage();
-                  },
-                ),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.video_library_rounded,
-                        color: Colors.orange),
-                  ),
-                  title: const Text('Video',
-                      style: TextStyle(fontWeight: FontWeight.w500)),
-                  subtitle: const Text('Choose a video from your gallery'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _pickAndSendVideo();
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -3780,7 +3952,7 @@ class _ChatScreenState extends State<ChatScreen> {
   ///    in the (already end-to-end-encrypted, already-serialized) `audioDuration`
   ///    field so the receiver's placeholder can show mm:ss with no schema change.
   ///    A video message never reaches the voice-note UI, so nothing else reads it.
-  Future<void> _pickAndSendVideo() async {
+  Future<void> _pickAndSendVideo({bool viewOnce = false}) async {
     AppHaptics.tap();
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3828,6 +4000,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (!isOnline) {
         // ── Offline: send via the mesh ──────────────────────────────
+        // View once is online-only, for the reason given in
+        // [_pickAndSendImage]: the mesh streams plaintext peer-to-peer, so
+        // there would be no key to destroy.
+        if (viewOnce) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'View once needs a connection — it can\'t be sent over '
+                      'a nearby link.')),
+            );
+          }
+          return;
+        }
         // The clip streams on the P2P FILE channel; a small poster + duration
         // ride the metadata packet (both optional — failure just drops the
         // preview, never the send).
@@ -3864,6 +4050,41 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final chatRoomId =
           _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+
+      if (viewOnce) {
+        // ── View once: encrypted upload, no plaintext URL ────────────
+        // Same reasoning as the image path: the key is the deletion mechanism,
+        // so the clip has to be ciphertext in Storage. `chat_videos/` already
+        // accepts `application/octet-stream`, so the rule block is unchanged;
+        // only the object name becomes opaque.
+        //
+        // No poster frame is generated, and that is the point — a thumbnail of
+        // a view-once video is a still of the thing that's meant to vanish, and
+        // it would ride the payload in the clear-to-the-receiver `videoThumbnailBase64`
+        // field that [MessageModel.asViewOnceConsumed] deliberately drops.
+        final bundle = await EncryptedMediaService().encryptAndUpload(
+          file: file,
+          storagePath: 'chat_videos/$chatRoomId/${_opaqueObjectName()}',
+          onProgress: (p) {
+            if (mounted) setState(() => _videoUploadProgress = p);
+          },
+        );
+
+        await _chatService.sendMessage(
+          senderId: widget.currentUserId,
+          receiverId: widget.contact.id,
+          text: '🎬 Video',
+          senderName: widget.currentUserName,
+          type: MessageType.video,
+          mediaKey: bundle.toMap(),
+          viewOnce: true,
+          audioDuration: duration?.inSeconds,
+        );
+
+        _scrollToBottom();
+        return;
+      }
+
       final fileName =
           '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
       final ref = FirebaseStorage.instance
@@ -3927,6 +4148,227 @@ class _ChatScreenState extends State<ChatScreen> {
           _isUploadingVideo = false;
           _videoUploadProgress = null;
         });
+      }
+    }
+  }
+
+  // ─── Document attachment ───────────────────────────────────────────
+  /// Pick any file and send it, encrypted, as a [MessageType.document].
+  ///
+  /// This is the only chat attachment path that goes through
+  /// [EncryptedMediaService] rather than a raw `putFile` to Storage. Chat
+  /// images and videos upload in the clear (only the *URL* is inside the Signal
+  /// envelope, and the read rule is `request.auth != null`, so any
+  /// authenticated user holding a URL can fetch the bytes). Documents are
+  /// resumes, tickets, bank statements and contracts; that trade-off isn't
+  /// acceptable for them, so the bytes are AES-256-GCM sealed on-device and the
+  /// key rides inside the encrypted payload as `mediaKey`.
+  ///
+  /// Four consequences follow from that choice, all of them deliberate:
+  ///
+  ///  * **Encryption happens where the network is.** Online, the file is sealed
+  ///    here and uploaded before the message is sent. Offline it goes over the
+  ///    mesh in the clear on a direct peer-to-peer link — there is no server in
+  ///    the path to protect it from — and
+  ///    [MeshNetworkService._uploadEncryptedLocalFile] seals it on the way to
+  ///    Storage when connectivity returns. Either way the blob that lands in
+  ///    `chat_documents/` is ciphertext.
+  ///  * **No compression, ever.** Sending the original bytes *is* the feature —
+  ///    it's also the workaround for sending a photo without gallery
+  ///    re-encoding. The only guard is the [_kMaxChatVideoBytes] ceiling, shared
+  ///    with video for the same reason: encrypt-then-upload holds roughly 3× the
+  ///    file in heap.
+  ///  * **The storage object is a UUID, not the filename.** The real name
+  ///    travels only inside the encrypted `fileName` key, and the service forces
+  ///    `application/octet-stream`, so the server can't tell a PDF from a ZIP.
+  ///  * **`text` is set to the filename.** A v2 message's Firestore `text` is
+  ///    `''` and an older build's `_parseMessageType` falls back to
+  ///    [MessageType.text] on the unknown type — without this it would paint a
+  ///    blank bubble. The same string doubles as the reply-quote snippet and the
+  ///    notification preview.
+  Future<void> _pickAndSendDocument() async {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send files to this contact')),
+      );
+      return;
+    }
+
+    // The mesh carries documents too, on the same FILE channel the photo, voice
+    // and video paths already use — so connectivity picks the ceiling and the
+    // transport, rather than blocking the picker. The mesh cap is tighter for the
+    // same reason the video one is: a P2P stream has no progress bar and no
+    // resume.
+    final connectivity =
+        Provider.of<ConnectivityProvider>(context, listen: false);
+    final isOnline = connectivity.isOnline;
+
+    try {
+      // `withData: false` keeps the picker from reading the whole file into
+      // memory: we want the path and read it ourselves, once, inside the
+      // service. On a 64 MB pick that difference is a copy we don't make.
+      final result = await FilePicker.platform.pickFiles(withData: false);
+      final picked = result?.files.single;
+      final path = picked?.path;
+      if (picked == null || path == null) return;
+
+      final file = File(path);
+      final bytes = await file.length();
+      final maxBytes = isOnline ? _kMaxChatVideoBytes : kMaxMeshDocumentBytes;
+      if (bytes > maxBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'This file is ${_formatMb(bytes)}. The most a '
+                '${isOnline ? 'chat' : 'nearby'} file can '
+                'carry is ${_formatMb(maxBytes)}.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      if (bytes == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('That file is empty.')),
+          );
+        }
+        return;
+      }
+
+      setState(() {
+        _isUploadingDocument = true;
+        _documentUploadProgress = null;
+      });
+
+      if (!isOnline) {
+        // ── Offline: hand it to the peer over the mesh ───────────────
+        // Nothing is encrypted or uploaded here — there is no network to upload
+        // to. The file streams plaintext on the P2P FILE channel and the message
+        // is left `syncPending`; [MeshNetworkService] encrypts and uploads it to
+        // `chat_documents/` when the connection returns.
+        try {
+          final meshService =
+              Provider.of<MeshNetworkService>(context, listen: false);
+          final meshMsg = await meshService.sendDocumentViaMesh(
+            receiverId: widget.contact.id,
+            filePath: path,
+            fileName: picked.name,
+            senderName: widget.currentUserName,
+          );
+          setState(() => _meshMessages.add(meshMsg));
+          _scrollToBottom();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content:
+                      Text('No internet & mesh unavailable. File not sent.')),
+            );
+          }
+        }
+        return;
+      }
+
+      final chatRoomId =
+          _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
+      // Opaque object name. The real filename is payload-only; see the doc above.
+      final objectName = _opaqueObjectName();
+
+      final bundle = await EncryptedMediaService().encryptAndUpload(
+        file: file,
+        storagePath: 'chat_documents/$chatRoomId/$objectName',
+        // Recorded inside the bundle for the receiver's benefit only — the
+        // object itself is uploaded as application/octet-stream regardless.
+        contentType: lookupMimeType(picked.name) ?? 'application/octet-stream',
+        onProgress: (p) {
+          if (mounted) setState(() => _documentUploadProgress = p);
+        },
+      );
+
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        // Human-readable fallback for old clients; also the reply snippet and
+        // the notification preview. See the doc above.
+        text: picked.name,
+        senderName: widget.currentUserName,
+        type: MessageType.document,
+        fileName: picked.name,
+        mediaKey: bundle.toMap(),
+        // Our own copy opens straight from the pick — no download, no decrypt.
+        localFilePath: path,
+      );
+
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send file: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingDocument = false;
+          _documentUploadProgress = null;
+        });
+      }
+    }
+  }
+
+  /// An opaque, unguessable Storage object name.
+  ///
+  /// Delegates to [EncryptedMediaService.opaqueObjectName] — the mesh service
+  /// needs the same name for a document it reconciles after the fact, and two
+  /// copies of a naming rule is two things to keep honest.
+  static String _opaqueObjectName() => EncryptedMediaService.opaqueObjectName();
+
+  // ─── Location attachment ───────────────────────────────────────────
+  /// Fetch the current position and, after an explicit confirm, send it as a
+  /// [MessageType.location] pin.
+  ///
+  /// A location message carries no media — just two doubles inside the
+  /// encrypted payload — so it needs no Storage upload and rides the mesh
+  /// transport for free, unlike a document. That also means no online guard.
+  ///
+  /// The acquire + confirm flow (permission, GPS fix, and the confirmation
+  /// sheet that ensures the position is **never sent silently**) lives in the
+  /// shared [pickLocationToShare] so the online and mesh transports can't drift
+  /// apart. `text` is set to `📍 Location` so an older client that doesn't know
+  /// the type renders that instead of a blank bubble, and it doubles as the
+  /// reply snippet and notification preview.
+  Future<void> _pickAndSendLocation() async {
+    AppHaptics.tap();
+    if (_isBlocked || _isBlockedByContact) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send location to this contact')),
+      );
+      return;
+    }
+
+    final pos = await pickLocationToShare(context);
+    if (pos == null || !mounted) return;
+
+    try {
+      await _chatService.sendMessage(
+        senderId: widget.currentUserId,
+        receiverId: widget.contact.id,
+        text: '📍 Location',
+        senderName: widget.currentUserName,
+        type: MessageType.location,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send location: $e')),
+        );
       }
     }
   }

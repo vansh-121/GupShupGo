@@ -1909,6 +1909,531 @@ StatusItem:
 
 ---
 
+## 🔄 App Update & Version Support Architecture
+
+Two separate mechanisms, often confused:
+
+| Question | Answered by | Source of truth |
+|---|---|---|
+| "Is there a newer build?" | `UpdateService` → Google Play In-App Updates | Play Store |
+| "Is *this* build still allowed to run?" | `VersionPolicyService` | Firebase Remote Config |
+
+Play knows what's newest; it has no opinion on what's acceptable. The
+supported-version policy is ours, and it is the only thing that can lock a
+user out — which is why it ships switched off.
+
+### Where the prompts appear
+
+```
+Cold start (signed in)
+  HomeScreen post-frame chain
+    → maybeShowWhatsNew()               (awaited, so nothing stacks on it)
+    → UpdateService.runLaunchPrompts()  (at most ONE dialog)
+         │
+         ├─ policy.blocks  → return; _AuthGate renders UnsupportedVersionScreen
+         ├─ policy.warns   → showVersionExpiringDialog()   [escalating throttle]
+         └─ otherwise      → Play check → showUpdateAvailableDialog()  [24h/version]
+
+Cold start (signed out)
+  _AuthGate → UpdateService.checkAndNotifyOnLaunch()  → notification, no dialog
+
+Resume after ≥ 4h backgrounded, on the Home route
+  → runLaunchPrompts() again
+```
+
+The signed-out launch posts a *notification* rather than a dialog because
+there is no home screen to host one; the signed-in launch gets the dialog and
+deliberately **not** the notification, so one update never produces two
+prompts. The launch dialog is literally the same widget as Settings → Check
+for updates (`lib/widgets/update_dialogs.dart`) for the same reason.
+
+### The three-state lifecycle
+
+`lib/services/version_policy.dart` — `evaluateWith()` is a pure function, fully
+covered by `test/services/version_policy_test.dart`.
+
+```
+        ok ──────────► expiring ──────────► unsupported
+             installed <          deadline passed,
+             deprecated_below     or installed < min_supported
+```
+
+Four Remote Config keys, and the split between them is the important part:
+
+| Key | Type | Effect |
+|---|---|---|
+| `force_update_enabled` | bool | **Master switch.** Everything below is inert while false. |
+| `deprecated_below_version_code` | int | Builds under this start warning. Soft. |
+| `support_deadline_iso` | string | UTC ISO-8601. When it passes, deprecated builds block *themselves* — nobody has to flip a switch at midnight. |
+| `min_supported_version_code` | int | Hard floor. Immediate, no clock consulted. |
+
+The soft path is the normal one. `min_supported_version_code` exists for
+"that build is broken, cut it off now" and because it never reads a clock, it
+is the lever a doctored device date cannot dodge.
+
+**Clock tampering.** Time comes from `ServerClock`, not `DateTime.now()`. Once
+a device has actually observed the unsupported state it latches in prefs, so
+winding the date back afterwards changes nothing. The latch *clears* when the
+policy stops condemning the build — that is what makes rolling back a bad
+config value actually release the users it caught.
+
+**The kill switch is checked first**, before the hard floor and before the
+latch. A mistyped version code is the one config error in this project that
+can lock out the entire install base, and the recovery has to be one boolean
+rather than working out which of three numbers was wrong.
+
+### Release checklist
+
+Three edits in lockstep — `test/app_version_consistency_test.dart` fails the
+build if any two disagree:
+
+1. `pubspec.yaml` → `version: <name>+<code>`
+2. `lib/widgets/whats_new_dialog.dart` → `kCurrentVersion`
+3. `lib/services/version_policy.dart` → `kAppVersionCode`
+
+A stale `kAppVersionCode` is the dangerous one: ship 57 while the constant
+still reads 56, set `deprecated_below_version_code: 57`, and the new build
+condemns itself — everyone who did what they were asked gets locked out.
+
+To retire a version:
+
+1. Ship the replacement and let adoption settle.
+2. Set `deprecated_below_version_code` to the first *good* code, and
+   `support_deadline_iso` **≥ 15 days out** — the countdown is worthless if
+   users meet it already expired.
+3. Only then set `force_update_enabled: true`. Users below the line start
+   seeing the countdown; the block arrives on its own at the deadline.
+4. Reserve `min_supported_version_code` for emergencies.
+
+To undo any of it: set `force_update_enabled: false`. Remote Config pushes in
+real time, and latched devices are released on their next evaluation.
+
+---
+
+## 📎 Encrypted Document Sharing
+
+Documents take a **different upload path from chat photos and videos**, and the
+difference is deliberate:
+
+| Path | Used by | What the server holds |
+|---|---|---|
+| `ref.putFile()` → `chat_images/`, `chat_videos/` | photo / video bubbles | the **plaintext** bytes; only the URL is inside the Signal envelope |
+| `EncryptedMediaService` → `chat_documents/` | documents, view-once media, status | AES-256-GCM ciphertext; the key is inside the Signal envelope |
+
+`allow read: if request.auth != null` means any authenticated GupShupGo user
+holding a URL can fetch a chat image. That is a known gap in the older path.
+Documents are resumes, tickets and bank statements, so the gap is not repeated
+for them — and because the blob is encrypted, documents also get the
+key-destruction mechanism view-once depends on for free.
+
+### Send pipeline
+
+```
+_pickAndSendDocument()                       lib/screens/chat_screen.dart
+  │
+  ├─ connectivity fork     offline → MeshNetworkService.sendDocumentViaMesh
+  │                        ("Over the mesh" below); online path continues ↓
+  ├─ FilePicker(withData: false)             path only; a 64 MB pick is not
+  │                                          copied into the Dart heap twice
+  ├─ size guard  > 64 MB → reject            encrypt-then-upload holds ~3× the
+  │                                          file in memory at peak
+  ├─ NO compression                          the whole point of the feature, and
+  │                                          the workaround for original-quality photos
+  │
+  ├─ EncryptedMediaService.encryptAndUpload(
+  │     storagePath: 'chat_documents/$chatRoomId/$uuid')
+  │       AES-256-GCM · random key + IV · SHA-256 of the ciphertext
+  │       → MediaKeyBundle { k, i, h, u, s, c }
+  │
+  └─ sendMessage(type: document,
+                 fileName: <real name>,    ← encrypted payload
+                 mediaKey: bundle.toMap(), ← encrypted payload
+                 text:     <real name>)    ← plaintext fallback, see below
+```
+
+**The storage object name is a UUID, never the filename.** `severance_letter.pdf`
+in a bucket listing is a disclosure on its own. The real name travels only
+inside the encrypted `fileName` payload key, and the service forces
+`contentType: application/octet-stream`, so the server cannot tell a PDF from a
+ZIP from a photo.
+
+**Why `text` carries the filename in the clear.** A v2 message's Firestore
+`text` is `''`, and `MessageModel._parseMessageType` falls back to
+`MessageType.text` on an unknown type — so a 1.1.9 client would render a
+document as a *blank bubble*. Setting the payload `text` to the filename (and
+`📍 Location` for a pin) makes old clients show something sensible, and the
+same string doubles as the reply-quote snippet and the notification preview. It
+is metadata the sender chose to reveal, not a leak of the file.
+
+### Receive pipeline
+
+`ChatService.downloadAndCacheMedia` is plaintext-only (`http.get` straight to
+disk) and cannot be reused. Documents use its sibling:
+
+```
+DocumentBubble tap
+  → ChatService.downloadAndCacheEncryptedMedia(message)
+      ├─ MediaKeyBundle.fromMap(message.mediaKey)
+      ├─ EncryptedMediaService.downloadAndDecrypt(bundle)
+      │     constant-time SHA-256 verify → StateError if tampered
+      │     isolate-offloaded above 32 KB
+      └─ write gsg_chat_media/<msgId>_<sanitised fileName>
+  → open_filex  (falls back to share_plus if no handler app exists)
+```
+
+The cache file keeps the sender's real name and extension — that is what lets
+the OS pick a handler — and is prefixed with the message id, which is both the
+uniqueness guarantee and the reason two sends of `invoice.pdf` don't collide.
+
+**Size display.** `bundle.sizeBytes` is the **ciphertext** length: plaintext
+plus the 16-byte GCM tag. The bubble subtracts 16 before formatting, so a
+1.00 MB file doesn't read as 1.000016 MB.
+
+### Over the mesh (offline)
+
+With no internet, the connectivity fork sends the document to a nearby phone via
+`MeshNetworkService.sendDocumentViaMesh` — the fourth file sender beside audio,
+image and video, and the same shape as all three. On the wire it is **not
+encrypted**: it rides Nearby Connections' type-agnostic `FILE` payload as
+plaintext bytes, exactly as a mesh photo or voice note does, with a companion
+`file_metadata` BYTES packet carrying the message JSON. Guarded by
+`kMaxMeshDocumentBytes` (25 MB — lower than the 64 MB online cap, because a P2P
+stream has no progress bar and no server-side resume).
+
+The **two-name split is the same as online**: the file is copied into
+`mesh_documents/` under an opaque `${ts}_${id}.$ext`, while the real name travels
+in the message's `fileName` field (and in `text`, the old-client fallback). The
+wire `fileName` is clamped so a pathological name can't blow the ~30 KB BYTES
+metadata cap.
+
+A mesh document arrives with a local file and **no `mediaKey`** — nothing was
+uploaded. Reconciliation (`_syncPendingToFirestore`) is therefore the one place a
+document is encrypted: when the network returns it runs
+`EncryptedMediaService.encryptAndUpload` into `chat_documents/` — exactly the
+upload the online send would have done — and only then writes the plaintext
+Firestore document with `mediaKey` set. Readiness keys on **`mediaKey != null`**
+(`meshMessageNeedsUpload`), not the `mediaUrl` the other three types use, so a
+document that can't upload yet stays pending and retries on the next reconnect
+rather than committing an unopenable bubble — which matters because
+`chat_documents/` is one of the undeployed rules below.
+
+**Two latent bugs fixed in passing**, both of which a fourth file type makes
+worse:
+
+- Received mesh files all landed in `mesh_images/` regardless of type (a mesh
+  voice note or video was already misfiled today). A pure
+  `meshDirNameForType(MessageType)` now routes each arrival to
+  `mesh_images` / `mesh_audio` / `mesh_videos` / `mesh_documents`. Absolute paths
+  already on disk are unaffected, so received messages keep working.
+- `meta.fileName` was interpolated into a filesystem path unsanitised — and it
+  arrives from an **unauthenticated peer**, so a `../../` in it wrote outside the
+  sandbox. `sanitiseMeshFileName` now `basename`s it, strips anything outside
+  `[A-Za-z0-9._-]`, clamps the length, and regenerates a name when the result is
+  empty or dot-leading.
+
+### Storage rule
+
+```
+match /chat_documents/{chatRoomId}/{fileName} {
+  allow read: if request.auth != null;
+  allow write: if request.auth != null
+    && request.resource.size < 100 * 1024 * 1024
+    && request.resource.contentType == 'application/octet-stream';
+}
+```
+
+100 MB is headroom above the 64 MB client cap: it fires only against a tampered
+client, which is the only thing a server-side ceiling can usefully catch.
+
+> ⚠️ **`storage.rules` in this repo is ahead of what is deployed.** Both the
+> `chat_documents` block above and the existing `chat_videos` block are
+> unpublished, so document and chat-video sends fail with a permission error
+> until `firebase deploy --only storage` runs. This is a release prerequisite,
+> not a code change.
+
+---
+
+## 🔍 In-Chat Search (SQLite FTS5)
+
+Search used to be `messages.where((m) => m.text.contains(q))` over the paged-in
+window — it could only find what was already on screen, which is the opposite of
+what search is for. It is now a real FTS5 index over the local Drift store.
+
+**Why this is possible at all:** messages reach `local_messages` via
+`PlaintextStore.saveMessage` *after* `ChatService.decryptForRendering`, so the
+stored `message_json` holds **decrypted** text. Indexing it needs no new
+plaintext anywhere, and the index never leaves the device — no query, no term
+and no result is ever sent to a server.
+
+### Schema (`schemaVersion` 5)
+
+Drift's `Migrator` cannot model a virtual table, so this uses the same
+`customStatement` escape hatch the file already uses for indexes:
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+  body,
+  message_id   UNINDEXED,
+  chat_room_id UNINDEXED,
+  tokenize='unicode61 remove_diacritics 2'
+);
+```
+
+A plain (non-external-content) FTS5 table, deliberately: an external-content
+table would have to stay in lockstep with `local_messages` through triggers, and
+a single missed trigger corrupts the index silently. Four explicit writes are
+easier to audit than four triggers. `remove_diacritics 2` is what makes `cafe`
+find `café`.
+
+### The four sync points
+
+Every write path that touches `local_messages` touches the index in the same
+method — `lib/services/crypto/plaintext_store.dart`:
+
+| # | Method | Index action |
+|---|---|---|
+| 1 | `wipe` | `DELETE FROM message_fts`, inside the existing transaction |
+| 2 | `saveMessage` | delete-then-insert the row (mirrors `insertOrReplace`) |
+| 3 | `saveMessagesBatch` | same, as a separate pass after the Drift batch |
+| 4 | `deleteMessage` | delete the row |
+
+Point 3 runs *outside* the `batch`: Drift's `batch` only accepts its own
+generated statements, and `message_fts` has no generated class.
+
+Routing everything through these four keeps the hard cases correct for free —
+an **edited** message re-saves and so re-indexes (old text gone, new text
+found), and a **deleted** message goes through `asTombstone()` → `saveMessage`,
+so its text leaves the index without a separate code path.
+
+### Query escaping is load-bearing
+
+FTS5 treats `"`, `*`, `^`, `:`, `(`, `-`, `OR`, `AND`, `NOT` and `NEAR` as
+syntax. Typing `NEAR(` in a search box must not throw, and typing `OR` must not
+silently widen the search. `PlaintextStore.buildFtsQuery` splits on whitespace,
+doubles any `"` FTS5-style, wraps each token in quotes, and appends `*` outside
+the closing quote:
+
+```
+hello world   →   "hello"* "world"*
+say "hi"      →   "say"* """hi"""*
+```
+
+Quoted tokens are literals, so every operator arrives as text. The `*` sits
+outside the quotes because inside them FTS5 reads it as a literal asterisk
+rather than the prefix operator. Space-separated tokens are an implicit **AND**
+— searching two words narrows, which is what users expect and the opposite of
+what a bare `OR` would do. 18 hostile inputs are pinned in
+`test/services/database/fts_search_test.dart`.
+
+### v4 → v5 migration
+
+`onUpgrade`'s `from < 5` rung calls `createFtsTable()` **and** `backfillFts()`.
+Without the backfill, search on an upgraded install would only ever find
+messages received *after* the update, and every older conversation would look
+empty — a failure indistinguishable from "search is broken" and unfixable
+without another migration.
+
+`backfillFts()` reads `message_json` directly rather than going through
+`MessageModel`: it runs inside the migration, before `PlaintextStore` exists,
+and a row that fails to parse must cost its own indexing and **nothing else** —
+throwing there would leave the database stuck below v5 and the app unable to
+open at all. It opens with a `DELETE`, so an interrupted migration that runs
+again does not double every message.
+
+**Deliberately out of scope:** cross-conversation search and server-side search.
+Both are real features; neither is this one. A hit outside the loaded page
+window reuses the existing "message not loaded" path rather than inventing a
+second paging mechanism.
+
+---
+
+## 📍 Location Pin Sharing
+
+A pin is two doubles — `latitude` / `longitude` in the encrypted payload — and
+no media at all, so it rides the **mesh transport for free**: no `FILE` payload,
+no later reconciliation, just two numbers in the same BYTES packet a text message
+uses. (A document goes over the mesh too now, but it pays for it — a file
+transfer on the wire and an encrypt-and-upload when the network returns.)
+
+**There is no inline map image, deliberately.** Rendering a static map tile
+would send the exact coordinate to Google's or OSM's servers on every render, on
+*both* devices — handing a third party the one thing the message exists to
+encrypt. The bubble is a styled card instead: pin glyph, coordinates to 5
+decimal places, and an **Open in Maps** action that fires `geo:$lat,$lng?q=…`
+via `url_launcher`, falling back to `https://maps.google.com/?q=…`. Zero render
+dependencies, zero metadata leak, and it works offline.
+
+The send path always shows the fetched coordinates and accuracy in a
+confirmation sheet first — a location is never sent silently.
+
+**Out of scope:** live location (the 15 min / 1 h / 8 h tiers) and map-based pin
+picking. Both need a real map widget, and live location additionally needs a
+background-location foreground service and an expiry sweeper.
+
+---
+
+## 👁️ View Once — deletion by key destruction
+
+There is no "delete the file" step in this feature, because there is nothing the
+receiver could be granted permission to delete: the receiver is not the blob's
+uploader, and no `allow delete` rule could be written for them cleanly.
+
+Instead, **destroying the key is the deletion.** The blob is AES-256-GCM
+ciphertext whose only key reached the device inside a Signal envelope that
+decrypts exactly once. Erase every copy of that key and the object left in
+Storage is permanently unrecoverable — by the receiver, by the sender, by us.
+
+This is also why view-once media goes through `EncryptedMediaService` rather
+than the plaintext `chat_images/` path: the mechanism only exists if the blob
+was encrypted in the first place. Both rule blocks already accept
+`application/octet-stream`, so this feature needs **no storage-rules change**.
+
+### The four key tiers
+
+`ChatService.markViewOnceConsumed` clears all four:
+
+```
+1-3.  forgetCachedPayload(messageId)
+        ├─ the in-memory decrypted-payload memo
+        ├─ any in-flight decrypt future
+        └─ the SQLite payload row holding mediaKey
+ 4.   _deleteFromVault(uid, messageId)
+        └─ users/{uid}/msgVault/{messageId}   ← the cross-install Firestore copy
+                                                the other three can't reach
+then  delete the decrypted file from gsg_chat_media/
+then  saveMessage(message.asViewOnceConsumed(uid))   ← stripped marker:
+                                                        no key, no URL,
+                                                        no thumbnail
+then  Firestore viewOnceOpenedBy: arrayUnion([uid])
+```
+
+Tier 4 is the one that is easy to miss and the only one that survives a
+reinstall, which is exactly why it matters.
+
+### Consumption happens *before* the first pixel
+
+`ViewOnceViewerScreen` decrypts into memory with
+`EncryptedMediaService().downloadAndDecrypt(bundle)` — **not**
+`downloadAndCacheEncryptedMedia`, which would leave a decrypted copy in the
+ordinary chat-media cache that nothing later deletes — and then awaits
+`markViewOnceConsumed` *before* rendering anything:
+
+```
+open → decrypt to memory → markViewOnceConsumed → THEN render
+```
+
+Consuming on viewer *close* would leave a window in which force-stopping the app
+while the photo is on screen preserves the media for a second viewing.
+Consuming immediately after decrypt, with the bytes already in hand, closes it.
+
+**Video is the one compromise.** `video_player` cannot play from a byte buffer,
+so the clip is written to a temp file, played, and deleted in `dispose`. The key
+is already destroyed by then, so that file is the only plaintext copy in
+existence and it is scoped to the viewer's lifetime.
+
+### `viewOnceOpenedBy` is cleartext, deliberately
+
+It sits **outside** `kMessageContentKeys` and must never gain a
+`schemaVersion == 2 ? null : …` guard — the same precedent `deletedFor` and
+`deletedForEveryone` already follow. It has to be server-visible to reach the
+sender's devices at all, and it reveals nothing the server didn't already know
+(that A sent B a message, and when).
+
+It is also the belt-and-braces guarantee: a reinstalled client refuses to render
+a view-once message whose id it already contains, even in the impossible case
+that a key copy somehow survived.
+
+### Screenshot blocking, and what it can't promise
+
+A fourth MethodChannel on `MainActivity.kt` (`com.gupshupgo.app/secure_screen`,
+following the three already there) toggles `FLAG_SECURE` from the viewer's
+`initState` / `dispose`. **iOS has no FLAG_SECURE equivalent**, so
+`SecureScreenService.isEnforceable` is false there and the viewer's footer says
+so outright rather than implying a protection that isn't present.
+
+Nothing here stops a second camera pointed at the screen, and the UI copy is
+worded to promise only what the mechanism delivers: *"the key is destroyed when
+they open it"*, never *"it can't be saved"*.
+
+### Sender side
+
+`markViewOnceConsumed` is receiver-only — a call where `currentUserId` is the
+sender returns immediately. The sender keeps its own vault copy because that is
+what backs the resend protocol, and the media was theirs to begin with. The
+sender therefore **cannot re-open their own view-once media**, and the guard for
+that lives at the render (`ViewOnceBubble` is never tappable for `isMe`), not at
+the key.
+
+---
+
+## 🕵️ Anonymous Chat Media
+
+Anonymous ("talk to a stranger") rooms pair two accounts that have exchanged no
+identity, so there is **no Signal session to encrypt to** — anonymous messages
+have always been plaintext, text included. Adding photos, video and voice notes
+doesn't change that fact; it makes it visible. This section exists to say so
+plainly, because it is the one media path in the app that is **not** E2EE, and
+that must be a deliberate, documented choice rather than a quiet omission.
+
+### Plaintext by construction — and no octet-stream escape hatch
+
+Media uploads to `anonymous_media/{roomId}/{userId}/{fileName}` and is readable
+by any authenticated user holding the URL, exactly like the older `chat_images/`
+path. The storage rule binds the uploader (`request.auth.uid == userId`), caps
+size, and — unlike **every other** media block in `storage.rules` — permits only
+`image/*`, `video/*` and `audio/*`, with **no `application/octet-stream`
+alternative**. Everywhere else that alternative is how genuine E2EE ciphertext
+(which has no honest MIME type) gets through; here there is no ciphertext, so an
+opaque blob on this path could only be a client dodging the content-type check.
+The rule also grants `allow delete` to the uploader, for the best-effort
+self-cleanup below.
+
+Firestore needs no rule change: `anonymous_rooms/{roomId}/messages` already lets
+a participant create a message as themselves and doesn't constrain the field set,
+so `mediaUrl` and the optional `audioDuration` / `videoThumbnailBase64` ride the
+existing document shape. `text` is set to a `📷 Photo` / `🎬 Video` /
+`🎤 Voice message` fallback so a build predating this feature shows a label
+rather than an empty bubble.
+
+### Blurred until tapped
+
+You can't stop a stranger sending you an image, but you can stop it ambushing the
+eye. Received **photos and videos** render behind an `ImageFiltered(blur 18px)`
+scrim with a lock glyph and "Tap to view"; one tap reveals. The revealed-id set
+lives on the screen's `State`, so **leaving and re-entering re-blurs** — a new
+stranger is a new decision. Two things are deliberately *not* gated:
+
+- **Your own sent media** — you chose it; hiding it from yourself is pointless.
+- **Voice notes** — the bubble doesn't autoplay, so audio can't ambush the way an
+  image can, and blurring a waveform communicates nothing.
+
+The app-bar Report/flag action is untouched and stays one tap away.
+
+### Reusing the bubbles
+
+Rendering reuses the ordinary chat widgets — `VoiceMessageBubble`,
+`VideoThumbnailTile`, `ChatVideoPlayerScreen` — each of which reads only a few
+`MessageModel` fields. Rather than write anonymous-specific copies, the builder
+**synthesizes a throwaway `MessageModel`** from the Firestore map. There is no
+`localFilePath` and no `mediaKey`; these bubbles load straight from `mediaUrl`.
+
+### Orphaned media — a bucket rule, not client code
+
+There is no Cloud Function cleanup for `anonymous_rooms`, and rooms are ephemeral
+by design, so without intervention every photo sent to a stranger would live in
+the bucket forever. A client-side delete on session end is best-effort at most —
+the leaver's app may be killed first, and the other party's uploads aren't theirs
+to delete. The real fix is a **GCS Object Lifecycle rule** (`matchesPrefix:
+anonymous_media/`, age 7 days, action delete): zero code, applies no matter which
+client path ran, and correct for genuinely ephemeral media. It is a
+console/`gcloud` change, so it lives on the deploy checklist, not in the diff.
+
+> ⚠️ Like `chat_documents` above, the `anonymous_media` block is **in the repo
+> but undeployed** — every anonymous media send fails with a permission error
+> until `firebase deploy --only storage` runs.
+
+---
+
 **This architecture supports:**
 - ✅ Unlimited concurrent users
 - ✅ Real-time presence updates
@@ -1917,6 +2442,12 @@ StatusItem:
 - ✅ Cold-start call handling
 - ✅ Instant chat list rendering via local cache
 - ✅ Per-user privacy controls
-- ✅ Mandatory in-app updates
+- ✅ End-to-end encrypted document sharing, with filenames hidden from the server
+- ✅ Documents sent phone-to-phone over the offline mesh, encrypted on reconnect
+- ✅ Full-history on-device message search that never reaches a server
+- ✅ Location pins with no third-party map request
+- ✅ View-once media enforced by key destruction, not by a delete permission
+- ✅ Photos, video and voice notes in anonymous chat — plaintext by design, blurred until tapped
+- ✅ Non-blocking in-app updates, with a configurable support lifecycle
 - ✅ Offline capability
 - ✅ Scalable to millions of users

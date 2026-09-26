@@ -15,8 +15,10 @@
 //   3. Verify sha256 matches `hash` (integrity).
 //   4. AES-GCM decrypt → plaintext file bytes.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -64,18 +66,42 @@ class EncryptedMediaService {
   static final _gcm = AesGcm.with256bits();
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
+  /// An opaque, unguessable Storage object name.
+  ///
+  /// Deliberately not a timestamp and not the filename: for an encrypted upload
+  /// the object path is the one part the server sees in the clear, so it is made
+  /// to carry no information at all. 16 bytes from [Random.secure] is 128 bits
+  /// of name — collision-free across the whole app, and no `uuid` dependency.
+  ///
+  /// Lives here rather than at a call site because every caller of it is already
+  /// a caller of this service, and a second copy would be a second thing to keep
+  /// honest.
+  static String opaqueObjectName() {
+    final r = Random.secure();
+    return List.generate(16, (_) => r.nextInt(256))
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
+
   /// Encrypts and uploads a file. Returns the bundle the sender embeds
   /// inside the Signal payload.
+  ///
+  /// [onProgress] reports upload completion in 0.0–1.0 and fires only while the
+  /// bytes are in flight — the encrypt that precedes it has no meaningful
+  /// progress to report, so a caller driving a determinate bar should show an
+  /// indeterminate state until the first callback arrives.
   Future<MediaKeyBundle> encryptAndUpload({
     required File file,
     required String storagePath,
     String contentType = 'application/octet-stream',
+    void Function(double)? onProgress,
   }) async {
     final plaintext = await file.readAsBytes();
     return _encryptAndUploadBytes(
       bytes: plaintext,
       storagePath: storagePath,
       contentType: contentType,
+      onProgress: onProgress,
     );
   }
 
@@ -83,50 +109,87 @@ class EncryptedMediaService {
     required Uint8List bytes,
     required String storagePath,
     String contentType = 'application/octet-stream',
+    void Function(double)? onProgress,
   }) =>
       _encryptAndUploadBytes(
         bytes: bytes,
         storagePath: storagePath,
         contentType: contentType,
+        onProgress: onProgress,
       );
 
   Future<MediaKeyBundle> _encryptAndUploadBytes({
     required Uint8List bytes,
     required String storagePath,
     required String contentType,
+    void Function(double)? onProgress,
   }) async {
     final secretKey = await _gcm.newSecretKey();
     final keyBytes = await secretKey.extractBytes();
     final nonce = _gcm.newNonce();
 
-    final box = await _gcm.encrypt(
-      bytes,
-      secretKey: secretKey,
-      nonce: nonce,
+    // Key material is generated here and only the raw bytes cross the isolate
+    // boundary — `SecretKey` is not sendable, and re-deriving it on the other
+    // side is what [_encryptIsolate] does.
+    final sealed = await _seal(
+      bytes: bytes,
+      key: Uint8List.fromList(keyBytes),
+      iv: Uint8List.fromList(nonce),
     );
 
-    // Wire format: [ciphertext bytes || 16-byte GCM tag].
-    final wire = Uint8List(box.cipherText.length + box.mac.bytes.length)
-      ..setRange(0, box.cipherText.length, box.cipherText)
-      ..setRange(box.cipherText.length, box.cipherText.length + box.mac.bytes.length,
-          box.mac.bytes);
-
     final ref = _storage.ref().child(storagePath);
-    await ref.putData(
-      wire,
+    final task = ref.putData(
+      sealed.wire,
       // Don't leak the original content-type; server should see "opaque".
       SettableMetadata(contentType: 'application/octet-stream'),
     );
+
+    StreamSubscription<TaskSnapshot>? sub;
+    if (onProgress != null) {
+      sub = task.snapshotEvents.listen(
+        (s) {
+          final total = s.totalBytes;
+          if (total > 0) onProgress(s.bytesTransferred / total);
+        },
+        // Swallowed on purpose: the real failure surfaces from `await task`
+        // below with its FirebaseException intact. An unhandled error on this
+        // side-channel would otherwise crash the zone before that happens.
+        onError: (_) {},
+      );
+    }
+    try {
+      await task;
+    } finally {
+      await sub?.cancel();
+    }
+
     final url = await ref.getDownloadURL();
 
     return MediaKeyBundle(
       key: keyBytes,
       iv: nonce,
-      hash: crypto.sha256.convert(wire).bytes,
+      hash: sealed.hash,
       url: url,
-      sizeBytes: wire.length,
+      sizeBytes: sealed.wire.length,
       contentType: contentType,
     );
+  }
+
+  /// AES-GCM encrypt + framing + integrity hash, offloaded above
+  /// [_isolateThresholdBytes] for the same reason [downloadAndDecrypt] offloads
+  /// the reverse. This side matters more: `package:cryptography` has no native
+  /// backend in this project, so a 64 MB document — the chat cap — is several
+  /// seconds of pure-Dart AES on whichever isolate runs it, and on the UI
+  /// isolate that is a frozen app rather than a slow one.
+  Future<_SealedMedia> _seal({
+    required Uint8List bytes,
+    required Uint8List key,
+    required Uint8List iv,
+  }) {
+    final req = _MediaEncryptRequest(plaintext: bytes, key: key, iv: iv);
+    return bytes.length >= _isolateThresholdBytes
+        ? compute(_encryptIsolate, req)
+        : _encryptIsolate(req);
   }
 
   /// Downloads ciphertext from `bundle.url`, verifies SHA-256, decrypts,
@@ -189,6 +252,53 @@ class EncryptedMediaService {
 // Everything below runs inside the isolate spawned by `compute()`. It must be
 // top-level (not a method) and take only sendable args, so we pass a plain
 // data holder and reconstruct the crypto primitives on the other side.
+
+/// The output of [_encryptIsolate]: the bytes to upload and their integrity
+/// hash, computed together so the wire buffer crosses the isolate boundary
+/// once instead of being re-hashed on the caller's side.
+class _SealedMedia {
+  _SealedMedia({required this.wire, required this.hash});
+
+  /// `[ciphertext || 16-byte GCM tag]`.
+  final Uint8List wire;
+  final Uint8List hash;
+}
+
+/// Sendable payload for [_encryptIsolate].
+class _MediaEncryptRequest {
+  _MediaEncryptRequest({
+    required this.plaintext,
+    required this.key,
+    required this.iv,
+  });
+
+  final Uint8List plaintext;
+  final Uint8List key;
+  final Uint8List iv;
+}
+
+/// AES-256-GCM encrypts [_MediaEncryptRequest.plaintext], frames it as
+/// `[ciphertext || tag]`, and returns that buffer with its SHA-256. Top-level
+/// and isolate-safe for the same reasons as [_verifyAndDecryptIsolate].
+Future<_SealedMedia> _encryptIsolate(_MediaEncryptRequest req) async {
+  final gcm = AesGcm.with256bits();
+  final box = await gcm.encrypt(
+    req.plaintext,
+    secretKey: SecretKey(req.key),
+    nonce: req.iv,
+  );
+
+  final ct = box.cipherText;
+  final tag = box.mac.bytes;
+  final wire = Uint8List(ct.length + tag.length)
+    ..setRange(0, ct.length, ct)
+    ..setRange(ct.length, ct.length + tag.length, tag);
+
+  return _SealedMedia(
+    wire: wire,
+    hash: Uint8List.fromList(crypto.sha256.convert(wire).bytes),
+  );
+}
 
 /// Sendable payload for [_verifyAndDecryptIsolate]. All fields are TypedData,
 /// which transfers across the isolate boundary without a deep copy on most

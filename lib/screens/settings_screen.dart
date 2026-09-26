@@ -30,8 +30,8 @@ import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
-import 'package:video_chat_app/utils/url_opener.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
+import 'package:video_chat_app/widgets/update_dialogs.dart';
 
 /// WhatsApp-style settings screen.
 class SettingsScreen extends StatefulWidget {
@@ -1330,6 +1330,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// button starts Google Play's background flexible update), a "ready to
   /// install" restart prompt, an "up to date" confirmation, or a graceful note
   /// when the check can't run (e.g. the app wasn't installed from Play).
+  ///
+  /// The two dialogs are shared with the launch prompt on purpose — see
+  /// [showUpdateAvailableDialog]. Being told about an update on open and then
+  /// shown a differently-worded one from here would read as two updates.
   Future<void> _checkForUpdates() async {
     AppHaptics.tap();
 
@@ -1346,89 +1350,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     switch (result.status) {
       case UpdateCheckStatus.updateAvailable:
-        // When Play won't run the background flexible flow (rare — e.g. a
-        // high-priority update), startFlexibleUpdate would silently no-op, so
-        // send the user to the Play Store listing instead of offering an
-        // "Update" button that does nothing.
-        if (result.flexibleAllowed) {
-          showDialog<void>(
-            context: context,
-            builder: (dialogCtx) => AlertDialog(
-              title: const Text('Update available'),
-              content: const Text(
-                'A new version of GupShupGo is ready. It downloads in the '
-                'background while you keep using the app, then installs with a '
-                'quick restart.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Later'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(dialogCtx);
-                    _startFlexibleUpdate();
-                  },
-                  child: const Text('Update'),
-                ),
-              ],
-            ),
-          );
-        } else {
-          showDialog<void>(
-            context: context,
-            builder: (dialogCtx) => AlertDialog(
-              title: const Text('Update available'),
-              content: const Text(
-                'A new version of GupShupGo is available on the Google Play '
-                'Store. Open the store listing to update.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Later'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(dialogCtx);
-                    openExternalUrl(
-                      context,
-                      'https://play.google.com/store/apps/details?id=com.gupshupgo.app',
-                    );
-                  },
-                  child: const Text('Open Play Store'),
-                ),
-              ],
-            ),
-          );
-        }
+        await showUpdateAvailableDialog(
+          context,
+          flexibleAllowed: result.flexibleAllowed,
+        );
         break;
 
       case UpdateCheckStatus.readyToInstall:
-        showDialog<void>(
-          context: context,
-          builder: (dialogCtx) => AlertDialog(
-            title: const Text('Update ready'),
-            content: const Text(
-              'An update has finished downloading. Restart GupShupGo to finish '
-              'installing it.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogCtx),
-                child: const Text('Later'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(dialogCtx);
-                  _startFlexibleUpdate();
-                },
-                child: const Text('Restart & install'),
-              ),
-            ],
-          ),
-        );
+        await showUpdateReadyDialog(context);
         break;
 
       case UpdateCheckStatus.upToDate:
@@ -1452,16 +1381,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
         break;
     }
-  }
-
-  Future<void> _startFlexibleUpdate() async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Starting update — it downloads in the background.'),
-      ),
-    );
-    await UpdateService.instance.startFlexibleUpdate();
   }
 
   void _showAboutDialog() {
