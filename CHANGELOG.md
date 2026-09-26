@@ -17,13 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Live location sharing and map-based pin picking
 
-## [1.2.0] - 2026-09-22
+## [1.2.0] - 2026-09-27
 
 ### Added
 - 📄 **Send Any File** — Share PDFs, Office documents, archives and anything else up to 64 MB straight from the attachment menu. Files are encrypted end-to-end before they leave your device and arrive byte-for-byte identical — no compression, no quality loss. Doubles as the way to send a photo at its original quality. With no internet at all, a file hands off straight to a nearby phone over the offline mesh, then syncs to the cloud — still encrypted end-to-end — the moment you're back online.
 - 🔍 **Search Every Message** — Chat search now looks through your entire conversation history stored on this device, not just the messages currently loaded on screen. Results are found instantly, work offline, and never leave your phone.
 - 📍 **Share Your Location** — Drop a pin from the attachment menu and open it in any maps app. Coordinates are shown before anything is sent, and a pin travels over the offline mesh just like a text message.
-- 👁️ **View Once Photos & Videos** — Send a photo or video that can be opened exactly one time. The encryption key is destroyed the moment it's opened, so the copy on the server becomes unreadable to everyone — including us. Screenshots are blocked while it's on screen on Android.
+- 👁️ **View Once Photos & Videos** — Send a photo or video that can be opened exactly one time across online, offline mesh, and anonymous stranger chats. For private chats, the encryption key is destroyed the moment it's opened. Screenshots and screen recordings are blocked while on screen on Android.
 - 🕵️ **Media in Anonymous Chat** — Send photos, video and voice notes in anonymous rooms, not just text. Because there's no shared identity to encrypt to a stranger, anything they send you stays blurred until you tap to reveal it, so an unsolicited image can't ambush you — and your own media is never hidden from you.
 - 🔔 **Update Reminders on Open** — When a new version is waiting on the Play Store, GupShupGo now tells you when you open the app instead of only when you go looking in Settings. It's the same one-tap update, shown at most once a day so it nudges rather than nags.
 - ⏳ **Advance Notice Before a Version Retires** — Older builds now get a countdown ("this version stops working in 15 days") that gets more insistent as the date approaches, so an update is never a surprise. Your messages and chats stay exactly where they are.
@@ -358,6 +358,7 @@ Documents, pins, view-once media and anonymous-room photos, videos and voice not
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.0 | September 2026 | Document & Location Sharing, View-Once Media, Anonymous Chat Media, Full History Search |
 | 1.1.9 | September 2026 | Chat Encryption Fixes, Self-Healing Message Recovery, Delivery Stability |
 | 1.1.8 | September 2026 | Video Messages in Chat, Instant Video Previews, Incoming Screen Share UI |
 | 1.1.7 | September 2026 | Chat Themes, PDF Chat Export, 2-Minute Voice Notes, Avatar Memory Optimization |
