@@ -51,6 +51,18 @@ class ChatExportService {
   /// into a multi-hundred-megabyte one.
   static const String mediaOmitted = '<media omitted>';
 
+  /// Shown in place of a document attachment, followed by the filename when
+  /// this device has it. Same reasoning as [mediaOmitted]: the file itself is
+  /// not bundled, but unlike a photo a document has a name worth keeping, and
+  /// the name is usually the only thing that identifies which attachment a
+  /// line of the transcript is talking about.
+  static const String documentOmitted = '<document>';
+
+  /// Shown in place of a location pin. The coordinates follow it as a maps
+  /// link — they are the entire content of the message, so omitting them the
+  /// way [mediaOmitted] omits image bytes would export nothing at all.
+  static const String locationOmitted = '<location>';
+
   /// Shown for a row whose stored text is one of the undecryptable
   /// placeholders. Reproducing `🔒 This message can't be decrypted…` verbatim
   /// would read as if the *export* had failed, so it is restated as what it is:
@@ -134,6 +146,23 @@ class ChatExportService {
         return d == null || d <= 0
             ? '<voice message>'
             : '<voice message, ${_duration(d)}>';
+      case MessageType.document:
+        // The real filename lives in the encrypted payload, so it is null on a
+        // row this device could not decrypt. `text` carries the same name as a
+        // fallback for older clients, but it is equally undecryptable there —
+        // hence the plain `documentOmitted` rather than trusting either.
+        final name = m.fileName?.trim() ?? '';
+        return name.isEmpty ? documentOmitted : '$documentOmitted $name';
+      case MessageType.location:
+        final lat = m.latitude;
+        final lng = m.longitude;
+        if (lat == null || lng == null) return locationOmitted;
+        // An https link, not the `geo:` URI the in-app bubble uses: a
+        // transcript is read outside the app, usually on a desktop, where a
+        // geo: scheme resolves to nothing.
+        return '$locationOmitted '
+            'https://maps.google.com/?q=${lat.toStringAsFixed(5)},'
+            '${lng.toStringAsFixed(5)}';
       case MessageType.reaction:
         // Filtered out in buildTranscript; unreachable, but the switch is
         // exhaustive so a new MessageType breaks the build instead of silently

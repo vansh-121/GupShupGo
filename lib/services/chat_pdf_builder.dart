@@ -604,6 +604,49 @@ class ChatPdfBuilder {
           ),
         ];
 
+      case MessageType.document:
+        return [
+          _bubble(
+            isMe: isMe,
+            who: who,
+            showName: showName,
+            fonts: fonts,
+            entry: entry,
+            isTail: true,
+            body: [
+              _mediaColumn(
+                tile: _documentTile(m, isMe, fonts),
+                // No caption: a document's `text` is a copy of its filename,
+                // carried only so pre-1.2.0 clients render something instead of
+                // a blank bubble. The tile already shows the name.
+                message: m,
+                isMe: isMe,
+                fonts: fonts,
+              ),
+            ],
+          ),
+        ];
+
+      case MessageType.location:
+        return [
+          _bubble(
+            isMe: isMe,
+            who: who,
+            showName: showName,
+            fonts: fonts,
+            entry: entry,
+            isTail: true,
+            body: [
+              _mediaColumn(
+                tile: _locationTile(m, isMe, fonts),
+                message: m,
+                isMe: isMe,
+                fonts: fonts,
+              ),
+            ],
+          ),
+        ];
+
       case MessageType.reaction:
         // Filtered out upstream — reactions are drawn on the bubble they target.
         // Kept so a new MessageType breaks the build instead of rendering blank.
@@ -945,6 +988,10 @@ class ChatPdfBuilder {
         return 'Video';
       case 'audio':
         return 'Voice message';
+      case 'document':
+        return 'Document';
+      case 'location':
+        return 'Location';
       default:
         return '';
     }
@@ -1145,6 +1192,190 @@ class ChatPdfBuilder {
       ),
     );
   }
+
+  /// A filename card rather than a rendition of the document. The builder never
+  /// receives decrypted attachment bytes — [ChatPdfEntry.imageBytes] is the only
+  /// payload it is handed — so the honest tile is the name, the type and the
+  /// size.
+  static _MediaTile _documentTile(
+    MessageModel m,
+    bool isMe,
+    ChatPdfFonts fonts,
+  ) {
+    final name = (m.fileName ?? '').trim();
+    if (name.isEmpty) {
+      return _mediaPlaceholder('Attachment not stored on this device', fonts);
+    }
+    final size = _fileSize(m);
+
+    return _MediaTile(
+      _tileWidth,
+      pw.SizedBox(
+        width: _tileWidth,
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Container(
+              width: 26,
+              height: 30,
+              alignment: pw.Alignment.center,
+              decoration: pw.BoxDecoration(
+                color: isMe ? _sentBadge : _brandTint,
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Text(
+                _extensionOf(name),
+                maxLines: 1,
+                style: pw.TextStyle(
+                  font: fonts.semiBold,
+                  fontSize: 6.5,
+                  color: isMe ? _white : _brand,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            pw.SizedBox(width: 8),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    _drawable(name),
+                    maxLines: 2,
+                    overflow: pw.TextOverflow.clip,
+                    style: pw.TextStyle(
+                      font: fonts.medium,
+                      fontSize: 8.5,
+                      color: isMe ? _onSent : _inkMid,
+                    ),
+                  ),
+                  if (size != null) ...[
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      size,
+                      style: pw.TextStyle(
+                        font: fonts.regular,
+                        fontSize: 7,
+                        color: isMe ? _onSentSoft : _inkLow,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The badge label: the extension, uppercased and capped at four characters
+  /// so a `.sketchpad` cannot push the badge wider than the tile.
+  static String _extensionOf(String name) {
+    final dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot == name.length - 1) return 'FILE';
+    final ext = name.substring(dot + 1).toUpperCase();
+    return ext.length > 4 ? ext.substring(0, 4) : ext;
+  }
+
+  /// The attachment's plaintext length, from the key bundle's `s` field.
+  ///
+  /// Read raw rather than through `MediaKeyBundle.fromMap` deliberately: that
+  /// decoder lives in `encrypted_media_service.dart`, which pulls in
+  /// firebase_storage, and this builder is kept dependency-free so it can be
+  /// exercised without a Firebase binding. The 16 bytes subtracted are the GCM
+  /// tag, which the stored ciphertext carries and the file itself does not.
+  static String? _fileSize(MessageModel m) {
+    final raw = m.mediaKey?['s'];
+    final cipherBytes = raw is num ? raw.toInt() : null;
+    if (cipherBytes == null || cipherBytes <= 16) return null;
+
+    final bytes = cipherBytes - 16;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  /// A coordinate card, deliberately not a map image. The chat bubble makes the
+  /// same choice to avoid handing the exact coordinate to a tile server, and an
+  /// export has a second reason: it has to render with no network at all.
+  static _MediaTile _locationTile(
+    MessageModel m,
+    bool isMe,
+    ChatPdfFonts fonts,
+  ) {
+    final lat = m.latitude;
+    final lng = m.longitude;
+    if (lat == null || lng == null) {
+      return _mediaPlaceholder('Location not stored on this device', fonts);
+    }
+
+    return _MediaTile(
+      _tileWidth,
+      pw.SizedBox(
+        width: _tileWidth,
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Container(
+              width: 26,
+              height: 26,
+              alignment: pw.Alignment.center,
+              decoration: pw.BoxDecoration(
+                color: isMe ? _sentBadge : _brandTint,
+                shape: pw.BoxShape.circle,
+              ),
+              child: _pinGlyph(isMe ? _white : _brand),
+            ),
+            pw.SizedBox(width: 8),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'Location',
+                    style: pw.TextStyle(
+                      font: fonts.medium,
+                      fontSize: 8.5,
+                      color: isMe ? _onSent : _inkMid,
+                    ),
+                  ),
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                    style: pw.TextStyle(
+                      font: fonts.regular,
+                      fontSize: 7.5,
+                      color: isMe ? _onSentSoft : _inkLow,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A map pin as vector art, for the same reason as [_playGlyph]: 📍 is not in
+  /// Poppins, so the glyph would export as a blank box on the one tile whose
+  /// job is to look like a pin. PDF space is y-up, so the head is the high y.
+  static pw.Widget _pinGlyph(PdfColor color) => pw.CustomPaint(
+        size: const PdfPoint(9, 12),
+        painter: (canvas, size) {
+          final r = size.x / 2;
+          canvas
+            ..setFillColor(color)
+            ..drawEllipse(r, size.y - r, r, r)
+            ..fillPath()
+            ..moveTo(r - 2.2, size.y - r - 1.0)
+            ..lineTo(r + 2.2, size.y - r - 1.0)
+            ..lineTo(r, 0)
+            ..closePath()
+            ..fillPath();
+        },
+      );
 
   static _MediaTile _mediaPlaceholder(String label, ChatPdfFonts fonts) =>
       _MediaTile(

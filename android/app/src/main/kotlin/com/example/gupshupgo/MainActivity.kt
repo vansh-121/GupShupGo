@@ -9,6 +9,7 @@ import android.content.res.Configuration
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Rational
+import android.view.WindowManager
 import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
 import com.google.android.gms.auth.api.identity.Identity
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -20,6 +21,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val CHANNEL = "com.gupshupgo.app/phone_verification"
     private val AUDIO_CHANNEL = "com.gupshupgo.app/audio_recorder"
     private val PIP_CHANNEL = "com.gupshupgo.app/pip"
+    private val SECURE_CHANNEL = "com.gupshupgo.app/secure_screen"
     private val PHONE_HINT_REQUEST_CODE = 1001
     private var pendingResult: MethodChannel.Result? = null
 
@@ -95,6 +97,33 @@ class MainActivity : FlutterFragmentActivity() {
                     // Explicit request (e.g. a "minimize" button) to enter PiP
                     // right away. Returns false on unsupported OS versions.
                     result.success(enterPipNow())
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+
+        // ── Secure-screen method channel ───────────────────────────────
+        // Backs view-once media. FLAG_SECURE on the window makes Android's
+        // window compositor refuse to include this activity in screenshots,
+        // screen recordings and the recent-apps thumbnail, and blocks non-secure
+        // external displays. The Dart wrapper sets it in the viewer's initState
+        // and clears it in dispose, so the flag is scoped to exactly the moment
+        // a view-once photo is on screen — set it app-wide and every share-sheet
+        // screenshot would break too.
+        //
+        // The flag must toggle on the UI thread; this handler already runs there.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SECURE_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setSecure" -> {
+                    val secure = call.argument<Boolean>("secure") ?: false
+                    if (secure) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                    result.success(true)
                 }
                 else -> {
                     result.notImplemented()
