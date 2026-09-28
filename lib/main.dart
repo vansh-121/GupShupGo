@@ -570,6 +570,12 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
     // it a freshly-retired build would run normally for the whole session.
     unawaited(_refreshVersionPolicy());
     FeatureFlagService.instance.addListener(_refreshVersionPolicy);
+    // The deadline rule declines to retire a build until ServerClock is
+    // trusted, so the first real sample can flip an expiring build to
+    // unsupported. That transition fires no config change and may land while
+    // the app sits in the foreground — re-evaluate when it does, so an expired
+    // build isn't left usable until the next resume.
+    ServerClock.addTrustListener(_refreshVersionPolicy);
 
     // Check for a Play Store update on launches that have no home screen to
     // put a dialog on — a signed-out user sitting on LoginScreen. The signed-in
@@ -585,6 +591,7 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     FeatureFlagService.instance.removeListener(_refreshVersionPolicy);
+    ServerClock.removeTrustListener(_refreshVersionPolicy);
     _connectivitySub?.cancel();
     // The gate is the root of the authenticated app: when it goes away the
     // hourly clock refresh has nothing left to serve.
