@@ -727,6 +727,18 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
         ),
       ),
     );
+
+    // Destroy the transferred file now that the one look is over. The
+    // consumed-id set is State-scoped and empty again if the route is
+    // recreated (leave and reopen the mesh chat while still offline), so
+    // without this the reloaded message would point at a file still on disk
+    // and become tappable a second time — breaking the viewer's "closes for
+    // good when you leave" promise. Deleting the bytes makes that promise hold
+    // regardless of the set: a reopened bubble's tap finds no file.
+    try {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   String _formatTime(DateTime t) {

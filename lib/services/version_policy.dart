@@ -18,9 +18,12 @@
 // one obvious undo: a boolean, not an archaeology exercise over three numbers.
 //
 // **Time comes from [ServerClock]**, not `DateTime.now()`, so rolling the
-// device date back does not buy extra days. Rolling it *forward* can bring the
-// block on early — that is the honest limitation of a date-based rule, and it
-// is why `min_supported_version_code` exists as the clock-free alternative.
+// device date back does not buy extra days. Rolling it *forward* used to bring
+// the block on early; the deadline rule now refuses to end a build until
+// ServerClock has landed a real sample ([ServerClock.trusted]), so an untrusted
+// device clock — set ahead, or simply not yet sampled at cold start — can only
+// warn, never lock the user out. `min_supported_version_code` remains the
+// clock-free alternative for an immediate cutoff.
 // Once a device has actually observed the unsupported state it is latched in
 // prefs, so the rollback trick does not work even for the rest of the session.
 //
@@ -110,6 +113,7 @@ class VersionPolicyService {
       deadline: flags.supportDeadline,
       now: ServerClock.now(),
       sticky: sharedPrefs.getBool(_prefSticky) ?? false,
+      clockTrusted: ServerClock.trusted,
     );
   }
 
@@ -146,6 +150,7 @@ class VersionPolicyService {
     required DateTime? deadline,
     required DateTime now,
     bool sticky = false,
+    bool clockTrusted = true,
   }) {
     // Master switch off → the policy does not exist. Checked first so that
     // flipping it back off releases even a device that already latched.
@@ -180,6 +185,21 @@ class VersionPolicyService {
       return VersionPolicy(
         VersionSupportState.expiring,
         daysLeft: days < 1 ? 1 : days,
+        deadline: deadline,
+      );
+    }
+
+    // The deadline has passed by [now]. But [now] is only ServerClock's time
+    // once it has landed a real sample this session; before that it is the raw
+    // device clock, and a device clock set ahead would declare the build
+    // unsupported — and, worse, latch that verdict in prefs so a later
+    // corrected sample can't undo it. This subsystem's whole premise is that
+    // time comes from ServerClock, so an untrusted clock cannot end a build:
+    // warn instead and let the next evaluation (once the clock is trusted)
+    // make the real call. The clock-free hard floor above is unaffected.
+    if (!clockTrusted) {
+      return VersionPolicy(
+        VersionSupportState.expiring,
         deadline: deadline,
       );
     }

@@ -273,7 +273,31 @@ class ChatService {
   // and vault failures are non-fatal.
   static const _vaultCollection = 'msgVault';
 
+  /// In-flight [_saveToVault] futures, keyed by message id.
+  ///
+  /// The receive path fires the vault write with `unawaited`, and the write
+  /// isn't atomic: it `await`s [VaultCipher.encryptPayload] before it ever
+  /// submits the Firestore `.set()`. View-once consumption deletes the same
+  /// vault doc, and if a still-encrypting save submits its `.set()` *after*
+  /// that delete, it silently restores the media key the consumption promised
+  /// to destroy. [markViewOnceConsumed] awaits the pending write here before
+  /// deleting, so the delete always wins.
+  final Map<String, Future<void>> _inFlightVaultWrites = {};
+
   Future<void> _saveToVault(
+      String uid, String messageId, Map<String, dynamic> payload) async {
+    final future = _doSaveToVault(uid, messageId, payload);
+    _inFlightVaultWrites[messageId] = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_inFlightVaultWrites[messageId], future)) {
+        _inFlightVaultWrites.remove(messageId);
+      }
+    }
+  }
+
+  Future<void> _doSaveToVault(
       String uid, String messageId, Map<String, dynamic> payload) async {
     // Never vault a placeholder. The vault is the last line of recovery and
     // survives reinstalls, so a placeholder in it would outlive every other
@@ -2511,6 +2535,12 @@ class ChatService {
     } catch (_) {}
 
     // 4. This device's vault copy — the tier forgetCachedPayload can't reach.
+    // First drain any vault write for this message still in flight from the
+    // receive path: it captured the payload (media key included) by value and
+    // would otherwise land its `.set()` after our delete and restore the key.
+    try {
+      await _inFlightVaultWrites[message.id];
+    } catch (_) {}
     await _deleteFromVault(currentUserId, message.id);
 
     // The decrypted bytes on disk.
@@ -2868,6 +2898,26 @@ class ChatService {
       return await File(path).exists() ? path : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Deletes every decrypted media file cached on this device.
+  ///
+  /// Called on sign-out. [PlaintextStore], the Signal stores and the vault key
+  /// are all wiped there, but the decrypted bytes that [downloadAndCacheMedia]
+  /// and [downloadAndCacheEncryptedMedia] write under `gsg_chat_media/` are
+  /// plaintext on disk and used to survive — on a shared device the next
+  /// account could open the previous account's photos, videos and documents.
+  /// Best-effort: a failure here is non-fatal and logged only in debug.
+  Future<void> clearMediaCache() async {
+    try {
+      final dbDir = (await getApplicationSupportDirectory()).path;
+      final cacheDir = Directory(p.join(dbDir, 'gsg_chat_media'));
+      if (await cacheDir.exists()) {
+        await cacheDir.delete(recursive: true);
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[ChatService] clearMediaCache failed: $e');
     }
   }
 

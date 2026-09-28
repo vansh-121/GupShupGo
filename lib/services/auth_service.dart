@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:video_chat_app/main.dart'; // for sharedPrefs global
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/user_service.dart';
+import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
@@ -851,6 +852,12 @@ class AuthService {
       try {
         final ps = await PlaintextStore.instance();
         await ps.wipe();
+      } catch (_) {}
+      // Delete the decrypted media files too. ps.wipe() only clears the SQLite
+      // rows; the plaintext bytes under gsg_chat_media/ are separate files that
+      // would otherwise remain readable to the next account on a shared device.
+      try {
+        await ChatService.instance.clearMediaCache();
       } catch (_) {}
       // Clear subscription cache (resets to free plan)
       try {

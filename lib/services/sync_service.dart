@@ -487,7 +487,12 @@ class SyncService {
             // listEquals, not `!=`: two equal lists parsed from two snapshots
             // are never the same object, so identity comparison would rewrite
             // the row and rebuild the list on every read receipt in the room.
-            !listEquals(localMsg.deletedFor, serverMsg.deletedFor)) {
+            !listEquals(localMsg.deletedFor, serverMsg.deletedFor) ||
+            // The recipient opened a view-once message and arrayUnion'd their id
+            // onto the doc. This is the sender's only signal to flip their
+            // bubble to "Opened"; without copying it here the sender reads their
+            // stale local list forever and the media stays "unopened" to them.
+            !listEquals(localMsg.viewOnceOpenedBy, serverMsg.viewOnceOpenedBy)) {
           final updated = localMsg.copyWith(
             status: serverMsg.status,
             syncPending: serverMsg.syncPending,
@@ -496,6 +501,7 @@ class SyncService {
             // ChatService.getMessages filters it out at read time, the same way
             // it handles `clearedAt`.
             deletedFor: serverMsg.deletedFor,
+            viewOnceOpenedBy: serverMsg.viewOnceOpenedBy,
           );
           statusUpdates.add(updated);
           if (updated.mediaUrl != null && updated.localFilePath == null) {
