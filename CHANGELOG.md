@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔄 **A Clear Way Back** — If a version does reach the end of its life, the app explains what happened and takes you straight to the update, rather than failing in confusing ways.
 
 ### Changed
-- Updated version to 1.2.0 (build code 57).
+- Updated version to 1.2.0 (build code 58).
 - The update prompt shown on open is the same dialog as Settings → Check for updates, so you're never told about the same update two different ways.
 - Reply previews and chat exports now recognise documents and location pins instead of falling back to a generic label.
 
