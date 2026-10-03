@@ -62,6 +62,18 @@ class MediaKeyBundle {
       );
 }
 
+/// Output of [EncryptedMediaService.sealInline]: a freshly generated content
+/// key and the AES-GCM wire bytes for a payload that ships inline rather than
+/// as a Storage blob. The caller wraps [key] per viewer and base64-embeds
+/// [iv] + [wire] in the referencing document.
+class InlineSealed {
+  InlineSealed({required this.key, required this.iv, required this.wire});
+
+  final Uint8List key; // 32 bytes
+  final Uint8List iv; // 12 bytes
+  final Uint8List wire; // [ciphertext || 16-byte GCM tag]
+}
+
 class EncryptedMediaService {
   static final _gcm = AesGcm.with256bits();
   final FirebaseStorage _storage = FirebaseStorage.instance;
@@ -245,6 +257,53 @@ class EncryptedMediaService {
       diff |= a[i] ^ b[i];
     }
     return diff == 0;
+  }
+
+  // ─── Inline payloads (no Storage round-trip) ──────────────────────────────
+  // For payloads small enough to live directly inside the Firestore document
+  // that references them — text statuses, specifically. The ciphertext ships
+  // in the status item itself, so a viewer decrypts after only the Signal key
+  // unwrap: no second HTTP request to Storage, which is what made text
+  // statuses feel slow. The GCM tag authenticates the bytes, so there is no
+  // separate SHA to carry (that existed only to detect a truncated download).
+
+  /// Generates a fresh content key, AES-256-GCM seals [bytes], and returns the
+  /// key plus the `[ciphertext || tag]` wire for the caller to embed inline.
+  /// The content key is wrapped per viewer by the caller, exactly as for a
+  /// Storage-backed blob — only the ciphertext's home differs.
+  Future<InlineSealed> sealInline(Uint8List bytes) async {
+    final secretKey = await _gcm.newSecretKey();
+    final keyBytes = await secretKey.extractBytes();
+    final nonce = _gcm.newNonce();
+    final sealed = await _seal(
+      bytes: bytes,
+      key: Uint8List.fromList(keyBytes),
+      iv: Uint8List.fromList(nonce),
+    );
+    return InlineSealed(
+      key: Uint8List.fromList(keyBytes),
+      iv: Uint8List.fromList(nonce),
+      wire: sealed.wire,
+    );
+  }
+
+  /// AES-256-GCM decrypts an inline [wire] (`[ciphertext || tag]`) with the
+  /// unwrapped content [key] and [iv]. Inline payloads are tiny, so this runs
+  /// on the calling isolate — spawning one would cost more than the work.
+  Future<Uint8List> openInline({
+    required List<int> key,
+    required List<int> iv,
+    required Uint8List wire,
+  }) async {
+    const tagLen = 16;
+    if (wire.length < tagLen) {
+      throw StateError('inline payload too short to contain a GCM tag');
+    }
+    final ct = wire.sublist(0, wire.length - tagLen);
+    final tag = wire.sublist(wire.length - tagLen);
+    final box = SecretBox(ct, nonce: iv, mac: Mac(tag));
+    final pt = await _gcm.decrypt(box, secretKey: SecretKey(key));
+    return Uint8List.fromList(pt);
   }
 }
 

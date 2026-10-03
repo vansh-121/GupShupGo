@@ -63,6 +63,28 @@ class StatusService {
   // silently drops statuses it can't recover after reinstall.
   static final Set<String> _unrecoverable = {};
 
+  // A freshly-posted status is NOT unrecoverable just because the first
+  // decrypt attempt missed. The wrappedKey envelope, the first-time Signal
+  // handshake with the poster's device, and the Storage blob all propagate to
+  // the viewer independently and can lag the status doc by a few seconds. If
+  // we blacklisted on that first miss, the viewer would filter the item out
+  // and render "No active status" permanently — even though the key arrives a
+  // moment later. So we only give up (and hide the item) once the item is
+  // older than this grace window, by which point a genuine reinstall ghost is
+  // the only thing that still can't be decrypted. The window is generous
+  // enough to absorb clock skew between poster and viewer.
+  static const _unrecoverableGrace = Duration(minutes: 15);
+
+  /// Mark [item] permanently undecryptable on this install — but only if it is
+  /// old enough that a transient propagation / handshake lag can be ruled out.
+  /// A recent item is left untouched so the next stream emission or the
+  /// viewer's own retry loop can recover it once the key lands.
+  static void _giveUpIfStale(StatusItem item) {
+    if (DateTime.now().difference(item.createdAt) > _unrecoverableGrace) {
+      _unrecoverable.add(item.id);
+    }
+  }
+
   static StatusPlaintext? cachedPlaintext(String statusItemId) =>
       _plaintextCache[statusItemId];
 
@@ -364,10 +386,11 @@ class StatusService {
         preloadedKey: _mediaKeyCache[item.id],
       );
       if (result == null) {
-        // No AES key available (vault empty, Signal session gone) — this
-        // item cannot be decrypted on this install. Mark it so the viewer
-        // can filter it out instead of showing a spinner forever.
-        _unrecoverable.add(item.id);
+        // No AES key available yet. Could be a reinstall ghost (vault empty,
+        // Signal session gone) OR a freshly-posted status whose envelope has
+        // not reached this device yet. Only the former is permanent — see
+        // [_giveUpIfStale]. A recent item is left uncached and retryable.
+        _giveUpIfStale(item);
         return;
       }
       if (item.type == 'encrypted') {
@@ -405,7 +428,10 @@ class StatusService {
         );
       }
     } catch (_) {
-      _unrecoverable.add(item.id);
+      // A decrypt that threw (Storage read blip, transient handshake failure)
+      // is treated the same as a missing key: terminal only once the item is
+      // old enough that propagation can be ruled out.
+      _giveUpIfStale(item);
     }
   }
 
@@ -525,6 +551,13 @@ class StatusService {
     return peers.toList();
   }
 
+  /// Generates a fresh Firestore id for a status item. Exposed so the provider
+  /// can mint the id up front for an optimistic placeholder and hand the SAME
+  /// id to the matching upload call — keeping the placeholder and the
+  /// server-echoed item on one id so the UI never shows a transient duplicate.
+  String newStatusItemId() =>
+      _firestore.collection(_statusCollection).doc().id;
+
   /// Encrypted text status. The text body is encrypted under a per-item
   /// content key; the content key is wrapped per viewer device.
   ///
@@ -538,22 +571,26 @@ class StatusService {
     required String text,
     required String backgroundColor,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     final ownerDeviceId = await _deviceIdentity.getDeviceId();
     if (ownerDeviceId == null) {
       throw StateError('E2EE not registered — cannot post encrypted status');
     }
-    final statusItemId = _firestore.collection(_statusCollection).doc().id;
+    final statusItemId =
+        itemId ?? _firestore.collection(_statusCollection).doc().id;
 
-    final bundle = await _media.encryptAndUploadBytes(
-      bytes: Uint8List.fromList(utf8.encode(jsonEncode({
+    // Text is tiny, so the ciphertext rides INLINE in the status item instead
+    // of a Storage blob. A viewer then decrypts after only the Signal key
+    // unwrap — no second HTTP round-trip to Storage, which is what made text
+    // statuses slow to open. (Image/video stay Storage-backed; their blobs are
+    // far too large for a Firestore document.)
+    final sealed = await _media.sealInline(
+      Uint8List.fromList(utf8.encode(jsonEncode({
         'type': 'text',
         'text': text,
         'backgroundColor': backgroundColor,
       }))),
-      storagePath:
-          'statuses/$userId/encrypted_text/${DateTime.now().millisecondsSinceEpoch}',
-      contentType: 'application/json',
     );
 
     final statusItem = StatusItem(
@@ -562,11 +599,13 @@ class StatusService {
       text: null,
       createdAt: DateTime.now(),
       viewedBy: [],
-      imageUrl: bundle.url,
+      // No Storage object for inline text — the ciphertext is in `caption`.
+      imageUrl: null,
       caption: jsonEncode({
         'enc': true,
-        'iv': base64Encode(bundle.iv),
-        'hash': base64Encode(bundle.hash),
+        'inline': true,
+        'iv': base64Encode(sealed.iv),
+        'ct': base64Encode(sealed.wire),
         'ownerDeviceId': ownerDeviceId,
       }),
     );
@@ -574,7 +613,7 @@ class StatusService {
     // Cache the content key locally so this (posting) device can decrypt
     // its own status without a Signal-to-self envelope.
     final ps = await PlaintextStore.instance();
-    final ownerKey = Uint8List.fromList(bundle.key);
+    final ownerKey = sealed.key;
     await ps.saveStatusKey(statusItemId, ownerKey);
     _mediaKeyCache[statusItemId] = ownerKey;
     unawaited(_saveMediaKeyToVault(userId, statusItemId, ownerKey));
@@ -587,7 +626,7 @@ class StatusService {
       ownerUid: userId,
       ownerDeviceId: ownerDeviceId,
       statusItemId: statusItemId,
-      contentKey: Uint8List.fromList(bundle.key),
+      contentKey: sealed.key,
       viewerUids: viewerUids,
     );
     await _addStatusItem(
@@ -609,6 +648,7 @@ class StatusService {
     required File imageFile,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     // Shrink before encrypt+upload — a 5 MB gallery photo turns into a
     // ~250 KB JPEG that uploads in a second over 4G instead of 15-30s.
@@ -632,6 +672,7 @@ class StatusService {
       contentType: 'image/jpeg',
       caption: caption,
       viewerUids: viewerUids,
+      itemId: itemId,
     );
   }
 
@@ -644,6 +685,7 @@ class StatusService {
     required File videoFile,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) =>
       _uploadEncryptedMedia(
         userId: userId,
@@ -656,6 +698,7 @@ class StatusService {
         contentType: 'video/mp4',
         caption: caption,
         viewerUids: viewerUids,
+        itemId: itemId,
       );
 
   Future<void> _uploadEncryptedMedia({
@@ -669,12 +712,14 @@ class StatusService {
     required String contentType,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     final ownerDeviceId = await _deviceIdentity.getDeviceId();
     if (ownerDeviceId == null) {
       throw StateError('E2EE not registered — cannot post encrypted status');
     }
-    final statusItemId = _firestore.collection(_statusCollection).doc().id;
+    final statusItemId =
+        itemId ?? _firestore.collection(_statusCollection).doc().id;
     final bundle = await _media.encryptAndUpload(
       file: file,
       storagePath:
@@ -759,6 +804,26 @@ class StatusService {
       selfUid: selfUid,
     );
     if (key == null) return null;
+
+    // Inline text statuses carry their ciphertext in `caption` ('ct') rather
+    // than a Storage blob, so there is no download — decrypt the bytes in hand.
+    // The GCM tag authenticates them, so no SHA hash is carried or checked.
+    if (meta['inline'] == true) {
+      final pt = await _media.openInline(
+        key: key,
+        iv: base64Decode(meta['iv'] as String),
+        wire: base64Decode(meta['ct'] as String),
+      );
+      return {
+        'type': item.type,
+        'bytes': pt,
+        if (item.type == 'encrypted')
+          'json': jsonDecode(utf8.decode(pt)) as Map<String, dynamic>,
+      };
+    }
+
+    // Legacy Storage-backed path: text statuses posted before the inline
+    // migration, plus all image/video statuses (too large to inline).
     final bundle = MediaKeyBundle(
       key: key,
       iv: base64Decode(meta['iv'] as String),

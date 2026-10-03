@@ -6,7 +6,7 @@
 /// the signature and does the crediting. A tampered client can fake
 /// [RewardedAdOutcome.earned] all day and still be paid nothing.
 ///
-/// One rewarded unit serves both reward types, so the type has to travel in
+/// One rewarded unit serves every reward type, so the type has to travel in
 /// `custom_data` — it cannot be inferred from the ad unit ID.
 library;
 
@@ -27,7 +27,11 @@ enum AdRewardType {
   points('points'),
 
   /// One free Bond Restore, credited as `users/{uid}.adRestoreCredits`.
-  restore('restore');
+  restore('restore'),
+
+  /// Extra GupShup AI messages for the day, credited as a bump to
+  /// `users/{uid}.aiRewardDaily` (worth `config/ai.rewardCredits` each).
+  aiCredit('ai_credit');
 
   const AdRewardType(this.wire);
   final String wire;

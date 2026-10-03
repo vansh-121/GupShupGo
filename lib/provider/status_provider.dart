@@ -26,36 +26,26 @@ class StatusProvider extends ChangeNotifier {
   String? _pendingUserPhotoUrl;
   String? _pendingUserPhoneNumber;
 
-  /// Cached result of _mergeMyStatusWithPending — recomputed only when
-  /// _myStatus or _pendingMyItems change. Prevents creating a new
-  /// StatusModel with DateTime.now() on every getter call, which would
-  /// defeat Flutter's == comparison and trigger unnecessary rebuilds.
+  /// Cached merge of [_myStatus] with any still-pending optimistic items.
+  /// Kept in sync by [_recomputeMerged], which runs on every state change
+  /// (stream emit, pending add/remove) right before notifyListeners — so the
+  /// getters below are pure reads that never return a stale value. Recomputing
+  /// only on change (not on every getter call) also avoids minting a new
+  /// StatusModel with a fresh DateTime.now() on each access, which would churn
+  /// rebuilds.
   StatusModel? _cachedMergedStatus;
 
   /// Whether the user has at least one upload still in flight. Lets the UI
   /// show a subtle "uploading" hint instead of nothing.
   bool get hasPendingUpload => _pendingMyItems.isNotEmpty;
 
-  StatusModel? get myStatus {
-    // Lazy init: ensure the cache is populated from _myStatus before returning.
-    // Without this, _cachedMergedStatus stays null on the first access even
-    // when _myStatus has data, causing the UI to show "no status" briefly.
-    if (_cachedMergedStatus == null && _myStatus != null) {
-      _mergeMyStatusWithPending();
-    }
-    return _cachedMergedStatus;
-  }
+  StatusModel? get myStatus => _cachedMergedStatus;
   List<StatusModel> get otherStatuses => _otherStatuses;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
   /// Whether the current user has an active status.
-  bool get hasMyStatus {
-    // Recompute on access — this is called infrequently (tile visibility).
-    _mergeMyStatusWithPending();
-    final merged = _cachedMergedStatus;
-    return merged != null && merged.hasActiveStatus;
-  }
+  bool get hasMyStatus => _cachedMergedStatus?.hasActiveStatus ?? false;
 
   StatusProvider({StatusService? statusService})
       : _statusService = statusService ?? StatusService();
@@ -69,12 +59,17 @@ class StatusProvider extends ChangeNotifier {
     _listenToOtherStatuses(userId);
   }
 
-  StatusModel? _mergeMyStatusWithPending() {
-    if (_pendingMyItems.isEmpty) {
-      _cachedMergedStatus = _myStatus;
-      return _myStatus;
-    }
+  /// Rebuilds [_cachedMergedStatus] from [_myStatus] plus any still-pending
+  /// optimistic items. Pending items whose id already appears in the real
+  /// status (the server has echoed them back) are dropped here too, so a
+  /// freshly-posted item is never shown twice. Call before notifyListeners on
+  /// any change to [_myStatus] or [_pendingMyItems].
+  void _recomputeMerged() {
     final real = _myStatus;
+    if (_pendingMyItems.isEmpty) {
+      _cachedMergedStatus = real;
+      return;
+    }
     final realIds = <String>{
       if (real != null) ...real.statusItems.map((s) => s.id),
     };
@@ -82,22 +77,20 @@ class StatusProvider extends ChangeNotifier {
         _pendingMyItems.where((p) => !realIds.contains(p.id)).toList();
     if (pending.isEmpty) {
       _cachedMergedStatus = real;
-      return real;
+      return;
     }
-    final items = <StatusItem>[
-      if (real != null) ...real.statusItems,
-      ...pending,
-    ];
     _cachedMergedStatus = StatusModel(
-      id: _pendingUserId ?? real?.id ?? '',
-      userId: _pendingUserId ?? real?.userId ?? '',
-      userName: _pendingUserName ?? real?.userName ?? '',
-      userPhotoUrl: _pendingUserPhotoUrl ?? real?.userPhotoUrl,
-      userPhoneNumber: _pendingUserPhoneNumber ?? real?.userPhoneNumber,
-      statusItems: items,
+      id: real?.id ?? _pendingUserId ?? '',
+      userId: real?.userId ?? _pendingUserId ?? '',
+      userName: real?.userName ?? _pendingUserName ?? '',
+      userPhotoUrl: real?.userPhotoUrl ?? _pendingUserPhotoUrl,
+      userPhoneNumber: real?.userPhoneNumber ?? _pendingUserPhoneNumber,
+      statusItems: <StatusItem>[
+        if (real != null) ...real.statusItems,
+        ...pending,
+      ],
       lastUpdated: DateTime.now(),
     );
-    return _cachedMergedStatus;
   }
 
   void _listenToMyStatus(String userId) {
@@ -105,11 +98,13 @@ class StatusProvider extends ChangeNotifier {
     _myStatusSubscription = _statusService.getMyStatus(userId).listen(
       (status) {
         _myStatus = status;
-        // Drop pending items the server has echoed back.
+        // Drop pending items the server has echoed back — now matched by the
+        // shared status-item id (see postEncrypted*StatusInBackground).
         if (status != null) {
           final serverIds = status.statusItems.map((s) => s.id).toSet();
           _pendingMyItems.removeWhere((p) => serverIds.contains(p.id));
         }
+        _recomputeMerged();
         notifyListeners();
         if (status != null) {
           _statusService.preDecryptStatuses([status], userId);
@@ -151,11 +146,15 @@ class StatusProvider extends ChangeNotifier {
 
   void _addPending(StatusItem item) {
     _pendingMyItems.add(item);
+    _recomputeMerged();
     notifyListeners();
   }
 
   void _removePending(String id) {
+    final before = _pendingMyItems.length;
     _pendingMyItems.removeWhere((p) => p.id == id);
+    if (_pendingMyItems.length == before) return; // already gone — no rebuild
+    _recomputeMerged();
     notifyListeners();
   }
 
@@ -178,10 +177,13 @@ class StatusProvider extends ChangeNotifier {
       userPhotoUrl: userPhotoUrl,
       userPhoneNumber: userPhoneNumber,
     );
-    final optimisticId =
-        'pending_${DateTime.now().microsecondsSinceEpoch}';
+    // Generate the real status-item id up front and use it for BOTH the
+    // optimistic placeholder and the uploaded item. Sharing the id lets the
+    // stream listener drop the placeholder the instant the server echoes the
+    // real item (same id) — no transient "2 updates" flicker.
+    final statusItemId = _statusService.newStatusItemId();
     _addPending(StatusItem(
-      id: optimisticId,
+      id: statusItemId,
       type: 'text',
       text: text,
       backgroundColor: backgroundColor,
@@ -197,15 +199,15 @@ class StatusProvider extends ChangeNotifier {
       text: text,
       backgroundColor: backgroundColor,
       viewerUids: viewerUids,
+      itemId: statusItemId,
     )
         .then((_) {
-      // Clean up the optimistic placeholder; the real item will arrive
-      // via the stream listener (which also removes server-echoed pending
-      // items, but our pending id is local-only so we must drop it here).
-      _removePending(optimisticId);
+      // Success is normally handled by the stream echo (same id); this is a
+      // belt-and-suspenders cleanup and the sole path on failure.
+      _removePending(statusItemId);
     }).catchError((e) {
       _error = 'Failed to post status: $e';
-      _removePending(optimisticId);
+      _removePending(statusItemId);
     });
   }
 
@@ -225,10 +227,9 @@ class StatusProvider extends ChangeNotifier {
       userPhotoUrl: userPhotoUrl,
       userPhoneNumber: userPhoneNumber,
     );
-    final optimisticId =
-        'pending_${DateTime.now().microsecondsSinceEpoch}';
+    final statusItemId = _statusService.newStatusItemId();
     _addPending(StatusItem(
-      id: optimisticId,
+      id: statusItemId,
       type: 'image',
       imageUrl: imageFile.path, // local path; tile can render a thumbnail
       caption: caption,
@@ -244,12 +245,13 @@ class StatusProvider extends ChangeNotifier {
       imageFile: imageFile,
       caption: caption,
       viewerUids: viewerUids,
+      itemId: statusItemId,
     )
         .then((_) {
-      _removePending(optimisticId);
+      _removePending(statusItemId);
     }).catchError((e) {
       _error = 'Failed to post status: $e';
-      _removePending(optimisticId);
+      _removePending(statusItemId);
     });
   }
 
@@ -269,10 +271,9 @@ class StatusProvider extends ChangeNotifier {
       userPhotoUrl: userPhotoUrl,
       userPhoneNumber: userPhoneNumber,
     );
-    final optimisticId =
-        'pending_${DateTime.now().microsecondsSinceEpoch}';
+    final statusItemId = _statusService.newStatusItemId();
     _addPending(StatusItem(
-      id: optimisticId,
+      id: statusItemId,
       type: 'video',
       videoUrl: videoFile.path,
       caption: caption,
@@ -288,12 +289,13 @@ class StatusProvider extends ChangeNotifier {
       videoFile: videoFile,
       caption: caption,
       viewerUids: viewerUids,
+      itemId: statusItemId,
     )
         .then((_) {
-      _removePending(optimisticId);
+      _removePending(statusItemId);
     }).catchError((e) {
       _error = 'Failed to post status: $e';
-      _removePending(optimisticId);
+      _removePending(statusItemId);
     });
   }
 
