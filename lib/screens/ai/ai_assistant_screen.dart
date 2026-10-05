@@ -219,7 +219,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetCtx) {
+      builder: (_) {
         var adBusy = false;
         var statusLine = isPro
             ? 'You\'ve used all of today\'s messages. They reset tomorrow.'

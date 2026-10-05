@@ -2094,6 +2094,13 @@ const AI_CONFIG_FALLBACK = {
   proDailyCap: 100,
   rewardCredits: 5,
   rewardDailyCap: 5,
+  // Models to try, in order, when the primary `model` is overloaded (503) or
+  // throttled (429) — free-tier quota and overload are largely PER-MODEL, so a
+  // sibling often answers when the configured one won't. These are the prior
+  // `-flash` generations, which sit on separate capacity pools from the primary;
+  // override live via `config/ai.fallbackModels` (no redeploy). The primary
+  // `model` is always tried first regardless.
+  fallbackModels: ["gemini-3.7-flash", "gemini-3.6-flash"],
 };
 
 // `config/ai` changes rarely but is read on every AI turn and every ai_credit SSV
@@ -2102,6 +2109,23 @@ const AI_CONFIG_FALLBACK = {
 const AI_CONFIG_TTL_MS = 60 * 1000;
 let _aiConfigValue = null;
 let _aiConfigFetchedAt = 0;
+
+/**
+ * Coerces a `config/ai.fallbackModels` value into a clean, ordered list of
+ * non-empty model-name strings. Anything that isn't an array (or is missing)
+ * yields the fallback's own list, so a malformed value never breaks the chain.
+ *
+ * @param {*} raw
+ * @returns {Array<string>}
+ */
+function _sanitizeModelList(raw) {
+  if (!Array.isArray(raw)) return [...AI_CONFIG_FALLBACK.fallbackModels];
+  const out = [];
+  for (const m of raw) {
+    if (typeof m === "string" && m.trim().length > 0) out.push(m.trim());
+  }
+  return out;
+}
 
 /**
  * Reads `config/ai`, merged over the safe fallbacks and cached per instance.
@@ -2133,6 +2157,7 @@ async function getAiConfig() {
         proDailyCap: aiQuota.positiveIntOr(data.proDailyCap, AI_CONFIG_FALLBACK.proDailyCap),
         rewardCredits: aiQuota.positiveIntOr(data.rewardCredits, AI_CONFIG_FALLBACK.rewardCredits),
         rewardDailyCap: aiQuota.positiveIntOr(data.rewardDailyCap, AI_CONFIG_FALLBACK.rewardDailyCap),
+        fallbackModels: _sanitizeModelList(data.fallbackModels),
       };
     }
   } catch (error) {
@@ -2913,24 +2938,72 @@ exports.admobSsv = onRequest(
 // context, and an unbounded history would blow the token budget and the cost.
 const AI_MAX_HISTORY_TURNS = 20;
 const AI_MAX_CHARS = 4000;
-const AI_GEMINI_TIMEOUT_MS = 20 * 1000;
+
+// One Gemini call can hang, and we may now make several per turn (retries +
+// model fall-through), so each attempt is capped well under the client's 30s
+// HTTP timeout and the whole generate step is bounded too — the FUNCTION must
+// return its own graceful 503 before the app's socket gives up, or the user's
+// turn is stranded instead of staying retryable.
+const AI_ATTEMPT_TIMEOUT_MS = 12 * 1000;
+const AI_GENERATE_BUDGET_MS = 25 * 1000;
+
+// Transient upstream failures (503 overloaded / other 5xx / network / timeout)
+// are retried on the SAME model this many times, with a short backoff, before
+// falling through to the next model in the chain. A spent quota (429) or an
+// unknown model (404) skips straight to the next model instead — no backoff can
+// clear either, but a sibling model has its own quota and may exist on the key.
+const AI_RETRIES_PER_MODEL = 1;
+const AI_RETRY_BASE_DELAY_MS = 500;
 
 /**
- * Calls Gemini `generateContent` and returns the reply text, or `null` when the
- * model produced no usable text (safety block, empty candidate). Throws on a
- * network error, a timeout, or a non-2xx upstream status — the caller maps a
- * throw to a graceful 503 and does NOT charge the user.
+ * The ordered, de-duplicated models to try for one turn: the configured
+ * `cfg.model` first, then `cfg.fallbackModels`. Dedup keeps a fallback that
+ * repeats the primary from costing a wasted round-trip.
  *
  * @param {object} cfg resolved `config/ai`
- * @param {Array<object>} contents Gemini `contents[]`
- * @returns {Promise<?string>}
+ * @returns {Array<string>}
  */
-async function _generateGeminiReply(cfg, contents) {
+function _aiModelChain(cfg) {
+  const raw = [
+    cfg.model,
+    ...(Array.isArray(cfg.fallbackModels) ? cfg.fallbackModels : []),
+  ];
+  const seen = new Set();
+  const chain = [];
+  for (const m of raw) {
+    if (typeof m !== "string") continue;
+    const name = m.trim();
+    if (name.length === 0 || seen.has(name)) continue;
+    seen.add(name);
+    chain.push(name);
+  }
+  return chain;
+}
+
+/**
+ * One `generateContent` attempt against a single model. Never throws: every
+ * network error, timeout, and HTTP status is classified into how the
+ * orchestrator should react, so retry / fall-through / fail-fast all live in
+ * one place rather than being scattered across try/catch.
+ *
+ *  - `{kind:'ok', text}`     — a usable reply.
+ *  - `{kind:'empty'}`        — 200 with no text (safety block / empty candidate).
+ *  - `{kind:'retry', error}` — 503/5xx/network/timeout: worth another go.
+ *  - `{kind:'next', error}`  — 429/404: this model is out; try the next one.
+ *  - `{kind:'fatal', error}` — 400/401/403: a bad request or key, same for all.
+ *
+ * @param {string} model
+ * @param {object} cfg resolved `config/ai`
+ * @param {Array<object>} contents Gemini `contents[]`
+ * @param {number} timeoutMs abort budget for this one attempt
+ * @returns {Promise<object>}
+ */
+async function _geminiAttempt(model, cfg, contents, timeoutMs) {
   const url =
     "https://generativelanguage.googleapis.com/v1beta/models/" +
-    `${encodeURIComponent(cfg.model)}:generateContent`;
+    `${encodeURIComponent(model)}:generateContent`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AI_GEMINI_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
     response = await fetch(url, {
@@ -2946,26 +3019,105 @@ async function _generateGeminiReply(cfg, contents) {
       }),
       signal: controller.signal,
     });
+  } catch (error) {
+    const reason =
+      error && error.name === "AbortError"
+        ? "timeout"
+        : `network: ${(error && error.message) || "unknown"}`;
+    return { kind: "retry", error: `${model} ${reason}` };
   } finally {
     clearTimeout(timer);
   }
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`gemini ${response.status}: ${detail.slice(0, 300)}`);
+  if (response.ok) {
+    const data = await response.json().catch(() => null);
+    const parts =
+      data && data.candidates && data.candidates[0] && data.candidates[0].content
+        ? data.candidates[0].content.parts
+        : null;
+    const text = Array.isArray(parts)
+      ? parts
+          .map((p) => (p && typeof p.text === "string" ? p.text : ""))
+          .join("")
+          .trim()
+      : "";
+    return text.length > 0 ? { kind: "ok", text } : { kind: "empty" };
   }
 
-  const data = await response.json();
-  const parts =
-    data && data.candidates && data.candidates[0] && data.candidates[0].content
-      ? data.candidates[0].content.parts
-      : null;
-  if (!Array.isArray(parts)) return null;
-  const text = parts
-    .map((p) => (p && typeof p.text === "string" ? p.text : ""))
-    .join("")
-    .trim();
-  return text.length > 0 ? text : null;
+  const detail = (await response.text().catch(() => "")).slice(0, 300);
+  const errMsg = `gemini ${response.status} (${model}): ${detail}`;
+  if (response.status === 429 || response.status === 404) {
+    return { kind: "next", error: errMsg };
+  }
+  if (response.status >= 500) {
+    return { kind: "retry", error: errMsg };
+  }
+  // 400 / 401 / 403 and other 4xx — a bad payload or key, identical across models.
+  return { kind: "fatal", error: errMsg };
+}
+
+/**
+ * Generates a reply, trying each model in the chain and absorbing the transient
+ * upstream failures that otherwise surface to the user as "GupShup AI is busy":
+ * a 503 "overloaded" / 5xx / network blip is retried on the same model with a
+ * short backoff; a 429 (quota) or 404 (unknown model) falls straight through to
+ * the next model, which has its own quota and may exist on the key.
+ *
+ * Returns the reply text, or `null` when a model answered 200 with no usable
+ * text (safety block / empty candidate) — a content outcome, not an
+ * availability one, so we do NOT model-hop on it. Throws only when every model
+ * is exhausted, a hard client error (400/401/403) is hit, or the time budget is
+ * spent; the caller maps any throw to a graceful 503 and does NOT charge the
+ * user. The whole step is bounded by [AI_GENERATE_BUDGET_MS] so the function,
+ * not the client socket, is the one that gives up first.
+ *
+ * @param {object} cfg resolved `config/ai`
+ * @param {Array<object>} contents Gemini `contents[]`
+ * @returns {Promise<?string>}
+ */
+async function _generateGeminiReply(cfg, contents) {
+  const chain = _aiModelChain(cfg);
+  if (chain.length === 0) throw new Error("gemini: no model configured");
+
+  const deadline = Date.now() + AI_GENERATE_BUDGET_MS;
+  let lastError = "gemini: all models exhausted";
+
+  for (const model of chain) {
+    for (let attempt = 0; attempt <= AI_RETRIES_PER_MODEL; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`${lastError} (budget spent)`);
+
+      const result = await _geminiAttempt(
+        model,
+        cfg,
+        contents,
+        Math.min(AI_ATTEMPT_TIMEOUT_MS, remaining)
+      );
+
+      if (result.kind === "ok") return result.text;
+      // A safety block / empty candidate is a content outcome — don't model-hop.
+      if (result.kind === "empty") return null;
+
+      lastError = result.error;
+      if (result.kind === "fatal") throw new Error(lastError);
+
+      console.warn("askGupShupAi: Gemini attempt failed:", lastError);
+
+      // 429/404: this model is out — go straight to the next, no backoff.
+      if (result.kind === "next") break;
+
+      // 503/5xx/network/timeout: back off and retry the SAME model, unless its
+      // retries are spent (fall through to the next model) or the backoff
+      // wouldn't fit the remaining budget.
+      if (attempt < AI_RETRIES_PER_MODEL) {
+        const backoff =
+          AI_RETRY_BASE_DELAY_MS * (attempt + 1) + Math.floor(Math.random() * 250);
+        if (deadline - Date.now() <= backoff) break;
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+  throw new Error(lastError);
 }
 
 exports.askGupShupAi = onRequest(
