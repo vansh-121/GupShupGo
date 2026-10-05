@@ -104,6 +104,34 @@ class ServerClock {
   static Timer? _timer;
   static Future<bool>? _inFlight;
 
+  /// Callbacks fired once, the first time the clock becomes [trusted] this
+  /// session. Used by the version-support gate: its deadline rule can only
+  /// return "unsupported" once the clock is trustworthy, so the moment a real
+  /// sample lands is the moment that verdict might change and the gate has to
+  /// re-evaluate. Without this a foreground session that started before the
+  /// first sample would keep running an expired build until the next resume.
+  static final List<VoidCallback> _trustListeners = [];
+
+  /// Registers [listener] to run when the clock first becomes trusted. If it is
+  /// already trusted, [listener] is not called — the caller has already missed
+  /// nothing, because trust never regresses within a session.
+  static void addTrustListener(VoidCallback listener) =>
+      _trustListeners.add(listener);
+
+  static void removeTrustListener(VoidCallback listener) =>
+      _trustListeners.remove(listener);
+
+  static void _notifyTrustGained() {
+    // Snapshot: a listener that removes itself must not mutate the list mid-loop.
+    for (final l in List<VoidCallback>.of(_trustListeners)) {
+      try {
+        l();
+      } catch (e) {
+        debugPrint('[ServerClock] trust listener threw (non-fatal): $e');
+      }
+    }
+  }
+
   // ── Reading ───────────────────────────────────────────────────────────────
 
   /// The best available estimate of the server's `now`, in UTC.
@@ -173,6 +201,7 @@ class ServerClock {
     _sampledAt = null;
     _loaded = false;
     _inFlight = null;
+    _trustListeners.clear();
   }
 
   // ── Sampling ──────────────────────────────────────────────────────────────
@@ -341,6 +370,7 @@ class ServerClock {
       return false;
     }
     _offset = offset;
+    final gainedTrust = !_trusted;
     _trusted = true;
     _source = source;
     _sampledAt = deviceInstant;
@@ -348,6 +378,7 @@ class ServerClock {
     // Fire and forget: a failed write costs the next cold start its
     // provisional offset, nothing more.
     _persist(offset: offset, sampleWall: deviceInstant);
+    if (gainedTrust) _notifyTrustGained();
     return true;
   }
 

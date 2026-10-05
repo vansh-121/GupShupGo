@@ -33,6 +33,7 @@ import 'package:video_chat_app/services/chat_cache_service.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/services/streak/streak_repository.dart';
+import 'package:video_chat_app/services/update_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
@@ -141,6 +142,16 @@ class _HomeScreenState extends State<HomeScreen>
   // data. Without a tick, a contact who stopped heartbeating would keep a green
   // dot until something else happened to rebuild the list.
   Timer? _presenceDecayTimer;
+
+  /// When the app was last backgrounded, so a resume can tell a glance at the
+  /// notification shade from coming back the next morning. Drives the update
+  /// re-check — see [_minBackgroundForUpdateCheck].
+  DateTime? _backgroundedAt;
+
+  /// How long the app has to have been away before a resume is worth another
+  /// Play round-trip. Short enough that "opened it again after lunch" is
+  /// covered, long enough that task-switching never costs anything.
+  static const _minBackgroundForUpdateCheck = Duration(hours: 4);
   static const _presenceDecayInterval = Duration(seconds: 20);
 
   // ─── First-run coaching ──────────────────────────────────────────────
@@ -221,11 +232,13 @@ class _HomeScreenState extends State<HomeScreen>
     switch (state) {
       case AppLifecycleState.resumed:
         _startPresenceDecayTimer();
+        _maybeRecheckUpdatesOnResume();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
+        _backgroundedAt ??= DateTime.now();
         _presenceDecayTimer?.cancel();
         _presenceDecayTimer = null;
         break;
@@ -258,6 +271,27 @@ class _HomeScreenState extends State<HomeScreen>
           break;
       }
     }
+  }
+
+  /// Re-runs the update prompts when the app comes back from a long absence.
+  ///
+  /// This is what makes an update surface "on its own" rather than only on a
+  /// cold start — most people never actually close this app, so a launch-only
+  /// check can go days without running. Three guards keep it from becoming a
+  /// nuisance: it needs a real absence ([_minBackgroundForUpdateCheck]), Home
+  /// has to be the visible route (resuming into a chat or a call is not the
+  /// moment), and the prompts carry their own throttles on top.
+  void _maybeRecheckUpdatesOnResume() {
+    final since = _backgroundedAt;
+    _backgroundedAt = null;
+    if (since == null) return;
+    if (DateTime.now().difference(since) < _minBackgroundForUpdateCheck) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      unawaited(UpdateService.instance.runLaunchPrompts(context));
+    });
   }
 
   Future<void> _initializeApp() async {
@@ -324,7 +358,17 @@ class _HomeScreenState extends State<HomeScreen>
           debugPrint('[Vault] readiness failed: $e');
         }
         if (!mounted) return;
-        maybeShowWhatsNew(context);
+        // Awaited, unlike before: the update prompt has to queue behind the
+        // changelog rather than land on top of it, and the username setup
+        // screen below must not push itself under an open dialog either.
+        await maybeShowWhatsNew(context);
+        if (!mounted) return;
+
+        // Expiry countdown first, then Play's ordinary "newer version"
+        // offer — at most one dialog, both throttled. This is what makes the
+        // update prompt appear on open instead of only from Settings.
+        await UpdateService.instance.runLaunchPrompts(context);
+        if (!mounted) return;
 
         // ── Check if user needs to choose a unique @username handle ─────
         // Push it ON TOP of HomeScreen (push, not pushReplacement) so that when
