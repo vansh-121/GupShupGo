@@ -97,7 +97,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            Text('✨', style: GoogleFonts.poppins(fontSize: 20)),
+            Icon(Icons.auto_awesome_rounded, color: c.primary, size: 22),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -459,7 +459,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 ),
               ),
               alignment: Alignment.center,
-              child: const Text('✨', style: TextStyle(fontSize: 18)),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
             Column(
@@ -835,7 +839,11 @@ class _EmptyState extends StatelessWidget {
               ),
             ),
             alignment: Alignment.center,
-            child: const Text('✨', style: TextStyle(fontSize: 34)),
+            child: const Icon(
+              Icons.auto_awesome_rounded,
+              color: Colors.white,
+              size: 36,
+            ),
           ),
         ),
         const SizedBox(height: 18),

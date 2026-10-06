@@ -1551,7 +1551,11 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   alignment: Alignment.center,
-                  child: const Text('✨', style: TextStyle(fontSize: 24)),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                    size: 28,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
