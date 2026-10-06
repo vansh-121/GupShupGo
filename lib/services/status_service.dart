@@ -75,6 +75,14 @@ class StatusService {
   // enough to absorb clock skew between poster and viewer.
   static const _unrecoverableGrace = Duration(minutes: 15);
 
+  /// Ceiling on how long a viewer waits on a single shared decrypt attempt.
+  /// Belt-and-suspenders beyond EncryptedMediaService's download timeout: if the
+  /// underlying future wedges for any other reason (e.g. a stuck per-address
+  /// Signal lock), the viewer's retry loop must still advance to "tap to retry"
+  /// instead of spinning forever. Slightly longer than the download timeout so a
+  /// legitimately slow download isn't cut off early.
+  static const _decryptWaitCeiling = Duration(seconds: 25);
+
   /// Mark [item] permanently undecryptable on this install — but only if it is
   /// old enough that a transient propagation / handshake lag can be ruled out.
   /// A recent item is left untouched so the next stream emission or the
@@ -324,13 +332,15 @@ class StatusService {
     if (_plaintextCache.containsKey(item.id)) return;
     final existing = _inFlight[item.id];
     if (existing != null) {
-      await existing;
+      // Bounded wait — see [_decryptWaitCeiling]. On timeout we return normally
+      // so the caller re-checks the cache and retries or gives up, never hangs.
+      await existing.timeout(_decryptWaitCeiling, onTimeout: () {});
       return;
     }
     final fut = _preDecryptOne(ownerUid, item, selfUid)
         .whenComplete(() => _inFlight.remove(item.id));
     _inFlight[item.id] = fut;
-    await fut;
+    await fut.timeout(_decryptWaitCeiling, onTimeout: () {});
   }
 
   Future<void> _preDecryptOne(
@@ -517,7 +527,22 @@ class StatusService {
         .collection('envelopes')
         .doc(addr)
         .get();
-    if (!doc.exists) return null;
+    if (!doc.exists) {
+      // No envelope for this device. The owner fanned out before this install
+      // existed (reinstall → new device id) or the encrypt to us failed. Ask
+      // the owner to re-wrap the content key for this device; their app serves
+      // it via [startServingKeyRequests]. Without this a dropped envelope was
+      // terminal — the status spun, then "tap to retry" against the same
+      // missing doc, forever.
+      unawaited(_requestStatusKey(
+        ownerUid: ownerUid,
+        ownerDeviceId: ownerDeviceId,
+        statusItemId: statusItemId,
+        selfUid: selfUid,
+        selfDeviceId: deviceId,
+      ));
+      return null;
+    }
     final env = EncryptedEnvelope.fromMap(doc.data()!);
     try {
       final key = await SignalService.instance
@@ -529,6 +554,181 @@ class StatusService {
       return key;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ── Status key heal (viewer-missing-key → owner re-wraps) ────────────────
+  // Mirrors ChatService's resend protocol for the per-viewer wrapped AES key.
+  // Before this, a viewer whose live device never received an envelope had no
+  // way to recover: the status spun, then showed "tap to retry" against the
+  // same missing doc forever. Now the viewer asks and the owner re-wraps.
+  static const _keyRequestsCollection = 'keyRequests';
+
+  /// Items we have already asked for this session, so repeated viewer retries
+  /// don't rewrite the (write-once) request doc on every tick.
+  static final Set<String> _requestedKeys = <String>{};
+
+  /// Owner-side listener subscription + the uid it is bound to. Static so a
+  /// recreated StatusService / provider can't leak a second listener.
+  static StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _keyReqSub;
+  static String? _keyReqOwner;
+
+  /// Viewer side: ask [ownerUid] to re-wrap the content key for [statusItemId]
+  /// for this device. Deterministic id so one device mints at most one pending
+  /// request per item. Fire-and-forget; the owner serves asynchronously.
+  Future<void> _requestStatusKey({
+    required String ownerUid,
+    required int ownerDeviceId,
+    required String statusItemId,
+    required String selfUid,
+    required int selfDeviceId,
+  }) async {
+    if (ownerUid.isEmpty || ownerUid == selfUid) return;
+    if (!_requestedKeys.add(statusItemId)) return; // already asked this session
+    try {
+      final reqId = '${statusItemId}__$selfUid:$selfDeviceId';
+      await _firestore
+          .collection(_statusCollection)
+          .doc(ownerUid)
+          .collection(_keyRequestsCollection)
+          .doc(reqId)
+          .set({
+        'itemId': statusItemId,
+        'ownerDeviceId': ownerDeviceId,
+        'requesterUid': selfUid,
+        'requesterDeviceId': selfDeviceId,
+        'at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      // A pending request may still exist (write-once rule denies the update);
+      // harmless. Forget the dedupe entry so a later session can retry.
+      _requestedKeys.remove(statusItemId);
+      if (kDebugMode) debugPrint('[Status] key request failed: $e');
+    }
+  }
+
+  /// Owner side: start serving wrapped-key re-wrap requests for [ownerUid].
+  /// Idempotent; rebinds if the signed-in user changes. Called from
+  /// StatusProvider.initialize so it runs for the whole session, the way the
+  /// chat resend listener does.
+  void startServingKeyRequests(String ownerUid) {
+    if (ownerUid.isEmpty) return;
+    if (_keyReqOwner == ownerUid && _keyReqSub != null) return;
+    _keyReqSub?.cancel();
+    _keyReqOwner = ownerUid;
+    _keyReqSub = _firestore
+        .collection(_statusCollection)
+        .doc(ownerUid)
+        .collection(_keyRequestsCollection)
+        .snapshots()
+        .listen((snap) {
+      for (final change in snap.docChanges) {
+        if (change.type == DocumentChangeType.removed) continue;
+        final data = change.doc.data();
+        if (data != null) {
+          unawaited(_serveKeyRequest(ownerUid, change.doc.id, data));
+        }
+      }
+    }, onError: (e) {
+      if (kDebugMode) debugPrint('[Status] keyRequests listen error: $e');
+    });
+  }
+
+  /// Stop serving (sign-out). Clears the binding so a later sign-in rebinds.
+  void stopServingKeyRequests() {
+    _keyReqSub?.cancel();
+    _keyReqSub = null;
+    _keyReqOwner = null;
+  }
+
+  Future<void> _serveKeyRequest(
+      String ownerUid, String reqId, Map<String, dynamic> data) async {
+    final itemId = data['itemId'] as String?;
+    final requesterUid = data['requesterUid'] as String?;
+    final requesterDeviceId = data['requesterDeviceId'] as int?;
+    final reqRef = _firestore
+        .collection(_statusCollection)
+        .doc(ownerUid)
+        .collection(_keyRequestsCollection)
+        .doc(reqId);
+    if (itemId == null || requesterUid == null || requesterDeviceId == null) {
+      try {
+        await reqRef.delete();
+      } catch (_) {}
+      return;
+    }
+    try {
+      // The owner decrypts its own statuses locally (vault / getStatusKey), so
+      // it never needs an envelope re-wrapped to itself.
+      if (requesterUid == ownerUid) {
+        await reqRef.delete();
+        return;
+      }
+
+      // Only the owner device that actually POSTED this status may serve. The
+      // viewer decrypts the envelope against the (ownerUid, ownerDeviceId) from
+      // the status metadata, and libsignal sessions are keyed by that address
+      // and SHARED with chat — so a different owner device re-wrapping here
+      // would pin its own identity under the posting device's address and
+      // corrupt that session. A non-matching device returns WITHOUT deleting,
+      // so the right device still serves the request when it next sees it.
+      final ownerDeviceId = data['ownerDeviceId'] as int?;
+      final myDeviceId = await _deviceIdentity.getDeviceId();
+      if (ownerDeviceId == null ||
+          myDeviceId == null ||
+          ownerDeviceId != myDeviceId) {
+        return;
+      }
+
+      // AUTHORIZATION: only re-wrap for a uid that ALREADY held an envelope for
+      // this item. The envelope set IS the authorized-viewer set, so a stranger
+      // who writes a request can never obtain a key they were not already
+      // granted on a previous device. A reinstalled viewer keeps their old
+      // device's envelope on the item, so their uid still matches here.
+      final envelopes = _firestore
+          .collection(_statusCollection)
+          .doc(ownerUid)
+          .collection('wrappedKeys')
+          .doc(itemId)
+          .collection('envelopes');
+      final prior = await envelopes
+          .where(FieldPath.documentId,
+              isGreaterThanOrEqualTo: '$requesterUid:',
+              isLessThan: '$requesterUid:')
+          .limit(1)
+          .get();
+      if (prior.docs.isEmpty) {
+        // Never a viewer of this item — refuse and clear the request.
+        await reqRef.delete();
+        return;
+      }
+
+      // Recover the content key K. The owner holds it locally (saveStatusKey on
+      // post) and/or in the status vault (reinstall-safe, pre-warmed into
+      // _mediaKeyCache). If it is genuinely gone, drop the request so it does
+      // not pile up — the viewer gives up as stale after the grace window.
+      Uint8List? key = _mediaKeyCache[itemId];
+      key ??= await (await PlaintextStore.instance()).getStatusKey(itemId);
+      if (key == null) {
+        await reqRef.delete();
+        return;
+      }
+
+      // Re-wrap K for the requester's CURRENT device over a fresh session, so a
+      // reinstalled viewer (new identity / device id) can decrypt it.
+      SignalService.invalidateDeviceCache(requesterUid);
+      final env = await SignalService.instance
+          .encryptWithFreshSession(requesterUid, requesterDeviceId, key);
+      await envelopes.doc('$requesterUid:$requesterDeviceId').set(env.toMap());
+      await reqRef.delete();
+      if (kDebugMode) {
+        debugPrint('[Status] re-wrapped key for $itemId → '
+            '$requesterUid:$requesterDeviceId');
+      }
+    } catch (e) {
+      // Leave the request in place for a retry on the next app start (the
+      // initial snapshot re-delivers it). Do NOT delete on failure.
+      if (kDebugMode) debugPrint('[Status] serve key $reqId failed: $e');
     }
   }
 

@@ -55,6 +55,9 @@ class StatusProvider extends ChangeNotifier {
     // previously-seen text statuses render instantly — before any
     // Firestore query completes.
     unawaited(_statusService.preWarmFromDisk());
+    // Owner side of the status key-heal: serve re-wrap requests from viewers
+    // whose device never received an envelope (reinstall / dropped encrypt).
+    _statusService.startServingKeyRequests(userId);
     _listenToMyStatus(userId);
     _listenToOtherStatuses(userId);
   }
@@ -420,6 +423,7 @@ class StatusProvider extends ChangeNotifier {
   void dispose() {
     _myStatusSubscription?.cancel();
     _otherStatusesSubscription?.cancel();
+    _statusService.stopServingKeyRequests();
     super.dispose();
   }
 }

@@ -214,8 +214,17 @@ class EncryptedMediaService {
   /// costs more than the work saved.
   static const _isolateThresholdBytes = 32 * 1024; // 32 KB
 
+  /// Hard ceiling on a single media download. Without it a stalled socket
+  /// (dead Wi-Fi, a Storage hiccup) leaves this future pending forever — and
+  /// because `StatusService.ensureDecrypted` awaits a *shared* in-flight
+  /// future, one stuck download freezes the status viewer's retry loop on an
+  /// endless spinner. On timeout we throw (TimeoutException), which every
+  /// caller already treats as an ordinary decrypt failure (retry / give up).
+  static const _downloadTimeout = Duration(seconds: 20);
+
   Future<Uint8List> downloadAndDecrypt(MediaKeyBundle bundle) async {
-    final response = await http.get(Uri.parse(bundle.url));
+    final response =
+        await http.get(Uri.parse(bundle.url)).timeout(_downloadTimeout);
     if (response.statusCode != 200) {
       throw StateError(
           'media download failed: ${response.statusCode} ${response.reasonPhrase}');
