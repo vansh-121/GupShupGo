@@ -101,7 +101,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Meet GupShup AI',
+                'Meet GupAI',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.w700,
                   fontSize: 18,
@@ -112,7 +112,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           ],
         ),
         content: Text(
-          'Ask GupShup AI to draft replies, translate, summarise, brainstorm, '
+          'Ask GupAI to draft replies, translate, summarise, brainstorm, '
           'or answer questions.\n\n'
           'Messages you send here are sent to Google to generate a reply. This '
           'is separate from your chats with people, which stay end-to-end '
@@ -168,12 +168,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       case AiQuotaExceeded(:final isPro, :final canEarn):
         _showQuotaSheet(isPro: isPro, canEarn: canEarn);
       case AiBusy():
-        _toast('GupShup AI is busy right now. Please try again in a moment.');
+        _toast('GupAI is busy right now. Please try again in a moment.');
       case AiSendFailed(:final message):
         _toast(
           message == 'not-signed-in'
-              ? 'Please sign in to use GupShup AI.'
-              : 'Couldn\'t reach GupShup AI. Check your connection and retry.',
+              ? 'Please sign in to use GupAI.'
+              : 'Couldn\'t reach GupAI. Check your connection and retry.',
         );
     }
   }
@@ -467,7 +467,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'GupShup AI',
+                  'GupAI',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -596,7 +596,7 @@ class _Composer extends StatelessWidget {
                   decoration: InputDecoration(
                     isDense: true,
                     border: InputBorder.none,
-                    hintText: 'Ask GupShup AI anything…',
+                    hintText: 'Ask GupAI anything…',
                     hintStyle:
                         GoogleFonts.poppins(fontSize: 14, color: c.textLow),
                     contentPadding: const EdgeInsets.symmetric(vertical: 12),

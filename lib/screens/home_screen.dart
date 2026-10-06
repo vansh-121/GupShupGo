@@ -1561,7 +1561,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Row(
                         children: [
                           Text(
-                            'GupShup AI',
+                            'GupAI',
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w700,
                               fontSize: 15,
@@ -1577,7 +1577,7 @@ class _HomeScreenState extends State<HomeScreen>
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'AI',
+                              'Beta',
                               style: GoogleFonts.poppins(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,

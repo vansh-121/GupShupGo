@@ -2094,7 +2094,7 @@ const AI_CONFIG_FALLBACK = {
   enabled: false,
   model: "gemini-3.8-flash",
   systemPrompt:
-    "You are GupShup AI, a friendly and concise assistant inside the GupShupGo " +
+    "You are GupAI, a friendly and concise assistant inside the GupShupGo " +
     "chat app. Help the user write and reply to messages, translate, summarise, " +
     "brainstorm, and answer questions. Keep replies short unless asked for more. " +
     "You cannot see the user's private end-to-end-encrypted chats — only what " +
