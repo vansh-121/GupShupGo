@@ -1,9 +1,20 @@
-// Force redeploy to apply minInstances
+// Global resource optimization for Cloud Functions Gen 2
+const { setGlobalOptions } = require("firebase-functions/v2");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
+
+// Global defaults: 0.25 vCPU (250 mCPU) and 256MiB RAM per instance.
+// This cuts baseline CPU quota usage by 75%, allowing up to 80 concurrent containers
+// within the project's 20,000 mCPU regional limit without throttling.
+setGlobalOptions({
+  region: "us-central1",
+  cpu: 0.25,
+  memory: "256MiB",
+  maxInstances: 3,
+});
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { google } = require("googleapis");
@@ -253,7 +264,7 @@ streakNotify.configure({
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
 exports.sendCallNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 3 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -334,7 +345,7 @@ exports.sendCallNotification = onRequest(
 
 // ─── Send Screen Share Notification ──────────────────────────────────────────
 exports.sendScreenShareNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 2 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -427,7 +438,7 @@ exports.sendScreenShareNotification = onRequest(
 
 // ─── Send Message Notification ──────────────────────────────────────────────
 exports.sendMessageNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 5 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -1614,8 +1625,11 @@ async function isStreakSweepEnabled() {
   return enabled;
 }
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Redundant with streakOnMessageCreate. Uncomment anytime to re-enable.
+/*
 exports.streakSweepJob = onSchedule(
-  { schedule: "every 15 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     if (!(await isStreakSweepEnabled())) {
       console.log("streakSweepJob: disabled (_config/streak.sweepEnabled is not true)");
@@ -1701,6 +1715,7 @@ exports.streakSweepJob = onSchedule(
     );
   }
 );
+*/
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STREAK REPAIR / MIGRATION (design §10, task 9.2)
@@ -1792,12 +1807,14 @@ function _repairAggregateLine(aggregate) {
   );
 }
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Legacy migration & manual operator tools. Uncomment anytime to re-enable.
+/*
 exports.streakRepairJob = onSchedule(
-  { schedule: "every 5 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const flags = await readStreakRepairFlags();
     if (!flags.enabled) {
-      // Deliberately quiet-ish: this is the steady state until task 9.4/9.5.
       console.log("streakRepairJob: disabled (_config/streak.repairEnabled is not true)");
       return;
     }
@@ -1826,18 +1843,9 @@ exports.streakRepairJob = onSchedule(
   }
 );
 
-// ─── Admin: dry runs, spot fixes and cursor inspection ────────────────────────
-// `POST /streakRepairRoom  {roomId, dryRun?, force?}` → the per-room report
-// `GET  /streakRepairRoom?status=1`                   → the cursor document
-//
-// `dryRun` defaults to TRUE here too, and a request may only go live by sending
-// `dryRun: false` explicitly AND having `_config/streak.repairEnabled === true`.
-// A spot fix does not consult `repairDryRun`: it is one room, chosen by an
-// operator, and the report comes straight back in the response.
 exports.streakRepairRoom = onRequest(
   { cors: false, invoker: "public", secrets: [streakAdminToken] },
   async (req, res) => {
-    // ── admin token, compared in constant time ────────────────────────────────
     const expected = streakAdminToken.value();
     const authHeader = req.headers.authorization || "";
     const presented = authHeader.startsWith("Bearer ")
@@ -1900,6 +1908,7 @@ exports.streakRepairRoom = onRequest(
     }
   }
 );
+*/
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STREAK HTTP ENDPOINTS (design §8, task 5.8)
@@ -3046,7 +3055,10 @@ async function _geminiAttempt(model, cfg, contents, timeoutMs) {
 
   const detail = (await response.text().catch(() => "")).slice(0, 300);
   const errMsg = `gemini ${response.status} (${model}): ${detail}`;
-  if (response.status === 429 || response.status === 404) {
+  // 429 (quota), 404 (model not found), or 503 (high demand overload):
+  // immediately advance to the next fallback model instead of retrying the
+  // overloaded model and burning through the 25-second execution deadline.
+  if (response.status === 429 || response.status === 404 || response.status === 503) {
     return { kind: "next", error: errMsg };
   }
   if (response.status >= 500) {
@@ -3121,7 +3133,16 @@ async function _generateGeminiReply(cfg, contents) {
 }
 
 exports.askGupShupAi = onRequest(
-  { cors: true, invoker: "public", minInstances: 0, secrets: [geminiApiKey] },
+  {
+    cors: true,
+    invoker: "public",
+    minInstances: 0,
+    maxInstances: 3,
+    concurrency: 80,
+    cpu: 1,
+    memory: "512MiB",
+    secrets: [geminiApiKey],
+  },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -3433,7 +3454,7 @@ exports.gupPointsEarnedTrigger = onDocumentUpdated(
 // notifications (with the contact's name) instead of generic batched ones.
 // Cooldown: 6h per room per risk level to avoid spam.
 exports.hourlyStreakWarningBatch = onSchedule(
-  { schedule: "every 60 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const COOLDOWN_HOURS = 6;
@@ -3543,7 +3564,7 @@ exports.hourlyStreakWarningBatch = onSchedule(
 // The write to streakBrokenAt triggers the existing `streakBrokenTrigger`
 // Firestore onUpdate function, which sends push notifications to both users.
 exports.streakExpiryJob = onSchedule(
-  { schedule: "every 30 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     // 2 full calendar days ago (48 hours is a safe server-side threshold)
@@ -3590,7 +3611,7 @@ exports.streakExpiryJob = onSchedule(
 // Collects all users' device tokens and sends one personalised morning digest.
 // Cooldown: once per 20 hours per user (stored in user.notifiedAt.daily_digest).
 exports.dailyDigestJob = onSchedule(
-  { schedule: "30 2 * * *", timeZone: "UTC", region: "us-central1" },
+  { schedule: "30 2 * * *", timeZone: "UTC", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
@@ -3655,7 +3676,7 @@ exports.dailyDigestJob = onSchedule(
 // If a user has unread messages older than 2 hours and hasn't opened the app,
 // send a gentle reminder. Uses lastSeen on the user document.
 exports.unreadReminderBatch = onSchedule(
-  { schedule: "every 120 minutes", region: "us-central1" },
+  { schedule: "every 120 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const twoHoursAgo = new Date(now - 2 * 3600000);
@@ -3887,7 +3908,7 @@ exports.processPendingEmails = onDocumentCreated(
 
 // ─── Scheduled: Weekly Digest Email (Monday 9 AM IST = 3:30 AM UTC) ──────────
 exports.weeklyDigestEmailJob = onSchedule(
-  { schedule: "30 3 * * 1", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  { schedule: "30 3 * * 1", timeZone: "UTC", region: "us-central1", maxInstances: 1, secrets: emailService.secrets },
   async () => {
     const now = new Date();
     const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
@@ -4007,8 +4028,11 @@ exports.weeklyDigestEmailJob = onSchedule(
 );
 
 // ─── Scheduled: Inactivity Reminder Email (daily at 6 PM IST = 12:30 PM UTC) ─
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Inactivity reminder emails. Uncomment anytime to re-enable.
+/*
 exports.inactivityReminderEmailJob = onSchedule(
-  { schedule: "30 12 * * *", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  { schedule: "30 12 * * *", timeZone: "UTC", region: "us-central1", maxInstances: 1, secrets: emailService.secrets },
   async () => {
     const now = new Date();
     const threeDaysAgo = new Date(now - 3 * 24 * 3600000);
@@ -4067,6 +4091,7 @@ exports.inactivityReminderEmailJob = onSchedule(
     console.log(`inactivityReminderEmailJob: sent ${sentCount} inactivity emails.`);
   }
 );
+*/
 
 // ─── HTTP: Unsubscribe from Emails ────────────────────────────────────────────
 // One-click unsubscribe endpoint. Sets emailNotifications = false on the user doc.
@@ -4169,7 +4194,7 @@ const { RtcTokenBuilder, RtcRole } = require("agora-token");
 const AGORA_TOKEN_TTL_SECONDS = 3600;
 
 exports.generateAgoraToken = onRequest(
-  { cors: true, invoker: "public", secrets: [agoraAppId, agoraAppCertificate] },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 3, secrets: [agoraAppId, agoraAppCertificate] },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -4435,16 +4460,17 @@ exports.presenceMirror = onValueWritten(
 // ghosts, and a wider window can't race a live user's delayed heartbeat.
 const PRESENCE_SWEEP_STALE_MS = 3 * PRESENCE_STALE_MS;
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Ghost presence cleaner (Flutter client already handles 60s offline checks).
+// Uncomment anytime to re-enable.
+/*
 exports.presenceSweeper = onSchedule(
-  { schedule: "every 5 minutes", region: "us-central1" },
+  { schedule: "every 30 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const cutoffMs = Date.now() - PRESENCE_SWEEP_STALE_MS;
     let firestoreFixed = 0;
     let rtdbFixed = 0;
 
-    // ── Pass 1: Firestore ────────────────────────────────────────────────
-    // Single-field query (auto-indexed) with the staleness filter applied in
-    // memory — avoids adding a composite index for isOnline + lastSeen.
     try {
       const onlineSnap = await db
         .collection("users")
@@ -4455,21 +4481,14 @@ exports.presenceSweeper = onSchedule(
       for (const doc of onlineSnap.docs) {
         const lastSeen = doc.data().lastSeen;
         const lastSeenMs = lastSeen?.toMillis ? lastSeen.toMillis() : null;
-        // A missing lastSeen can never be evidence of a live connection.
         if (lastSeenMs !== null && lastSeenMs >= cutoffMs) continue;
         stale.push(doc.ref);
       }
 
-      // Chunked at Firestore's hard 500-writes-per-batch limit. Not a
-      // theoretical concern: this job's whole purpose is to be the layer that
-      // still works, and a single oversized commit would throw and repair
-      // nothing — silently, right as the userbase grew past the limit.
       const BATCH_LIMIT = 500;
       for (let i = 0; i < stale.length; i += BATCH_LIMIT) {
         const batch = db.batch();
         for (const ref of stale.slice(i, i + BATCH_LIMIT)) {
-          // Preserve lastSeen — the user really was last seen then, and the UI
-          // renders it as "last seen X ago".
           batch.update(ref, { isOnline: false });
         }
         await batch.commit();
@@ -4479,7 +4498,6 @@ exports.presenceSweeper = onSchedule(
       console.error("presenceSweeper: Firestore pass failed:", error.message);
     }
 
-    // ── Pass 2: RTDB ─────────────────────────────────────────────────────
     try {
       const ghostSnap = await admin
         .database()
@@ -4494,7 +4512,6 @@ exports.presenceSweeper = onSchedule(
         const isStale =
           typeof lastSeenMs !== "number" || lastSeenMs < cutoffMs;
         if (!isStale) return;
-        // update() not set(): keeps the original lastSeen intact.
         writes.push(child.ref.update({ online: false }));
         rtdbFixed++;
       });
@@ -4508,5 +4525,6 @@ exports.presenceSweeper = onSchedule(
     );
   },
 );
+*/
 
 
