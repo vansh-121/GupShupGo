@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.1] - 2026-10-07
 
 ### Added
-- 🤖 **Meet GupAI** — Your personal, intelligent in-app chat assistant powered by Gemini. Ask anything, brainstorm ideas, draft messages, and get real-time answers right inside GupShupGo with smart instant actions.
+- 🤖 **Meet GupAI** — Your personal, intelligent in-app chat assistant. Ask anything, brainstorm ideas, draft messages, and get real-time answers right inside GupShupGo with smart instant actions.
 - 🔄 **Self-Healing Encrypted Statuses** — Encrypted statuses and stories now automatically reconcile and recover encryption keys across device switches, logouts, and app re-installs so your shared moments are never lost.
 
 ### Changed

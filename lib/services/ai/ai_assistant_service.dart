@@ -117,7 +117,7 @@ class AiAssistantService {
   }
 
   /// Whether the signed-in user has any AI transcript stored locally — used to
-  /// decide whether to show the one-time "sent to Google" first-run notice.
+  /// decide whether to show the one-time first-run introduction notice.
   Future<bool> hasHistory() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;

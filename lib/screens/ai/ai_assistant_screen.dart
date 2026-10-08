@@ -34,7 +34,7 @@ import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
-/// SharedPreferences flag for the one-time "sent to Google" notice. Versioned so
+/// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
 /// the notice can be re-shown if the wording materially changes.
 const String _kAiNoticeSeenKey = 'ai_first_run_notice_seen_v1';
 
@@ -124,7 +124,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         content: Text(
           'Ask GupAI to draft replies, translate, summarise, brainstorm, '
           'or answer questions.\n\n'
-          'Messages you send here are sent to Google to generate a reply. This '
+          'Messages you send here are processed by GupAI to generate replies. This '
           'is separate from your chats with people, which stay end-to-end '
           'encrypted and are never shared.',
           style: GoogleFonts.poppins(

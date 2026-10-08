@@ -195,6 +195,6 @@ const List<_Feature> _features = [
   _Feature(
     Icons.auto_awesome_rounded,
     'Meet GupAI',
-    'Your fast, intelligent in-app AI assistant powered by Gemini. Ask questions, brainstorm ideas, draft messages, and get instant answers right from your chats.',
+    'Your fast, intelligent in-app AI assistant. Ask questions, brainstorm ideas, draft messages, and get instant answers right from your chats.',
   ),
 ];
