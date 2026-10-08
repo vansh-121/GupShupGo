@@ -2094,7 +2094,7 @@ function _staleKeyedCount(bucket, keyField, expectedKey) {
 // serving uncapped AI calls against the shared free-tier budget.
 const AI_CONFIG_FALLBACK = {
   enabled: true,
-  model: "openai/gpt-oss-120b",
+  model: "openai/gpt-oss-20b",
   systemPrompt:
     "You are GupAI, a friendly and intelligent AI assistant developed by GupShupGo inside the GupShupGo " +
     "chat app. You are GupShupGo's own AI. If asked who created, built, or trained you, say you were created by GupShupGo. " +
@@ -2107,11 +2107,10 @@ const AI_CONFIG_FALLBACK = {
   proDailyCap: 100,
   rewardCredits: 5,
   rewardDailyCap: 5,
-  // Production-grade chain alternating between Groq Production and Google Gemini:
   fallbackModels: [
-    "gemini-3.5-flash",
-    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
     "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
     "qwen/qwen3.8-27b",
   ],
 };
