@@ -28,7 +28,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   final TextEditingController _nameController = TextEditingController();
 
   PhoneAuthStage _stage = PhoneAuthStage.entry;
-  bool _busy = false; // a send/verify/guest call is in flight (button spinner)
+  bool _busy = false; // a send/verify call is in flight (button spinner)
   bool _completing = false; // UI single-flight for OTP verify
   bool _navigated = false; // one-push guard so we navigate at most once
 
@@ -223,32 +223,6 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     });
   }
 
-  // ─── Continue as Guest ────────────────────────────────────────────────────
-  Future<void> _signInAnonymously() async {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      setState(() => _errorMessage = 'Please enter your name');
-      return;
-    }
-
-    setState(() {
-      _busy = true;
-      _errorMessage = null;
-    });
-
-    final user = await _authService.signInAnonymously(name);
-
-    if (!mounted) return;
-    if (user != null) {
-      _handleSignedIn(user);
-    } else {
-      setState(() {
-        _busy = false;
-        _errorMessage = 'Failed to sign in. Please try again.';
-      });
-    }
-  }
-
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   InputDecoration _fieldDecoration(
@@ -393,7 +367,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     );
   }
 
-  // ── Entry stage: name + phone + Send OTP + Guest ──
+  // ── Entry stage: name + phone + Send OTP ──
   List<Widget> _buildEntryStage(AppThemeColors c) {
     return [
       TextField(
@@ -456,40 +430,6 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                     color: Colors.white,
                   ),
                 ),
-        ),
-      ),
-      const SizedBox(height: 24),
-      Row(
-        children: [
-          Expanded(child: Divider(color: c.divider, thickness: 1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'OR',
-              style: GoogleFonts.poppins(
-                color: c.textLow,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Expanded(child: Divider(color: c.divider, thickness: 1)),
-        ],
-      ),
-      const SizedBox(height: 20),
-      GestureDetector(
-        onTap: _busy ? null : _signInAnonymously,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text(
-            'Continue as Guest',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: c.textHigh,
-            ),
-          ),
         ),
       ),
     ];

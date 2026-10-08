@@ -213,6 +213,42 @@ class PlaintextStore {
     return base64Decode(payload['k'] as String);
   }
 
+  /// Owner side: the set of viewer UIDs a status was posted to, recorded at
+  /// post time under `status_audience:<itemId>` (same table + id-prefix trick
+  /// as `status_key:`, so no schema bump and [wipe] covers it for free).
+  ///
+  /// This is the owner's PRIVATE record of its intended audience — it is never
+  /// written to Firestore. The key-heal path uses it to authorise a viewer
+  /// whose per-device key wrap failed for every one of their devices at post
+  /// time: such a viewer has no envelope to prove they were ever a viewer, so
+  /// the envelope-as-audience check alone can't tell them from a stranger.
+  Future<void> saveStatusAudience(
+      String statusItemId, List<String> viewerUids) async {
+    await _db.into(_db.messagePlaintexts).insert(
+      MessagePlaintextsCompanion.insert(
+        id: 'status_audience:$statusItemId',
+        payload: jsonEncode({'v': viewerUids}),
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      mode: InsertMode.insertOrReplace,
+    );
+  }
+
+  /// The recorded viewer-UID audience for an owner's own status item, or null
+  /// when none was recorded (e.g. a status posted by a build predating this).
+  Future<Set<String>?> getStatusAudience(String statusItemId) async {
+    final query = _db.select(_db.messagePlaintexts)
+      ..where((tbl) => tbl.id.equals('status_audience:$statusItemId'));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    try {
+      final payload = jsonDecode(row.payload) as Map<String, dynamic>;
+      return (payload['v'] as List).cast<String>().toSet();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── Resend-protocol bookkeeping ──────────────────────────────────────
   //
   // Both halves of the resend protocol need a little state that survives a

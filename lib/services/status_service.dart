@@ -63,6 +63,36 @@ class StatusService {
   // silently drops statuses it can't recover after reinstall.
   static final Set<String> _unrecoverable = {};
 
+  // A freshly-posted status is NOT unrecoverable just because the first
+  // decrypt attempt missed. The wrappedKey envelope, the first-time Signal
+  // handshake with the poster's device, and the Storage blob all propagate to
+  // the viewer independently and can lag the status doc by a few seconds. If
+  // we blacklisted on that first miss, the viewer would filter the item out
+  // and render "No active status" permanently — even though the key arrives a
+  // moment later. So we only give up (and hide the item) once the item is
+  // older than this grace window, by which point a genuine reinstall ghost is
+  // the only thing that still can't be decrypted. The window is generous
+  // enough to absorb clock skew between poster and viewer.
+  static const _unrecoverableGrace = Duration(minutes: 15);
+
+  /// Ceiling on how long a viewer waits on a single shared decrypt attempt.
+  /// Belt-and-suspenders beyond EncryptedMediaService's download timeout: if the
+  /// underlying future wedges for any other reason (e.g. a stuck per-address
+  /// Signal lock), the viewer's retry loop must still advance to "tap to retry"
+  /// instead of spinning forever. Slightly longer than the download timeout so a
+  /// legitimately slow download isn't cut off early.
+  static const _decryptWaitCeiling = Duration(seconds: 25);
+
+  /// Mark [item] permanently undecryptable on this install — but only if it is
+  /// old enough that a transient propagation / handshake lag can be ruled out.
+  /// A recent item is left untouched so the next stream emission or the
+  /// viewer's own retry loop can recover it once the key lands.
+  static void _giveUpIfStale(StatusItem item) {
+    if (DateTime.now().difference(item.createdAt) > _unrecoverableGrace) {
+      _unrecoverable.add(item.id);
+    }
+  }
+
   static StatusPlaintext? cachedPlaintext(String statusItemId) =>
       _plaintextCache[statusItemId];
 
@@ -302,13 +332,15 @@ class StatusService {
     if (_plaintextCache.containsKey(item.id)) return;
     final existing = _inFlight[item.id];
     if (existing != null) {
-      await existing;
+      // Bounded wait — see [_decryptWaitCeiling]. On timeout we return normally
+      // so the caller re-checks the cache and retries or gives up, never hangs.
+      await existing.timeout(_decryptWaitCeiling, onTimeout: () {});
       return;
     }
     final fut = _preDecryptOne(ownerUid, item, selfUid)
         .whenComplete(() => _inFlight.remove(item.id));
     _inFlight[item.id] = fut;
-    await fut;
+    await fut.timeout(_decryptWaitCeiling, onTimeout: () {});
   }
 
   Future<void> _preDecryptOne(
@@ -364,10 +396,11 @@ class StatusService {
         preloadedKey: _mediaKeyCache[item.id],
       );
       if (result == null) {
-        // No AES key available (vault empty, Signal session gone) — this
-        // item cannot be decrypted on this install. Mark it so the viewer
-        // can filter it out instead of showing a spinner forever.
-        _unrecoverable.add(item.id);
+        // No AES key available yet. Could be a reinstall ghost (vault empty,
+        // Signal session gone) OR a freshly-posted status whose envelope has
+        // not reached this device yet. Only the former is permanent — see
+        // [_giveUpIfStale]. A recent item is left uncached and retryable.
+        _giveUpIfStale(item);
         return;
       }
       if (item.type == 'encrypted') {
@@ -405,7 +438,13 @@ class StatusService {
         );
       }
     } catch (_) {
-      _unrecoverable.add(item.id);
+      // A decrypt that threw (Storage read blip, transient handshake failure)
+      // is transient by nature, so it must NOT be made terminal: a brief
+      // download/connection error would otherwise drop a perfectly valid status
+      // into [_unrecoverable] and the viewer would filter it out for the rest of
+      // the session. Leave the item uncached and retryable — the next stream
+      // emission or the viewer's own retry re-attempts it. Only the genuine
+      // "no key anywhere" path above (result == null) ages into unrecoverable.
     }
   }
 
@@ -437,6 +476,16 @@ class StatusService {
     required List<String> viewerUids,
   }) async {
     final fanout = <String>{...viewerUids, ownerUid}.toList();
+
+    // Record the intended viewer set locally (owner-only, never uploaded) so
+    // the key-heal path can authorise a viewer whose content-key wrap fails for
+    // every one of their devices below — leaving them with no envelope to prove
+    // they were ever an audience member. See [_serveKeyRequest]. Best-effort:
+    // the post must not fail if this local write does.
+    try {
+      await (await PlaintextStore.instance())
+          .saveStatusAudience(statusItemId, viewerUids);
+    } catch (_) {}
 
     // Simple fixed-concurrency executor — runs at most [_maxConcurrentEncrypts]
     // viewers in parallel, starts the next as soon as one finishes.
@@ -491,7 +540,22 @@ class StatusService {
         .collection('envelopes')
         .doc(addr)
         .get();
-    if (!doc.exists) return null;
+    if (!doc.exists) {
+      // No envelope for this device. The owner fanned out before this install
+      // existed (reinstall → new device id) or the encrypt to us failed. Ask
+      // the owner to re-wrap the content key for this device; their app serves
+      // it via [startServingKeyRequests]. Without this a dropped envelope was
+      // terminal — the status spun, then "tap to retry" against the same
+      // missing doc, forever.
+      unawaited(_requestStatusKey(
+        ownerUid: ownerUid,
+        ownerDeviceId: ownerDeviceId,
+        statusItemId: statusItemId,
+        selfUid: selfUid,
+        selfDeviceId: deviceId,
+      ));
+      return null;
+    }
     final env = EncryptedEnvelope.fromMap(doc.data()!);
     try {
       final key = await SignalService.instance
@@ -503,6 +567,195 @@ class StatusService {
       return key;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ── Status key heal (viewer-missing-key → owner re-wraps) ────────────────
+  // Mirrors ChatService's resend protocol for the per-viewer wrapped AES key.
+  // Before this, a viewer whose live device never received an envelope had no
+  // way to recover: the status spun, then showed "tap to retry" against the
+  // same missing doc forever. Now the viewer asks and the owner re-wraps.
+  static const _keyRequestsCollection = 'keyRequests';
+
+  /// Items we have already asked for this session, so repeated viewer retries
+  /// don't rewrite the (write-once) request doc on every tick.
+  static final Set<String> _requestedKeys = <String>{};
+
+  /// Owner-side listener subscription + the uid it is bound to. Static so a
+  /// recreated StatusService / provider can't leak a second listener.
+  static StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _keyReqSub;
+  static String? _keyReqOwner;
+
+  /// Viewer side: ask [ownerUid] to re-wrap the content key for [statusItemId]
+  /// for this device. Deterministic id so one device mints at most one pending
+  /// request per item. Fire-and-forget; the owner serves asynchronously.
+  Future<void> _requestStatusKey({
+    required String ownerUid,
+    required int ownerDeviceId,
+    required String statusItemId,
+    required String selfUid,
+    required int selfDeviceId,
+  }) async {
+    if (ownerUid.isEmpty || ownerUid == selfUid) return;
+    if (!_requestedKeys.add(statusItemId)) return; // already asked this session
+    try {
+      final reqId = '${statusItemId}__$selfUid:$selfDeviceId';
+      await _firestore
+          .collection(_statusCollection)
+          .doc(ownerUid)
+          .collection(_keyRequestsCollection)
+          .doc(reqId)
+          .set({
+        'itemId': statusItemId,
+        'ownerDeviceId': ownerDeviceId,
+        'requesterUid': selfUid,
+        'requesterDeviceId': selfDeviceId,
+        'at': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      // A pending request may still exist (write-once rule denies the update);
+      // harmless. Forget the dedupe entry so a later session can retry.
+      _requestedKeys.remove(statusItemId);
+      if (kDebugMode) debugPrint('[Status] key request failed: $e');
+    }
+  }
+
+  /// Owner side: start serving wrapped-key re-wrap requests for [ownerUid].
+  /// Idempotent; rebinds if the signed-in user changes. Called from
+  /// StatusProvider.initialize so it runs for the whole session, the way the
+  /// chat resend listener does.
+  void startServingKeyRequests(String ownerUid) {
+    if (ownerUid.isEmpty) return;
+    if (_keyReqOwner == ownerUid && _keyReqSub != null) return;
+    _keyReqSub?.cancel();
+    _keyReqOwner = ownerUid;
+    _keyReqSub = _firestore
+        .collection(_statusCollection)
+        .doc(ownerUid)
+        .collection(_keyRequestsCollection)
+        .snapshots()
+        .listen((snap) {
+      for (final change in snap.docChanges) {
+        if (change.type == DocumentChangeType.removed) continue;
+        final data = change.doc.data();
+        if (data != null) {
+          unawaited(_serveKeyRequest(ownerUid, change.doc.id, data));
+        }
+      }
+    }, onError: (e) {
+      if (kDebugMode) debugPrint('[Status] keyRequests listen error: $e');
+    });
+  }
+
+  /// Stop serving (sign-out). Clears the binding so a later sign-in rebinds.
+  void stopServingKeyRequests() {
+    _keyReqSub?.cancel();
+    _keyReqSub = null;
+    _keyReqOwner = null;
+  }
+
+  Future<void> _serveKeyRequest(
+      String ownerUid, String reqId, Map<String, dynamic> data) async {
+    final itemId = data['itemId'] as String?;
+    final requesterUid = data['requesterUid'] as String?;
+    final requesterDeviceId = data['requesterDeviceId'] as int?;
+    final reqRef = _firestore
+        .collection(_statusCollection)
+        .doc(ownerUid)
+        .collection(_keyRequestsCollection)
+        .doc(reqId);
+    if (itemId == null || requesterUid == null || requesterDeviceId == null) {
+      try {
+        await reqRef.delete();
+      } catch (_) {}
+      return;
+    }
+    try {
+      // The owner decrypts its own statuses locally (vault / getStatusKey), so
+      // it never needs an envelope re-wrapped to itself.
+      if (requesterUid == ownerUid) {
+        await reqRef.delete();
+        return;
+      }
+
+      // Only the owner device that actually POSTED this status may serve. The
+      // viewer decrypts the envelope against the (ownerUid, ownerDeviceId) from
+      // the status metadata, and libsignal sessions are keyed by that address
+      // and SHARED with chat — so a different owner device re-wrapping here
+      // would pin its own identity under the posting device's address and
+      // corrupt that session. A non-matching device returns WITHOUT deleting,
+      // so the right device still serves the request when it next sees it.
+      final ownerDeviceId = data['ownerDeviceId'] as int?;
+      final myDeviceId = await _deviceIdentity.getDeviceId();
+      if (ownerDeviceId == null ||
+          myDeviceId == null ||
+          ownerDeviceId != myDeviceId) {
+        return;
+      }
+
+      // AUTHORIZATION: only re-wrap for a uid that ALREADY held an envelope for
+      // this item. The envelope set IS the authorized-viewer set, so a stranger
+      // who writes a request can never obtain a key they were not already
+      // granted on a previous device. A reinstalled viewer keeps their old
+      // device's envelope on the item, so their uid still matches here.
+      final envelopes = _firestore
+          .collection(_statusCollection)
+          .doc(ownerUid)
+          .collection('wrappedKeys')
+          .doc(itemId)
+          .collection('envelopes');
+      final prior = await envelopes
+          .where(FieldPath.documentId,
+              isGreaterThanOrEqualTo: '$requesterUid:',
+              isLessThan: '$requesterUid:')
+          .limit(1)
+          .get();
+      if (prior.docs.isEmpty) {
+        // No envelope was ever delivered to this uid. Usually that is a
+        // stranger who merely wrote a request — but it is also the one
+        // legitimate case the envelope-as-audience check cannot see: a viewer
+        // the owner DID post to whose content-key wrap failed for every one of
+        // their devices at post time (encryptForUser returned empty), so no
+        // envelope was ever written for them. Consult the owner's local record
+        // of the intended audience (saved in _publishWrappedKeys, never
+        // uploaded) to tell them apart. A uid the owner never shared with — the
+        // stranger — is still refused and cleared exactly as before.
+        final audience =
+            await (await PlaintextStore.instance()).getStatusAudience(itemId);
+        if (audience == null || !audience.contains(requesterUid)) {
+          await reqRef.delete();
+          return;
+        }
+        // Authorised viewer whose first delivery failed: fall through and
+        // re-wrap a fresh envelope for their current device.
+      }
+
+      // Recover the content key K. The owner holds it locally (saveStatusKey on
+      // post) and/or in the status vault (reinstall-safe, pre-warmed into
+      // _mediaKeyCache). If it is genuinely gone, drop the request so it does
+      // not pile up — the viewer gives up as stale after the grace window.
+      Uint8List? key = _mediaKeyCache[itemId];
+      key ??= await (await PlaintextStore.instance()).getStatusKey(itemId);
+      if (key == null) {
+        await reqRef.delete();
+        return;
+      }
+
+      // Re-wrap K for the requester's CURRENT device over a fresh session, so a
+      // reinstalled viewer (new identity / device id) can decrypt it.
+      SignalService.invalidateDeviceCache(requesterUid);
+      final env = await SignalService.instance
+          .encryptWithFreshSession(requesterUid, requesterDeviceId, key);
+      await envelopes.doc('$requesterUid:$requesterDeviceId').set(env.toMap());
+      await reqRef.delete();
+      if (kDebugMode) {
+        debugPrint('[Status] re-wrapped key for $itemId → '
+            '$requesterUid:$requesterDeviceId');
+      }
+    } catch (e) {
+      // Leave the request in place for a retry on the next app start (the
+      // initial snapshot re-delivers it). Do NOT delete on failure.
+      if (kDebugMode) debugPrint('[Status] serve key $reqId failed: $e');
     }
   }
 
@@ -525,6 +778,13 @@ class StatusService {
     return peers.toList();
   }
 
+  /// Generates a fresh Firestore id for a status item. Exposed so the provider
+  /// can mint the id up front for an optimistic placeholder and hand the SAME
+  /// id to the matching upload call — keeping the placeholder and the
+  /// server-echoed item on one id so the UI never shows a transient duplicate.
+  String newStatusItemId() =>
+      _firestore.collection(_statusCollection).doc().id;
+
   /// Encrypted text status. The text body is encrypted under a per-item
   /// content key; the content key is wrapped per viewer device.
   ///
@@ -538,22 +798,26 @@ class StatusService {
     required String text,
     required String backgroundColor,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     final ownerDeviceId = await _deviceIdentity.getDeviceId();
     if (ownerDeviceId == null) {
       throw StateError('E2EE not registered — cannot post encrypted status');
     }
-    final statusItemId = _firestore.collection(_statusCollection).doc().id;
+    final statusItemId =
+        itemId ?? _firestore.collection(_statusCollection).doc().id;
 
-    final bundle = await _media.encryptAndUploadBytes(
-      bytes: Uint8List.fromList(utf8.encode(jsonEncode({
+    // Text is tiny, so the ciphertext rides INLINE in the status item instead
+    // of a Storage blob. A viewer then decrypts after only the Signal key
+    // unwrap — no second HTTP round-trip to Storage, which is what made text
+    // statuses slow to open. (Image/video stay Storage-backed; their blobs are
+    // far too large for a Firestore document.)
+    final sealed = await _media.sealInline(
+      Uint8List.fromList(utf8.encode(jsonEncode({
         'type': 'text',
         'text': text,
         'backgroundColor': backgroundColor,
       }))),
-      storagePath:
-          'statuses/$userId/encrypted_text/${DateTime.now().millisecondsSinceEpoch}',
-      contentType: 'application/json',
     );
 
     final statusItem = StatusItem(
@@ -562,11 +826,13 @@ class StatusService {
       text: null,
       createdAt: DateTime.now(),
       viewedBy: [],
-      imageUrl: bundle.url,
+      // No Storage object for inline text — the ciphertext is in `caption`.
+      imageUrl: null,
       caption: jsonEncode({
         'enc': true,
-        'iv': base64Encode(bundle.iv),
-        'hash': base64Encode(bundle.hash),
+        'inline': true,
+        'iv': base64Encode(sealed.iv),
+        'ct': base64Encode(sealed.wire),
         'ownerDeviceId': ownerDeviceId,
       }),
     );
@@ -574,7 +840,7 @@ class StatusService {
     // Cache the content key locally so this (posting) device can decrypt
     // its own status without a Signal-to-self envelope.
     final ps = await PlaintextStore.instance();
-    final ownerKey = Uint8List.fromList(bundle.key);
+    final ownerKey = sealed.key;
     await ps.saveStatusKey(statusItemId, ownerKey);
     _mediaKeyCache[statusItemId] = ownerKey;
     unawaited(_saveMediaKeyToVault(userId, statusItemId, ownerKey));
@@ -587,7 +853,7 @@ class StatusService {
       ownerUid: userId,
       ownerDeviceId: ownerDeviceId,
       statusItemId: statusItemId,
-      contentKey: Uint8List.fromList(bundle.key),
+      contentKey: sealed.key,
       viewerUids: viewerUids,
     );
     await _addStatusItem(
@@ -609,6 +875,7 @@ class StatusService {
     required File imageFile,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     // Shrink before encrypt+upload — a 5 MB gallery photo turns into a
     // ~250 KB JPEG that uploads in a second over 4G instead of 15-30s.
@@ -632,6 +899,7 @@ class StatusService {
       contentType: 'image/jpeg',
       caption: caption,
       viewerUids: viewerUids,
+      itemId: itemId,
     );
   }
 
@@ -644,6 +912,7 @@ class StatusService {
     required File videoFile,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) =>
       _uploadEncryptedMedia(
         userId: userId,
@@ -656,6 +925,7 @@ class StatusService {
         contentType: 'video/mp4',
         caption: caption,
         viewerUids: viewerUids,
+        itemId: itemId,
       );
 
   Future<void> _uploadEncryptedMedia({
@@ -669,12 +939,14 @@ class StatusService {
     required String contentType,
     String? caption,
     required List<String> viewerUids,
+    String? itemId,
   }) async {
     final ownerDeviceId = await _deviceIdentity.getDeviceId();
     if (ownerDeviceId == null) {
       throw StateError('E2EE not registered — cannot post encrypted status');
     }
-    final statusItemId = _firestore.collection(_statusCollection).doc().id;
+    final statusItemId =
+        itemId ?? _firestore.collection(_statusCollection).doc().id;
     final bundle = await _media.encryptAndUpload(
       file: file,
       storagePath:
@@ -759,6 +1031,26 @@ class StatusService {
       selfUid: selfUid,
     );
     if (key == null) return null;
+
+    // Inline text statuses carry their ciphertext in `caption` ('ct') rather
+    // than a Storage blob, so there is no download — decrypt the bytes in hand.
+    // The GCM tag authenticates them, so no SHA hash is carried or checked.
+    if (meta['inline'] == true) {
+      final pt = await _media.openInline(
+        key: key,
+        iv: base64Decode(meta['iv'] as String),
+        wire: base64Decode(meta['ct'] as String),
+      );
+      return {
+        'type': item.type,
+        'bytes': pt,
+        if (item.type == 'encrypted')
+          'json': jsonDecode(utf8.decode(pt)) as Map<String, dynamic>,
+      };
+    }
+
+    // Legacy Storage-backed path: text statuses posted before the inline
+    // migration, plus all image/video statuses (too large to inline).
     final bundle = MediaKeyBundle(
       key: key,
       iv: base64Decode(meta['iv'] as String),

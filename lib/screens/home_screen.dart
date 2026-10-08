@@ -23,6 +23,7 @@ import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
+import 'package:video_chat_app/screens/ai/ai_assistant_screen.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
@@ -34,6 +35,7 @@ import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/services/streak/streak_repository.dart';
 import 'package:video_chat_app/services/update_service.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
@@ -1273,24 +1275,34 @@ class _HomeScreenState extends State<HomeScreen>
           final hasPhoto = (_currentUser?.photoUrl ?? '').isNotEmpty;
           final showChecklist =
               !StarterChecklistCard.isComplete(hasPhoto: hasPhoto);
+          final emptyBody = showChecklist
+              ? _buildStarterState(hasPhoto: hasPhoto)
+              : _buildPlainEmptyState();
 
           return RefreshIndicator(
             onRefresh: () => _manualRefresh(chatRooms),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              child: showChecklist
-                  ? _buildStarterState(hasPhoto: hasPhoto)
-                  : _buildPlainEmptyState(),
+              // Even with no human chats yet, surface the assistant so a brand
+              // new user has something to talk to from the first launch.
+              child: FeatureFlagService.instance.aiAssistantEnabled
+                  ? Column(children: [_buildAiTile(), emptyBody])
+                  : emptyBody,
             ),
           );
         }
 
+        // When the assistant is enabled it rides at index 0 as a pinned tile,
+        // shifting the real rooms down by one.
+        final aiEnabled = FeatureFlagService.instance.aiAssistantEnabled;
+        final aiOffset = aiEnabled ? 1 : 0;
         return RefreshIndicator(
           onRefresh: () => _manualRefresh(chatRooms),
           child: ListView.builder(
-            itemCount: chatRooms.length,
+            itemCount: chatRooms.length + aiOffset,
             itemBuilder: (context, index) {
-              final chatRoom = chatRooms[index];
+              if (aiEnabled && index == 0) return _buildAiTile();
+              final chatRoom = chatRooms[index - aiOffset];
               final otherUserId = chatRoom.participants
                   .firstWhere((id) => id != _currentUserId, orElse: () => '');
 
@@ -1504,6 +1516,102 @@ class _HomeScreenState extends State<HomeScreen>
             chatRoom.lastMessageStatus == MessageStatus.delivered;
 
     return isIncomingLastMessage && isUnreadLastMessage ? 1 : 0;
+  }
+
+  /// The pinned "GupShup AI" entry at the top of the chat list. Deliberately
+  /// distinct from a human chat row — a gradient avatar and an "AI" chip — so
+  /// nobody mistakes the assistant for a contact. Tapping opens the dedicated
+  /// you↔AI screen; it shares none of the Signal / streak plumbing a real room
+  /// does. Gated by `ai_assistant_enabled`, so this is only ever built when the
+  /// flag is on.
+  Widget _buildAiTile() {
+    final c = AppThemeColors.of(context);
+    return Column(
+      children: [
+        InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AiAssistantScreen()),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [c.primary, c.primaryDk],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'GupAI',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              color: c.textHigh,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: c.primaryLt,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Beta',
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: c.primary,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Draft, translate, summarise & more',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: c.textMid,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: c.textLow, size: 20),
+              ],
+            ),
+          ),
+        ),
+        Divider(height: 1, thickness: 1, indent: 86, color: c.divider),
+      ],
+    );
   }
 
   Widget _buildChatRoomItem(

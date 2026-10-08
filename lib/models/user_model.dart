@@ -4,7 +4,7 @@ class UserModel {
   final String id;
   final String name;
   final String? username;
-  final String? authProvider; // 'phone' or 'google'
+  final String? authProvider; // 'phone', 'google', or 'password'
   final String? phoneNumber;
   final String? email;
   final String? photoUrl;

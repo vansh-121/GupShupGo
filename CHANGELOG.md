@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Live location sharing and map-based pin picking
 
+## [1.2.1] - 2026-10-07
+
+### Added
+- 🤖 **Meet GupAI** — Your personal, intelligent in-app chat assistant. Ask anything, brainstorm ideas, draft messages, and get real-time answers right inside GupShupGo with smart instant actions.
+- 🔄 **Self-Healing Encrypted Statuses** — Encrypted statuses and stories now automatically reconcile and recover encryption keys across device switches, logouts, and app re-installs so your shared moments are never lost.
+
+### Changed
+- Updated version to 1.2.1 (build code 59).
+- ⚡ **Supercharged Cloud Backend & Real-Time Sync** — Re-architected Cloud Functions for high concurrency, ultra-low latency, and instant model fallback under heavy traffic spikes.
+- 🔒 **Instant Cryptographic Identity Reconciliation** — Auto-clears identity key mismatches and self-heals E2EE sessions on the fly without confusing errors.
+- ⏱️ **Media Download Protection** — Added fail-safe download ceilings for encrypted media transfers to prevent stuck pending states.
+
 ## [1.2.0] - 2026-09-27
 
 ### Added

@@ -53,13 +53,37 @@ service cloud.firestore {
         ]);
       }
 
+      // GupShup AI usage counters. aiDaily is today's spent-message count and
+      // aiRewardDaily is today's claimed rewarded top-ups. Both are read
+      // authoritatively by `askGupShupAi` to compute each user's allowance and
+      // are written ONLY by the askGupShupAi / admobSsv functions (Admin SDK,
+      // which bypasses these rules). Same exploit as the ad rewards above: a
+      // client that could reset aiDaily would bypass its own daily cap, and one
+      // that could raise aiRewardDaily would mint free AI messages without
+      // watching an ad — and every reply is a real paid Gemini call.
+      function doesNotTouchAiCounters() {
+        return !request.resource.data.keys().hasAny([
+          'aiDaily',
+          'aiRewardDaily'
+        ]);
+      }
+
+      function doesNotModifyAiCounters() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'aiDaily',
+          'aiRewardDaily'
+        ]);
+      }
+
       // Users can only create/update their own profile
       allow create: if request.auth != null && request.auth.uid == userId
         && doesNotCreateSubscriptions()
-        && doesNotTouchAdRewards();
+        && doesNotTouchAdRewards()
+        && doesNotTouchAiCounters();
       allow update: if request.auth != null && request.auth.uid == userId
         && doesNotModifySubscriptions()
-        && doesNotModifyAdRewards();
+        && doesNotModifyAdRewards()
+        && doesNotModifyAiCounters();
       
       // Prevent users from deleting profiles
       allow delete: if false;
@@ -444,6 +468,34 @@ service cloud.firestore {
               || request.auth.uid == userId);
         allow create, update, delete: if request.auth != null
           && request.auth.uid == userId;
+      }
+
+      // E2EE heal channel: a viewer whose live device has no wrapped-key
+      // envelope (the owner fanned out before this install existed — e.g. the
+      // viewer reinstalled and got a new device id — or the encrypt to this
+      // device failed) asks the owner to re-wrap the content key for it. The
+      // owner's app serves it (writes a fresh envelope above) and deletes the
+      // request. Mirrors the chat `retryRequests` protocol.
+      //
+      // Write-once and tightly shaped: the requester may only create a request
+      // naming *themselves*, with a fixed field set, so this can never be used
+      // to smuggle arbitrary data into the owner's tree. Authorization to the
+      // key itself is NOT granted here — the owner re-wraps only for a device
+      // whose uid already held an envelope for the item (see _serveKeyRequest).
+      match /keyRequests/{reqId} {
+        allow create: if request.auth != null
+          && request.auth.uid != userId
+          && request.resource.data.requesterUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(
+               ['itemId', 'ownerDeviceId', 'requesterUid',
+                'requesterDeviceId', 'at'])
+          && request.resource.data.itemId is string
+          && request.resource.data.ownerDeviceId is int
+          && request.resource.data.requesterDeviceId is int;
+        allow read, delete: if request.auth != null
+          && (request.auth.uid == userId
+              || resource.data.requesterUid == request.auth.uid);
+        allow update: if false;
       }
     }
     
