@@ -2094,7 +2094,7 @@ function _staleKeyedCount(bucket, keyField, expectedKey) {
 // serving uncapped AI calls against the shared free-tier budget.
 const AI_CONFIG_FALLBACK = {
   enabled: true,
-  model: "qwen/qwen3.8-27b",
+  model: "openai/gpt-oss-120b",
   systemPrompt:
     "You are GupAI, a friendly and intelligent AI assistant developed by GupShupGo inside the GupShupGo " +
     "chat app. You are GupShupGo's own AI. If asked who created, built, or trained you, say you were created by GupShupGo. " +
@@ -2107,12 +2107,12 @@ const AI_CONFIG_FALLBACK = {
   proDailyCap: 100,
   rewardCredits: 5,
   rewardDailyCap: 5,
-  // Exact live-tested models on Groq and Google Gemini API:
+  // Production-grade chain alternating between Groq Production and Google Gemini:
   fallbackModels: [
-    "openai/gpt-oss-120b",
+    "gemini-3.5-flash",
     "openai/gpt-oss-20b",
     "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "qwen/qwen3.8-27b",
   ],
 };
 
@@ -3088,18 +3088,18 @@ async function _groqAttempt(model, cfg, contents, timeoutMs) {
       typeof data.choices[0].message.content === "string"
         ? data.choices[0].message.content.trim()
         : "";
-    return text.length > 0 ? { kind: "ok", text } : { kind: "empty" };
+    return text.length > 0 ? { kind: "ok", text } : { kind: "next", error: "groq empty text" };
   }
 
   const detail = (await response.text().catch(() => "")).slice(0, 300);
   const errMsg = `groq ${response.status} (${model}): ${detail}`;
-  if (response.status === 429 || response.status === 404 || response.status === 503) {
+  if (response.status >= 400 && response.status < 500) {
     return { kind: "next", error: errMsg };
   }
   if (response.status >= 500) {
     return { kind: "retry", error: errMsg };
   }
-  return { kind: "fatal", error: errMsg };
+  return { kind: "next", error: errMsg };
 }
 
 /**
@@ -3166,14 +3166,15 @@ async function _geminiAttempt(model, cfg, contents, timeoutMs) {
   // 429 (quota), 404 (model not found), or 503 (high demand overload):
   // immediately advance to the next fallback model instead of retrying the
   // overloaded model and burning through the 25-second execution deadline.
-  if (response.status === 429 || response.status === 404 || response.status === 503) {
+  if (response.status === 401 || response.status === 403 ||
+      response.status === 429 || response.status === 404 || response.status === 503) {
     return { kind: "next", error: errMsg };
   }
   if (response.status >= 500) {
     return { kind: "retry", error: errMsg };
   }
-  // 400 / 401 / 403 and other 4xx — a bad payload or key, identical across models.
-  return { kind: "fatal", error: errMsg };
+  // Advance to next fallback model
+  return { kind: "next", error: errMsg };
 }
 
 /**
@@ -3200,16 +3201,14 @@ async function _generateGeminiReply(cfg, contents) {
       );
 
       if (result.kind === "ok") return result.text;
-      // A safety block / empty candidate is a content outcome — don't model-hop.
-      if (result.kind === "empty") return null;
+      lastError = result.error || "empty response";
 
-      lastError = result.error;
-      if (result.kind === "fatal") throw new Error(lastError);
+      console.warn("askGupShupAi: attempt failed or empty on", model, ":", lastError);
 
-      console.warn("askGupShupAi: attempt failed:", lastError);
-
-      // 429/404/timeout: this model is out — go straight to the next, no backoff.
-      if (result.kind === "next") break;
+      // Model returned empty, fatal, or next (4xx/429/timeout): advance straight to the next model
+      if (result.kind === "empty" || result.kind === "fatal" || result.kind === "next") {
+        break;
+      }
 
       // 503/5xx/network: back off and retry the SAME model, unless its
       // retries are spent (fall through to the next model) or the backoff

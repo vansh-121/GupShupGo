@@ -36,7 +36,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 
 /// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
 /// the notice can be re-shown if the wording materially changes.
-const String _kAiNoticeSeenKey = 'ai_first_run_notice_seen_v1';
+const String _kAiNoticeSeenKey = 'ai_first_run_notice_seen_v2';
 
 class AiAssistantScreen extends StatefulWidget {
   const AiAssistantScreen({super.key});
