@@ -1,11 +1,11 @@
 /// GupShupGo — GupShup AI assistant service.
 ///
 /// A dedicated you↔AI conversation that never touches the app's human↔human
-/// E2EE (Signal) chats. The transcript lives only in [PlaintextStore] under the
-/// reserved room id [kAiRoomId], so it is local-only and wiped on sign-out by
-/// `PlaintextStore.wipe()` along with every other local message — no Firestore,
-/// no Signal session, and none of `ChatService`'s streak / notification side
-/// effects.
+/// E2EE (Signal) chats. The transcript lives only in [PlaintextStore] under a
+/// per-account room id ([aiRoomIdFor]), so it is local-only and wiped on
+/// sign-out by `PlaintextStore.wipe()` along with every other local message —
+/// no Firestore, no Signal session, and none of `ChatService`'s streak /
+/// notification side effects.
 ///
 /// The client is deliberately dumb about cost: it never decides the quota. It
 /// POSTs the turn to the `askGupShupAi` Cloud Function with the user's Firebase
@@ -26,11 +26,25 @@ import 'package:http/http.dart' as http;
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 
-/// Reserved local room id for the AI transcript. It has no `uid:uid` separator,
-/// so it can never collide with a real 1:1 chat room id. The assistant's own
-/// messages are stored with `senderId == kAiRoomId`, which is also how a stored
-/// message is told apart from the user's own (`senderId == <uid>`) at render.
+/// Reserved local room id *prefix* for the AI transcript. The full room id is
+/// per-account ([aiRoomIdFor]) — `gupshup_ai:<uid>`.
+///
+/// Scoping by account is load-bearing for privacy: [PlaintextStore] is only
+/// wiped by an explicit sign-out, but an auth invalidation (token revoked or
+/// expired, `AuthService.listenForAuthInvalidation`) clears the saved uid
+/// *without* wiping the store. A single shared room id would then be readable —
+/// and replayed to Gemini as history — by whoever signs in next on the device.
+/// A per-account id makes every other account read an empty transcript instead.
+///
+/// The prefix has no `uid_uid` shape, so a real 1:1 chat room id can never
+/// collide with it. The assistant's own messages are still stored with
+/// `senderId == kAiRoomId`, which is `!= <uid>`, and that inequality is how a
+/// stored message is told apart from the user's own (`senderId == <uid>`) at
+/// render — the per-account suffix lives only on the room key, not the sender.
 const String kAiRoomId = 'gupshup_ai';
+
+/// The per-account AI transcript room id for [uid]. See [kAiRoomId].
+String aiRoomIdFor(String uid) => '$kAiRoomId:$uid';
 
 /// Outcome of [AiAssistantService.sendMessage].
 ///
@@ -93,15 +107,22 @@ class AiAssistantService {
   /// Reactive transcript for the UI. A thin pass-through to the local store so
   /// the screen depends only on this service, not on [PlaintextStore] directly.
   Stream<List<MessageModel>> watchTranscript() async* {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      yield const [];
+      return;
+    }
     final store = await PlaintextStore.instance();
-    yield* store.watchMessages(kAiRoomId);
+    yield* store.watchMessages(aiRoomIdFor(uid));
   }
 
   /// Whether the signed-in user has any AI transcript stored locally — used to
   /// decide whether to show the one-time "sent to Google" first-run notice.
   Future<bool> hasHistory() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
     final store = await PlaintextStore.instance();
-    final messages = await store.getMessages(kAiRoomId);
+    final messages = await store.getMessages(aiRoomIdFor(uid));
     return messages.isNotEmpty;
   }
 
@@ -128,7 +149,7 @@ class AiAssistantService {
     }
 
     // History first: the prior transcript, before this turn is appended.
-    final prior = await store.getMessages(kAiRoomId);
+    final prior = await store.getMessages(aiRoomIdFor(uid));
     final history = buildHistory(prior, uid);
 
     // Persist the user's turn so it renders immediately via watchTranscript().
@@ -141,7 +162,7 @@ class AiAssistantService {
       timestamp: DateTime.now(),
       schemaVersion: 1,
     );
-    await store.saveMessage(userMsg, kAiRoomId);
+    await store.saveMessage(userMsg, aiRoomIdFor(uid));
 
     return _post(store: store, uid: uid, message: trimmed, history: history);
   }
@@ -165,7 +186,7 @@ class AiAssistantService {
       return AiSendFailed('store-unavailable: $e');
     }
 
-    final messages = await store.getMessages(kAiRoomId);
+    final messages = await store.getMessages(aiRoomIdFor(uid));
     if (messages.isEmpty) return const AiSendFailed('nothing-to-retry');
 
     final last = messages.last;
@@ -248,7 +269,7 @@ class AiAssistantService {
         timestamp: DateTime.now(),
         schemaVersion: 1,
       );
-      await store.saveMessage(aiMsg, kAiRoomId);
+      await store.saveMessage(aiMsg, aiRoomIdFor(uid));
     }
 
     return result;

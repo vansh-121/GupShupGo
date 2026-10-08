@@ -53,13 +53,37 @@ service cloud.firestore {
         ]);
       }
 
+      // GupShup AI usage counters. aiDaily is today's spent-message count and
+      // aiRewardDaily is today's claimed rewarded top-ups. Both are read
+      // authoritatively by `askGupShupAi` to compute each user's allowance and
+      // are written ONLY by the askGupShupAi / admobSsv functions (Admin SDK,
+      // which bypasses these rules). Same exploit as the ad rewards above: a
+      // client that could reset aiDaily would bypass its own daily cap, and one
+      // that could raise aiRewardDaily would mint free AI messages without
+      // watching an ad — and every reply is a real paid Gemini call.
+      function doesNotTouchAiCounters() {
+        return !request.resource.data.keys().hasAny([
+          'aiDaily',
+          'aiRewardDaily'
+        ]);
+      }
+
+      function doesNotModifyAiCounters() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'aiDaily',
+          'aiRewardDaily'
+        ]);
+      }
+
       // Users can only create/update their own profile
       allow create: if request.auth != null && request.auth.uid == userId
         && doesNotCreateSubscriptions()
-        && doesNotTouchAdRewards();
+        && doesNotTouchAdRewards()
+        && doesNotTouchAiCounters();
       allow update: if request.auth != null && request.auth.uid == userId
         && doesNotModifySubscriptions()
-        && doesNotModifyAdRewards();
+        && doesNotModifyAdRewards()
+        && doesNotModifyAiCounters();
       
       // Prevent users from deleting profiles
       allow delete: if false;

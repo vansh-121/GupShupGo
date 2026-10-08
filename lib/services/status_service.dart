@@ -439,9 +439,12 @@ class StatusService {
       }
     } catch (_) {
       // A decrypt that threw (Storage read blip, transient handshake failure)
-      // is treated the same as a missing key: terminal only once the item is
-      // old enough that propagation can be ruled out.
-      _giveUpIfStale(item);
+      // is transient by nature, so it must NOT be made terminal: a brief
+      // download/connection error would otherwise drop a perfectly valid status
+      // into [_unrecoverable] and the viewer would filter it out for the rest of
+      // the session. Leave the item uncached and retryable — the next stream
+      // emission or the viewer's own retry re-attempts it. Only the genuine
+      // "no key anywhere" path above (result == null) ages into unrecoverable.
     }
   }
 
@@ -473,6 +476,16 @@ class StatusService {
     required List<String> viewerUids,
   }) async {
     final fanout = <String>{...viewerUids, ownerUid}.toList();
+
+    // Record the intended viewer set locally (owner-only, never uploaded) so
+    // the key-heal path can authorise a viewer whose content-key wrap fails for
+    // every one of their devices below — leaving them with no envelope to prove
+    // they were ever an audience member. See [_serveKeyRequest]. Best-effort:
+    // the post must not fail if this local write does.
+    try {
+      await (await PlaintextStore.instance())
+          .saveStatusAudience(statusItemId, viewerUids);
+    } catch (_) {}
 
     // Simple fixed-concurrency executor — runs at most [_maxConcurrentEncrypts]
     // viewers in parallel, starts the next as soon as one finishes.
@@ -698,9 +711,23 @@ class StatusService {
           .limit(1)
           .get();
       if (prior.docs.isEmpty) {
-        // Never a viewer of this item — refuse and clear the request.
-        await reqRef.delete();
-        return;
+        // No envelope was ever delivered to this uid. Usually that is a
+        // stranger who merely wrote a request — but it is also the one
+        // legitimate case the envelope-as-audience check cannot see: a viewer
+        // the owner DID post to whose content-key wrap failed for every one of
+        // their devices at post time (encryptForUser returned empty), so no
+        // envelope was ever written for them. Consult the owner's local record
+        // of the intended audience (saved in _publishWrappedKeys, never
+        // uploaded) to tell them apart. A uid the owner never shared with — the
+        // stranger — is still refused and cleared exactly as before.
+        final audience =
+            await (await PlaintextStore.instance()).getStatusAudience(itemId);
+        if (audience == null || !audience.contains(requesterUid)) {
+          await reqRef.delete();
+          return;
+        }
+        // Authorised viewer whose first delivery failed: fall through and
+        // re-wrap a fresh envelope for their current device.
       }
 
       // Recover the content key K. The owner holds it locally (saveStatusKey on

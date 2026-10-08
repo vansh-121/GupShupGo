@@ -58,6 +58,15 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   /// actually grows (not on every unrelated stream re-emit).
   int _lastItemCount = 0;
 
+  /// Today's remaining / total AI message allowance, surfaced as the app-bar
+  /// chip. Both null until the first read lands, so the chip stays hidden until
+  /// there is a real number to show. Computed on open and after a top-up from
+  /// the Remote Config caps + the server-written `aiDaily` / `aiRewardDaily`
+  /// counters, and refreshed from the server's authoritative `remaining` after
+  /// every reply. See [_refreshQuota].
+  int? _remaining;
+  int? _allocated;
+
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   @override
@@ -68,6 +77,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     // so (like the Arcade) it's a fair place to resolve ad consent too.
     unawaited(AdsService.instance.ensureConsent());
     unawaited(RewardedAdService.instance.preload());
+    unawaited(_refreshQuota());
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowNotice());
   }
 
@@ -157,6 +167,15 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   void _handleResult(AiSendResult result) {
     switch (result) {
       case AiReplyReceived(:final remaining):
+        // The server's post-send remaining is authoritative — adopt it, and
+        // nudge the cached allocation up if it somehow trails (e.g. the on-open
+        // estimate under-counted a Pro cap or a top-up).
+        setState(() {
+          _remaining = remaining;
+          if (_allocated == null || remaining > _allocated!) {
+            _allocated = remaining;
+          }
+        });
         _scrollToBottom();
         if (remaining >= 0 && remaining <= 3) {
           _toast(
@@ -166,6 +185,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           );
         }
       case AiQuotaExceeded(:final isPro, :final canEarn):
+        setState(() => _remaining = 0);
         _showQuotaSheet(isPro: isPro, canEarn: canEarn);
       case AiBusy():
         _toast('GupAI is busy right now. Please try again in a moment.');
@@ -419,6 +439,60 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if (!mounted) return;
     setState(() => _sending = false);
     _handleResult(result);
+    // The top-up raised today's allocation; re-read so the chip's total (not
+    // just its remaining, which _handleResult already took from the reply)
+    // reflects the extra credits.
+    unawaited(_refreshQuota());
+  }
+
+  /// Reads today's AI usage from the user doc and recomputes the app-bar chip's
+  /// remaining / allocated. Fire-and-forget: a failed read just leaves the last
+  /// known values (or keeps the chip hidden if we never had any).
+  ///
+  /// Allocation mirrors the server's `aiAllowance`: a Pro-or-free base plus the
+  /// rewarded top-ups earned today. The base uses [SubscriptionProvider.hasActiveProEntitlement]
+  /// — the real paid entitlement, which is what the server's `isProUser` keys
+  /// off — not `isPro`, which `pro_enabled` deliberately inverts. The caps are
+  /// the Remote Config "advertised" mirrors of `config/ai`; they are meant to
+  /// match it, and any drift self-corrects from the server's `remaining` on the
+  /// next reply.
+  Future<void> _refreshQuota() async {
+    final uid = _uid;
+    if (uid == null) return;
+    final isPro = context.read<SubscriptionProvider>().hasActiveProEntitlement;
+    final flags = FeatureFlagService.instance;
+    final todayKey = StreakDay.fromInstant(ServerClock.now()).key;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final data = snap.data();
+      final base = isPro ? flags.aiProDailyCap : flags.aiFreeDailyCap;
+      final topUps = _aiRewardCountToday(data, todayKey);
+      final used = _aiDailyCountToday(data, todayKey);
+      final allocated = base + topUps * flags.aiRewardCredits;
+      final remaining = (allocated - used).clamp(0, allocated);
+      if (mounted) {
+        setState(() {
+          _allocated = allocated;
+          _remaining = remaining;
+        });
+      }
+    } catch (_) {
+      // Keep whatever we last showed.
+    }
+  }
+
+  /// Today's charged AI message count from the server-written `aiDaily` counter,
+  /// read with the same canonical day key `askGupShupAi` stamps so a device in
+  /// another timezone doesn't disagree. A bucket from any other day reads as 0.
+  int _aiDailyCountToday(Map<String, dynamic>? user, String todayKey) {
+    final daily = user?['aiDaily'];
+    if (daily is! Map) return 0;
+    if (daily['dayKey'] != todayKey) return 0;
+    final count = daily['count'];
+    return count is num ? count.toInt() : 0;
   }
 
   /// Today's rewarded-AI top-up count from the server-written counter, read with
@@ -430,6 +504,134 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if (daily['dayKey'] != todayKey) return 0;
     final count = daily['count'];
     return count is num ? count.toInt() : 0;
+  }
+
+  /// The app-bar "N left today" pill. Hidden until the first quota read lands,
+  /// so it never flashes a wrong number. Colour tracks urgency: brand normally,
+  /// [AppThemeColors.warning] at ≤3, [AppThemeColors.error] at 0. Tapping opens
+  /// [_showQuotaInfo] with the full breakdown.
+  Widget _buildQuotaChip(AppThemeColors c) {
+    final remaining = _remaining;
+    if (remaining == null) return const SizedBox.shrink();
+    final color =
+        remaining == 0 ? c.error : (remaining <= 3 ? c.warning : c.primary);
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: _showQuotaInfo,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: color.withValues(alpha: 0.30)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.bolt_rounded, size: 14, color: color),
+                const SizedBox(width: 3),
+                Text(
+                  '$remaining left',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                Icon(Icons.expand_more_rounded, size: 15, color: color),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A compact breakdown of today's allowance: how many are left of the day's
+  /// total, a used/total bar, and the reset note. Reached from the app-bar chip.
+  void _showQuotaInfo() {
+    final remaining = _remaining;
+    if (remaining == null) return;
+    // Never render "N of <M<N>>": if the client cap estimate trails the
+    // server's remaining, show the remaining as the total instead.
+    final allocated = (_allocated == null || _allocated! < remaining)
+        ? remaining
+        : _allocated!;
+    final used = (allocated - remaining).clamp(0, allocated);
+    final c = AppThemeColors.of(context);
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.bolt_rounded, color: c.primary, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'GupAI messages',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+                color: c.textHigh,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$remaining of $allocated left today',
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: c.textHigh,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: allocated == 0 ? 0 : used / allocated,
+                minHeight: 7,
+                backgroundColor: c.surfaceAlt,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  remaining == 0 ? c.error : c.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Used $used today · resets tomorrow. Watch an ad or go Pro for more.',
+              style: GoogleFonts.poppins(
+                fontSize: 12.5,
+                height: 1.4,
+                color: c.textMid,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Got it',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: c.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -489,6 +691,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ),
           ],
         ),
+        actions: [_buildQuotaChip(c)],
       ),
       body: Column(
         children: [

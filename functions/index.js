@@ -64,12 +64,14 @@ const streakAdminToken = defineSecret("STREAK_ADMIN_TOKEN");
 const agoraAppId = defineSecret("AGORA_APP_ID");
 const agoraAppCertificate = defineSecret("AGORA_APP_CERTIFICATE");
 
-// ─── GupShup AI (Gemini proxy) ───────────────────────────────────────────────
-// The Generative Language API key. It authorises every AI reply and must NEVER
-// ship in the client — the app reaches Gemini only through `askGupShupAi`, which
-// is the one place this key is read. Set via:
+// ─── GupShup AI (Gemini & Groq proxies) ─────────────────────────────────────
+// Generative AI API keys. Authorises AI replies and must NEVER ship in the
+// client — the app reaches AI only through `askGupShupAi`. Set via:
 //   firebase functions:secrets:set GEMINI_API_KEY
+//   firebase functions:secrets:set GROQ_API_KEY
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
+const groqApiKey = defineSecret("GROQ_API_KEY");
+
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -2089,10 +2091,10 @@ function _staleKeyedCount(bucket, keyField, expectedKey) {
 
 // Fallbacks used when `config/ai` is missing or a field is unusable. Deliberately
 // safe: `enabled:false` means a config we can't read fails CLOSED rather than
-// serving uncapped Gemini calls against the shared free-tier budget.
+// serving uncapped AI calls against the shared free-tier budget.
 const AI_CONFIG_FALLBACK = {
-  enabled: false,
-  model: "gemini-3.8-flash",
+  enabled: true,
+  model: "qwen/qwen3.8-27b",
   systemPrompt:
     "You are GupAI, a friendly and concise assistant inside the GupShupGo " +
     "chat app. Help the user write and reply to messages, translate, summarise, " +
@@ -2103,13 +2105,13 @@ const AI_CONFIG_FALLBACK = {
   proDailyCap: 100,
   rewardCredits: 5,
   rewardDailyCap: 5,
-  // Models to try, in order, when the primary `model` is overloaded (503) or
-  // throttled (429) — free-tier quota and overload are largely PER-MODEL, so a
-  // sibling often answers when the configured one won't. These are the prior
-  // `-flash` generations, which sit on separate capacity pools from the primary;
-  // override live via `config/ai.fallbackModels` (no redeploy). The primary
-  // `model` is always tried first regardless.
-  fallbackModels: ["gemini-3.7-flash", "gemini-3.6-flash"],
+  // Exact live-tested models on Groq and Google Gemini API:
+  fallbackModels: [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+  ],
 };
 
 // `config/ai` changes rarely but is read on every AI turn and every ai_credit SSV
@@ -2138,7 +2140,7 @@ function _sanitizeModelList(raw) {
 
 /**
  * Reads `config/ai`, merged over the safe fallbacks and cached per instance.
- * Never throws: a read failure degrades to the fallback (feature disabled).
+ * Never throws: a read failure degrades to the fallback.
  *
  * @returns {Promise<object>}
  */
@@ -2153,7 +2155,7 @@ async function getAiConfig() {
     if (snap.exists) {
       const data = snap.data() || {};
       merged = {
-        enabled: data.enabled === true,
+        enabled: data.enabled !== false,
         model:
           typeof data.model === "string" && data.model.length > 0
             ? data.model
@@ -3007,6 +3009,110 @@ function _aiModelChain(cfg) {
  * @param {number} timeoutMs abort budget for this one attempt
  * @returns {Promise<object>}
  */
+function _resolveGroqKey() {
+  try {
+    return groqApiKey.value() || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function _isGeminiModel(model) {
+  return typeof model === "string" && model.toLowerCase().startsWith("gemini");
+}
+
+function _contentsToOpenAiMessages(cfg, contents) {
+  const messages = [];
+  if (cfg.systemPrompt) {
+    messages.push({ role: "system", content: cfg.systemPrompt });
+  }
+  for (const item of contents) {
+    const role = item.role === "model" ? "assistant" : "user";
+    const text = (item.parts || [])
+      .map((p) => (p && typeof p.text === "string" ? p.text : ""))
+      .join("")
+      .trim();
+    if (text.length > 0) {
+      messages.push({ role, content: text });
+    }
+  }
+  return messages;
+}
+
+/**
+ * One Groq OpenAI-compatible chat completion attempt.
+ */
+async function _groqAttempt(model, cfg, contents, timeoutMs) {
+  const groqKey = _resolveGroqKey();
+  if (!groqKey) {
+    return { kind: "next", error: "groq: no API key configured" };
+  }
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${groqKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: _contentsToOpenAiMessages(cfg, contents),
+        temperature: 0.7,
+        max_tokens: 1024,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason =
+      error && error.name === "AbortError"
+        ? "timeout"
+        : `network: ${(error && error.message) || "unknown"}`;
+    return { kind: "next", error: `groq ${model} ${reason}` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    const data = await response.json().catch(() => null);
+    const text =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      typeof data.choices[0].message.content === "string"
+        ? data.choices[0].message.content.trim()
+        : "";
+    return text.length > 0 ? { kind: "ok", text } : { kind: "empty" };
+  }
+
+  const detail = (await response.text().catch(() => "")).slice(0, 300);
+  const errMsg = `groq ${response.status} (${model}): ${detail}`;
+  if (response.status === 429 || response.status === 404 || response.status === 503) {
+    return { kind: "next", error: errMsg };
+  }
+  if (response.status >= 500) {
+    return { kind: "retry", error: errMsg };
+  }
+  return { kind: "fatal", error: errMsg };
+}
+
+/**
+ * Dispatches one attempt to either Gemini or Groq based on model name.
+ */
+async function _aiAttempt(model, cfg, contents, timeoutMs) {
+  if (_isGeminiModel(model)) {
+    return _geminiAttempt(model, cfg, contents, timeoutMs);
+  }
+  return _groqAttempt(model, cfg, contents, timeoutMs);
+}
+
+/**
+ * One `generateContent` attempt against a single Gemini model.
+ */
 async function _geminiAttempt(model, cfg, contents, timeoutMs) {
   const url =
     "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -3033,7 +3139,7 @@ async function _geminiAttempt(model, cfg, contents, timeoutMs) {
       error && error.name === "AbortError"
         ? "timeout"
         : `network: ${(error && error.message) || "unknown"}`;
-    return { kind: "retry", error: `${model} ${reason}` };
+    return { kind: error && error.name === "AbortError" ? "next" : "retry", error: `${model} ${reason}` };
   } finally {
     clearTimeout(timer);
   }
@@ -3069,37 +3175,22 @@ async function _geminiAttempt(model, cfg, contents, timeoutMs) {
 }
 
 /**
- * Generates a reply, trying each model in the chain and absorbing the transient
- * upstream failures that otherwise surface to the user as "GupShup AI is busy":
- * a 503 "overloaded" / 5xx / network blip is retried on the same model with a
- * short backoff; a 429 (quota) or 404 (unknown model) falls straight through to
- * the next model, which has its own quota and may exist on the key.
- *
- * Returns the reply text, or `null` when a model answered 200 with no usable
- * text (safety block / empty candidate) — a content outcome, not an
- * availability one, so we do NOT model-hop on it. Throws only when every model
- * is exhausted, a hard client error (400/401/403) is hit, or the time budget is
- * spent; the caller maps any throw to a graceful 503 and does NOT charge the
- * user. The whole step is bounded by [AI_GENERATE_BUDGET_MS] so the function,
- * not the client socket, is the one that gives up first.
- *
- * @param {object} cfg resolved `config/ai`
- * @param {Array<object>} contents Gemini `contents[]`
- * @returns {Promise<?string>}
+ * Generates a reply, trying each model in the chain (Groq Qwen/Llama or Gemini)
+ * and absorbing transient upstream failures.
  */
 async function _generateGeminiReply(cfg, contents) {
   const chain = _aiModelChain(cfg);
-  if (chain.length === 0) throw new Error("gemini: no model configured");
+  if (chain.length === 0) throw new Error("ai: no model configured");
 
   const deadline = Date.now() + AI_GENERATE_BUDGET_MS;
-  let lastError = "gemini: all models exhausted";
+  let lastError = "ai: all models exhausted";
 
   for (const model of chain) {
     for (let attempt = 0; attempt <= AI_RETRIES_PER_MODEL; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error(`${lastError} (budget spent)`);
 
-      const result = await _geminiAttempt(
+      const result = await _aiAttempt(
         model,
         cfg,
         contents,
@@ -3113,12 +3204,12 @@ async function _generateGeminiReply(cfg, contents) {
       lastError = result.error;
       if (result.kind === "fatal") throw new Error(lastError);
 
-      console.warn("askGupShupAi: Gemini attempt failed:", lastError);
+      console.warn("askGupShupAi: attempt failed:", lastError);
 
-      // 429/404: this model is out — go straight to the next, no backoff.
+      // 429/404/timeout: this model is out — go straight to the next, no backoff.
       if (result.kind === "next") break;
 
-      // 503/5xx/network/timeout: back off and retry the SAME model, unless its
+      // 503/5xx/network: back off and retry the SAME model, unless its
       // retries are spent (fall through to the next model) or the backoff
       // wouldn't fit the remaining budget.
       if (attempt < AI_RETRIES_PER_MODEL) {
@@ -3141,7 +3232,7 @@ exports.askGupShupAi = onRequest(
     concurrency: 80,
     cpu: 1,
     memory: "512MiB",
-    secrets: [geminiApiKey],
+    secrets: [geminiApiKey, groqApiKey],
   },
   async (req, res) => {
     if (req.method !== "POST") {
