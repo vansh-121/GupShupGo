@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.2.0';
+const String kCurrentVersion = '1.2.1';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,28 +193,8 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.insert_drive_file_rounded,
-    'Send Any File',
-    'Share PDFs, Office files and archives up to 64 MB — encrypted end-to-end, with no compression. Works over the offline mesh too.',
-  ),
-  // _Feature(
-  //   Icons.search_rounded,
-  //   'Search Every Message',
-  //   'Chat search now looks through your whole conversation history on this device',
-  // ),
-  _Feature(
-    Icons.location_on_rounded,
-    'Share Your Location',
-    'Drop a pin from the attachment menu and open it in any maps app. Works over the offline mesh too.',
-  ),
-  _Feature(
-    Icons.lock_clock_rounded,
-    'View Once',
-    'Send a photo or video that can be opened a single time. Screenshots are blocked for view once.',
-  ),
-  _Feature(
-    Icons.blur_on_rounded,
-    'Media in Anonymous Chat',
-    'Send photos, video and voice notes to strangers. Anything they send you stays blurred until you tap to reveal it.',
+    Icons.auto_awesome_rounded,
+    'Meet GupAI',
+    'Your fast, intelligent in-app AI assistant. Ask questions, brainstorm ideas, draft messages, and get instant answers right from your chats.',
   ),
 ];

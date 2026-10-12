@@ -51,6 +51,16 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   /// and a temp-file path that VideoPlayer.file / Image.file can consume.
   final Map<String, _DecryptedStatus> _decrypted = {};
 
+  /// Items whose decrypt attempts were exhausted (or that are permanently
+  /// unrecoverable). We show a "tap to retry" affordance for these instead of
+  /// spinning forever — WhatsApp does the same once it gives up on a status.
+  final Set<String> _failedItems = {};
+
+  /// Ids with a decrypt loop currently running, so navigating back and forth
+  /// over a still-decrypting item doesn't stack duplicate loops on top of the
+  /// in-flight one.
+  final Set<String> _decrypting = {};
+
   Stream<int> _watchCurrentViewCount() {
     return _statusService.watchStatusViewCount(
       statusOwnerId: widget.statusModel.userId,
@@ -65,9 +75,17 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     // was never vaulted (status never opened before reinstall). Showing a
     // spinner for them forever is worse than silently omitting, which is
     // exactly what WhatsApp does.
-    _activeItems = widget.statusModel.activeStatusItems
+    //
+    // But never collapse to an empty viewer when the status genuinely has
+    // active items: a transient over-blacklist (envelope still propagating
+    // for a freshly-posted status) would otherwise dead-end on the black
+    // "No active status" screen with no retry. In that case we keep the raw
+    // active items and let [_decryptOne]'s retry loop recover them.
+    final active = widget.statusModel.activeStatusItems;
+    final recoverable = active
         .where((item) => !StatusService.isUnrecoverable(item.id))
         .toList();
+    _activeItems = recoverable.isNotEmpty ? recoverable : active;
     if (widget.initialStatusItemId != null) {
       final initialIndex = _activeItems.indexWhere(
         (item) => item.id == widget.initialStatusItemId,
@@ -107,7 +125,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   /// Decrypt the currently-visible item first so the user stops staring at
-  /// "Decrypting…" while later items round-trip. The remaining items run in
+  /// the loader while later items round-trip. The remaining items run in
   /// parallel and each one rebuilds the UI as soon as it lands.
   Future<void> _decryptAllEncrypted() async {
     final encrypted = _activeItems
@@ -117,49 +135,107 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
     final current = _activeItems[_currentIndex];
     if (current.type.startsWith('encrypted')) {
-      await _decryptOne(current);
-      if (mounted) setState(() {});
+      await _decryptOne(current, patient: true);
     }
 
     await Future.wait(encrypted
         .where((i) => i.id != current.id)
-        .map((item) async {
-      await _decryptOne(item);
-      if (mounted) setState(() {});
-    }));
+        .map((item) => _decryptOne(item)));
   }
 
-  Future<void> _decryptOne(StatusItem item) async {
+  /// Decrypts one encrypted item into [_decrypted], retrying across the brief
+  /// propagation window for a freshly-posted status whose wrappedKey envelope /
+  /// first-time Signal session hasn't reached this device yet.
+  ///
+  /// Each attempt goes through [StatusService.ensureDecrypted], which prefers
+  /// the persistent disk cache and dedupes against the background pre-decrypt —
+  /// so if the stream-driven pre-decrypt fills the cache while we wait, the very
+  /// next cheap check picks it up (this is what turns a stuck spinner into an
+  /// instant render the moment the key lands).
+  ///
+  /// [patient] is set for the item the user is actually looking at: it waits far
+  /// longer (covering a cold open where the status key-unwrap queues behind a
+  /// chat backlog on the shared Signal session) before surfacing a retry
+  /// affordance. Prefetch of off-screen items gives up quickly and silently.
+  Future<void> _decryptOne(StatusItem item, {bool patient = false}) async {
     if (_decrypted.containsKey(item.id)) return;
-
-    // Up to 3 attempts to cover the brief propagation window for a freshly
-    // posted status whose wrappedKey envelope hasn't arrived yet. Each
-    // attempt goes through ensureDecrypted which prefers the persistent
-    // disk cache — so a status the user has already seen renders
-    // instantly even after an app restart (and without network).
-    for (var attempt = 0; attempt < 3; attempt++) {
-      await _statusService.ensureDecrypted(
-        ownerUid: widget.statusModel.userId,
-        item: item,
-        selfUid: widget.currentUserId,
-      );
-      final cached = StatusService.cachedPlaintext(item.id);
-      if (cached != null) {
-        _decrypted[item.id] = cached.text != null
-            ? _DecryptedStatus.text(
-                text: cached.text ?? '',
-                backgroundColor: cached.backgroundColor ?? '#6C5CE7',
-              )
-            : _DecryptedStatus.media(
-                localFile: cached.localFile!,
-                bytes: cached.bytes!,
-                isVideo: cached.isVideo,
-              );
-        return;
+    if (_decrypting.contains(item.id)) return; // a loop is already on it
+    _decrypting.add(item.id);
+    try {
+      final maxAttempts = patient ? 40 : 6;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        await _statusService.ensureDecrypted(
+          ownerUid: widget.statusModel.userId,
+          item: item,
+          selfUid: widget.currentUserId,
+        );
+        final cached = StatusService.cachedPlaintext(item.id);
+        if (cached != null) {
+          _decrypted[item.id] = cached.text != null
+              ? _DecryptedStatus.text(
+                  text: cached.text ?? '',
+                  backgroundColor: cached.backgroundColor ?? '#6C5CE7',
+                )
+              : _DecryptedStatus.media(
+                  localFile: cached.localFile!,
+                  bytes: cached.bytes!,
+                  isVideo: cached.isVideo,
+                );
+          _failedItems.remove(item.id);
+          if (mounted) {
+            setState(() {});
+            _onItemDecrypted(item.id);
+          }
+          return;
+        }
+        // Permanently undecryptable (genuine reinstall ghost) — stop early and
+        // surface the retry affordance rather than spinning out the full window.
+        if (StatusService.isUnrecoverable(item.id)) break;
+        if (!mounted) return;
+        final backoffMs = (500 * (attempt + 1)).clamp(500, 1500).toInt();
+        await Future.delayed(Duration(milliseconds: backoffMs));
       }
-      if (!mounted) return;
-      await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+      // Exhausted (or blacklisted) without a plaintext: show "tap to retry"
+      // instead of an eternal loader.
+      if (mounted && !_decrypted.containsKey(item.id)) {
+        setState(() => _failedItems.add(item.id));
+      }
+    } finally {
+      _decrypting.remove(item.id);
     }
+  }
+
+  /// Called when an item finishes decrypting. If it's the one on screen, the
+  /// progress bar has been held at zero waiting for it — start the countdown
+  /// now so the timer measures time-visible, not time-spent-decrypting (this is
+  /// the WhatsApp behaviour: the ring fills only once the content is shown).
+  void _onItemDecrypted(String itemId) {
+    if (_activeItems.isEmpty) return;
+    if (_activeItems[_currentIndex].id != itemId) return;
+    if (_isPaused) return;
+    _progressController.duration = const Duration(seconds: 5);
+    _startProgress();
+  }
+
+  /// User tapped "retry" on an item we'd given up on.
+  void _retryDecrypt(StatusItem item) {
+    // The parent tap handler fires onTapDown (pausing) before this inner tap
+    // wins the gesture arena, and its onTapUp may not fire — clear the pause
+    // here so _onItemDecrypted can start the bar once the retry succeeds.
+    _isPaused = false;
+    setState(() => _failedItems.remove(item.id));
+    // ignore: discarded_futures
+    _decryptOne(item, patient: true);
+  }
+
+  /// Whether the item currently on screen is ready to display (and therefore
+  /// whether the progress timer may run). Plain items are always ready; an
+  /// encrypted item is ready only once its plaintext is decrypted.
+  bool _isCurrentReady() {
+    if (_activeItems.isEmpty) return false;
+    final item = _activeItems[_currentIndex];
+    if (!item.type.startsWith('encrypted')) return true;
+    return _decrypted.containsKey(item.id);
   }
 
   /// Initialize the current status - set appropriate duration, load video if needed.
@@ -196,9 +272,24 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           }
         });
     } else {
-      // Text or image: 5 seconds
+      // Text / image / encrypted. Give it the 5s duration, but only START the
+      // countdown once the content is actually ready to show. For an encrypted
+      // item that hasn't decrypted yet we hold the bar at zero (showing the
+      // loader) and make sure a patient decrypt loop is running; _onItemDecrypted
+      // starts the timer the instant the plaintext lands.
       _progressController.duration = const Duration(seconds: 5);
-      _startProgress();
+      if (_isCurrentReady()) {
+        _startProgress();
+      } else {
+        _progressController.stop();
+        _progressController.reset();
+        if (item.type.startsWith('encrypted') &&
+            !_failedItems.contains(item.id) &&
+            !_decrypting.contains(item.id)) {
+          // ignore: discarded_futures
+          _decryptOne(item, patient: true);
+        }
+      }
     }
   }
 
@@ -907,22 +998,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   Widget _buildEncryptedStatus(StatusItem item) {
     final dec = _decrypted[item.id];
     if (dec == null) {
-      // Subtle spinner on a dark background — no "Decrypting…" text.
-      // The status progress bar at the top already indicates activity;
-      // a second text label just looks broken.
-      return const ColoredBox(
-        color: Colors.black,
-        child: Center(
-          child: SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.white30,
-            ),
-          ),
-        ),
-      );
+      return _failedItems.contains(item.id)
+          ? _buildDecryptFailed(item)
+          : _buildDecryptLoading();
     }
     if (dec.text != null) {
       // Render as a text status using the decrypted text + bg colour.
@@ -950,6 +1028,60 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       );
     }
     return const SizedBox.shrink();
+  }
+
+  /// WhatsApp-style loader shown while an encrypted item is being decrypted.
+  /// A single calm spinner centred on black — the held progress bar at the top
+  /// already signals "not started yet", so this stays deliberately minimal.
+  Widget _buildDecryptLoading() {
+    return const ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: SizedBox(
+          width: 34,
+          height: 34,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            color: Colors.white70,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Shown when decryption was exhausted/blacklisted: a quiet lock glyph with a
+  /// tap-to-retry, instead of a spinner that never resolves.
+  Widget _buildDecryptFailed(StatusItem item) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: GestureDetector(
+          // Swallow the tap so it retries instead of advancing the story.
+          onTap: () => _retryDecrypt(item),
+          behavior: HitTestBehavior.opaque,
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_reset_rounded, color: Colors.white54, size: 48),
+              SizedBox(height: 12),
+              Text(
+                "Couldn't load this update",
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Tap to retry',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildTextStatus(StatusItem item) {

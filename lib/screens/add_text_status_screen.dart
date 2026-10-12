@@ -27,6 +27,18 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   final StatusService _statusService = StatusService();
   bool _isUploading = false;
 
+  /// Pre-warmed when the screen opens so the post tap is instant.
+  /// [StatusService.defaultViewerUids] fetches every chat room the user is in
+  /// (a cold round-trip); running it now — while the user types — means the
+  /// post no longer waits on it behind a spinner.
+  late final Future<List<String>> _viewersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewersFuture = _statusService.defaultViewerUids(widget.userId);
+  }
+
   int _currentColorIndex = 0;
 
   final List<String> _backgroundColors = [
@@ -75,8 +87,9 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
       // E2EE: encrypt the status under a per-item key and wrap the key for
       // every viewer's device. If the user has zero contacts, we have no one
       // to share it with — surface that explicitly rather than silently
-      // dropping the post.
-      final viewers = await _statusService.defaultViewerUids(widget.userId);
+      // dropping the post. (Viewer list was pre-warmed in initState, so this
+      // await is normally already resolved.)
+      final viewers = await _viewersFuture;
       if (viewers.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

@@ -54,6 +54,17 @@ class FeatureFlagService extends ChangeNotifier {
   static const _kDeprecatedBelowVersionCode = 'deprecated_below_version_code';
   static const _kSupportDeadlineIso = 'support_deadline_iso';
 
+  // GupShup AI. `ai_assistant_enabled` is the CLIENT kill switch — it only
+  // decides whether the entry point is shown. It is deliberately separate from
+  // `pro_enabled`: while that is off, `isProUnlocked` is true for everyone, so
+  // gating AI on it would hand unlimited Gemini calls to the whole user base.
+  // The per-user daily quota is enforced server-side in `askGupShupAi`; the caps
+  // below are DISPLAY-ONLY copy (what the sheet promises), never the ceiling.
+  static const _kAiAssistantEnabled = 'ai_assistant_enabled';
+  static const _kAiFreeDailyCap = 'ai_free_daily_cap';
+  static const _kAiProDailyCap = 'ai_pro_daily_cap';
+  static const _kAiRewardCredits = 'ai_reward_credits';
+
   // Fallbacks used when the console holds a value Remote Config can't parse as
   // a positive int — getInt() returns 0 in that case, and a 0-point reward or a
   // 0 daily cap silently disables the feature rather than failing loudly.
@@ -65,6 +76,14 @@ class FeatureFlagService extends ChangeNotifier {
   // after every call teaches people that calling costs them something.
   static const _kDefaultInterstitialMinGapSeconds = 60;
   static const _kDefaultInterstitialCallMinGapSeconds = 14400; // 4h
+
+  // GupShup AI display-only cap fallbacks. These must mirror the server
+  // fallbacks in `functions/index.js` (AI_CONFIG_FALLBACK) so the sheet shows an
+  // honest number when Remote Config has nothing set — but the server's
+  // `config/ai` is always the authority on what is actually enforced.
+  static const _kDefaultAiFreeDailyCap = 10;
+  static const _kDefaultAiProDailyCap = 100;
+  static const _kDefaultAiRewardCredits = 5;
 
   final FirebaseRemoteConfig _remoteConfig = FirebaseRemoteConfig.instance;
 
@@ -172,6 +191,36 @@ class FeatureFlagService extends ChangeNotifier {
     return DateTime.tryParse(raw)?.toUtc();
   }
 
+  // ── GupShup AI ─────────────────────────────────────────────────────────────
+
+  /// Whether the GupShup AI assistant entry point is shown. Off by default so a
+  /// release ships without it until Gemini + `config/ai` are provisioned. This
+  /// is a CLIENT-side visibility switch only — the server's `config/ai.enabled`
+  /// is the real kill switch, and `askGupShupAi` refuses regardless of this flag.
+  bool get aiAssistantEnabled => _remoteConfig.getBool(_kAiAssistantEnabled);
+
+  /// Free users' advertised daily message cap. Display copy only; the real cap
+  /// is `config/ai.freeDailyCap`, enforced in `askGupShupAi`.
+  int get aiFreeDailyCap {
+    final v = _remoteConfig.getInt(_kAiFreeDailyCap);
+    return v > 0 ? v : _kDefaultAiFreeDailyCap;
+  }
+
+  /// Pro users' advertised daily message cap. Display copy only; see
+  /// [aiFreeDailyCap].
+  int get aiProDailyCap {
+    final v = _remoteConfig.getInt(_kAiProDailyCap);
+    return v > 0 ? v : _kDefaultAiProDailyCap;
+  }
+
+  /// Extra messages advertised per watched ad. Display copy only; the real grant
+  /// is `config/ai.rewardCredits`, applied by the `ai_credit` branch of
+  /// `admobSsv`.
+  int get aiRewardCredits {
+    final v = _remoteConfig.getInt(_kAiRewardCredits);
+    return v > 0 ? v : _kDefaultAiRewardCredits;
+  }
+
   Future<void>? _initFuture;
 
   /// Initialise Remote Config with defaults and fetch latest values.
@@ -207,6 +256,12 @@ class FeatureFlagService extends ChangeNotifier {
         _kMinSupportedVersionCode: 0,
         _kDeprecatedBelowVersionCode: 0,
         _kSupportDeadlineIso: '',
+        // GupShup AI ships dark: the entry point stays hidden until the flag is
+        // flipped on. The caps are display copy and mirror the server fallback.
+        _kAiAssistantEnabled: false,
+        _kAiFreeDailyCap: _kDefaultAiFreeDailyCap,
+        _kAiProDailyCap: _kDefaultAiProDailyCap,
+        _kAiRewardCredits: _kDefaultAiRewardCredits,
       });
 
       // Configure fetch settings

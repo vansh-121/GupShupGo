@@ -426,6 +426,17 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
 
   // ── Stitch Peer Card with Avatar Glowing Ring ────────────────────────────
   Widget _buildStitchPeerCard(MeshPeer peer, AppThemeColors c) {
+    final bool connected = peer.status == MeshPeerStatus.connected;
+    final bool connecting = peer.status == MeshPeerStatus.connecting;
+
+    final Color ringColor =
+        connected ? c.online : (connecting ? c.primary : c.border);
+    final String subtitle = connected
+        ? 'Connected · Tap to chat'
+        : (connecting ? 'Connecting…' : 'Tap to connect');
+    final Color subtitleColor =
+        connected ? c.online : (connecting ? c.primary : c.textMid);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -436,15 +447,12 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
       ),
       child: Row(
         children: [
-          // Avatar inside Blue Glowing Outline Ring (Stitch Style)
+          // Avatar inside a glowing outline ring — colour tracks the link state.
           Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: peer.isConnected ? c.online : c.primary,
-                width: 2,
-              ),
+              border: Border.all(color: ringColor, width: 2),
             ),
             child: CircleAvatar(
               radius: 20,
@@ -461,7 +469,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           ),
           const SizedBox(width: 14),
 
-          // Name and Subtitle Status
+          // Name and subtitle status.
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,22 +485,60 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  peer.isConnected ? 'Connected · Tap to chat' : 'Tap to Connect',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: peer.isConnected ? c.online : c.textMid,
-                  ),
+                Row(
+                  children: [
+                    if (connecting) ...[
+                      SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.6,
+                          valueColor: AlwaysStoppedAnimation<Color>(c.primary),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Flexible(
+                      child: Text(
+                        subtitle,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: subtitleColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 10),
 
-          // Action Pill Button (Connect / Chat)
-          OutlinedButton(
-            onPressed: () {
-              if (peer.isConnected) {
+          // Action pill: Chat when connected, otherwise a real Connect button.
+          _buildPeerActionButton(peer, c, connected, connecting),
+        ],
+      ),
+    );
+  }
+
+  /// The trailing pill on a peer card. Connected → opens the chat; discovered →
+  /// kicks off a real connection (the initiating side, or a nudge if we're the
+  /// passive one); connecting → disabled while the handshake is in flight.
+  Widget _buildPeerActionButton(
+      MeshPeer peer, AppThemeColors c, bool connected, bool connecting) {
+    final String label =
+        connected ? 'Chat' : (connecting ? 'Connecting' : 'Connect');
+    final Color borderColor = connected ? c.primary : c.border;
+    final Color textColor =
+        connecting ? c.textMid : (connected ? c.primary : c.textHigh);
+
+    return OutlinedButton(
+      onPressed: connecting
+          ? null
+          : () {
+              if (connected) {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -500,36 +546,26 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                   ),
                 );
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Connecting to ${peer.displayName}…'),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
+                Provider.of<MeshNetworkService>(context, listen: false)
+                    .connectToPeer(peer.endpointId);
               }
             },
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(
-                color: peer.isConnected ? c.primary : c.border,
-                width: 1.2,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: Text(
-              peer.isConnected ? 'Chat' : 'Connect',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: peer.isConnected ? c.primary : c.textHigh,
-              ),
-            ),
-          ),
-        ],
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: borderColor, width: 1.2),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: textColor,
+        ),
       ),
     );
   }

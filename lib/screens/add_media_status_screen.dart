@@ -77,9 +77,16 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
   /// [resolveVideoDisplayAspect]). Null until resolved / when unavailable.
   double? _trueVideoAspect;
 
+  /// Pre-warmed when the screen opens so posting is instant.
+  /// [StatusService.defaultViewerUids] fetches every chat room the user is in
+  /// (a cold round-trip); kicking it off now — while the user frames or
+  /// captions the media — means the post no longer waits on it.
+  late final Future<List<String>> _viewersFuture;
+
   @override
   void initState() {
     super.initState();
+    _viewersFuture = _statusService.defaultViewerUids(widget.userId);
     if (widget.preSelectedFile != null) {
       _selectedFile = widget.preSelectedFile;
       _isVideo = widget.isVideo;
@@ -431,8 +438,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       debugPrint('[Status] File size: ${await _selectedFile!.length()} bytes');
 
       // E2EE: encrypt the file and wrap the content key for every viewer.
-      final viewers =
-          await _statusService.defaultViewerUids(widget.userId);
+      // (Viewer list was pre-warmed in initState, so this await is normally
+      // already resolved.)
+      final viewers = await _viewersFuture;
       if (viewers.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

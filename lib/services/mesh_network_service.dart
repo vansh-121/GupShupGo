@@ -86,26 +86,65 @@ enum MeshStartError {
   unknown,
 }
 
+/// Lifecycle of a mesh peer, from first sighting to an established link.
+///
+/// The three states let the UI distinguish "seen but not linked yet" from
+/// "handshake in flight" from "ready to chat" — the old boolean could only say
+/// connected-or-not, which is what made a mid-handshake peer read as a dead one.
+enum MeshPeerStatus {
+  /// Advertised nearby and known, but no connection yet (or a link just dropped
+  /// and we're about to re-establish it).
+  discovered,
+
+  /// A connection handshake is in flight (we requested, or accepted an incoming
+  /// request, and are waiting on the result).
+  connecting,
+
+  /// Fully connected — payloads can flow.
+  connected,
+}
+
 /// Public-facing record of a peer discovered or connected via mesh.
 class MeshPeer {
   final String endpointId;
   final String userId;
   final String displayName;
-  final bool isConnected;
+  final MeshPeerStatus status;
+
+  /// Random per-session token the advertiser broadcasts in its identity. Used
+  /// only to break connection-initiation ties when two devices share a userId
+  /// (e.g. the same account signed in on both — a common test setup). Not shown
+  /// in the UI.
+  final String nonce;
 
   const MeshPeer({
     required this.endpointId,
     required this.userId,
     required this.displayName,
-    required this.isConnected,
+    this.status = MeshPeerStatus.discovered,
+    this.nonce = '',
   });
 
-  MeshPeer copyWith({String? endpointId, String? userId, String? displayName, bool? isConnected}) {
+  /// True once the link is fully established. Kept as a getter so existing UI
+  /// (`peer.isConnected`) keeps working after the move to a 3-state model.
+  bool get isConnected => status == MeshPeerStatus.connected;
+
+  /// True while a handshake is in flight — drives the "Connecting…" UI.
+  bool get isConnecting => status == MeshPeerStatus.connecting;
+
+  MeshPeer copyWith({
+    String? endpointId,
+    String? userId,
+    String? displayName,
+    MeshPeerStatus? status,
+    String? nonce,
+  }) {
     return MeshPeer(
       endpointId: endpointId ?? this.endpointId,
       userId: userId ?? this.userId,
       displayName: displayName ?? this.displayName,
-      isConnected: isConnected ?? this.isConnected,
+      status: status ?? this.status,
+      nonce: nonce ?? this.nonce,
     );
   }
 }
@@ -125,6 +164,21 @@ class MeshNetworkService extends ChangeNotifier {
   static const Strategy _strategy = Strategy.P2P_CLUSTER;
   static const String _serviceId = 'com.gupshupgo.mesh';
 
+  /// Prefix marking the current identity wire format `gsg1|nonce|userId|name`.
+  /// Lets [_decodeIdentity] tell a new-format advertisement from a legacy
+  /// `userId|displayName` one during a mixed-version rollout.
+  static const String _identityPrefix = 'gsg1';
+
+  /// How long the passive (non-initiating) side waits for the initiator before
+  /// nudging the connection itself. Covers asymmetric discovery, where only one
+  /// device has spotted the other so far.
+  static const Duration _passiveFallbackDelay = Duration(seconds: 5);
+
+  /// Upper bound on the exponential retry backoff — a peer that's genuinely in
+  /// range should re-link within this cadence no matter how many attempts it
+  /// takes, without hammering the radio.
+  static const Duration _maxRetryBackoff = Duration(seconds: 10);
+
   // ─── State ───────────────────────────────────────────────────────────
   bool _isAdvertising = false;
   bool _isDiscovering = false;
@@ -132,6 +186,22 @@ class MeshNetworkService extends ChangeNotifier {
 
   final Set<String> _connectedEndpoints = {};
   int get connectedPeers => _connectedEndpoints.length;
+
+  /// Per-endpoint retry timers (initiating side), so a pending retry can be
+  /// cancelled the moment the peer connects, is lost, or mesh stops.
+  final Map<String, Timer> _retryTimers = {};
+
+  /// Per-endpoint passive-side fallback timers — see [_schedulePassiveFallback].
+  final Map<String, Timer> _passiveTimers = {};
+
+  /// Per-endpoint connection attempt counters, driving the capped backoff.
+  final Map<String, int> _connectAttempts = {};
+
+  /// Random token minted once per process. Broadcast in our identity and used as
+  /// the tie-breaker of last resort so that, even when two devices advertise the
+  /// same userId, exactly one of them initiates the connection (see
+  /// [_shouldInitiateTo]).
+  late final String _sessionNonce = _generateId();
 
   /// IDs of messages already seen — prevents relay loops.
   final Set<String> _seenMessageIds = {};
@@ -242,16 +312,63 @@ class MeshNetworkService extends ChangeNotifier {
   String? userIdForEndpoint(String endpointId) =>
       _peers[endpointId]?.userId;
 
-  /// Encode userId + displayName into the single string Nearby Connections
-  /// uses for the advertising / discovering identity.
-  String _encodeIdentity() => '$_currentUserId|$_displayName';
+  /// Encode userId + displayName (+ our session nonce) into the single string
+  /// Nearby Connections uses for the advertising / discovering identity.
+  ///
+  /// Format: `gsg1|<nonce>|<userId>|<displayName>`. The display name is placed
+  /// last because it is the only free-form field — it may itself contain `|`,
+  /// which the decoder tolerates by re-joining the trailing segments. `nonce`
+  /// (hex) and `userId` (a Firebase UID / guest id) never contain `|`.
+  String _encodeIdentity() =>
+      '$_identityPrefix|$_sessionNonce|$_currentUserId|$_displayName';
 
-  /// Parse an advertised identity back into (userId, displayName).
-  ({String userId, String displayName}) _decodeIdentity(String raw) {
+  /// Parse an advertised identity back into (userId, displayName, nonce).
+  ///
+  /// Understands both the current `gsg1|nonce|userId|name` format and the legacy
+  /// `userId|displayName` one (nonce empty), so a device on an older build is
+  /// still discoverable during a rollout.
+  ({String userId, String displayName, String nonce}) _decodeIdentity(
+      String raw) {
+    if (raw.startsWith('$_identityPrefix|')) {
+      final rest = raw.substring(_identityPrefix.length + 1);
+      final parts = rest.split('|');
+      if (parts.length >= 3) {
+        return (
+          nonce: parts[0],
+          userId: parts[1],
+          displayName: parts.sublist(2).join('|'),
+        );
+      }
+    }
+    // Legacy / malformed → best-effort split on the first separator.
     final i = raw.indexOf('|');
-    if (i < 0) return (userId: raw, displayName: raw);
-    return (userId: raw.substring(0, i), displayName: raw.substring(i + 1));
+    if (i < 0) return (userId: raw, displayName: raw, nonce: '');
+    return (
+      userId: raw.substring(0, i),
+      displayName: raw.substring(i + 1),
+      nonce: '',
+    );
   }
+
+  /// Deterministic tie-breaker deciding whether *this* device should be the one
+  /// to call [Nearby.requestConnection] for a given peer.
+  ///
+  /// In `P2P_CLUSTER` both devices advertise and discover, so both used to fire
+  /// a connection request at each other — a symmetric collision the SDK resolves
+  /// by rejecting one side, which is exactly why one device would show
+  /// "connected" while the other was stuck "connecting". Letting only one side
+  /// initiate removes the collision at the source.
+  ///
+  /// Both devices compute the same ordering from data both can see: the higher
+  /// userId initiates; if the userIds match (same account on two devices), the
+  /// higher session nonce breaks the tie. A full tie is astronomically unlikely
+  /// and self-heals via the passive fallback + retry, so we don't special-case it.
+  bool _shouldInitiateTo({required String peerUserId, required String peerNonce}) {
+    final byUser = _currentUserId.compareTo(peerUserId);
+    if (byUser != 0) return byUser > 0;
+    return _sessionNonce.compareTo(peerNonce) > 0;
+  }
+
 
   void _publishPeers() {
     _peersController.add(peers);
@@ -331,6 +448,16 @@ class MeshNetworkService extends ChangeNotifier {
     }
     _connectedEndpoints.clear();
     _peers.clear();
+    // Cancel any in-flight connection retries / passive nudges.
+    for (final t in _retryTimers.values) {
+      t.cancel();
+    }
+    _retryTimers.clear();
+    for (final t in _passiveTimers.values) {
+      t.cancel();
+    }
+    _passiveTimers.clear();
+    _connectAttempts.clear();
     // Clear dedup set so restarted sessions accept all messages fresh.
     _seenMessageIds.clear();
     // Discard in-flight file transfers — they won't complete after stop.
@@ -379,25 +506,37 @@ class MeshNetworkService extends ChangeNotifier {
         onEndpointFound: (endpointId, endpointName, serviceId) {
           final id = _decodeIdentity(endpointName);
           debugPrint('[Mesh] Found peer: ${id.displayName} ($endpointId)');
+          final existing = _peers[endpointId];
+          // Re-finding a peer must not reset a live/handshaking link — keep the
+          // current status, only (re)record identity.
           _peers[endpointId] = MeshPeer(
             endpointId: endpointId,
             userId: id.userId,
             displayName: id.displayName,
-            isConnected: false,
+            nonce: id.nonce,
+            status: existing?.status ?? MeshPeerStatus.discovered,
           );
           _publishPeers();
-          Nearby().requestConnection(
-            _encodeIdentity(),
-            endpointId,
-            onConnectionInitiated: _onConnectionInitiated,
-            onConnectionResult: _onConnectionResult,
-            onDisconnected: _onDisconnected,
-          );
+
+          if (_connectedEndpoints.contains(endpointId)) return;
+
+          // Only the tie-break winner initiates; the other side waits for the
+          // incoming request (with a fallback in case it never arrives). This is
+          // what prevents the symmetric-request collision.
+          if (_shouldInitiateTo(
+              peerUserId: id.userId, peerNonce: id.nonce)) {
+            _connectTo(endpointId);
+          } else {
+            _schedulePassiveFallback(endpointId);
+          }
         },
         onEndpointLost: (endpointId) {
           debugPrint('[Mesh] Lost endpoint: $endpointId');
           _connectedEndpoints.remove(endpointId);
           _peers.remove(endpointId);
+          _retryTimers.remove(endpointId)?.cancel();
+          _passiveTimers.remove(endpointId)?.cancel();
+          _connectAttempts.remove(endpointId);
           _publishPeers();
         },
         serviceId: _serviceId,
@@ -412,6 +551,50 @@ class MeshNetworkService extends ChangeNotifier {
   // Connection callbacks
   // ═══════════════════════════════════════════════════════════════════════
 
+  /// Initiate (or re-initiate) a connection to a discovered peer.
+  ///
+  /// Centralises everything the request needs: it flips the peer to
+  /// [MeshPeerStatus.connecting], cancels any passive nudge (we're driving now),
+  /// and routes a failure into [_scheduleRetry] rather than dropping the peer.
+  Future<void> _connectTo(String endpointId, {bool force = false}) async {
+    final peer = _peers[endpointId];
+    if (peer == null) return;
+    if (_connectedEndpoints.contains(endpointId)) return;
+    // A handshake is already in flight — don't fire a second overlapping request
+    // (that can itself look like a collision to the SDK).
+    if (!force && peer.status == MeshPeerStatus.connecting) return;
+
+    _passiveTimers.remove(endpointId)?.cancel();
+    _peers[endpointId] = peer.copyWith(status: MeshPeerStatus.connecting);
+    _publishPeers();
+
+    try {
+      final ok = await Nearby().requestConnection(
+        _encodeIdentity(),
+        endpointId,
+        onConnectionInitiated: _onConnectionInitiated,
+        onConnectionResult: _onConnectionResult,
+        onDisconnected: _onDisconnected,
+      );
+      // A false return means the platform refused to even start the request
+      // (often because a previous attempt is still tearing down). Treat it like
+      // any other transient failure and back off.
+      if (!ok) {
+        debugPrint('[Mesh] requestConnection returned false for $endpointId');
+        _handleConnectFailure(endpointId);
+      }
+    } catch (e) {
+      debugPrint('[Mesh] requestConnection error for $endpointId: $e');
+      _handleConnectFailure(endpointId);
+    }
+  }
+
+  /// Public entry point for the "Connect" button — force a (re)connect attempt
+  /// to a peer the user tapped. Safe to call repeatedly; a no-op if already
+  /// connected.
+  Future<void> connectToPeer(String endpointId) =>
+      _connectTo(endpointId, force: true);
+
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
     debugPrint('[Mesh] Connection initiated with ${info.endpointName}');
     // Capture peer identity from the advertised name (covers the advertiser
@@ -422,8 +605,16 @@ class MeshNetworkService extends ChangeNotifier {
       endpointId: endpointId,
       userId: id.userId,
       displayName: id.displayName,
-      isConnected: existing?.isConnected ?? false,
+      nonce: id.nonce.isNotEmpty ? id.nonce : (existing?.nonce ?? ''),
+      // An incoming initiation means a handshake is under way. Preserve an
+      // already-connected status (a spurious re-init shouldn't downgrade it).
+      status: existing?.status == MeshPeerStatus.connected
+          ? MeshPeerStatus.connected
+          : MeshPeerStatus.connecting,
     );
+    // The other side is driving this handshake — our passive fallback no longer
+    // needs to fire.
+    _passiveTimers.remove(endpointId)?.cancel();
     _publishPeers();
 
     // Auto-accept all connections for mesh relay
@@ -441,47 +632,112 @@ class MeshNetworkService extends ChangeNotifier {
   void _onConnectionResult(String endpointId, Status status) {
     if (status == Status.CONNECTED) {
       _connectedEndpoints.add(endpointId);
+      _connectAttempts.remove(endpointId); // reset backoff
+      _retryTimers.remove(endpointId)?.cancel();
+      _passiveTimers.remove(endpointId)?.cancel();
       final existing = _peers[endpointId];
       if (existing != null) {
-        _peers[endpointId] = existing.copyWith(isConnected: true);
+        _peers[endpointId] =
+            existing.copyWith(status: MeshPeerStatus.connected);
       }
       debugPrint('[Mesh] Connected to $endpointId ($connectedPeers peers)');
     } else {
-      _connectedEndpoints.remove(endpointId);
-      _peers.remove(endpointId);
+      // REJECTED / ERROR. Crucially we do NOT drop the peer — it's still in
+      // range and advertising. Keep it visible, drop back to `discovered`, and
+      // let the retry path re-establish. (Removing it here, with no retry, was
+      // the original bug: the rejected side went blank while the other showed
+      // connected.)
       debugPrint('[Mesh] Connection failed with $endpointId: $status');
+      _handleConnectFailure(endpointId);
     }
     _publishPeers();
   }
 
+  /// Common failure handler: mark the peer discovered again and schedule a retry.
+  void _handleConnectFailure(String endpointId) {
+    _connectedEndpoints.remove(endpointId);
+    final existing = _peers[endpointId];
+    if (existing != null && existing.status != MeshPeerStatus.connected) {
+      _peers[endpointId] = existing.copyWith(status: MeshPeerStatus.discovered);
+    }
+    _scheduleRetry(endpointId);
+  }
+
   void _onDisconnected(String endpointId) {
     _connectedEndpoints.remove(endpointId);
-    _peers.remove(endpointId);
+    final existing = _peers[endpointId];
+    // Keep the peer entry — it's usually still in range — but show it as no
+    // longer connected so the UI reads "connecting" while we re-establish,
+    // instead of the row vanishing and reappearing.
+    if (existing != null) {
+      _peers[endpointId] = existing.copyWith(status: MeshPeerStatus.discovered);
+    }
     debugPrint('[Mesh] Disconnected from $endpointId ($connectedPeers peers)');
     _publishPeers();
 
     // The Nearby SDK does NOT re-fire onEndpointFound when a connection drops
-    // while the peer is still in range — so auto-reconnect is the only path
-    // back without the peer going fully out of range and returning.
-    if (isActive) _scheduleReconnect(endpointId);
+    // while the peer is still in range — so re-establishing is on us. Reset the
+    // backoff for a fresh drop and go through the tie-broken retry path so only
+    // one side re-initiates.
+    if (isActive && existing != null) {
+      _connectAttempts.remove(endpointId);
+      _scheduleRetry(endpointId);
+    }
   }
 
-  void _scheduleReconnect(String endpointId) {
-    Future.delayed(const Duration(seconds: 2), () async {
-      // Bail if mesh was stopped or peer already reconnected via other path.
-      if (!isActive || _connectedEndpoints.contains(endpointId)) return;
-      debugPrint('[Mesh] Auto-reconnect attempt → $endpointId');
-      try {
-        await Nearby().requestConnection(
-          _encodeIdentity(),
-          endpointId,
-          onConnectionInitiated: _onConnectionInitiated,
-          onConnectionResult: _onConnectionResult,
-          onDisconnected: _onDisconnected,
-        );
-      } catch (e) {
-        debugPrint('[Mesh] Auto-reconnect failed for $endpointId: $e');
-      }
+  /// Schedule a connection retry (initiating side only) with capped exponential
+  /// backoff + jitter. The passive side never retries here — it waits for the
+  /// initiator via [_schedulePassiveFallback] so we don't recreate the collision.
+  void _scheduleRetry(String endpointId) {
+    if (!isActive) return;
+    final peer = _peers[endpointId];
+    if (peer == null) return;
+    if (_connectedEndpoints.contains(endpointId)) return;
+
+    if (!_shouldInitiateTo(
+        peerUserId: peer.userId, peerNonce: peer.nonce)) {
+      // We're the passive side — fall back to waiting for the initiator.
+      _schedulePassiveFallback(endpointId);
+      return;
+    }
+
+    _retryTimers.remove(endpointId)?.cancel();
+    final attempt = (_connectAttempts[endpointId] ?? 0) + 1;
+    _connectAttempts[endpointId] = attempt;
+
+    final baseMs = (1500 * attempt)
+        .clamp(1500, _maxRetryBackoff.inMilliseconds);
+    final delay = Duration(milliseconds: baseMs + Random().nextInt(600));
+    debugPrint(
+        '[Mesh] Retry #$attempt for $endpointId in ${delay.inMilliseconds}ms');
+
+    _retryTimers[endpointId] = Timer(delay, () {
+      _retryTimers.remove(endpointId);
+      if (!isActive) return;
+      if (_connectedEndpoints.contains(endpointId)) return;
+      if (!_peers.containsKey(endpointId)) return; // lost meanwhile
+      _connectTo(endpointId);
+    });
+  }
+
+  /// The passive (non-initiating) side's safety net: if the initiator never
+  /// sends us a connection request within [_passiveFallbackDelay] — e.g. it
+  /// hasn't discovered us yet, or discovery is one-sided — take over and
+  /// initiate ourselves rather than waiting forever.
+  void _schedulePassiveFallback(String endpointId) {
+    if (!isActive) return;
+    if (_connectedEndpoints.contains(endpointId)) return;
+    if (_passiveTimers.containsKey(endpointId)) return; // already waiting
+
+    _passiveTimers[endpointId] = Timer(_passiveFallbackDelay, () {
+      _passiveTimers.remove(endpointId);
+      if (!isActive) return;
+      if (_connectedEndpoints.contains(endpointId)) return;
+      if (!_peers.containsKey(endpointId)) return;
+      final peer = _peers[endpointId]!;
+      if (peer.status == MeshPeerStatus.connecting) return; // handshake started
+      debugPrint('[Mesh] Passive fallback firing for $endpointId — initiating');
+      _connectTo(endpointId);
     });
   }
 

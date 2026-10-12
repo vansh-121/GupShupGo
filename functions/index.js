@@ -1,9 +1,20 @@
-// Force redeploy to apply minInstances
+// Global resource optimization for Cloud Functions Gen 2
+const { setGlobalOptions } = require("firebase-functions/v2");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
+
+// Global defaults: 0.25 vCPU (250 mCPU) and 256MiB RAM per instance.
+// This cuts baseline CPU quota usage by 75%, allowing up to 80 concurrent containers
+// within the project's 20,000 mCPU regional limit without throttling.
+setGlobalOptions({
+  region: "us-central1",
+  cpu: 0.25,
+  memory: "256MiB",
+  maxInstances: 3,
+});
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { google } = require("googleapis");
@@ -34,6 +45,11 @@ const streakRepair = require("./streak/repair");
 // tested against a locally generated keypair. See `exports.admobSsv` below.
 const adsSsv = require("./ads/ssv");
 
+// GupShup AI daily-quota arithmetic. Pure functions of their arguments (no
+// Firestore, no network), so the allowance formula and the stale-key reset are
+// unit tested in test/ai_quota.unit.test.js. See `exports.askGupShupAi` below.
+const aiQuota = require("./ai/quota");
+
 // ─── Repair admin token ────────────────────────────────────────────────────────
 // Set via: firebase functions:secrets:set STREAK_ADMIN_TOKEN
 // The only credential that can drive `streakRepairRoom`. Not a user id token: the
@@ -47,6 +63,15 @@ const streakAdminToken = defineSecret("STREAK_ADMIN_TOKEN");
 //   firebase functions:secrets:set AGORA_APP_CERTIFICATE
 const agoraAppId = defineSecret("AGORA_APP_ID");
 const agoraAppCertificate = defineSecret("AGORA_APP_CERTIFICATE");
+
+// ─── GupShup AI (Gemini & Groq proxies) ─────────────────────────────────────
+// Generative AI API keys. Authorises AI replies and must NEVER ship in the
+// client — the app reaches AI only through `askGupShupAi`. Set via:
+//   firebase functions:secrets:set GEMINI_API_KEY
+//   firebase functions:secrets:set GROQ_API_KEY
+const geminiApiKey = defineSecret("GEMINI_API_KEY");
+const groqApiKey = defineSecret("GROQ_API_KEY");
+
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -241,7 +266,7 @@ streakNotify.configure({
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
 exports.sendCallNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 3 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -322,7 +347,7 @@ exports.sendCallNotification = onRequest(
 
 // ─── Send Screen Share Notification ──────────────────────────────────────────
 exports.sendScreenShareNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 2 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -415,7 +440,7 @@ exports.sendScreenShareNotification = onRequest(
 
 // ─── Send Message Notification ──────────────────────────────────────────────
 exports.sendMessageNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0 },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 5 },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -1602,8 +1627,11 @@ async function isStreakSweepEnabled() {
   return enabled;
 }
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Redundant with streakOnMessageCreate. Uncomment anytime to re-enable.
+/*
 exports.streakSweepJob = onSchedule(
-  { schedule: "every 15 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     if (!(await isStreakSweepEnabled())) {
       console.log("streakSweepJob: disabled (_config/streak.sweepEnabled is not true)");
@@ -1689,6 +1717,7 @@ exports.streakSweepJob = onSchedule(
     );
   }
 );
+*/
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STREAK REPAIR / MIGRATION (design §10, task 9.2)
@@ -1780,12 +1809,14 @@ function _repairAggregateLine(aggregate) {
   );
 }
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Legacy migration & manual operator tools. Uncomment anytime to re-enable.
+/*
 exports.streakRepairJob = onSchedule(
-  { schedule: "every 5 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const flags = await readStreakRepairFlags();
     if (!flags.enabled) {
-      // Deliberately quiet-ish: this is the steady state until task 9.4/9.5.
       console.log("streakRepairJob: disabled (_config/streak.repairEnabled is not true)");
       return;
     }
@@ -1814,18 +1845,9 @@ exports.streakRepairJob = onSchedule(
   }
 );
 
-// ─── Admin: dry runs, spot fixes and cursor inspection ────────────────────────
-// `POST /streakRepairRoom  {roomId, dryRun?, force?}` → the per-room report
-// `GET  /streakRepairRoom?status=1`                   → the cursor document
-//
-// `dryRun` defaults to TRUE here too, and a request may only go live by sending
-// `dryRun: false` explicitly AND having `_config/streak.repairEnabled === true`.
-// A spot fix does not consult `repairDryRun`: it is one room, chosen by an
-// operator, and the report comes straight back in the response.
 exports.streakRepairRoom = onRequest(
   { cors: false, invoker: "public", secrets: [streakAdminToken] },
   async (req, res) => {
-    // ── admin token, compared in constant time ────────────────────────────────
     const expected = streakAdminToken.value();
     const authHeader = req.headers.authorization || "";
     const presented = authHeader.startsWith("Bearer ")
@@ -1888,6 +1910,7 @@ exports.streakRepairRoom = onRequest(
     }
   }
 );
+*/
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STREAK HTTP ENDPOINTS (design §8, task 5.8)
@@ -2056,6 +2079,122 @@ function _staleKeyedCount(bucket, keyField, expectedKey) {
   if (bucket[keyField] !== expectedKey) return 0; // different period → reset
   const count = Number(bucket.count);
   return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+// ─── GupShup AI quota + config ────────────────────────────────────────────────
+// Same server-authoritative split as the rewarded-ad limits above: the per-user
+// caps live in Firestore `config/ai` (so ops can tune model, caps, and persona
+// live without a release), and the client Remote Config values are display-only.
+// The counters reuse the exact "the key IS the reset" trick as the ad counters —
+// a bucket keyed to any other day reads as zero, so the daily allowance rolls
+// over with no sweeper job.
+
+// Fallbacks used when `config/ai` is missing or a field is unusable. Deliberately
+// safe: `enabled:false` means a config we can't read fails CLOSED rather than
+// serving uncapped AI calls against the shared free-tier budget.
+const AI_CONFIG_FALLBACK = {
+  enabled: true,
+  model: "openai/gpt-oss-20b",
+  systemPrompt:
+    "You are GupAI, a friendly and intelligent AI assistant developed by GupShupGo inside the GupShupGo " +
+    "chat app. You are GupShupGo's own AI. If asked who created, built, or trained you, say you were created by GupShupGo. " +
+    "Never mention or reveal any underlying third-party AI models, companies, or APIs (such as Google, Gemini, Groq, OpenAI, Meta, or Anthropic). " +
+    "Help the user write and reply to messages, translate, summarise, " +
+    "brainstorm, and answer questions. Keep replies short unless asked for more. " +
+    "You cannot see the user's private end-to-end-encrypted chats — only what " +
+    "they type to you here.",
+  freeDailyCap: 10,
+  proDailyCap: 100,
+  rewardCredits: 5,
+  rewardDailyCap: 5,
+  fallbackModels: [
+    "openai/gpt-oss-120b",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "qwen/qwen3.8-27b",
+  ],
+};
+
+// `config/ai` changes rarely but is read on every AI turn and every ai_credit SSV
+// callback, so it is cached per instance for a minute rather than fetched each
+// time. A cold instance pays one read; a busy one pays none.
+const AI_CONFIG_TTL_MS = 60 * 1000;
+let _aiConfigValue = null;
+let _aiConfigFetchedAt = 0;
+
+/**
+ * Coerces a `config/ai.fallbackModels` value into a clean, ordered list of
+ * non-empty model-name strings. Anything that isn't an array (or is missing)
+ * yields the fallback's own list, so a malformed value never breaks the chain.
+ *
+ * @param {*} raw
+ * @returns {Array<string>}
+ */
+function _sanitizeModelList(raw) {
+  if (!Array.isArray(raw)) return [...AI_CONFIG_FALLBACK.fallbackModels];
+  const out = [];
+  for (const m of raw) {
+    if (typeof m === "string" && m.trim().length > 0) out.push(m.trim());
+  }
+  return out;
+}
+
+/**
+ * Reads `config/ai`, merged over the safe fallbacks and cached per instance.
+ * Never throws: a read failure degrades to the fallback.
+ *
+ * @returns {Promise<object>}
+ */
+async function getAiConfig() {
+  const now = Date.now();
+  if (_aiConfigValue && now - _aiConfigFetchedAt < AI_CONFIG_TTL_MS) {
+    return _aiConfigValue;
+  }
+  let merged = { ...AI_CONFIG_FALLBACK };
+  try {
+    const snap = await db.collection("config").doc("ai").get();
+    if (snap.exists) {
+      const data = snap.data() || {};
+      merged = {
+        enabled: data.enabled !== false,
+        model:
+          typeof data.model === "string" && data.model.length > 0
+            ? data.model
+            : AI_CONFIG_FALLBACK.model,
+        systemPrompt:
+          typeof data.systemPrompt === "string" && data.systemPrompt.length > 0
+            ? data.systemPrompt
+            : AI_CONFIG_FALLBACK.systemPrompt,
+        freeDailyCap: aiQuota.positiveIntOr(data.freeDailyCap, AI_CONFIG_FALLBACK.freeDailyCap),
+        proDailyCap: aiQuota.positiveIntOr(data.proDailyCap, AI_CONFIG_FALLBACK.proDailyCap),
+        rewardCredits: aiQuota.positiveIntOr(data.rewardCredits, AI_CONFIG_FALLBACK.rewardCredits),
+        rewardDailyCap: aiQuota.positiveIntOr(data.rewardDailyCap, AI_CONFIG_FALLBACK.rewardDailyCap),
+        fallbackModels: _sanitizeModelList(data.fallbackModels),
+      };
+    }
+  } catch (error) {
+    console.error("getAiConfig: read failed, using fallback:", error && error.message);
+    merged = { ...AI_CONFIG_FALLBACK };
+  }
+  _aiConfigValue = merged;
+  _aiConfigFetchedAt = now;
+  return merged;
+}
+
+// The quota math itself lives in `./ai/quota` (pure, unit-tested). These thin
+// wrappers keep index.js's call sites unchanged and apply the one impure input —
+// `isProUser`, which reads the subscription mirror — here rather than in the
+// module.
+function aiDailyCount(userData, dayKey) {
+  return aiQuota.aiDailyCount(userData, dayKey);
+}
+
+function aiRewardDailyCount(userData, dayKey) {
+  return aiQuota.aiRewardDailyCount(userData, dayKey);
+}
+
+function aiAllowance(userData, cfg, dayKey, nowMs) {
+  return aiQuota.aiAllowance(userData, cfg, dayKey, isProUser(userData, nowMs));
 }
 
 /**
@@ -2615,7 +2754,7 @@ exports.admobSsv = onRequest(
     }
 
     const uid = customUid || userIdParam;
-    if (!uid || (type !== "points" && type !== "restore")) {
+    if (!uid || (type !== "points" && type !== "restore" && type !== "ai_credit")) {
       console.error(
         `admobSsv: verified callback we can't route uid=${uid} type=${type} ` +
         `txn=${transactionId}`
@@ -2637,6 +2776,11 @@ exports.admobSsv = onRequest(
       res.status(200).json({ ok: true, credited: false, reason: "bad-ids" });
       return;
     }
+
+    // Resolved once, outside the transaction — `getAiConfig()` does its own read
+    // and must not run inside `runTransaction`, which forbids non-transactional
+    // gets. Only fetched for the branch that needs it.
+    const aiCfg = type === "ai_credit" ? await getAiConfig() : null;
 
     const rewardRef = db.collection("adRewards").doc(transactionId);
     const userRef = db.collection("users").doc(uid);
@@ -2701,6 +2845,34 @@ exports.admobSsv = onRequest(
           };
         }
 
+        // type === "ai_credit" — a top-up to today's GupShup AI allowance. Each
+        // watched ad raises the cap by `config/ai.rewardCredits`, up to
+        // `rewardDailyCap` top-ups a day. The counter is read authoritatively by
+        // `askGupShupAi` via `aiRewardDailyCount`; here we only bump it.
+        if (type === "ai_credit") {
+          const dayKey = streakDay.dayKeyFromInstant(serverNow);
+          const already = aiRewardDailyCount(userData, dayKey);
+          if (already >= aiCfg.rewardDailyCap) {
+            tx.set(rewardRef, { ...record, credited: false, reason: "daily-cap", dayKey });
+            return { skipped: "daily-cap", dayKey };
+          }
+
+          tx.update(userRef, {
+            aiRewardDaily: { dayKey, count: already + 1, lastAt: serverNow },
+          });
+          tx.set(rewardRef, {
+            ...record,
+            credited: true,
+            aiCredits: aiCfg.rewardCredits,
+            dayKey,
+          });
+          return {
+            credited: true,
+            aiCredits: aiCfg.rewardCredits,
+            remaining: aiCfg.rewardDailyCap - already - 1,
+          };
+        }
+
         // type === "restore" — a credit, not a restore. The user still has to
         // spend it through `streakRestore`, which is where participation and the
         // restore window are checked; granting one here says nothing about
@@ -2737,6 +2909,8 @@ exports.admobSsv = onRequest(
         `admobSsv: credited ${uid} ${type} txn=${transactionId}` +
         (type === "points"
           ? ` points=${outcome.points} remainingToday=${outcome.remaining}`
+          : type === "ai_credit"
+          ? ` aiCredits=${outcome.aiCredits} remainingToday=${outcome.remaining}`
           : ` week=${outcome.weekKey} room=${roomId || "-"}`)
       );
       res.status(200).json({ ok: true, credited: true });
@@ -2747,6 +2921,442 @@ exports.admobSsv = onRequest(
         error && error.stack ? error.stack : error
       );
       res.status(500).json({ ok: false, error: "credit-failed" });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GUPSHUP AI — Gemini proxy (dedicated you↔AI assistant, never a human E2EE chat)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// The client talks to a separate "GupShup AI" thread; this endpoint is the only
+// place the Gemini key is used. Nothing here touches the Signal pipeline, streaks,
+// or notifications — the transcript lives only on the device.
+//
+// Contract (POST, `Authorization: Bearer <idToken>`):
+//   body: { message: string, history?: [{ role:'user'|'model', text:string }] }
+//   200 → { reply: string, remaining: number }
+//   400 → { error:'bad-request', reason }            (empty message)
+//   401 → { error, reason:'unauthenticated' }        (missing/invalid token)
+//   429 → { error:'quota', reason:'daily-cap', isPro, canEarn }
+//   503 → { error:'unavailable', reason:'disabled'|'busy'|'empty' }
+//
+// Quota is server-authoritative: `config/ai` holds the caps, the per-user
+// `aiDaily` / `aiRewardDaily` counters use the same stale-key reset as the ad
+// counters, and the increment happens in a transaction AFTER a successful reply
+// so a failed Gemini call is never charged.
+
+// Keep the conversation we forward to Gemini bounded: the last turns are enough
+// context, and an unbounded history would blow the token budget and the cost.
+const AI_MAX_HISTORY_TURNS = 20;
+const AI_MAX_CHARS = 4000;
+
+// One Gemini call can hang, and we may now make several per turn (retries +
+// model fall-through), so each attempt is capped well under the client's 30s
+// HTTP timeout and the whole generate step is bounded too — the FUNCTION must
+// return its own graceful 503 before the app's socket gives up, or the user's
+// turn is stranded instead of staying retryable.
+const AI_ATTEMPT_TIMEOUT_MS = 12 * 1000;
+const AI_GENERATE_BUDGET_MS = 25 * 1000;
+
+// Transient upstream failures (503 overloaded / other 5xx / network / timeout)
+// are retried on the SAME model this many times, with a short backoff, before
+// falling through to the next model in the chain. A spent quota (429) or an
+// unknown model (404) skips straight to the next model instead — no backoff can
+// clear either, but a sibling model has its own quota and may exist on the key.
+const AI_RETRIES_PER_MODEL = 1;
+const AI_RETRY_BASE_DELAY_MS = 500;
+
+/**
+ * The ordered, de-duplicated models to try for one turn: the configured
+ * `cfg.model` first, then `cfg.fallbackModels`. Dedup keeps a fallback that
+ * repeats the primary from costing a wasted round-trip.
+ *
+ * @param {object} cfg resolved `config/ai`
+ * @returns {Array<string>}
+ */
+function _aiModelChain(cfg) {
+  const raw = [
+    cfg.model,
+    ...(Array.isArray(cfg.fallbackModels) ? cfg.fallbackModels : []),
+  ];
+  const seen = new Set();
+  const chain = [];
+  for (const m of raw) {
+    if (typeof m !== "string") continue;
+    const name = m.trim();
+    if (name.length === 0 || seen.has(name)) continue;
+    seen.add(name);
+    chain.push(name);
+  }
+  return chain;
+}
+
+/**
+ * One `generateContent` attempt against a single model. Never throws: every
+ * network error, timeout, and HTTP status is classified into how the
+ * orchestrator should react, so retry / fall-through / fail-fast all live in
+ * one place rather than being scattered across try/catch.
+ *
+ *  - `{kind:'ok', text}`     — a usable reply.
+ *  - `{kind:'empty'}`        — 200 with no text (safety block / empty candidate).
+ *  - `{kind:'retry', error}` — 503/5xx/network/timeout: worth another go.
+ *  - `{kind:'next', error}`  — 429/404: this model is out; try the next one.
+ *  - `{kind:'fatal', error}` — 400/401/403: a bad request or key, same for all.
+ *
+ * @param {string} model
+ * @param {object} cfg resolved `config/ai`
+ * @param {Array<object>} contents Gemini `contents[]`
+ * @param {number} timeoutMs abort budget for this one attempt
+ * @returns {Promise<object>}
+ */
+function _resolveGroqKey() {
+  try {
+    return groqApiKey.value() || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function _isGeminiModel(model) {
+  return typeof model === "string" && model.toLowerCase().startsWith("gemini");
+}
+
+function _contentsToOpenAiMessages(cfg, contents) {
+  const messages = [];
+  if (cfg.systemPrompt) {
+    messages.push({ role: "system", content: cfg.systemPrompt });
+  }
+  for (const item of contents) {
+    const role = item.role === "model" ? "assistant" : "user";
+    const text = (item.parts || [])
+      .map((p) => (p && typeof p.text === "string" ? p.text : ""))
+      .join("")
+      .trim();
+    if (text.length > 0) {
+      messages.push({ role, content: text });
+    }
+  }
+  return messages;
+}
+
+/**
+ * One Groq OpenAI-compatible chat completion attempt.
+ */
+async function _groqAttempt(model, cfg, contents, timeoutMs) {
+  const groqKey = _resolveGroqKey();
+  if (!groqKey) {
+    return { kind: "next", error: "groq: no API key configured" };
+  }
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${groqKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: _contentsToOpenAiMessages(cfg, contents),
+        temperature: 0.7,
+        max_tokens: 1024,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason =
+      error && error.name === "AbortError"
+        ? "timeout"
+        : `network: ${(error && error.message) || "unknown"}`;
+    return { kind: "next", error: `groq ${model} ${reason}` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    const data = await response.json().catch(() => null);
+    const text =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      typeof data.choices[0].message.content === "string"
+        ? data.choices[0].message.content.trim()
+        : "";
+    return text.length > 0 ? { kind: "ok", text } : { kind: "next", error: "groq empty text" };
+  }
+
+  const detail = (await response.text().catch(() => "")).slice(0, 300);
+  const errMsg = `groq ${response.status} (${model}): ${detail}`;
+  if (response.status >= 400 && response.status < 500) {
+    return { kind: "next", error: errMsg };
+  }
+  if (response.status >= 500) {
+    return { kind: "retry", error: errMsg };
+  }
+  return { kind: "next", error: errMsg };
+}
+
+/**
+ * Dispatches one attempt to either Gemini or Groq based on model name.
+ */
+async function _aiAttempt(model, cfg, contents, timeoutMs) {
+  if (_isGeminiModel(model)) {
+    return _geminiAttempt(model, cfg, contents, timeoutMs);
+  }
+  return _groqAttempt(model, cfg, contents, timeoutMs);
+}
+
+/**
+ * One `generateContent` attempt against a single Gemini model.
+ */
+async function _geminiAttempt(model, cfg, contents, timeoutMs) {
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/" +
+    `${encodeURIComponent(model)}:generateContent`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": geminiApiKey.value(),
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: cfg.systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason =
+      error && error.name === "AbortError"
+        ? "timeout"
+        : `network: ${(error && error.message) || "unknown"}`;
+    return { kind: error && error.name === "AbortError" ? "next" : "retry", error: `${model} ${reason}` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    const data = await response.json().catch(() => null);
+    const parts =
+      data && data.candidates && data.candidates[0] && data.candidates[0].content
+        ? data.candidates[0].content.parts
+        : null;
+    const text = Array.isArray(parts)
+      ? parts
+          .map((p) => (p && typeof p.text === "string" ? p.text : ""))
+          .join("")
+          .trim()
+      : "";
+    return text.length > 0 ? { kind: "ok", text } : { kind: "empty" };
+  }
+
+  const detail = (await response.text().catch(() => "")).slice(0, 300);
+  const errMsg = `gemini ${response.status} (${model}): ${detail}`;
+  // 429 (quota), 404 (model not found), or 503 (high demand overload):
+  // immediately advance to the next fallback model instead of retrying the
+  // overloaded model and burning through the 25-second execution deadline.
+  if (response.status === 401 || response.status === 403 ||
+      response.status === 429 || response.status === 404 || response.status === 503) {
+    return { kind: "next", error: errMsg };
+  }
+  if (response.status >= 500) {
+    return { kind: "retry", error: errMsg };
+  }
+  // Advance to next fallback model
+  return { kind: "next", error: errMsg };
+}
+
+/**
+ * Generates a reply, trying each model in the chain (Groq Qwen/Llama or Gemini)
+ * and absorbing transient upstream failures.
+ */
+async function _generateGeminiReply(cfg, contents) {
+  const chain = _aiModelChain(cfg);
+  if (chain.length === 0) throw new Error("ai: no model configured");
+
+  const deadline = Date.now() + AI_GENERATE_BUDGET_MS;
+  let lastError = "ai: all models exhausted";
+
+  for (const model of chain) {
+    for (let attempt = 0; attempt <= AI_RETRIES_PER_MODEL; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`${lastError} (budget spent)`);
+
+      const result = await _aiAttempt(
+        model,
+        cfg,
+        contents,
+        Math.min(AI_ATTEMPT_TIMEOUT_MS, remaining)
+      );
+
+      if (result.kind === "ok") return result.text;
+      lastError = result.error || "empty response";
+
+      console.warn("askGupShupAi: attempt failed or empty on", model, ":", lastError);
+
+      // Model returned empty, fatal, or next (4xx/429/timeout): advance straight to the next model
+      if (result.kind === "empty" || result.kind === "fatal" || result.kind === "next") {
+        break;
+      }
+
+      // 503/5xx/network: back off and retry the SAME model, unless its
+      // retries are spent (fall through to the next model) or the backoff
+      // wouldn't fit the remaining budget.
+      if (attempt < AI_RETRIES_PER_MODEL) {
+        const backoff =
+          AI_RETRY_BASE_DELAY_MS * (attempt + 1) + Math.floor(Math.random() * 250);
+        if (deadline - Date.now() <= backoff) break;
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+  throw new Error(lastError);
+}
+
+exports.askGupShupAi = onRequest(
+  {
+    cors: true,
+    invoker: "public",
+    minInstances: 0,
+    maxInstances: 3,
+    concurrency: 80,
+    cpu: 1,
+    memory: "512MiB",
+    secrets: [geminiApiKey, groqApiKey],
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    // ── Auth (uid from the token, never from the body) ──────────────────────
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized", reason: "unauthenticated" });
+      return;
+    }
+    let uid;
+    try {
+      const decoded = await auth.verifyIdToken(authHeader.split("Bearer ")[1]);
+      uid = decoded.uid;
+    } catch (_) {
+      res.status(401).json({ error: "Invalid or expired token", reason: "unauthenticated" });
+      return;
+    }
+
+    // ── Kill switch (independent of pro_enabled) ────────────────────────────
+    const cfg = await getAiConfig();
+    if (!cfg.enabled) {
+      res.status(503).json({ error: "unavailable", reason: "disabled" });
+      return;
+    }
+
+    // ── Validate the new turn ───────────────────────────────────────────────
+    const body = req.body || {};
+    const rawMessage = typeof body.message === "string" ? body.message.trim() : "";
+    if (rawMessage.length === 0) {
+      res.status(400).json({ error: "bad-request", reason: "empty-message" });
+      return;
+    }
+    const message = rawMessage.slice(0, AI_MAX_CHARS);
+
+    // Prior turns the client replayed from its local transcript, newest-last.
+    // We trust only the shape — role must be user/model, text is clamped — and
+    // append the new user turn ourselves so the final turn is always the user's.
+    const rawHistory = Array.isArray(body.history) ? body.history : [];
+    const contents = [];
+    for (const turn of rawHistory.slice(-AI_MAX_HISTORY_TURNS)) {
+      if (!turn || typeof turn !== "object") continue;
+      const role = turn.role === "model" ? "model" : turn.role === "user" ? "user" : null;
+      const text = typeof turn.text === "string" ? turn.text.slice(0, AI_MAX_CHARS) : "";
+      if (!role || text.length === 0) continue;
+      contents.push({ role, parts: [{ text }] });
+    }
+    contents.push({ role: "user", parts: [{ text: message }] });
+
+    try {
+      const userRef = db.collection("users").doc(uid);
+      const serverNow = new Date();
+      const nowMs = serverNow.getTime();
+      const dayKey = streakDay.dayKeyFromInstant(serverNow);
+
+      // ── Cheap pre-check: refuse before paying for Gemini if already capped ─
+      const preSnap = await userRef.get();
+      const preData = preSnap.exists ? preSnap.data() : {};
+      const allowance = aiAllowance(preData, cfg, dayKey, nowMs);
+      const usedBefore = aiDailyCount(preData, dayKey);
+      if (usedBefore >= allowance) {
+        res.status(429).json({
+          error: "quota",
+          reason: "daily-cap",
+          isPro: isProUser(preData, nowMs),
+          canEarn: aiRewardDailyCount(preData, dayKey) < cfg.rewardDailyCap,
+        });
+        return;
+      }
+
+      // ── Generate (never charged on failure) ───────────────────────────────
+      let reply;
+      try {
+        reply = await _generateGeminiReply(cfg, contents);
+      } catch (error) {
+        console.error("askGupShupAi: Gemini call failed:", error && error.message);
+        res.status(503).json({ error: "unavailable", reason: "busy" });
+        return;
+      }
+      if (!reply) {
+        res.status(503).json({ error: "unavailable", reason: "empty" });
+        return;
+      }
+
+      // ── Charge authoritatively: re-read and re-check inside the transaction ─
+      const outcome = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(userRef);
+        const data = snap.exists ? snap.data() : {};
+        const allowanceNow = aiAllowance(data, cfg, dayKey, nowMs);
+        const usedNow = aiDailyCount(data, dayKey);
+        if (usedNow >= allowanceNow) {
+          return {
+            capped: true,
+            isPro: isProUser(data, nowMs),
+            canEarn: aiRewardDailyCount(data, dayKey) < cfg.rewardDailyCap,
+          };
+        }
+        tx.set(
+          userRef,
+          { aiDaily: { dayKey, count: usedNow + 1, lastAt: serverNow } },
+          { merge: true }
+        );
+        return { remaining: allowanceNow - (usedNow + 1) };
+      });
+
+      if (outcome.capped) {
+        // A concurrent request used the last slot after our pre-check. The reply
+        // was generated but we honour the cap and don't charge for it.
+        res.status(429).json({
+          error: "quota",
+          reason: "daily-cap",
+          isPro: outcome.isPro,
+          canEarn: outcome.canEarn,
+        });
+        return;
+      }
+
+      res.status(200).json({ reply, remaining: outcome.remaining });
+    } catch (error) {
+      console.error("askGupShupAi error:", error && error.stack ? error.stack : error);
+      res.status(500).json({ error: "internal", reason: "unexpected" });
     }
   }
 );
@@ -2935,7 +3545,7 @@ exports.gupPointsEarnedTrigger = onDocumentUpdated(
 // notifications (with the contact's name) instead of generic batched ones.
 // Cooldown: 6h per room per risk level to avoid spam.
 exports.hourlyStreakWarningBatch = onSchedule(
-  { schedule: "every 60 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const COOLDOWN_HOURS = 6;
@@ -3045,7 +3655,7 @@ exports.hourlyStreakWarningBatch = onSchedule(
 // The write to streakBrokenAt triggers the existing `streakBrokenTrigger`
 // Firestore onUpdate function, which sends push notifications to both users.
 exports.streakExpiryJob = onSchedule(
-  { schedule: "every 30 minutes", region: "us-central1" },
+  { schedule: "every 60 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     // 2 full calendar days ago (48 hours is a safe server-side threshold)
@@ -3092,7 +3702,7 @@ exports.streakExpiryJob = onSchedule(
 // Collects all users' device tokens and sends one personalised morning digest.
 // Cooldown: once per 20 hours per user (stored in user.notifiedAt.daily_digest).
 exports.dailyDigestJob = onSchedule(
-  { schedule: "30 2 * * *", timeZone: "UTC", region: "us-central1" },
+  { schedule: "30 2 * * *", timeZone: "UTC", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
@@ -3157,7 +3767,7 @@ exports.dailyDigestJob = onSchedule(
 // If a user has unread messages older than 2 hours and hasn't opened the app,
 // send a gentle reminder. Uses lastSeen on the user document.
 exports.unreadReminderBatch = onSchedule(
-  { schedule: "every 120 minutes", region: "us-central1" },
+  { schedule: "every 120 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const now = new Date();
     const twoHoursAgo = new Date(now - 2 * 3600000);
@@ -3389,7 +3999,7 @@ exports.processPendingEmails = onDocumentCreated(
 
 // ─── Scheduled: Weekly Digest Email (Monday 9 AM IST = 3:30 AM UTC) ──────────
 exports.weeklyDigestEmailJob = onSchedule(
-  { schedule: "30 3 * * 1", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  { schedule: "30 3 * * 1", timeZone: "UTC", region: "us-central1", maxInstances: 1, secrets: emailService.secrets },
   async () => {
     const now = new Date();
     const sevenDaysAgo = new Date(now - 7 * 24 * 3600000);
@@ -3509,8 +4119,11 @@ exports.weeklyDigestEmailJob = onSchedule(
 );
 
 // ─── Scheduled: Inactivity Reminder Email (daily at 6 PM IST = 12:30 PM UTC) ─
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Inactivity reminder emails. Uncomment anytime to re-enable.
+/*
 exports.inactivityReminderEmailJob = onSchedule(
-  { schedule: "30 12 * * *", timeZone: "UTC", region: "us-central1", secrets: emailService.secrets },
+  { schedule: "30 12 * * *", timeZone: "UTC", region: "us-central1", maxInstances: 1, secrets: emailService.secrets },
   async () => {
     const now = new Date();
     const threeDaysAgo = new Date(now - 3 * 24 * 3600000);
@@ -3569,6 +4182,7 @@ exports.inactivityReminderEmailJob = onSchedule(
     console.log(`inactivityReminderEmailJob: sent ${sentCount} inactivity emails.`);
   }
 );
+*/
 
 // ─── HTTP: Unsubscribe from Emails ────────────────────────────────────────────
 // One-click unsubscribe endpoint. Sets emailNotifications = false on the user doc.
@@ -3671,7 +4285,7 @@ const { RtcTokenBuilder, RtcRole } = require("agora-token");
 const AGORA_TOKEN_TTL_SECONDS = 3600;
 
 exports.generateAgoraToken = onRequest(
-  { cors: true, invoker: "public", secrets: [agoraAppId, agoraAppCertificate] },
+  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 3, secrets: [agoraAppId, agoraAppCertificate] },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -3937,16 +4551,17 @@ exports.presenceMirror = onValueWritten(
 // ghosts, and a wider window can't race a live user's delayed heartbeat.
 const PRESENCE_SWEEP_STALE_MS = 3 * PRESENCE_STALE_MS;
 
+// [DISABLED FOR RESOURCE OPTIMIZATION]
+// Ghost presence cleaner (Flutter client already handles 60s offline checks).
+// Uncomment anytime to re-enable.
+/*
 exports.presenceSweeper = onSchedule(
-  { schedule: "every 5 minutes", region: "us-central1" },
+  { schedule: "every 30 minutes", region: "us-central1", maxInstances: 1 },
   async () => {
     const cutoffMs = Date.now() - PRESENCE_SWEEP_STALE_MS;
     let firestoreFixed = 0;
     let rtdbFixed = 0;
 
-    // ── Pass 1: Firestore ────────────────────────────────────────────────
-    // Single-field query (auto-indexed) with the staleness filter applied in
-    // memory — avoids adding a composite index for isOnline + lastSeen.
     try {
       const onlineSnap = await db
         .collection("users")
@@ -3957,21 +4572,14 @@ exports.presenceSweeper = onSchedule(
       for (const doc of onlineSnap.docs) {
         const lastSeen = doc.data().lastSeen;
         const lastSeenMs = lastSeen?.toMillis ? lastSeen.toMillis() : null;
-        // A missing lastSeen can never be evidence of a live connection.
         if (lastSeenMs !== null && lastSeenMs >= cutoffMs) continue;
         stale.push(doc.ref);
       }
 
-      // Chunked at Firestore's hard 500-writes-per-batch limit. Not a
-      // theoretical concern: this job's whole purpose is to be the layer that
-      // still works, and a single oversized commit would throw and repair
-      // nothing — silently, right as the userbase grew past the limit.
       const BATCH_LIMIT = 500;
       for (let i = 0; i < stale.length; i += BATCH_LIMIT) {
         const batch = db.batch();
         for (const ref of stale.slice(i, i + BATCH_LIMIT)) {
-          // Preserve lastSeen — the user really was last seen then, and the UI
-          // renders it as "last seen X ago".
           batch.update(ref, { isOnline: false });
         }
         await batch.commit();
@@ -3981,7 +4589,6 @@ exports.presenceSweeper = onSchedule(
       console.error("presenceSweeper: Firestore pass failed:", error.message);
     }
 
-    // ── Pass 2: RTDB ─────────────────────────────────────────────────────
     try {
       const ghostSnap = await admin
         .database()
@@ -3996,7 +4603,6 @@ exports.presenceSweeper = onSchedule(
         const isStale =
           typeof lastSeenMs !== "number" || lastSeenMs < cutoffMs;
         if (!isStale) return;
-        // update() not set(): keeps the original lastSeen intact.
         writes.push(child.ref.update({ online: false }));
         rtdbFixed++;
       });
@@ -4010,5 +4616,6 @@ exports.presenceSweeper = onSchedule(
     );
   },
 );
+*/
 
 

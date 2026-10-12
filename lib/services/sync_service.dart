@@ -699,6 +699,31 @@ class SyncService {
     unawaited(_serveResendRequests(roomId, withRequests, currentUserId));
   }
 
+  // One-shot surfacing of a serve write rejected by Firestore rules. Mirrors
+  // ChatService._reportResendWriteError: a `permission-denied` while serving a
+  // resend means the deployed rules are stale and the self-heal protocol is
+  // dead, so it is logged once per session even in release. Everything else
+  // (including an expected UntrustedIdentityException) stays debug-only.
+  static bool _warnedServeDenied = false;
+  static void _reportServeError(String messageId, String address, Object e) {
+    String? code;
+    try {
+      final dynamic c = (e as dynamic).code;
+      code = c is String ? c : null;
+    } catch (_) {}
+    if (code == 'permission-denied') {
+      if (_warnedServeDenied) return;
+      _warnedServeDenied = true;
+      debugPrint('[SyncService] ⛔ Serving a resend was DENIED by Firestore '
+          'rules — deploy the current rules: '
+          'firebase deploy --only firestore:rules');
+      return;
+    }
+    if (kDebugMode) {
+      debugPrint('[SyncService] Resend for $messageId to $address failed: $e');
+    }
+  }
+
   Future<void> _serveResendRequests(
     String roomId,
     List<DocumentSnapshot<Map<String, dynamic>>> docs,
@@ -936,10 +961,10 @@ class SyncService {
     } catch (e) {
       // Includes UntrustedIdentityException, which can still fire if the
       // requester's key rotated between the fetch above and the handshake.
-      // Swallowed: their next attempt gets a fresh look at the new key.
-      if (kDebugMode) {
-        debugPrint('[SyncService] Resend for ${doc.id} to $address failed: $e');
-      }
+      // Swallowed: their next attempt gets a fresh look at the new key. A
+      // `permission-denied`, by contrast, is a stale-rules deployment fault
+      // and is surfaced once even in release — see [_reportServeError].
+      _reportServeError(doc.id, address, e);
     }
   }
 

@@ -173,51 +173,6 @@ class AuthService {
     return _auth.currentUser;
   }
 
-  // Sign in anonymously (for testing)
-  Future<UserModel?> signInAnonymously(String displayName) async {
-    try {
-      print('Starting anonymous sign in...');
-
-      // Sign in to Firebase Auth
-      UserCredential userCredential = await _auth.signInAnonymously();
-
-      if (userCredential.user == null) {
-        print('Error: User credential is null');
-        return null;
-      }
-
-      String userId = userCredential.user!.uid;
-      print('Signed in with user ID: $userId');
-
-      // Create user profile in Firestore
-      UserModel user = UserModel(
-        id: userId,
-        name: displayName,
-        isOnline: true,
-        createdAt: DateTime.now(),
-        authProvider: 'anonymous',
-      );
-
-      print('Creating user in Firestore...');
-      await Future.wait([
-        _userService.createOrUpdateUser(user),
-        _saveUserIdLocally(userId),
-        _saveUserLocally(user),
-      ]);
-
-      // Run device session, E2EE, FCM, presence, and Crashlytics
-      // concurrently in the background — not needed to show HomeScreen.
-      _runPostSignInTasks(userId: userId, displayName: user.name);
-
-      print('Anonymous sign in complete!');
-      return user;
-    } catch (e, stackTrace) {
-      print('Error signing in anonymously: $e');
-      print('Stack trace: $stackTrace');
-      return null;
-    }
-  }
-
   // Sign in with phone number (Step 1: Send verification code).
   //
   // On Android [verificationCompleted] can fire when the SMS is auto-retrieved

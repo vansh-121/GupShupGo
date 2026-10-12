@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
 import 'package:video_chat_app/models/friend_request_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
+import 'package:video_chat_app/services/presence_service.dart';
 
 /// The three media types an anonymous chat carries.
 ///
@@ -178,6 +179,40 @@ class AnonymousChatService {
   /// this to detect when `matchedRoomId` appears.
   Stream<DocumentSnapshot> listenToQueueEntry(String userId) {
     return _firestore.collection('match_queue').doc(userId).snapshots();
+  }
+
+  /// Approximate count of users currently online, for the lobby's live pill.
+  ///
+  /// A single-field `where('isOnline', == true)` query needs no composite index
+  /// (Firestore auto-indexes single fields) and is already allowed by the
+  /// `/users` read rule. We deliberately do NOT add a `lastSeen >=` filter: that
+  /// would make it a composite query needing a hand-deployed index, and the
+  /// project rule is never to force one. Instead we take a capped sample and drop
+  /// stale `isOnline: true` ghosts client-side with [PresenceService]'s own
+  /// freshness bound — the same test every other screen applies — so a session
+  /// stuck online for weeks (see [PresenceService]) doesn't inflate the number.
+  ///
+  /// The result is intentionally approximate: capped at 100 and app-wide, not
+  /// queue-specific. It's a liveness signal, not a promise of instant matching.
+  Future<int> onlineUsersCount() async {
+    final snap = await _firestore
+        .collection('users')
+        .where('isOnline', isEqualTo: true)
+        .limit(100)
+        .get();
+
+    var live = 0;
+    for (final doc in snap.docs) {
+      final raw = doc.data()['lastSeen'];
+      // PresenceService mirrors lastSeen as a server Timestamp, but a profile
+      // save via UserModel.toMap writes it as millisecondsSinceEpoch. Accept
+      // both, matching UserModel._parseDateTime.
+      final DateTime? lastSeen = raw is Timestamp
+          ? raw.toDate()
+          : (raw is int ? DateTime.fromMillisecondsSinceEpoch(raw) : null);
+      if (PresenceService.isRecentlyActive(lastSeen)) live++;
+    }
+    return live;
   }
 
   /// Atomic transaction: finds a waiting user in the queue, pairs them

@@ -701,6 +701,14 @@ class ChatService {
           SignalService.instance.stores.identityStore.trustedKeys.remove(addr);
           SignalService.instance.stores.markDirty();
         } catch (_) {}
+        // A changed identity key means the peer reinstalled — often reusing the
+        // same device id, which the device-list diff can't see. Kick a
+        // non-blocking refresh of their device/bundle cache so our stale *send*
+        // session is torn down now (via _fetchAndCacheDeviceIds' identity-change
+        // check) instead of after the 5-min stale-while-revalidate window. This
+        // never touches the receive session — recovery of the current message
+        // stays the sender's job, via the resend requested below.
+        SignalService.refreshDeviceCache(msg.senderId);
       }
 
       // Libsignal couldn't decrypt — try the vault before giving up.
@@ -962,6 +970,38 @@ class ChatService {
   /// Returns true while the bubble should still render as "waiting" — either
   /// we just asked, or the last ask is recent enough that the answer could
   /// still be in flight.
+  /// One-shot, unconditional surfacing of a resend write rejected by Firestore
+  /// rules. A `permission-denied` here is not transient: it means the deployed
+  /// `firestore.rules` predate the `retryRequests` / `resendWakeups` carve-outs,
+  /// so the whole message self-heal protocol is silently dead and every
+  /// undecryptable bubble stays ⏳ forever. Logged once per session even in
+  /// release (there is no plaintext in the message, so it is safe) so the cause
+  /// is discoverable instead of invisible. Transient errors (offline, doc
+  /// deleted) stay debug-only — the reconcile sweep retries them.
+  static bool _warnedResendDenied = false;
+  static void _reportResendWriteError(String where, Object e) {
+    if (_firebaseErrorCode(e) == 'permission-denied') {
+      if (_warnedResendDenied) return;
+      _warnedResendDenied = true;
+      debugPrint('[E2EE] ⛔ "$where" was DENIED by Firestore rules — message '
+          'self-heal cannot work until you deploy the current rules: '
+          'firebase deploy --only firestore:rules');
+      return;
+    }
+    if (kDebugMode) debugPrint('[E2EE] $where failed: $e');
+  }
+
+  /// Best-effort read of a FirebaseException-style `.code` without a hard
+  /// dependency on the type, so it is usable from any catch block.
+  static String? _firebaseErrorCode(Object e) {
+    try {
+      final dynamic code = (e as dynamic).code;
+      return code is String ? code : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> _requestResend({
     required MessageModel msg,
     required String selfUid,
@@ -1034,7 +1074,10 @@ class ChatService {
       // Offline, or the message was deleted. Nothing to show but the hard
       // failure; the reconcile sweep will try again later. Note that no
       // attempt was recorded, so this costs us nothing from the cap.
-      if (kDebugMode) debugPrint('[E2EE] resend request failed: $e');
+      // A `permission-denied` here, though, is a deployment fault, not a
+      // transient one — surfaced loudly so a stale ruleset doesn't look like
+      // "no bug". See [_reportResendWriteError].
+      _reportResendWriteError('resend request', e);
       return false;
     } finally {
       _resendInFlight.remove(msg.id);
@@ -1092,8 +1135,10 @@ class ChatService {
     } catch (e) {
       // Swallowed on purpose. The request itself is already on the message
       // document, so the sender still repairs the bubble the moment they open
-      // the app — this only makes it sooner.
-      if (kDebugMode) debugPrint('[E2EE] resend wakeup failed: $e');
+      // the app — this only makes it sooner. Exception: a `permission-denied`
+      // means the deployed rules reject the wakeup collection, which is worth
+      // seeing even in release — see [_reportResendWriteError].
+      _reportResendWriteError('resend wakeup', e);
     }
   }
 
