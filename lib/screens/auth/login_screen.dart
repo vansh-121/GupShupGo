@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
@@ -83,6 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signInWithGoogle() async {
+    final t = AppLocalizations.of(context);
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -96,7 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Google sign-in was cancelled.';
+          _errorMessage = t.loginErrorGoogleCancelled;
         });
       }
     } catch (e) {
@@ -111,8 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (e is ProfileReadException) {
         setState(() {
           _isLoading = false;
-          _errorMessage =
-              "Couldn't load your profile. Check your connection and try again.";
+          _errorMessage = t.loginErrorProfileLoad;
         });
         return;
       }
@@ -124,57 +125,58 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Google sign-in failed. Please try again.';
+        _errorMessage = t.loginErrorGoogleFailed;
       });
     }
   }
 
-  String? _validateEmail(String email) {
+  String? _validateEmail(AppLocalizations t, String email) {
     if (email.isEmpty) {
-      return 'Please enter your email';
+      return t.loginErrorEnterEmail;
     }
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
     if (!emailRegex.hasMatch(email)) {
-      return 'Please enter a valid email';
+      return t.loginErrorValidEmail;
     }
     return null;
   }
 
-  String? _validatePassword(String password) {
+  String? _validatePassword(AppLocalizations t, String password) {
     if (password.isEmpty) {
-      return 'Please enter your password';
+      return t.loginErrorEnterPassword;
     }
     if (password.length < 6) {
-      return 'Password must be at least 6 characters';
+      return t.loginErrorPasswordMin6;
     }
     return null;
   }
 
   /// Stronger rules applied only at sign-up. Sign-in keeps the lenient check
   /// above so existing accounts created before these rules aren't locked out.
-  String? _validateNewPassword(String password) {
+  String? _validateNewPassword(AppLocalizations t, String password) {
     if (password.isEmpty) {
-      return 'Please enter a password';
+      return t.loginErrorEnterPasswordSignup;
     }
     if (password.length < 8) {
-      return 'Password must be at least 8 characters';
+      return t.loginErrorPasswordMin8;
     }
     if (!RegExp(r'[A-Za-z]').hasMatch(password)) {
-      return 'Password must include a letter';
+      return t.loginErrorPasswordLetter;
     }
     if (!RegExp(r'\d').hasMatch(password)) {
-      return 'Password must include a number';
+      return t.loginErrorPasswordNumber;
     }
     return null;
   }
 
   Future<void> _signInWithEmail() async {
-    final emailError = _validateEmail(_emailController.text.trim());
+    final t = AppLocalizations.of(context);
+    final emailError = _validateEmail(t, _emailController.text.trim());
     if (emailError != null) {
       setState(() => _errorMessage = emailError);
       return;
     }
-    final passwordError = _validatePassword(_passwordController.text);
+    final passwordError = _validatePassword(t, _passwordController.text);
     if (passwordError != null) {
       setState(() => _errorMessage = passwordError);
       return;
@@ -194,32 +196,33 @@ class _LoginScreenState extends State<LoginScreen> {
       if (user != null) {
         _goHome();
       } else {
-        setState(() => _errorMessage = 'Failed to sign in. Please try again.');
+        setState(() => _errorMessage = t.loginErrorSignInFailed);
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = _getErrorMessage(e.code);
+        _errorMessage = _getErrorMessage(t, e.code);
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'An error occurred. Please try again.';
+        _errorMessage = t.loginErrorGeneric;
       });
     }
   }
 
   Future<void> _signUpWithEmail() async {
+    final t = AppLocalizations.of(context);
     if (_nameController.text.trim().isEmpty) {
-      setState(() => _errorMessage = 'Please enter your name');
+      setState(() => _errorMessage = t.loginErrorEnterName);
       return;
     }
-    final emailError = _validateEmail(_emailController.text.trim());
+    final emailError = _validateEmail(t, _emailController.text.trim());
     if (emailError != null) {
       setState(() => _errorMessage = emailError);
       return;
     }
-    final passwordError = _validateNewPassword(_passwordController.text);
+    final passwordError = _validateNewPassword(t, _passwordController.text);
     if (passwordError != null) {
       setState(() => _errorMessage = passwordError);
       return;
@@ -240,24 +243,25 @@ class _LoginScreenState extends State<LoginScreen> {
       if (user != null) {
         _goHome();
       } else {
-        setState(() => _errorMessage = 'Failed to sign up. Please try again.');
+        setState(() => _errorMessage = t.loginErrorSignUpFailed);
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = _getErrorMessage(e.code);
+        _errorMessage = _getErrorMessage(t, e.code);
       });
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'An error occurred. Please try again.';
+        _errorMessage = t.loginErrorGeneric;
       });
     }
   }
 
   Future<void> _resetPassword() async {
+    final t = AppLocalizations.of(context);
     final email = _emailController.text.trim();
-    final emailError = _validateEmail(email);
+    final emailError = _validateEmail(t, email);
     if (emailError != null) {
       setState(() => _errorMessage = emailError);
       return;
@@ -274,42 +278,43 @@ class _LoginScreenState extends State<LoginScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Password reset email sent to $email'),
+          content: Text(t.loginResetEmailSent(email)),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Failed to send reset email. Please try again.';
+        _errorMessage = t.loginErrorResetFailed;
       });
     }
   }
 
-  String _getErrorMessage(String code) {
+  String _getErrorMessage(AppLocalizations t, String code) {
     switch (code) {
       case 'user-not-found':
-        return 'No account found with this email. Please sign up.';
+        return t.loginErrorUserNotFound;
       case 'wrong-password':
-        return 'Incorrect password. Please try again.';
+        return t.loginErrorWrongPassword;
       case 'email-already-in-use':
-        return 'An account already exists with this email. Please sign in.';
+        return t.loginErrorEmailInUse;
       case 'invalid-email':
-        return 'Please enter a valid email address.';
+        return t.loginErrorInvalidEmail;
       case 'weak-password':
-        return 'Password is too weak. Use at least 6 characters.';
+        return t.loginErrorWeakPassword;
       case 'invalid-credential':
-        return 'Invalid email or password. Please check and try again.';
+        return t.loginErrorInvalidCredential;
       case 'too-many-requests':
-        return 'Too many attempts. Please try again later.';
+        return t.loginErrorTooManyRequests;
       default:
-        return 'An error occurred. Please try again.';
+        return t.loginErrorGeneric;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: c.surface,
@@ -381,7 +386,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.white, size: 20),
                         const SizedBox(width: 10),
                         Text(
-                          'Continue with Phone',
+                          t.loginContinueWithPhone,
                           style: GoogleFonts.poppins(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -430,7 +435,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               const SizedBox(width: 10),
                               Text(
-                                'Continue with Google',
+                                t.loginContinueWithGoogle,
                                 style: GoogleFonts.poppins(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
@@ -464,7 +469,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: c.textHigh, size: 20),
                         const SizedBox(width: 10),
                         Text(
-                          'Use Email & Password',
+                          t.loginUseEmailPassword,
                           style: GoogleFonts.poppins(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -481,7 +486,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _ModeChip(
-                      label: 'Sign In',
+                      label: t.loginSignIn,
                       selected: !_isSignUp,
                       onTap: () => setState(() {
                         _isSignUp = false;
@@ -490,7 +495,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(width: 12),
                     _ModeChip(
-                      label: 'Sign Up',
+                      label: t.loginSignUp,
                       selected: _isSignUp,
                       onTap: () => setState(() {
                         _isSignUp = true;
@@ -507,7 +512,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: c.textHigh),
                     textCapitalization: TextCapitalization.words,
                     decoration: InputDecoration(
-                      hintText: 'Your Name',
+                      hintText: t.loginHintName,
                       hintStyle: TextStyle(color: c.textLow),
                       prefixIcon: Icon(Icons.person_outline,
                           color: c.textMid),
@@ -537,7 +542,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
                   decoration: InputDecoration(
-                    hintText: 'Email',
+                    hintText: t.loginHintEmail,
                     hintStyle: TextStyle(color: c.textLow),
                     prefixIcon:
                         Icon(Icons.email_outlined, color: c.textMid),
@@ -565,10 +570,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(color: c.textHigh),
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
-                    hintText: 'Password',
+                    hintText: t.loginHintPassword,
                     hintStyle: TextStyle(color: c.textLow),
                     helperText: _isSignUp
-                        ? 'At least 8 characters, with a letter and a number'
+                        ? t.loginPasswordHelper
                         : null,
                     helperStyle:
                         TextStyle(color: c.textLow, fontSize: 11),
@@ -609,7 +614,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: TextButton(
                       onPressed: _isLoading ? null : _resetPassword,
                       child: Text(
-                        'Forgot Password?',
+                        t.loginForgotPassword,
                         style: GoogleFonts.poppins(
                           color: c.primary,
                           fontWeight: FontWeight.w500,
@@ -644,7 +649,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           )
                         : Text(
-                            _isSignUp ? 'Create Account' : 'Sign In',
+                            _isSignUp ? t.loginCreateAccount : t.loginSignIn,
                             style: GoogleFonts.poppins(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -660,7 +665,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     _errorMessage = null;
                   }),
                   child: Text(
-                    'Cancel',
+                    t.commonCancel,
                     style: GoogleFonts.poppins(
                       color: c.textMid,
                       fontWeight: FontWeight.w500,
@@ -720,7 +725,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Offline Chat',
+                        t.loginOfflineChat,
                         style: GoogleFonts.poppins(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,

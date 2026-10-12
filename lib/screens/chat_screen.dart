@@ -72,6 +72,12 @@ import 'package:video_chat_app/utils/haptics.dart';
 import 'package:video_chat_app/utils/upload_progress.dart';
 import 'package:video_chat_app/widgets/common/async_button.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/screens/ai/ai_assistant_screen.dart';
+import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
+import 'package:video_chat_app/widgets/ai/ai_action_sheet.dart';
+import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
 
 class Contact {
   final String id;
@@ -251,6 +257,12 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Firestore-write + FCM + engine-init gap, so a second tap slipped through.
   bool _startingScreenShare = false;
   bool _hasText = false; // tracks if text field has content for mic/send toggle
+
+  // ─── GupAI in-chat ─────────────────────────────────────────────────
+  /// Smart-reply suggestions shown as chips above the composer; empty when none.
+  List<String> _aiSmartReplies = const [];
+  /// True while a smart-reply request is in flight (disables the ✨ button).
+  bool _aiSuggesting = false;
 
   // ─── Block state ──────────────────────────────────────────────────
   bool _isBlocked = false; // current user blocked the contact
@@ -2962,6 +2974,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
           ),
+        if (_aiSmartReplies.isNotEmpty) _buildSmartReplyChips(c),
         _buildComposerRow(c, darkPillBg, darkPillBorder),
       ],
     );
@@ -2974,6 +2987,21 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // GupAI compose-help: rewrite the draft, or suggest replies to the
+          // last message. Gated behind the in-chat flag.
+          if (_aiInChatEnabled)
+            IconButton(
+              tooltip: 'GupAI',
+              icon: _aiSuggesting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: c.primary),
+                    )
+                  : Icon(Icons.auto_awesome_rounded, color: c.primary, size: 22),
+              onPressed: _aiSuggesting ? null : _showComposeHelp,
+            ),
           // Attachment Paperclip
           // Attachment Paperclip. One button for photo, video *and* document —
           // tapping it opens a chooser sheet; while any of them is uploading it
@@ -4526,6 +4554,35 @@ class _ChatScreenState extends State<ChatScreen> {
                               _showForwardSheet(message);
                             },
                           ),
+                        if (hasContent && _aiInChatEnabled) ...[
+                          _buildActionTile(
+                            icon: Icons.translate_rounded,
+                            label: 'Translate',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiTranslateMessage(message);
+                            },
+                          ),
+                          _buildActionTile(
+                            icon: Icons.notes_rounded,
+                            label: 'Summarise',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiSummariseMessage(message);
+                            },
+                          ),
+                          _buildActionTile(
+                            icon: Icons.auto_awesome_rounded,
+                            label: 'Ask GupAI',
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiAskAbout(message);
+                            },
+                          ),
+                        ],
                         if (canEdit)
                           _buildActionTile(
                             icon: Icons.edit_rounded,
@@ -4640,6 +4697,347 @@ class _ChatScreenState extends State<ChatScreen> {
       const SnackBar(
         content: Text('Copied'),
         duration: Duration(milliseconds: 1200),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  GupAI in-chat helpers (message actions + composer compose-help)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// In-chat GupAI surfaces appear only when BOTH the master switch and the
+  /// in-chat switch are on — so the whole feature can be rolled out (or pulled)
+  /// independently of the dedicated screen.
+  bool get _aiInChatEnabled =>
+      FeatureFlagService.instance.aiAssistantEnabled &&
+      FeatureFlagService.instance.aiInChatEnabled;
+
+  static const _kAiInChatNoticeKey = 'ai_in_chat_notice_seen_v1';
+
+  /// One-time disclosure before the first in-chat AI action: acting on a message
+  /// sends that text out of E2EE to GupAI (Google). Returns true to proceed.
+  /// Mirrors the dedicated screen's first-run notice.
+  Future<bool> _ensureAiConsent() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kAiInChatNoticeKey) == true) return true;
+    if (!mounted) return false;
+    final c = AppThemeColors.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: c.primary, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Use GupAI here?',
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w700, fontSize: 18, color: c.textHigh),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'When you translate, summarise, rewrite, or ask GupAI about a message, '
+          'that text is sent to GupAI (Google) to generate a result.\n\n'
+          'Your chats stay end-to-end encrypted — only the text you choose to act '
+          'on is shared, nothing else.',
+          style:
+              GoogleFonts.poppins(fontSize: 13.5, height: 1.5, color: c.textMid),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel',
+                style: GoogleFonts.poppins(
+                    color: c.textMid, fontWeight: FontWeight.w600)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c.primary),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Continue',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await prefs.setBool(_kAiInChatNoticeKey, true);
+      return true;
+    }
+    return false;
+  }
+
+  /// Drops AI-produced [text] into the composer and focuses it. Nothing is ever
+  /// auto-sent — the user reviews/edits first.
+  void _insertAiText(String text) {
+    _messageController.text = text;
+    _messageController.selection =
+        TextSelection.collapsed(offset: _messageController.text.length);
+    _composerFocus.requestFocus();
+  }
+
+  /// A readable language name for the device locale — the default translate
+  /// target, so a foreign message is read in the user's own language.
+  String _deviceLanguageName() {
+    final code = WidgetsBinding.instance.platformDispatcher.locale.languageCode
+        .toLowerCase();
+    const names = {
+      'en': 'English', 'hi': 'Hindi', 'es': 'Spanish', 'fr': 'French',
+      'de': 'German', 'pt': 'Portuguese', 'ar': 'Arabic', 'bn': 'Bengali',
+      'ru': 'Russian', 'ja': 'Japanese', 'zh': 'Chinese', 'ur': 'Urdu',
+      'ta': 'Tamil', 'te': 'Telugu', 'mr': 'Marathi', 'gu': 'Gujarati',
+      'kn': 'Kannada', 'ml': 'Malayalam', 'pa': 'Punjabi', 'it': 'Italian',
+      'ko': 'Korean', 'tr': 'Turkish', 'id': 'Indonesian', 'vi': 'Vietnamese',
+    };
+    return names[code] ?? 'English';
+  }
+
+  /// The most recent peer message with text, used as the smart-reply input.
+  /// Order-independent (picks the max timestamp) so it doesn't depend on how the
+  /// list happens to be sorted.
+  String? _lastIncomingText() {
+    MessageModel? best;
+    for (final m in _currentMessages) {
+      if (m.senderId != widget.currentUserId &&
+          m.type == MessageType.text &&
+          !m.deletedForEveryone &&
+          m.text.trim().isNotEmpty) {
+        if (best == null || m.timestamp.isAfter(best.timestamp)) best = m;
+      }
+    }
+    return best?.text.trim();
+  }
+
+  /// Message action → translate the message into the device language.
+  Future<void> _aiTranslateMessage(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Translate',
+      icon: Icons.translate_rounded,
+      mode: 'translate',
+      input: message.text,
+      params: {'targetLang': _deviceLanguageName()},
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Message action → summarise the message.
+  Future<void> _aiSummariseMessage(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Summary',
+      icon: Icons.notes_rounded,
+      mode: 'summarize',
+      input: message.text,
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Message action → open GupAI seeded with the message quoted, to ask about it
+  /// in a full (grounded) conversation.
+  Future<void> _aiAskAbout(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    final quoted = message.text.trim();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AiAssistantScreen(seedText: 'About this message:\n"$quoted"\n\n'),
+      ),
+    );
+  }
+
+  /// Composer ✨ → a contextual menu of compose-help actions.
+  Future<void> _showComposeHelp() async {
+    final c = AppThemeColors.of(context);
+    final hasDraft = _messageController.text.trim().isNotEmpty;
+    final hasIncoming = _lastIncomingText() != null;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.auto_awesome_rounded, size: 18, color: c.primary),
+                  const SizedBox(width: 10),
+                  Text('GupAI',
+                      style: GoogleFonts.poppins(
+                          color: c.textHigh,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: c.border.withOpacity(0.4)),
+            if (hasIncoming)
+              _composeHelpTile(ctx, c, Icons.quickreply_rounded,
+                  'Suggest replies', 'reply'),
+            if (hasDraft) ...[
+              _composeHelpTile(ctx, c, Icons.auto_fix_high_rounded,
+                  'Rewrite — clearer', 'rewrite'),
+              _composeHelpTile(ctx, c, Icons.workspace_premium_outlined,
+                  'Rewrite — more formal', 'formal'),
+              _composeHelpTile(ctx, c, Icons.sentiment_satisfied_rounded,
+                  'Rewrite — friendlier', 'friendly'),
+            ],
+            if (!hasDraft && !hasIncoming)
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Type a message to rewrite it, or wait for a message to get '
+                  'reply ideas.',
+                  style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'reply':
+        await _aiSuggestReplies();
+      case 'rewrite':
+        await _aiRewriteDraft('clearer and more polished');
+      case 'formal':
+        await _aiRewriteDraft('more formal and professional');
+      case 'friendly':
+        await _aiRewriteDraft('warmer and friendlier');
+    }
+  }
+
+  Widget _composeHelpTile(BuildContext ctx, AppThemeColors c, IconData icon,
+      String label, String value) {
+    return InkWell(
+      onTap: () => Navigator.of(ctx).pop(value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: c.textHigh),
+            const SizedBox(width: 15),
+            Text(label,
+                style: GoogleFonts.poppins(
+                    color: c.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Rewrites the current draft in [tone] and offers to replace it.
+  Future<void> _aiRewriteDraft(String tone) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Rewrite',
+      icon: Icons.auto_fix_high_rounded,
+      mode: 'rewrite',
+      input: _messageController.text,
+      params: {'tone': tone},
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Fetches smart replies to the last incoming message and shows them as chips.
+  Future<void> _aiSuggestReplies() async {
+    final incoming = _lastIncomingText();
+    if (incoming == null) return;
+    if (!await _ensureAiConsent() || !mounted) return;
+    setState(() => _aiSuggesting = true);
+    final result = await AiAssistantService.instance
+        .runAction(mode: 'smart_reply', input: incoming);
+    if (!mounted) return;
+    setState(() => _aiSuggesting = false);
+    switch (result) {
+      case AiActionReply(:final text):
+        final suggestions = AiAssistantService.parseSuggestions(text);
+        if (suggestions.isEmpty) {
+          _aiToast('No suggestions right now.');
+        } else {
+          setState(() => _aiSmartReplies = suggestions);
+        }
+      case AiActionQuota(:final isPro, :final canEarn):
+        await showAiQuotaTopUpSheet(
+          context: context,
+          isPro: isPro,
+          canEarn: canEarn,
+          onCredited: _aiSuggestReplies,
+        );
+      case AiActionBusy():
+        _aiToast('GupAI is busy right now. Try again in a moment.');
+      case AiActionFailed():
+        _aiToast("Couldn't reach GupAI. Check your connection.");
+    }
+  }
+
+  void _aiToast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(msg, style: GoogleFonts.poppins(fontSize: 13)),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// The smart-reply chip strip, shown above the composer when suggestions are
+  /// live. Tapping a chip drops it into the composer; the ✕ dismisses them.
+  Widget _buildSmartReplyChips(AppThemeColors c) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, right: 4, top: 6),
+      child: Row(
+        children: [
+          Icon(Icons.auto_awesome_rounded, size: 14, color: c.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final s in _aiSmartReplies)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        label: Text(s,
+                            style: GoogleFonts.poppins(
+                                fontSize: 12.5, color: c.textHigh)),
+                        backgroundColor: c.surfaceAlt,
+                        side: BorderSide(color: c.border),
+                        onPressed: () {
+                          _insertAiText(s);
+                          setState(() => _aiSmartReplies = const []);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.close_rounded, size: 16, color: c.textMid),
+            onPressed: () => setState(() => _aiSmartReplies = const []),
+          ),
+        ],
       ),
     );
   }

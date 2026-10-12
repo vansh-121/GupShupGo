@@ -24,8 +24,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
-import 'package:video_chat_app/screens/premium_screen.dart';
-import 'package:video_chat_app/services/ads/ad_reward_waiter.dart';
 import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/ads/rewarded_ad_service.dart';
 import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
@@ -33,13 +31,18 @@ import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
 
 /// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
 /// the notice can be re-shown if the wording materially changes.
 const String _kAiNoticeSeenKey = 'ai_first_run_notice_seen_v2';
 
 class AiAssistantScreen extends StatefulWidget {
-  const AiAssistantScreen({super.key});
+  const AiAssistantScreen({super.key, this.seedText});
+
+  /// Optional text to pre-fill the composer with on open — used by the in-chat
+  /// "Ask GupAI" action to carry a quoted message into a fresh conversation.
+  final String? seedText;
 
   @override
   State<AiAssistantScreen> createState() => _AiAssistantScreenState();
@@ -78,6 +81,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     unawaited(AdsService.instance.ensureConsent());
     unawaited(RewardedAdService.instance.preload());
     unawaited(_refreshQuota());
+    final seed = widget.seedText?.trim();
+    if (seed != null && seed.isNotEmpty) {
+      _composer.text = widget.seedText!;
+      _composer.selection =
+          TextSelection.collapsed(offset: _composer.text.length);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _composerFocus.requestFocus());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowNotice());
   }
 
@@ -222,210 +233,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   // ── Quota top-up sheet ───────────────────────────────────────────────────────
 
   void _showQuotaSheet({required bool isPro, required bool canEarn}) {
-    final c = AppThemeColors.of(context);
-    final flags = FeatureFlagService.instance;
-    final reward = flags.aiRewardCredits;
-    final canWatch = canEarn && AdsService.instance.canShowRewarded;
-    // `isProFeatureVisible` is `pro_enabled`: with it off there is nothing to
-    // sell, so the upgrade affordance stays hidden rather than leading to a
-    // dead end. A genuine Pro holder who somehow hit this never sees it either.
-    final showUpgrade =
-        !isPro && context.read<SubscriptionProvider>().isProFeatureVisible;
-
-    showModalBottomSheet<void>(
+    // The ad-watch → credit-wait → resume flow is shared with the in-chat
+    // actions (see ai_quota_topup_sheet.dart). On a successful top-up it
+    // re-asks the pending turn via retryLast.
+    showAiQuotaTopUpSheet(
       context: context,
-      backgroundColor: c.cardBg,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) {
-        var adBusy = false;
-        var statusLine = isPro
-            ? 'You\'ve used all of today\'s messages. They reset tomorrow.'
-            : 'You\'ve used today\'s free messages.';
-
-        return StatefulBuilder(
-          builder: (sheetCtx, setSheet) {
-            Future<void> watchAd() async {
-              final uid = _uid;
-              if (uid == null || adBusy) return;
-              setSheet(() {
-                adBusy = true;
-                statusLine = 'Loading an ad…';
-              });
-
-              final todayKey = StreakDay.fromInstant(ServerClock.now()).key;
-              var baseline = 0;
-              try {
-                final snap = await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .get();
-                baseline = _aiRewardCountToday(snap.data(), todayKey);
-              } catch (_) {}
-
-              final outcome = await RewardedAdService.instance.show(
-                uid: uid,
-                type: AdRewardType.aiCredit,
-              );
-
-              if (outcome != RewardedAdOutcome.earned) {
-                setSheet(() {
-                  adBusy = false;
-                  statusLine = switch (outcome) {
-                    RewardedAdOutcome.dismissedEarly =>
-                      'Watch the full ad to unlock more messages.',
-                    RewardedAdOutcome.unavailable =>
-                      'Ads aren\'t available right now.',
-                    _ => 'Couldn\'t load an ad. Please try again shortly.',
-                  };
-                });
-                return;
-              }
-
-              setSheet(() => statusLine = 'Unlocking your messages…');
-              final credited = await AdRewardWaiter.awaitCredit(
-                uid: uid,
-                satisfied: (u) => _aiRewardCountToday(u, todayKey) > baseline,
-              );
-
-              if (!credited) {
-                setSheet(() {
-                  adBusy = false;
-                  statusLine =
-                      'Your reward is taking a moment — try again shortly.';
-                });
-                return;
-              }
-
-              // Credit landed. Close the sheet and answer the pending question
-              // automatically (retryLast re-asks it without a duplicate bubble).
-              if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-              await _retryAfterTopUp();
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: 20 + MediaQuery.of(sheetCtx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: c.border,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Text('🎯', style: GoogleFonts.poppins(fontSize: 26)),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Daily limit reached',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: c.textHigh,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    statusLine,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      height: 1.45,
-                      color: c.textMid,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  if (canWatch)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: c.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: adBusy ? null : watchAd,
-                      icon: adBusy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.play_circle_outline_rounded),
-                      label: Text(
-                        adBusy ? 'Please wait…' : 'Watch an ad for +$reward',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  if (canWatch && showUpgrade) const SizedBox(height: 10),
-                  if (showUpgrade)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: c.primary,
-                        side: BorderSide(
-                          color: c.primary.withValues(alpha: 0.5),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: adBusy
-                          ? null
-                          : () {
-                              Navigator.of(sheetCtx).pop();
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const PremiumScreen(),
-                                ),
-                              );
-                            },
-                      icon: const Icon(Icons.workspace_premium_rounded),
-                      label: Text(
-                        'Upgrade to Pro for more',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  if (!canWatch && !showUpgrade) const SizedBox(height: 2),
-                  const SizedBox(height: 6),
-                  TextButton(
-                    onPressed:
-                        adBusy ? null : () => Navigator.of(sheetCtx).pop(),
-                    child: Text(
-                      'Maybe later',
-                      style: GoogleFonts.poppins(
-                        color: c.textMid,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      isPro: isPro,
+      canEarn: canEarn,
+      onCredited: _retryAfterTopUp,
     );
   }
 
@@ -469,7 +284,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           .get();
       final data = snap.data();
       final base = isPro ? flags.aiProDailyCap : flags.aiFreeDailyCap;
-      final topUps = _aiRewardCountToday(data, todayKey);
+      final topUps = aiRewardCountToday(data, todayKey);
       final used = _aiDailyCountToday(data, todayKey);
       final allocated = base + topUps * flags.aiRewardCredits;
       final remaining = (allocated - used).clamp(0, allocated);
@@ -489,17 +304,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   /// another timezone doesn't disagree. A bucket from any other day reads as 0.
   int _aiDailyCountToday(Map<String, dynamic>? user, String todayKey) {
     final daily = user?['aiDaily'];
-    if (daily is! Map) return 0;
-    if (daily['dayKey'] != todayKey) return 0;
-    final count = daily['count'];
-    return count is num ? count.toInt() : 0;
-  }
-
-  /// Today's rewarded-AI top-up count from the server-written counter, read with
-  /// the same canonical day key `admobSsv` uses so a device in another timezone
-  /// doesn't disagree. A bucket from any other day reads as 0.
-  int _aiRewardCountToday(Map<String, dynamic>? user, String todayKey) {
-    final daily = user?['aiRewardDaily'];
     if (daily is! Map) return 0;
     if (daily['dayKey'] != todayKey) return 0;
     final count = daily['count'];

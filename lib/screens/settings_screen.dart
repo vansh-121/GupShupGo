@@ -3,7 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
 import 'package:video_chat_app/models/user_model.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
+import 'package:video_chat_app/l10n/app_locales.dart';
 import 'package:video_chat_app/provider/chat_theme_provider.dart';
+import 'package:video_chat_app/provider/locale_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
@@ -13,6 +16,7 @@ import 'package:video_chat_app/widgets/whats_new_dialog.dart'
     show kCurrentVersion, showWhatsNewDialog;
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/screens/language_picker_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/ads/ad_consent_service.dart';
@@ -554,10 +558,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: _buildStitchCompactTile(
                       icon: Icons.g_translate_rounded,
                       title: 'App Language',
-                      subtitle: 'English',
+                      subtitle: context.watch<LocaleProvider>().isSystem
+                          ? AppLocalizations.of(context).languageSystemDefault
+                          : languageNativeName(context
+                              .watch<LocaleProvider>()
+                              .locale!
+                              .languageCode),
                       onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('English (US) is active')),
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const LanguagePickerScreen(),
+                          ),
                         );
                       },
                     ),

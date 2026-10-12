@@ -49,6 +49,7 @@ const adsSsv = require("./ads/ssv");
 // Firestore, no network), so the allowance formula and the stale-key reset are
 // unit tested in test/ai_quota.unit.test.js. See `exports.askGupShupAi` below.
 const aiQuota = require("./ai/quota");
+const aiPrompts = require("./ai/prompts");
 
 // ─── Repair admin token ────────────────────────────────────────────────────────
 // Set via: firebase functions:secrets:set STREAK_ADMIN_TOKEN
@@ -2103,14 +2104,18 @@ const AI_CONFIG_FALLBACK = {
     "brainstorm, and answer questions. Keep replies short unless asked for more. " +
     "You cannot see the user's private end-to-end-encrypted chats — only what " +
     "they type to you here.",
+  // Curated facts about GupShupGo, prepended (only for open-ended chat) so app
+  // questions are answered accurately instead of hallucinated. Empty by default
+  // — set `config/ai.knowledgeBase` in Firestore (live, no deploy) to enable
+  // grounding. See `./ai/prompts`.
+  knowledgeBase: "",
   freeDailyCap: 10,
   proDailyCap: 100,
   rewardCredits: 5,
   rewardDailyCap: 5,
   fallbackModels: [
     "openai/gpt-oss-120b",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
     "qwen/qwen3.8-27b",
   ],
 };
@@ -2165,6 +2170,10 @@ async function getAiConfig() {
           typeof data.systemPrompt === "string" && data.systemPrompt.length > 0
             ? data.systemPrompt
             : AI_CONFIG_FALLBACK.systemPrompt,
+        knowledgeBase:
+          typeof data.knowledgeBase === "string"
+            ? data.knowledgeBase
+            : AI_CONFIG_FALLBACK.knowledgeBase,
         freeDailyCap: aiQuota.positiveIntOr(data.freeDailyCap, AI_CONFIG_FALLBACK.freeDailyCap),
         proDailyCap: aiQuota.positiveIntOr(data.proDailyCap, AI_CONFIG_FALLBACK.proDailyCap),
         rewardCredits: aiQuota.positiveIntOr(data.rewardCredits, AI_CONFIG_FALLBACK.rewardCredits),
@@ -3271,6 +3280,21 @@ exports.askGupShupAi = onRequest(
     }
     const message = rawMessage.slice(0, AI_MAX_CHARS);
 
+    // Optional task mode (translate / summarize / rewrite / smart_reply) used by
+    // the in-chat surfaces. Absent → the open-ended `chat` the dedicated screen
+    // uses. An explicitly-supplied unknown mode is a client bug, so reject it
+    // rather than silently treating it as chat. `params` (e.g. targetLang) is
+    // sanitised downstream in composeSystemPrompt.
+    let mode = aiPrompts.DEFAULT_MODE;
+    if (body.mode !== undefined) {
+      if (!aiPrompts.AI_MODES.includes(body.mode)) {
+        res.status(400).json({ error: "bad-request", reason: "bad-mode" });
+        return;
+      }
+      mode = body.mode;
+    }
+    const params = body.params && typeof body.params === "object" ? body.params : {};
+
     // Prior turns the client replayed from its local transcript, newest-last.
     // We trust only the shape — role must be user/model, text is clamped — and
     // append the new user turn ourselves so the final turn is always the user's.
@@ -3307,9 +3331,16 @@ exports.askGupShupAi = onRequest(
       }
 
       // ── Generate (never charged on failure) ───────────────────────────────
+      // The effective system prompt is composed per-turn: base voice + (chat
+      // only) KB grounding + task instruction for the mode. Only the prompt
+      // changes; the model chain / quota / caps all stay on the resolved cfg.
+      const genCfg = {
+        ...cfg,
+        systemPrompt: aiPrompts.composeSystemPrompt(cfg, mode, params),
+      };
       let reply;
       try {
-        reply = await _generateGeminiReply(cfg, contents);
+        reply = await _generateGeminiReply(genCfg, contents);
       } catch (error) {
         console.error("askGupShupAi: Gemini call failed:", error && error.message);
         res.status(503).json({ error: "unavailable", reason: "busy" });

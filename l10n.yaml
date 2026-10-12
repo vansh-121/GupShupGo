@@ -1,0 +1,14 @@
+# Flutter gen_l10n configuration. Generates the `AppLocalizations` class from
+# the ARB files in lib/l10n/ (app_en.arb is the English source of truth).
+# Regenerate with `flutter gen-l10n` (also runs on `flutter pub get` / build
+# because pubspec has `flutter: generate: true`).
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+# Non-nullable getter: AppLocalizations.of(context) returns a non-null instance
+# (the delegates are always installed in MaterialApp), so call sites stay clean.
+nullable-getter: false
+# Emit untranslated-key reports during generation so missing translations are
+# visible in CI/build logs rather than silently falling back to English.
+untranslated-messages-file: lib/l10n/untranslated.txt

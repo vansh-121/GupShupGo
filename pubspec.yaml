@@ -30,6 +30,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Localization: Flutter's built-in gen_l10n (ARB files in lib/l10n, see
+  # l10n.yaml). flutter_localizations supplies Material/Cupertino/Widgets
+  # translations + RTL; intl backs the generated AppLocalizations.
+  flutter_localizations:
+    sdk: flutter
+  intl: any
   firebase_core: ^2.27.0
   firebase_messaging: ^14.7.19
   firebase_auth: ^4.17.8
@@ -276,6 +282,10 @@ flutter_launcher_icons:
 
 # The following section is specific to Flutter packages.
 flutter:
+  # Generate localization sources (AppLocalizations) from lib/l10n/*.arb at
+  # build time per l10n.yaml. See lib/l10n/app_en.arb for the string source.
+  generate: true
+
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

@@ -61,6 +61,7 @@ class FeatureFlagService extends ChangeNotifier {
   // The per-user daily quota is enforced server-side in `askGupShupAi`; the caps
   // below are DISPLAY-ONLY copy (what the sheet promises), never the ceiling.
   static const _kAiAssistantEnabled = 'ai_assistant_enabled';
+  static const _kAiInChatEnabled = 'ai_in_chat_enabled';
   static const _kAiFreeDailyCap = 'ai_free_daily_cap';
   static const _kAiProDailyCap = 'ai_pro_daily_cap';
   static const _kAiRewardCredits = 'ai_reward_credits';
@@ -199,6 +200,12 @@ class FeatureFlagService extends ChangeNotifier {
   /// is the real kill switch, and `askGupShupAi` refuses regardless of this flag.
   bool get aiAssistantEnabled => _remoteConfig.getBool(_kAiAssistantEnabled);
 
+  /// Whether GupAI's in-chat surfaces (message Translate/Summarise, the composer
+  /// ✨ rewrite/smart-reply) are shown. Separate from [aiAssistantEnabled] so the
+  /// in-chat rollout can be flipped independently of the dedicated screen. The
+  /// in-chat UI requires BOTH this and [aiAssistantEnabled]. Off by default.
+  bool get aiInChatEnabled => _remoteConfig.getBool(_kAiInChatEnabled);
+
   /// Free users' advertised daily message cap. Display copy only; the real cap
   /// is `config/ai.freeDailyCap`, enforced in `askGupShupAi`.
   int get aiFreeDailyCap {
@@ -259,6 +266,7 @@ class FeatureFlagService extends ChangeNotifier {
         // GupShup AI ships dark: the entry point stays hidden until the flag is
         // flipped on. The caps are display copy and mirror the server fallback.
         _kAiAssistantEnabled: false,
+        _kAiInChatEnabled: false,
         _kAiFreeDailyCap: _kDefaultAiFreeDailyCap,
         _kAiProDailyCap: _kDefaultAiProDailyCap,
         _kAiRewardCredits: _kDefaultAiRewardCredits,
