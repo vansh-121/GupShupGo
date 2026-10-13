@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_performance/firebase_performance.dart';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/models/call_log_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -491,13 +492,15 @@ class _CallScreenState extends State<CallScreen> {
               print('⚠️ Agora reported errDecryptionFailed — triggering immediate E2EE fallback');
               _handleEncryptionMismatchRecovery();
             } else if (err == ErrorCodeType.errInvalidToken) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      'Token expired or invalid. Please restart the call.'),
-                  backgroundColor: Colors.red,
-                ),
-              );
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                        AppLocalizations.of(context).callTokenExpired),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
             }
           },
         ),
@@ -564,7 +567,7 @@ class _CallScreenState extends State<CallScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(
-                  'Failed to initialize ${widget.isAudioOnly ? "audio" : "video"} call: $e')),
+                  AppLocalizations.of(context).callFailedToInit(widget.isAudioOnly ? "audio" : "video", e.toString()))),
         );
       }
     }
@@ -804,7 +807,7 @@ class _CallScreenState extends State<CallScreen> {
           child: Text(
             _endReasonText.isNotEmpty
                 ? _endReasonText
-                : 'Waiting for remote user...',
+                : AppLocalizations.of(context).callWaitingForUser,
             style: const TextStyle(color: Colors.white, fontSize: 18),
           ),
         ),
@@ -830,20 +833,21 @@ class _CallScreenState extends State<CallScreen> {
   ///   • encryption on     → "End-to-end encrypted"
   ///   • encryption off    → "Not encrypted"         (setup failed or dropped)
   Widget _buildEncryptionBadge() {
+    final l10n = AppLocalizations.of(context);
     final IconData icon;
     final String text;
     final Color color;
     if (!_encryptionResolved) {
       icon = Icons.lock_outline;
-      text = 'Securing call…';
+      text = l10n.callSecuring;
       color = Colors.white60;
     } else if (_encryptionApplied) {
       icon = Icons.lock;
-      text = 'End-to-end encrypted';
+      text = l10n.callEndToEndEncrypted;
       color = Colors.white60;
     } else {
       icon = Icons.lock_open;
-      text = 'Not encrypted';
+      text = l10n.callNotEncrypted;
       color = const Color(0xFFFFB74D); // amber — degraded, not a hard error
     }
     return Row(
@@ -984,18 +988,19 @@ class _CallScreenState extends State<CallScreen> {
 
   String _getCallStatusText() {
     // Show end-reason text (e.g. "Call Declined", "No Answer", "Call Ended")
+    final l10n = AppLocalizations.of(context);
     if (_endReasonText.isNotEmpty) return _endReasonText;
-    if (_isOnHold) return 'On hold';
+    if (_isOnHold) return l10n.callOnHold;
     if (_remoteUserJoined && _callDurationSeconds > 0) {
       return _formatDuration(_callDurationSeconds);
     }
     if (_isInitialized && _remoteUid == null) {
-      return widget.isCaller ? 'Ringing...' : 'Connecting...';
+      return widget.isCaller ? l10n.callRinging : l10n.callConnecting;
     }
     if (!_isInitialized) {
-      return widget.isCaller ? 'Calling...' : 'Connecting...';
+      return widget.isCaller ? l10n.callCalling : l10n.callConnecting;
     }
-    return 'Connected';
+    return l10n.callConnected;
   }
 
   Widget _buildControlButton({
@@ -1037,6 +1042,8 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     // For audio calls, use the dedicated WhatsApp-style audio UI
     if (widget.isAudioOnly) {
       return Scaffold(
@@ -1103,15 +1110,15 @@ class _CallScreenState extends State<CallScreen> {
 
           // Loading indicator
           if (!_isInitialized)
-            const Center(
+            Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 20),
+                  const CircularProgressIndicator(color: Colors.white),
+                  const SizedBox(height: 20),
                   Text(
-                    'Connecting...',
-                    style: TextStyle(color: Colors.white, fontSize: 18),
+                    l10n.callConnecting,
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
                   ),
                 ],
               ),
@@ -1136,8 +1143,8 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   child: IconButton(
                     tooltip: _isSpeakerOn
-                        ? 'Turn off speaker'
-                        : 'Turn on speaker',
+                        ? l10n.callTurnOffSpeaker
+                        : l10n.callTurnOnSpeaker,
                     icon: Icon(
                       _isSpeakerOn ? Icons.volume_up : Icons.phone_in_talk_outlined,
                       color: _isSpeakerOn ? Colors.black : Colors.white,
@@ -1160,7 +1167,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
-                    tooltip: _isMuted ? 'Unmute microphone' : 'Mute microphone',
+                    tooltip: _isMuted ? l10n.callUnmuteMic : l10n.callMuteMic,
                     icon: Icon(
                       _isMuted ? Icons.mic_off : Icons.mic,
                       color: _isMuted ? Colors.black : Colors.white,
@@ -1180,7 +1187,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
-                    tooltip: 'End call',
+                    tooltip: l10n.callEndCall,
                     icon: const Icon(
                       Icons.call_end,
                       color: Colors.white,
@@ -1197,7 +1204,7 @@ class _CallScreenState extends State<CallScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
-                    tooltip: 'Switch camera',
+                    tooltip: l10n.callSwitchCamera,
                     icon: const Icon(
                       Icons.switch_camera,
                       color: Colors.white,
@@ -1220,8 +1227,8 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   child: IconButton(
                     tooltip: _localVideoEnabled
-                        ? 'Turn off camera'
-                        : 'Turn on camera',
+                        ? l10n.callTurnOffCamera
+                        : l10n.callTurnOnCamera,
                     icon: Icon(
                       _localVideoEnabled ? Icons.videocam : Icons.videocam_off,
                       color: !_localVideoEnabled ? Colors.black : Colors.white,
@@ -1247,7 +1254,7 @@ class _CallScreenState extends State<CallScreen> {
               children: [
                 Text(
                   widget.calleeName ??
-                      (widget.isCaller ? 'Calling...' : 'Incoming Call'),
+                      (widget.isCaller ? l10n.callCalling : l10n.callIncomingVoice),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
@@ -1265,8 +1272,8 @@ class _CallScreenState extends State<CallScreen> {
                       _endReasonText.isNotEmpty
                           ? _endReasonText
                           : _remoteUid != null
-                              ? 'Connected'
-                              : 'Waiting...',
+                              ? l10n.callConnected
+                              : l10n.callConnecting,
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 16,

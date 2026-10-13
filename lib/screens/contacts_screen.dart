@@ -20,6 +20,7 @@ import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
@@ -278,6 +279,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
   void _showQRCodeModal() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     // Previously this fell back to the raw Firebase uid when no username was
     // set, producing a link like /u/8fJ2k... that resolves to nothing and a
@@ -288,7 +290,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Set a @username in your profile first — that\'s what your QR code shares.',
+            l10n.contactsSetUsernamePrompt,
             style: GoogleFonts.poppins(),
           ),
         ),
@@ -339,7 +341,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             ),
             const SizedBox(height: 16),
             Text(
-              'My Profile QR Code',
+              l10n.contactsMyQrCodeTitle,
               style: GoogleFonts.poppins(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -348,7 +350,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             ),
             const SizedBox(height: 4),
             Text(
-              'Friends can scan this QR code to connect with you instantly',
+              l10n.contactsMyQrCodeSubtitle,
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
             ),
@@ -420,14 +422,14 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'Profile link for @$handle copied!',
+                        l10n.contactsProfileLinkCopied(handle),
                         style: GoogleFonts.poppins(),
                       ),
                     ),
                   );
                 },
                 icon: const Icon(Icons.copy_rounded),
-                label: Text('Copy Profile Link', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                label: Text(l10n.contactsCopyProfileLink, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.primary,
                   foregroundColor: Colors.white,
@@ -448,7 +450,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 },
                 icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
                 label: Text(
-                  'Scan Someone\'s Code',
+                  l10n.contactsScanSomeonesCode,
                   style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                 ),
                 style: OutlinedButton.styleFrom(
@@ -467,13 +469,14 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   }
 
   Future<void> _syncDeviceContacts() async {
+    final l10n = AppLocalizations.of(context);
     final granted = await fc.FlutterContacts.requestPermission(readonly: true);
     if (!granted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Permission to access contacts was denied.',
+              l10n.contactsPermissionDenied,
               style: GoogleFonts.poppins(),
             ),
           ),
@@ -509,7 +512,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'No GupShupGo users found in your contacts yet.',
+              l10n.contactsNoUsersFound,
               style: GoogleFonts.poppins(),
             ),
           ),
@@ -523,7 +526,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         setState(() => _isSyncingContacts = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to sync contacts: $e', style: GoogleFonts.poppins()),
+            content: Text(l10n.contactsFailedToSync(e.toString()), style: GoogleFonts.poppins()),
           ),
         );
       }
@@ -532,6 +535,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
   void _showMatchedContactsSheet(List<UserModel> matches) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: c.surface,
@@ -562,7 +566,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   Icon(Icons.contacts_rounded, color: c.primary, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    '${matches.length} contact${matches.length > 1 ? 's' : ''} on GupShupGo',
+                    l10n.contactsMatchedCount(matches.length),
                     style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -588,7 +592,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   return UserDiscoverTile(
                     key: ValueKey(matches[index].id),
                     targetUser: matches[index],
-                    customSubtitle: 'From your device contacts',
+                    customSubtitle: l10n.contactsFromDeviceContacts,
                     currentUserId: widget.currentUserId,
                     currentUserName:
                         _currentUserModel?.name ?? widget.currentUserName ?? 'User',
@@ -619,6 +623,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: c.surface,
@@ -631,7 +636,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         // competing for the same row.
         titleSpacing: 8,
         title: Text(
-          'Contacts & Discover',
+          l10n.contactsTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.poppins(
@@ -646,7 +651,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         actions: [
           IconButton(
             icon: Icon(Icons.qr_code_scanner_rounded, color: c.textHigh, size: 23),
-            tooltip: 'Scan QR Code',
+            tooltip: l10n.contactsScanQrTooltip,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints.tightFor(width: 40, height: 40),
             padding: EdgeInsets.zero,
@@ -654,7 +659,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           ),
           IconButton(
             icon: Icon(Icons.qr_code_2_rounded, color: c.textHigh, size: 23),
-            tooltip: 'My Handle',
+            tooltip: l10n.contactsMyHandleTooltip,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints.tightFor(width: 40, height: 40),
             padding: EdgeInsets.zero,
@@ -686,7 +691,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 fontSize: 14,
               ),
               tabs: [
-                const Tab(text: 'Friends'),
+                Tab(text: l10n.contactsTabFriends),
                 StreamBuilder<QuerySnapshot>(
                   stream: _badgeRequestsStream ??= _friendService
                       .streamIncomingRequests(widget.currentUserId),
@@ -696,7 +701,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text('Requests'),
+                          Text(l10n.contactsTabRequests),
                           if (count > 0) ...[
                             const SizedBox(width: 6),
                             Container(
@@ -720,7 +725,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                     );
                   },
                 ),
-                const Tab(text: 'Discover'),
+                Tab(text: l10n.contactsTabDiscover),
               ],
             ),
           ),
@@ -740,6 +745,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   // TAB 1: Friends (Only explicit accepted connections)
   Widget _buildFriendsTab() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return StreamBuilder<List<UserModel>>(
       stream: _friendsStream ??= _friendService.streamFriends(widget.currentUserId),
@@ -755,7 +761,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
         // stayed invisible.
         if (snapshot.hasError) {
           return _buildErrorState(
-            'Couldn\'t load your friends.',
+            l10n.contactsLoadFriendsError,
             onRetry: () => setState(() {
               _friendsStream =
                   _friendService.streamFriends(widget.currentUserId);
@@ -814,7 +820,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 ),
                 const SizedBox(height: 28),
                 Text(
-                  'No Friends Added Yet',
+                  l10n.contactsNoFriendsTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -825,29 +831,13 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 const SizedBox(height: 12),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: RichText(
+                  child: Text(
+                    l10n.contactsNoFriendsPrompt,
                     textAlign: TextAlign.center,
-                    text: TextSpan(
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: c.textMid,
-                        height: 1.5,
-                      ),
-                      children: [
-                        const TextSpan(
-                          text: 'Use the Discover tab to search for users by ',
-                        ),
-                        TextSpan(
-                          text: '@username',
-                          style: GoogleFonts.poppins(
-                            color: c.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const TextSpan(
-                          text: ', phone, or email and send them a friend request!',
-                        ),
-                      ],
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: c.textMid,
+                      height: 1.5,
                     ),
                   ),
                 ),
@@ -871,7 +861,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          'Discover People',
+                          l10n.contactsDiscoverPeopleButton,
                           style: GoogleFonts.poppins(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
@@ -889,7 +879,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'QUICK CONNECT',
+                    l10n.contactsQuickConnectHeader,
                     style: GoogleFonts.poppins(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -921,7 +911,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Text(
-                          'No suggestions available at the moment.',
+                          l10n.contactsNoSuggestions,
                           style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
                         ),
                       );
@@ -1083,6 +1073,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   // TAB 2: Incoming Requests (Redesigned with Stitch Specs)
   Widget _buildRequestsTab() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return StreamBuilder<QuerySnapshot>(
       stream: _tabRequestsStream ??=
@@ -1095,7 +1086,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
         if (snapshot.hasError) {
           return _buildErrorState(
-            'Couldn\'t load your requests.',
+            l10n.contactsLoadRequestsError,
             onRetry: () => setState(() {
               _tabRequestsStream =
                   _friendService.streamIncomingRequests(widget.currentUserId);
@@ -1116,7 +1107,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'PENDING REQUESTS (${docs.length})',
+                    l10n.contactsPendingRequestsHeader(docs.length),
                     style: GoogleFonts.poppins(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1151,7 +1142,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'No Pending Requests',
+                        l10n.contactsNoPendingRequestsTitle,
                         style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1160,7 +1151,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'When users send you a connection request, they will show up here.',
+                        l10n.contactsNoPendingRequestsSubtitle,
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(fontSize: 12, color: c.textMid),
                       ),
@@ -1209,7 +1200,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                             ),
                           ),
                           subtitle: Text(
-                            fromUsername.isNotEmpty ? '@$fromUsername' : 'Wants to connect',
+                            fromUsername.isNotEmpty ? '@$fromUsername' : l10n.contactsWantsToConnect,
                             style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
                           ),
                           trailing: Row(
@@ -1241,8 +1232,8 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                     SnackBar(
                                       content: Text(
                                         ok
-                                            ? 'Connected with $fromName!'
-                                            : 'Couldn\'t accept the request. Please try again.',
+                                            ? l10n.contactsConnectedWith(fromName)
+                                            : l10n.contactsAcceptFailed,
                                         style: GoogleFonts.poppins(),
                                       ),
                                     ),
@@ -1259,7 +1250,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                   ),
                                 ),
                                 child: Text(
-                                  'ACCEPT',
+                                  l10n.contactsAcceptButton,
                                   style: GoogleFonts.poppins(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
@@ -1295,7 +1286,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                                                 .showSnackBar(
                                               SnackBar(
                                                 content: Text(
-                                                  'Couldn\'t decline the request. Please try again.',
+                                                  l10n.contactsDeclineFailed,
                                                   style: GoogleFonts.poppins(),
                                                 ),
                                               ),
@@ -1319,7 +1310,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'YOU MIGHT KNOW',
+                    l10n.contactsYouMightKnowHeader,
                     style: GoogleFonts.poppins(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1335,7 +1326,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: Text(
-                      'SEE ALL',
+                      l10n.contactsSeeAll,
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -1371,7 +1362,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Text(
-                        'No suggestions right now.',
+                        l10n.contactsNoSuggestions,
                         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
                       ),
                     );
@@ -1412,6 +1403,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   // TAB 3: Universal Search & Discover (Redesigned with Stitch Specs)
   Widget _buildDiscoverTab() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Column(
       children: [
@@ -1422,7 +1414,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             onChanged: _onSearchChanged,
             style: GoogleFonts.poppins(color: c.textHigh, fontSize: 14),
             decoration: InputDecoration(
-              hintText: 'Search name, @handle, phone or email...',
+              hintText: l10n.contactsSearchHint,
               hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 14),
               prefixIcon: Icon(Icons.search_rounded, color: c.primary),
               filled: true,
@@ -1464,7 +1456,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Turn on Discoverability to appear in search and suggestions.',
+                      l10n.contactsTurnOnDiscoverability,
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -1498,7 +1490,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       }
                     },
                     child: Text(
-                      'Settings',
+                      l10n.settingsTitle,
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -1521,6 +1513,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
   Widget _buildSearchResults() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     if (_isSearching) {
       return Center(child: CircularProgressIndicator(color: c.primary));
@@ -1536,12 +1529,12 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               Icon(Icons.person_search_rounded, size: 48, color: c.textMid),
               const SizedBox(height: 12),
               Text(
-                'No Matching Users Found',
+                l10n.contactsNoMatchingUsersTitle,
                 style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: c.textHigh),
               ),
               const SizedBox(height: 4),
               Text(
-                'Check the @username, phone number, or email and try again.',
+                l10n.contactsNoMatchingUsersSubtitle,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
               ),
@@ -1583,6 +1576,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
   Widget _buildDiscoveryDefault() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1621,7 +1615,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  'Discover People on GupShupGo',
+                  l10n.contactsDiscoverHeroTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -1631,7 +1625,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Expand your circle with high-fidelity connections across the globe.',
+                  l10n.contactsDiscoverHeroSubtitle,
                   style: GoogleFonts.poppins(
                     fontSize: 13,
                     color: c.textMid,
@@ -1684,7 +1678,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isSyncingContacts ? 'Syncing Contacts...' : 'Sync Device Contacts',
+                          _isSyncingContacts ? l10n.contactsSyncingContacts : l10n.contactsSyncDeviceContacts,
                           style: GoogleFonts.poppins(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -1693,7 +1687,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Find your friends instantly from phone contacts',
+                          l10n.contactsSyncDeviceSubtitle,
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             color: c.textMid,
@@ -1715,7 +1709,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'SUGGESTED USERS',
+                l10n.contactsSuggestedUsersHeader,
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -1738,7 +1732,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
               if (snapshot.hasError) {
                 return _buildErrorState(
-                  'Couldn\'t load suggestions.',
+                  l10n.contactsNoSuggestions,
                   onRetry: () => setState(() {
                     _allUsersStream =
                         _userService.getAllUsers(widget.currentUserId);
@@ -1756,7 +1750,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
-                    'No suggested users available right now.',
+                    l10n.contactsNoSuggestions,
                     style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
                   ),
                 );
@@ -1830,6 +1824,7 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final user = widget.targetUser;
 
     // Ink (not Container) so the tap ripple paints *above* the card's own
@@ -1895,7 +1890,7 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
                           padding: EdgeInsets.zero,
                         ),
                         child: Text(
-                          'Requested',
+                          l10n.contactsRequestedButton,
                           style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                       )
@@ -1925,7 +1920,7 @@ class _YouMightKnowCardState extends State<YouMightKnowCard> {
                               )
                             : const Icon(Icons.person_add_rounded, size: 14),
                         label: Text(
-                          'ADD FRIEND',
+                          l10n.contactsAddFriendButton,
                           style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
@@ -2057,12 +2052,13 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
     });
 
     if (!ok) {
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             requestId == null
-                ? 'That request is no longer available.'
-                : 'Couldn\'t accept the request. Please try again.',
+                ? l10n.contactsRequestUnavailable
+                : l10n.contactsAcceptFailed,
             style: GoogleFonts.poppins(),
           ),
         ),
@@ -2085,6 +2081,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
     );
 
     if (mounted) {
+      final l10n = AppLocalizations.of(context);
       setState(() {
         _isSending = false;
         if (success) {
@@ -2096,8 +2093,8 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
         SnackBar(
           content: Text(
             success
-                ? 'Friend request sent to ${widget.targetUser.name}!'
-                : 'Friend request is already pending or failed.',
+                ? l10n.contactsRequestSent(widget.targetUser.name)
+                : l10n.contactsRequestFailed,
             style: GoogleFonts.poppins(),
           ),
         ),
@@ -2108,6 +2105,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final user = widget.targetUser;
 
     return ListTile(
@@ -2145,11 +2143,11 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2, color: c.primary),
             )
-          : _buildActionWidget(c),
+          : _buildActionWidget(c, l10n),
     );
   }
 
-  Widget _buildActionWidget(AppThemeColors c) {
+  Widget _buildActionWidget(AppThemeColors c, AppLocalizations l10n) {
     switch (_status) {
       case ConnectionStateStatus.friends:
         return Row(
@@ -2179,7 +2177,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
         return OutlinedButton.icon(
           onPressed: null, // Disabled when pending
           icon: const Icon(Icons.hourglass_top_rounded, size: 14),
-          label: Text('Requested', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
+          label: Text(l10n.contactsRequestedButton, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             shape: RoundedRectangleBorder(
@@ -2192,7 +2190,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
         return ElevatedButton.icon(
           onPressed: _isSending ? null : _acceptIncoming,
           icon: const Icon(Icons.check_rounded, size: 14),
-          label: Text('Accept', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
+          label: Text(l10n.contactsAcceptButton, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
             foregroundColor: Colors.white,
@@ -2215,7 +2213,7 @@ class _UserDiscoverTileState extends State<UserDiscoverTile> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.person_add_rounded, size: 14),
-          label: Text('Add Friend', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
+          label: Text(l10n.contactsAddFriendButton, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
             backgroundColor: c.primary,
             foregroundColor: Colors.white,

@@ -19,6 +19,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -339,7 +340,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 Icon(Icons.bolt_rounded, size: 14, color: color),
                 const SizedBox(width: 3),
                 Text(
-                  '$remaining left',
+                  AppLocalizations.of(context).aiMessagesRemaining(remaining),
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -367,6 +368,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         : _allocated!;
     final used = (allocated - remaining).clamp(0, allocated);
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     showDialog<void>(
       context: context,
@@ -378,7 +380,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             Icon(Icons.bolt_rounded, color: c.primary, size: 20),
             const SizedBox(width: 8),
             Text(
-              'GupAI messages',
+              l10n.aiQuotaDialogTitle,
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w700,
                 fontSize: 17,
@@ -392,7 +394,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '$remaining of $allocated left today',
+              l10n.aiQuotaRemainingOfTotal(remaining, allocated),
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -413,7 +415,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Used $used today · resets tomorrow. Watch an ad or go Pro for more.',
+              l10n.aiQuotaUsedResetNote(used),
               style: GoogleFonts.poppins(
                 fontSize: 12.5,
                 height: 1.4,
@@ -426,7 +428,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(
-              'Got it',
+              l10n.aiQuotaGotIt,
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w600,
                 color: c.primary,
@@ -607,7 +609,7 @@ class _Composer extends StatelessWidget {
                   decoration: InputDecoration(
                     isDense: true,
                     border: InputBorder.none,
-                    hintText: 'Ask GupAI anything…',
+                    hintText: AppLocalizations.of(context).aiAskHint,
                     hintStyle:
                         GoogleFonts.poppins(fontSize: 14, color: c.textLow),
                     contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -855,7 +857,7 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         Text(
-          'How can I help?',
+          AppLocalizations.of(context).aiEmptyHelpTitle,
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(
             fontSize: 20,
@@ -865,8 +867,7 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Draft replies, translate, summarise, brainstorm, or just ask a '
-          'question. Tap an idea to start.',
+          AppLocalizations.of(context).aiEmptyHelpSubtitle,
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(
             fontSize: 13,

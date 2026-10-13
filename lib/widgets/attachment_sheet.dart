@@ -25,6 +25,7 @@ import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/utils/haptics.dart';
 // Brings in NewFeatureChip, plus the re-exported WhatsNewService/NewFeature.
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 /// The kinds of attachment a chat can offer. The icon, accent colour, title and
 /// subtitles for each live here — not at the call sites — so the four tiles
@@ -91,10 +92,12 @@ Future<void> showAttachmentSheet({
   required List<AttachmentAction> actions,
   AttachmentViewOnce? viewOnce,
   String? footer,
-  String title = 'Share',
+  String? title,
 }) {
   AppHaptics.tap();
   final c = AppThemeColors.of(context);
+  final l10n = AppLocalizations.of(context);
+  final sheetTitle = title ?? l10n.attachmentShareTitle;
 
   return showModalBottomSheet<void>(
     context: context,
@@ -123,7 +126,7 @@ Future<void> showAttachmentSheet({
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  title,
+                  sheetTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -177,7 +180,7 @@ Future<void> showAttachmentSheet({
                     ),
                     title: Row(
                       children: [
-                        Text('View once',
+                        Text(l10n.attachmentViewOnce,
                             style: GoogleFonts.poppins(
                               fontSize: 15,
                               fontWeight: FontWeight.w500,
@@ -239,6 +242,7 @@ class _AttachmentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final accent = _accent(action.kind, colors);
     final showOnce = hasViewOnce && armed && _supportsViewOnce(action.kind);
 
@@ -258,7 +262,7 @@ class _AttachmentTile extends StatelessWidget {
       title: Row(
         children: [
           Text(
-            _title(action.kind),
+            _title(action.kind, l10n),
             style: GoogleFonts.poppins(
               fontSize: 15,
               fontWeight: FontWeight.w500,
@@ -272,7 +276,7 @@ class _AttachmentTile extends StatelessWidget {
       subtitle: Text(
         disabled
             ? 'Not available for view once'
-            : (showOnce ? _subtitleOnce(action.kind) : _subtitle(action.kind)),
+            : (showOnce ? _subtitleOnce(action.kind) : _subtitle(action.kind, l10n)),
         style: GoogleFonts.poppins(fontSize: 12, color: colors.textLow),
       ),
       onTap: disabled ? null : onSelected,
@@ -305,29 +309,29 @@ class _AttachmentTile extends StatelessWidget {
     }
   }
 
-  static String _title(AttachmentKind kind) {
+  static String _title(AttachmentKind kind, AppLocalizations l10n) {
     switch (kind) {
       case AttachmentKind.photo:
-        return 'Photo';
+        return l10n.attachmentPhoto;
       case AttachmentKind.video:
-        return 'Video';
+        return l10n.attachmentVideo;
       case AttachmentKind.document:
-        return 'Document';
+        return l10n.attachmentDocument;
       case AttachmentKind.location:
-        return 'Location';
+        return l10n.attachmentLocation;
     }
   }
 
-  static String _subtitle(AttachmentKind kind) {
+  static String _subtitle(AttachmentKind kind, AppLocalizations l10n) {
     switch (kind) {
       case AttachmentKind.photo:
-        return 'Choose an image from your gallery';
+        return l10n.attachmentPhotoSubtitle;
       case AttachmentKind.video:
-        return 'Choose a video from your gallery';
+        return l10n.attachmentVideoSubtitle;
       case AttachmentKind.document:
-        return 'PDF, Office file, archive — sent as-is';
+        return l10n.attachmentDocumentSubtitle;
       case AttachmentKind.location:
-        return 'Share your current location';
+        return l10n.attachmentLocationSubtitle;
     }
   }
 

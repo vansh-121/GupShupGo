@@ -78,6 +78,7 @@ import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/widgets/ai/ai_action_sheet.dart';
 import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class Contact {
   final String id;
@@ -724,11 +725,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool get _hasBondBadge => _streakView?.hasBadge ?? false;
 
   Widget _buildSubtitleRow(AppThemeColors c) {
+    final l10n = AppLocalizations.of(context);
     // ── Typing ──────────────────────────────────────────────────────
     if (_isOtherUserTyping) {
       return Row(children: [
         Text(
-          'typing...',
+          l10n.chatStatusTyping,
           style: GoogleFonts.poppins(
             fontSize: 11,
             color: c.primary,
@@ -746,7 +748,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_isContactOnline) {
       return Row(children: [
         Text(
-          'Online',
+          l10n.chatStatusOnline,
           style: GoogleFonts.poppins(
             fontSize: 11,
             color: c.online,
@@ -767,8 +769,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // entering and exiting children collide during the transition.
     if (_hasBondBadge) {
       final lastSeenText = _contactLastSeen != null
-          ? 'Last seen ${_formatLastSeen(_contactLastSeen!)}'
-          : 'Offline';
+          ? l10n.chatStatusLastSeen(_formatLastSeen(_contactLastSeen!))
+          : l10n.chatStatusOffline;
       return SizedBox(
         height: 16,
         child: Stack(
@@ -806,7 +808,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // No bond badge — just show last seen
     if (_contactLastSeen != null) {
       return Text(
-        'Last seen ${_formatLastSeen(_contactLastSeen!)}',
+        l10n.chatStatusLastSeen(_formatLastSeen(_contactLastSeen!)),
         style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
       );
     }
@@ -2494,7 +2496,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: _searchController,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'Search messages...',
+                    hintText: AppLocalizations.of(context).chatSearchHint,
                     hintStyle:
                         GoogleFonts.poppins(color: c.textLow, fontSize: 14),
                     border: InputBorder.none,
@@ -2522,14 +2524,14 @@ class _ChatScreenState extends State<ChatScreen> {
               color: c.isDark ? Colors.white : c.textHigh,
               iconSize: 22,
               onPressed: _initiateAudioCall,
-              tooltip: 'Audio Call',
+              tooltip: AppLocalizations.of(context).chatTooltipVoiceCall,
             ),
             AsyncIconButton(
               icon: const Icon(Icons.videocam_outlined),
               color: c.isDark ? Colors.white : c.textHigh,
               iconSize: 24,
               onPressed: _initiateVideoCall,
-              tooltip: 'Video Call',
+              tooltip: AppLocalizations.of(context).chatTooltipVideoCall,
             ),
             PopupMenuButton<String>(
               icon: const NewFeatureDot(
@@ -2539,16 +2541,17 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               onSelected: _onMenuItemSelected,
               itemBuilder: (BuildContext context) {
+                final l10n = AppLocalizations.of(context);
                 return [
                   PopupMenuItem(
                       value: 'contact info',
                       child:
-                          Text('Contact info', style: GoogleFonts.poppins())),
+                          Text(l10n.chatMenuContactInfo, style: GoogleFonts.poppins())),
                   PopupMenuItem(
                     value: 'search',
                     child: Row(
                       children: [
-                        Text('Search', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuSearch, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatSearch),
                       ],
                     ),
@@ -2557,7 +2560,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'chat theme',
                     child: Row(
                       children: [
-                        Text('Chat theme', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuChatTheme, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatThemes),
                       ],
                     ),
@@ -2566,7 +2569,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'export chat',
                     child: Row(
                       children: [
-                        Text('Export chat', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuExportChat, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatExport),
                       ],
                     ),
@@ -2575,12 +2578,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       value: 'mute notifications',
                       child: Text(
                           _isMuted
-                              ? 'Unmute notifications'
-                              : 'Mute notifications',
+                              ? l10n.chatMenuUnmuteNotifications
+                              : l10n.chatMenuMuteNotifications,
                           style: GoogleFonts.poppins())),
                   PopupMenuItem(
                       value: 'block contact',
-                      child: Text('Block contact',
+                      child: Text(l10n.chatMenuBlockContact,
                           style: GoogleFonts.poppins(color: c.error))),
                 ];
               },
@@ -2617,7 +2620,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                       : c2.textLow),
                               const SizedBox(width: 6),
                               Text(
-                                'End-to-end encrypted',
+                                AppLocalizations.of(context).chatEndToEndEncrypted,
                                 style: GoogleFonts.poppins(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
@@ -2657,7 +2660,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               child: Text(
                                 mesh.isActive
                                     ? 'Offline Chat  ·  ${mesh.connectedPeers} device${mesh.connectedPeers == 1 ? '' : 's'} nearby'
-                                    : 'No internet?\nChat offline with nearby devices',
+                                    : AppLocalizations.of(context).chatNoInternetOfflineTitle,
                                 style: GoogleFonts.poppins(
                                   color: c3.isDark
                                       ? Colors.white
@@ -2678,7 +2681,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
-                                    'Enable',
+                                    AppLocalizations.of(context).chatEnableOfflineButton,
                                     style: GoogleFonts.poppins(
                                       color: Colors.black,
                                       fontSize: 11,
@@ -3086,7 +3089,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       minLines: 1,
                       textCapitalization: TextCapitalization.sentences,
                       decoration: InputDecoration(
-                        hintText: 'Message...',
+                        hintText: AppLocalizations.of(context).chatInputHint,
                         hintStyle: GoogleFonts.poppins(
                           color: c.isDark ? Colors.white38 : c.textLow,
                           fontSize: 15,
@@ -3215,7 +3218,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Icon(Icons.chevron_left_rounded, color: c.textLow, size: 18),
             Text(
-              'Slide to cancel',
+              AppLocalizations.of(context).chatSlideToCancel,
               style: GoogleFonts.poppins(color: c.textLow, fontSize: 12),
             ),
           ],
@@ -3606,21 +3609,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Block contact ─────────────────────────────────────────────────
   Future<void> _blockContact() async {
+    final l10n = AppLocalizations.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Block ${widget.contact.name}?'),
-        content: const Text(
-          'Blocked contacts cannot send you messages or call you. '
-          'You can unblock them from Settings → Privacy → Blocked contacts.',
-        ),
+        title: Text(l10n.chatBlockContactTitle(widget.contact.name)),
+        content: Text(l10n.chatBlockContactPrompt),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Block', style: TextStyle(color: Colors.red))),
+              child: Text(l10n.chatBlockButton, style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -3922,7 +3923,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showAttachmentSheet() {
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot send media to this contact')),
+        SnackBar(content: Text(AppLocalizations.of(context).chatCannotSendMediaBlocked)),
       );
       return;
     }
@@ -4492,6 +4493,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       barrierColor: Colors.black.withOpacity(0.4),
       builder: (BuildContext dialogContext) {
+        final l10n = AppLocalizations.of(dialogContext);
         // Scrollable because the pill plus six tiles is taller than a short
         // screen in landscape, and a menu you cannot reach the bottom of is
         // worse than one that scrolls.
@@ -4527,7 +4529,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (hasContent)
                           _buildActionTile(
                             icon: Icons.reply_rounded,
-                            label: 'Reply',
+                            label: l10n.chatActionReply,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4537,7 +4539,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (canCopy)
                           _buildActionTile(
                             icon: Icons.content_copy_rounded,
-                            label: 'Copy',
+                            label: l10n.chatActionCopy,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4547,7 +4549,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (hasContent)
                           _buildActionTile(
                             icon: Icons.forward_rounded,
-                            label: 'Forward',
+                            label: l10n.chatActionForward,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4557,7 +4559,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (hasContent && _aiInChatEnabled) ...[
                           _buildActionTile(
                             icon: Icons.translate_rounded,
-                            label: 'Translate',
+                            label: l10n.chatActionTranslate,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4566,7 +4568,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                           _buildActionTile(
                             icon: Icons.notes_rounded,
-                            label: 'Summarise',
+                            label: l10n.chatActionSummarise,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4575,7 +4577,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                           _buildActionTile(
                             icon: Icons.auto_awesome_rounded,
-                            label: 'Ask GupAI',
+                            label: l10n.chatActionAskGupAi,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4586,7 +4588,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (canEdit)
                           _buildActionTile(
                             icon: Icons.edit_rounded,
-                            label: 'Edit',
+                            label: l10n.chatActionEdit,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4595,7 +4597,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                         _buildActionTile(
                           icon: Icons.delete_outline_rounded,
-                          label: 'Delete',
+                          label: l10n.chatActionDelete,
                           colors: c,
                           destructive: true,
                           onTap: () {
@@ -5051,6 +5053,7 @@ class _ChatScreenState extends State<ChatScreen> {
       {required bool forEveryone}) async {
     final c = AppThemeColors.of(context);
 
+    final l10n = AppLocalizations.of(context);
     final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -5058,7 +5061,7 @@ class _ChatScreenState extends State<ChatScreen> {
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          'Delete message?',
+          l10n.chatDeleteMessageTitle,
           style: GoogleFonts.poppins(
             color: c.textHigh,
             fontSize: 16.5,
@@ -5067,11 +5070,10 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         content: Text(
           forEveryone
-              ? 'Delete it just for you, or for everyone in this chat?'
+              ? l10n.chatDeleteMessageForEveryonePrompt
               // Shown when the 48h window has closed, or the message is not
               // ours. Saying why is better than an option that is simply absent.
-              : 'This removes it from your devices only. '
-                  '${widget.contact.name} will still see it.',
+              : l10n.chatDeleteMessageForMeOnlyPrompt(widget.contact.name),
           style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
         ),
         actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
@@ -5079,14 +5081,14 @@ class _ChatScreenState extends State<ChatScreen> {
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: Text(
-              'Cancel',
+              l10n.commonCancel,
               style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, 'me'),
             child: Text(
-              'Delete for me',
+              l10n.chatDeleteForMe,
               style: GoogleFonts.poppins(
                 color: const Color(0xFFE5484D),
                 fontSize: 13.5,
@@ -5097,7 +5099,7 @@ class _ChatScreenState extends State<ChatScreen> {
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, 'everyone'),
               child: Text(
-                'Delete for everyone',
+                l10n.chatDeleteForEveryone,
                 style: GoogleFonts.poppins(
                   color: const Color(0xFFE5484D),
                   fontSize: 13.5,
@@ -5160,7 +5162,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     Icon(Icons.forward_rounded, size: 18, color: c.textMid),
                     const SizedBox(width: 10),
                     Text(
-                      'Forward to',
+                      AppLocalizations.of(context).chatForwardTo,
                       style: GoogleFonts.poppins(
                         color: c.textHigh,
                         fontSize: 15,
@@ -5201,7 +5203,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       return Padding(
                         padding: const EdgeInsets.all(28),
                         child: Text(
-                          'No other chats to forward to',
+                          AppLocalizations.of(context).chatNoForwardChats,
                           style: GoogleFonts.poppins(
                               color: c.textMid, fontSize: 13.5),
                         ),

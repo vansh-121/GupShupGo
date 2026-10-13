@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -402,10 +403,11 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                         (p) => p.endpointId == widget.peer.endpointId,
                         orElse: () => widget.peer,
                       );
+                      final l10n = AppLocalizations.of(context);
                       return Text(
                         live.isConnected
-                            ? 'Offline chat · connected'
-                            : 'Connecting…',
+                            ? l10n.meshOfflineChatConnected
+                            : l10n.meshConnecting,
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           color: live.isConnected ? c.online : c.textLow,
@@ -432,7 +434,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Offline chat — no internet, no servers',
+                    AppLocalizations.of(context).meshBannerNotice,
                     style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontSize: 12,
@@ -451,6 +453,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
 
   Widget _buildMessageList(AppThemeColors c) {
     if (_messages.isEmpty) {
+      final l10n = AppLocalizations.of(context);
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -459,14 +462,14 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             children: [
               Icon(Icons.sensors_rounded, size: 56, color: c.primary),
               const SizedBox(height: 16),
-              Text('Say hi to ${widget.peer.displayName}',
+              Text(l10n.meshSayHiTo(widget.peer.displayName),
                   style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: c.textHigh)),
               const SizedBox(height: 6),
               Text(
-                'You\'re in offline chat. Messages stay between you and ${widget.peer.displayName}.',
+                l10n.meshOfflineDescription(widget.peer.displayName),
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 13, color: c.textMid),
               ),
@@ -678,29 +681,29 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     if (path == null || path.isEmpty || !File(path).existsSync()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This media is no longer available.')),
+        SnackBar(content: Text(AppLocalizations.of(context).meshMediaUnavailable)),
       );
       return;
     }
 
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final isVideo = msg.type == MessageType.video;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
         backgroundColor: c.surface,
-        title: Text('View once',
+        title: Text(l10n.meshViewOnceTitle,
             style: GoogleFonts.poppins(
                 color: c.textHigh, fontWeight: FontWeight.w600)),
         content: Text(
-          "You can only open this ${isVideo ? 'video' : 'photo'} one time. "
-          "It closes for good when you leave.",
+          l10n.meshViewOncePrompt(isVideo ? 'video' : 'photo'),
           style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
-            child: Text('Cancel',
+            child: Text(l10n.commonCancel,
                 style: GoogleFonts.poppins(color: c.textMid)),
           ),
           TextButton(

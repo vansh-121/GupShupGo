@@ -5,6 +5,7 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 /// Full-screen incoming call UI shown when the app is in the foreground.
 ///
@@ -169,6 +170,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return PopScope(
       canPop: false, // Prevent back button from dismissing
       child: Scaffold(
@@ -191,14 +194,14 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
               children: [
                 const SizedBox(height: 16),
                 // Encrypted label
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.lock, color: Colors.white60, size: 12),
-                    SizedBox(width: 4),
+                    const Icon(Icons.lock, color: Colors.white60, size: 12),
+                    const SizedBox(width: 4),
                     Text(
-                      'End-to-end encrypted',
-                      style: TextStyle(color: Colors.white60, fontSize: 12),
+                      l10n.callEndToEndEncrypted,
+                      style: const TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
@@ -207,8 +210,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                 // Call type label
                 Text(
                   widget.isAudioOnly
-                      ? 'Incoming Voice Call'
-                      : 'Incoming Video Call',
+                      ? l10n.callIncomingVoice
+                      : l10n.callIncomingVideo,
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 16,
@@ -258,7 +261,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  widget.isAudioOnly ? 'Voice Call' : 'Video Call',
+                  widget.isAudioOnly ? l10n.callVoiceCall : l10n.callVideoCall,
                   style: const TextStyle(
                     color: Colors.white54,
                     fontSize: 16,
@@ -293,9 +296,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Decline',
-                            style: TextStyle(
+                          Text(
+                            l10n.callDecline,
+                            style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
                             ),
@@ -324,9 +327,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Accept',
-                            style: TextStyle(
+                          Text(
+                            l10n.callAccept,
+                            style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
                             ),

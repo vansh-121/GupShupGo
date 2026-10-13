@@ -64,6 +64,7 @@ import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -1150,7 +1151,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               const SizedBox(height: 24),
               Text(
-                'No chats yet',
+                AppLocalizations.of(context).homeEmptyChatsTitle,
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
@@ -1159,7 +1160,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'Start a conversation by tapping the button below',
+                AppLocalizations.of(context).homeEmptyChatsSubtitle,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
@@ -1181,7 +1182,7 @@ class _HomeScreenState extends State<HomeScreen>
                   );
                 },
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('New chat'),
+                label: Text(AppLocalizations.of(context).homeNewChatButton),
               ),
             ],
           ),
@@ -1565,7 +1566,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Row(
                         children: [
                           Text(
-                            'GupAI',
+                            AppLocalizations.of(context).homeAiAssistantTitle,
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w700,
                               fontSize: 15,
@@ -1594,7 +1595,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Draft, translate, summarise & more',
+                        AppLocalizations.of(context).homeAiAssistantSubtitle,
                         style: GoogleFonts.poppins(
                           fontSize: 13,
                           color: c.textMid,
@@ -1837,7 +1838,7 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                'My Moment',
+                AppLocalizations.of(context).homeMyMoment,
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -1856,7 +1857,7 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                'Recent Moments',
+                AppLocalizations.of(context).homeRecentMoments,
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -1910,7 +1911,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        'No updates yet.',
+                        AppLocalizations.of(context).homeEmptyMomentsTitle,
                         style: GoogleFonts.poppins(
                           fontSize: 17,
                           fontWeight: FontWeight.w600,
@@ -1919,7 +1920,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera to share.',
+                        AppLocalizations.of(context).homeEmptyMomentsSubtitle,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
                           color: c.textMid,
@@ -1988,7 +1989,7 @@ class _HomeScreenState extends State<HomeScreen>
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to add an update',
+            : AppLocalizations.of(context).homeTapToAddMoment,
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -2170,7 +2171,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'No call history',
+                  AppLocalizations.of(context).homeEmptyCallsTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -2179,7 +2180,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Your recent calls will appear here',
+                  AppLocalizations.of(context).homeEmptyCallsSubtitle,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     color: c.textMid,
@@ -2403,7 +2404,7 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             key: _meshIconKey,
             icon: const Icon(Icons.sensors_rounded),
-            tooltip: 'Offline Chat — talk to people nearby',
+            tooltip: AppLocalizations.of(context).homeTooltipOfflineChat,
             onPressed: () {
               markStarterMeshVisited();
               Navigator.push(
@@ -2414,6 +2415,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
+            tooltip: AppLocalizations.of(context).homeTooltipSearch,
             onPressed: () {
               if (_currentUserId != null) {
                 Navigator.push(
@@ -2485,6 +2487,7 @@ class _HomeScreenState extends State<HomeScreen>
               }
             },
             itemBuilder: (BuildContext context) {
+              final l10n = AppLocalizations.of(context);
               return [
                 PopupMenuItem(
                   value: 'profile',
@@ -2493,7 +2496,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Icon(Icons.person_outline_rounded,
                           color: c.primary, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Profile'),
+                      Text(l10n.homeMenuProfile),
                     ],
                   ),
                 ),
@@ -2503,7 +2506,7 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Settings'),
+                      Text(l10n.homeMenuSettings),
                       const NewFeatureChip(featureId: NewFeature.chatThemes),
                     ],
                   ),
@@ -2514,7 +2517,7 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Rate us'),
+                      Text(l10n.homeMenuRateUs),
                     ],
                   ),
                 ),
@@ -2524,7 +2527,7 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Report Issue'),
+                      Text(l10n.homeMenuReportIssue),
                     ],
                   ),
                 ),
@@ -2535,7 +2538,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Icon(Icons.auto_awesome_rounded,
                           color: c.primary, size: 20),
                       const SizedBox(width: 12),
-                      const Text("What's New"),
+                      Text(l10n.homeMenuWhatsNew),
                     ],
                   ),
                 ),
@@ -2545,7 +2548,7 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.logout_rounded, color: c.error, size: 20),
                       const SizedBox(width: 12),
-                      Text('Log out', style: TextStyle(color: c.error)),
+                      Text(l10n.homeMenuLogOut, style: TextStyle(color: c.error)),
                     ],
                   ),
                 ),
@@ -2642,7 +2645,7 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             _buildNavItem(
               index: 0,
-              label: 'Gup',
+              label: AppLocalizations.of(context).homeNavChats,
               icon: Icons.chat_bubble_rounded,
               selectedIcon: Icons.chat_bubble_rounded,
               isSelected: selectedIndex == 0,
@@ -2650,7 +2653,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             _buildNavItem(
               index: 1,
-              label: 'Moments',
+              label: AppLocalizations.of(context).homeNavMoments,
               icon: Icons.camera_alt_outlined,
               selectedIcon: Icons.camera_alt_rounded,
               isSelected: selectedIndex == 1,
@@ -2658,7 +2661,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             _buildNavItem(
               index: 2,
-              label: 'Calls',
+              label: AppLocalizations.of(context).homeNavCalls,
               icon: Icons.call_outlined,
               selectedIcon: Icons.call_rounded,
               isSelected: selectedIndex == 2,
@@ -2708,7 +2711,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Profile',
+                    AppLocalizations.of(context).homeNavProfile,
                     style: GoogleFonts.poppins(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
@@ -3160,7 +3163,7 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Connect with a Stranger',
+                        AppLocalizations.of(context).homeStrangerMatchTitle,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -3170,7 +3173,7 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Anonymous chat — tap to match!',
+                        AppLocalizations.of(context).homeStrangerMatchSubtitle,
                         style: GoogleFonts.poppins(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w400,

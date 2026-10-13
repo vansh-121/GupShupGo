@@ -121,20 +121,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _signOut() async {
     if (_isSigningOut) return;
+    final l10n = AppLocalizations.of(context);
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Log out'),
-        content: const Text('Are you sure you want to log out of GupShupGo?'),
+        title: Text(l10n.settingsLogOutConfirmTitle),
+        content: Text(l10n.settingsLogOutConfirmPrompt),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  const Text('Log Out', style: TextStyle(color: Colors.red))),
+                  Text(l10n.settingsLogOut, style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -149,7 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await LoadingOverlay.during(
         context,
         () => _authService.signOut(),
-        message: 'Signing out…',
+        message: l10n.settingsSigningOut,
       );
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -164,22 +165,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Clear all chats ──────────────────────────────────────────────────────
   Future<void> _clearAllChats() async {
+    final l10n = AppLocalizations.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Clear all chats'),
-        content: const Text(
-          'This will permanently delete all your message history. '
-          'This action cannot be undone.',
-        ),
+        title: Text(l10n.settingsClearChatsConfirmTitle),
+        content: Text(l10n.settingsClearChatsConfirmPrompt),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete All',
-                  style: TextStyle(color: Colors.red))),
+              child: Text(l10n.settingsDeleteAll,
+                  style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -189,7 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // Show a loading indicator
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Clearing chats...')),
+          SnackBar(content: Text(l10n.settingsClearingChats)),
         );
       }
 
@@ -217,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('All chats cleared'),
+            content: Text(l10n.settingsAllChatsCleared),
             backgroundColor: AppThemeColors.of(context).success,
           ),
         );
@@ -227,7 +226,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to clear chats: $e'),
+            content: Text(l10n.settingsClearChatsFailed(e.toString())),
             backgroundColor: AppThemeColors.of(context).error,
           ),
         );
@@ -377,6 +376,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final avatarUrl = _user.photoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_user.name)}&background=7C5CFC&color=fff&size=128';
 
@@ -391,7 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Settings',
+          l10n.settingsTitle,
           style: GoogleFonts.poppins(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -452,11 +452,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 1. Account Section Card (Full Width) ────────────────────────────
           _buildStitchCard(
-            title: 'Account',
+            title: l10n.settingsAccountCard,
             children: [
               _buildStitchTile(
                 icon: Icons.person_outline_rounded,
-                title: 'Profile',
+                title: l10n.settingsProfileTile,
                 onTap: () async {
                   final updated = await Navigator.push<UserModel>(
                     context,
@@ -468,7 +468,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.link_rounded,
-                title: 'Linked sign-in methods',
+                title: l10n.settingsLinkedMethodsTile,
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => LinkAccountsScreen(user: _user)),
@@ -477,14 +477,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.phone_outlined,
-                title: 'Phone number',
-                trailingText: _user.phoneNumber ?? 'Not linked',
+                title: l10n.settingsPhoneTile,
+                trailingText: _user.phoneNumber ?? l10n.profileNotLinked,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.email_outlined,
-                title: 'Email',
-                trailingText: _user.email ?? 'Not linked',
+                title: l10n.settingsEmailTile,
+                trailingText: _user.email ?? l10n.profileNotLinked,
               ),
             ],
           ),
@@ -494,25 +494,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // Discoverability lives alongside last seen / read receipts so there
           // is a single place in Settings that answers "who can see what".
           _buildStitchCard(
-            title: 'Privacy',
+            title: l10n.settingsPrivacyCard,
             children: [
               _buildStitchSwitchRow(
                 icon: Icons.person_search_rounded,
-                title: 'Discoverability',
+                title: l10n.settingsDiscoverability,
                 value: _user.isDiscoverable,
                 onChanged: _setDiscoverable,
               ),
               const SizedBox(height: 10),
               _buildStitchSwitchRow(
                 icon: Icons.access_time_rounded,
-                title: 'Last seen',
+                title: l10n.settingsLastSeen,
                 value: _settings.showLastSeen,
                 onChanged: (v) => setState(() => _settings.showLastSeen = v),
               ),
               const SizedBox(height: 10),
               _buildStitchSwitchRow(
                 icon: Icons.check_circle_outline_rounded,
-                title: 'Read receipts',
+                title: l10n.settingsReadReceipts,
                 value: _settings.showReadReceipts,
                 onChanged: (v) => setState(() => _settings.showReadReceipts = v),
               ),
@@ -524,8 +524,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildStitchDivider(),
                 _buildStitchTile(
                   icon: Icons.ads_click_rounded,
-                  title: 'Ad preferences',
-                  trailingText: 'Manage',
+                  title: l10n.settingsAdPreferences,
+                  trailingText: l10n.settingsManage,
                   onTap: _openAdPreferences,
                 ),
               ],
@@ -535,7 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 3. Appearance Card (Full Width) ─────────────────────────────────
           _buildStitchCard(
-            title: 'Appearance',
+            title: l10n.settingsAppearanceCard,
             newAnchor: NewFeatureAnchor.settingsAppearance,
             children: [
               Row(
@@ -544,12 +544,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Expanded(
                     child: _buildStitchCompactTile(
                       icon: Icons.dark_mode_outlined,
-                      title: 'Theme',
+                      title: l10n.settingsTheme,
                       subtitle: context.watch<ThemeProvider>().themeMode == ThemeMode.dark
-                          ? 'Dark'
+                          ? l10n.settingsThemeDark
                           : context.watch<ThemeProvider>().themeMode == ThemeMode.light
-                              ? 'Light'
-                              : 'System',
+                              ? l10n.settingsThemeLight
+                              : l10n.settingsThemeSystem,
                       onTap: _showThemeModal,
                     ),
                   ),
@@ -583,7 +583,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // whatever is set here.
               _buildStitchTile(
                 icon: Icons.palette_outlined,
-                title: 'Chat theme',
+                title: l10n.settingsChatTheme,
                 badge: const NewFeatureChip(featureId: NewFeature.chatThemes),
                 trailingText: context
                     .watch<ChatThemeProvider>()
@@ -604,66 +604,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 4. Help & Security Card (Full Width) ────────────────────────────
           _buildStitchCard(
-            title: 'Help & Security',
+            title: l10n.settingsHelpSecurityCard,
             children: [
               _buildStitchTile(
                 icon: Icons.help_outline_rounded,
-                title: 'Help Center',
+                title: l10n.settingsHelpCenter,
                 onTap: _showHelpCenter,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.bug_report_outlined,
-                title: 'Report a problem',
+                title: l10n.settingsReportProblem,
                 onTap: _reportProblem,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.shield_outlined,
-                title: 'End-to-end encryption (Vault)',
+                title: l10n.settingsE2EEShield,
                 onTap: _openVaultSettings,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.verified_user_outlined,
-                title: 'Verify safety number',
+                title: l10n.settingsVerifySafetyNumber,
                 onTap: _verifySafetyNumber,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.block_outlined,
-                title: 'Blocked contacts',
+                title: l10n.settingsBlockedContacts,
                 onTap: _showBlockedContacts,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.delete_sweep_outlined,
-                title: 'Clear all gup history',
+                title: l10n.settingsClearAllGupHistory,
                 onTap: _clearAllChats,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.star_rate_rounded,
-                title: 'Rate us',
+                title: l10n.settingsRateUs,
                 onTap: () => ReviewPromptService.instance
                     .openStoreListing(context: context),
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.auto_awesome_rounded,
-                title: "What's New",
+                title: l10n.settingsWhatsNew,
                 onTap: () => showWhatsNewDialog(context),
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.system_update_rounded,
-                title: 'Check for updates',
+                title: l10n.settingsCheckForUpdates,
                 onTap: _checkForUpdates,
               ),
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.info_outline_rounded,
-                title: 'App info',
+                title: l10n.settingsAppInfo,
                 // From the changelog's constant, so the number here cannot drift
                 // away from the version the What's New dialog announces.
                 trailingText: 'v$kCurrentVersion',
@@ -690,7 +690,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               child: Text(
-                'Log Out',
+                l10n.settingsLogOut,
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -936,13 +936,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showThemeModal() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final themeProvider = context.read<ThemeProvider>();
     final currentMode = themeProvider.themeMode;
 
     final options = [
-      (ThemeMode.light, Icons.light_mode_outlined, 'Light'),
-      (ThemeMode.dark, Icons.dark_mode_outlined, 'Dark'),
-      (ThemeMode.system, Icons.brightness_auto_outlined, 'System'),
+      (ThemeMode.light, Icons.light_mode_outlined, l10n.settingsThemeLight),
+      (ThemeMode.dark, Icons.dark_mode_outlined, l10n.settingsThemeDark),
+      (ThemeMode.system, Icons.brightness_auto_outlined, l10n.settingsThemeSystem),
     ];
 
     showModalBottomSheet(
@@ -970,7 +971,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('Choose theme',
+                    child: Text(l10n.settingsChooseThemeTitle,
                         style: GoogleFonts.poppins(
                             fontSize: 16, fontWeight: FontWeight.w700, color: c.textHigh)),
                   ),
@@ -1005,6 +1006,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── GupShupGo Pro card ────────────────────────────────────────────────────
   Widget _buildProCard() {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final sub = context.watch<SubscriptionProvider>();
 
     return Padding(
@@ -1051,7 +1053,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.workspace_premium_rounded,
                   color: Colors.white,
                   size: 24,
@@ -1081,8 +1083,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 2),
                     Text(
                       sub.isPro
-                          ? '${sub.subscription.planLabel} · ${sub.subscription.daysRemaining} days left'
-                          : 'Unlock premium features',
+                          ? l10n.settingsProDaysLeft(sub.subscription.planLabel, sub.subscription.daysRemaining)
+                          : l10n.settingsUnlockPremiumFeatures,
                       style: TextStyle(
                         fontSize: 12,
                         color: c.textMid,
@@ -1130,6 +1132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (peerUser == null || !mounted) return;
 
+    final l10n = AppLocalizations.of(context);
     // Compute behind a blocking overlay; `during` tears it down in a finally,
     // so a failure can't leave the spinner stuck on screen.
     final n = await LoadingOverlay.during(
@@ -1138,7 +1141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         selfUserId: selfUid,
         peerUserId: peerUser.id,
       ),
-      message: 'Computing safety number…',
+      message: l10n.settingsComputingSafetyNumber,
     );
 
     if (!mounted) return;
@@ -1167,16 +1170,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         content: n == null
-            ? const Text(
-                'This contact hasn\'t published an encryption key bundle yet. '
-                'They may be using an older version of GupShupGo.')
+            ? Text(l10n.settingsSafetyNumberNoBundle)
             : Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'If the number below matches on ${peerUser.name}\'s device, '
-                    'your end-to-end encryption is verified.',
+                    l10n.settingsSafetyNumberExplanation(peerUser.name),
                     style: TextStyle(fontSize: 13, color: c.textMid),
                   ),
                   const SizedBox(height: 16),
@@ -1205,7 +1205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          'Compare this number in person or over a trusted call.',
+                          l10n.settingsSafetyNumberCompareHint,
                           style: TextStyle(fontSize: 11, color: c.textLow),
                         ),
                       ),
@@ -1225,13 +1225,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Blocked contacts dialog ────────────────────────────────────────────
   void _showBlockedContacts() async {
+    final l10n = AppLocalizations.of(context);
     final blockedIds = await _getBlockedUserIds();
 
     if (!mounted) return;
 
     if (blockedIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No blocked contacts')),
+        SnackBar(content: Text(l10n.settingsNoBlockedContacts)),
       );
       return;
     }
@@ -1272,7 +1273,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
-              Text('Blocked Contacts',
+              Text(l10n.settingsBlockedContacts,
                   style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1282,7 +1283,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Text('No blocked contacts',
+                    child: Text(l10n.settingsNoBlockedContacts,
                         style: TextStyle(color: c.textMid)),
                   ),
                 )
@@ -1302,12 +1303,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Navigator.pop(context);
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('${user.name} unblocked')),
+                              SnackBar(content: Text(l10n.settingsUserUnblocked(user.name))),
                             );
                           }
                         },
                         child:
-                            Text('Unblock', style: TextStyle(color: c.primary)),
+                            Text(l10n.settingsUnblock, style: TextStyle(color: c.primary)),
                       ),
                     )),
               const SizedBox(height: 12),
@@ -1336,24 +1337,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Check for updates ──────────────────────────────────────────────────
-  /// Manual update check from the Help & Security card. Shows a brief spinner
-  /// while Play is queried, then reports the outcome: an update offer (whose
-  /// button starts Google Play's background flexible update), a "ready to
-  /// install" restart prompt, an "up to date" confirmation, or a graceful note
-  /// when the check can't run (e.g. the app wasn't installed from Play).
-  ///
-  /// The two dialogs are shared with the launch prompt on purpose — see
-  /// [showUpdateAvailableDialog]. Being told about an update on open and then
-  /// shown a differently-worded one from here would read as two updates.
   Future<void> _checkForUpdates() async {
     AppHaptics.tap();
+    final l10n = AppLocalizations.of(context);
 
     // The check itself is quick (not the download), so a blocking spinner is
     // fine here; the flexible download runs in the background afterwards.
     final result = await LoadingOverlay.during(
       context,
       () => UpdateService.instance.checkForUpdate(),
-      message: 'Checking for updates…',
+      message: l10n.settingsCheckingForUpdates,
     );
 
     if (!mounted) return;
@@ -1374,8 +1367,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case UpdateCheckStatus.upToDate:
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-                "You're on the latest version (v$kCurrentVersion)."),
+            content: Text(l10n.settingsUpToDate(kCurrentVersion)),
             backgroundColor: c.success,
           ),
         );
@@ -1383,11 +1375,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       case UpdateCheckStatus.unavailable:
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Couldn't check for updates. Make sure GupShupGo was installed "
-              'from the Google Play Store.',
-            ),
+          SnackBar(
+            content: Text(l10n.settingsUpdateCheckUnavailable),
           ),
         );
         break;
@@ -1520,7 +1509,7 @@ class _SafetyNumberContactPickerState
                       Icon(Icons.verified_user, color: c.primary, size: 22),
                       const SizedBox(width: 10),
                       Text(
-                        'Verify a contact',
+                        AppLocalizations.of(context).settingsVerifyContactTitle,
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -1531,7 +1520,7 @@ class _SafetyNumberContactPickerState
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Select a contact to view your shared safety number.',
+                    AppLocalizations.of(context).settingsVerifyContactSubtitle,
                     style: TextStyle(fontSize: 13, color: c.textMid),
                   ),
                   const SizedBox(height: 14),

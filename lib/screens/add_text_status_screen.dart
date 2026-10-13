@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
@@ -73,10 +74,11 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   }
 
   Future<void> _uploadStatus() async {
+    final l10n = AppLocalizations.of(context);
     final text = _textController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter some text')),
+        SnackBar(content: Text(l10n.statusEnterTextPrompt)),
       );
       return;
     }
@@ -93,9 +95,9 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
       if (viewers.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
                 content: Text(
-                    'No contacts yet — start a chat before posting a status.')),
+                    l10n.statusNoContactsNotice)),
           );
         }
         return;
@@ -123,7 +125,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to post status: $e')),
+          SnackBar(content: Text(l10n.statusPostFailed(e.toString()))),
         );
       }
     } finally {
@@ -165,7 +167,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           IconButton(
             icon: Icon(Icons.palette_rounded, color: onBg),
             onPressed: _cycleColor,
-            tooltip: 'Change background color',
+            tooltip: AppLocalizations.of(context).statusChangeBgColorTooltip,
           ),
         ],
       ),
@@ -185,7 +187,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
                 ),
                 decoration: InputDecoration(
                   filled: false,
-                  hintText: 'Type a status...',
+                  hintText: AppLocalizations.of(context).statusTypeHint,
                   hintStyle: GoogleFonts.poppins(
                     color: onBgMuted,
                     fontSize: 24,
@@ -212,7 +214,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
                 Icon(Icons.lock_outline_rounded, size: 12, color: onBgMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'End-to-end encrypted',
+                  AppLocalizations.of(context).callEndToEndEncrypted,
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: onBgMuted,

@@ -1,110 +1,1496 @@
 {
   "@@locale": "en",
-
   "commonCancel": "Cancel",
-  "@commonCancel": { "description": "Generic Cancel button." },
+  "@commonCancel": {
+    "description": "Generic Cancel button."
+  },
   "commonOk": "OK",
-  "@commonOk": { "description": "Generic OK/confirm button." },
+  "@commonOk": {
+    "description": "Generic OK/confirm button."
+  },
   "commonContinue": "Continue",
-  "@commonContinue": { "description": "Generic Continue button." },
+  "@commonContinue": {
+    "description": "Generic Continue button."
+  },
   "commonSave": "Save",
-  "@commonSave": { "description": "Generic Save button." },
+  "@commonSave": {
+    "description": "Generic Save button."
+  },
   "commonRetry": "Retry",
-  "@commonRetry": { "description": "Generic Retry button after a failure." },
+  "@commonRetry": {
+    "description": "Generic Retry button after a failure."
+  },
   "commonClose": "Close",
-  "@commonClose": { "description": "Generic Close button." },
+  "@commonClose": {
+    "description": "Generic Close button."
+  },
   "commonGotIt": "Got it",
-  "@commonGotIt": { "description": "Dismiss button acknowledging a notice." },
-
+  "@commonGotIt": {
+    "description": "Dismiss button acknowledging a notice."
+  },
   "settingsTitle": "Settings",
-  "@settingsTitle": { "description": "Title of the Settings screen." },
+  "@settingsTitle": {
+    "description": "Title of Settings screen."
+  },
   "settingsLanguageTitle": "Language",
-  "@settingsLanguageTitle": { "description": "Settings row that opens the app language picker." },
+  "@settingsLanguageTitle": {
+    "description": "Settings row that opens the app language picker."
+  },
   "settingsLanguageSubtitle": "Choose your preferred language",
-  "@settingsLanguageSubtitle": { "description": "Subtitle under the Language settings row." },
-
+  "@settingsLanguageSubtitle": {
+    "description": "Subtitle under the Language settings row."
+  },
   "languagePickerTitle": "Language",
-  "@languagePickerTitle": { "description": "Title of the language picker screen." },
+  "@languagePickerTitle": {
+    "description": "Title of the language picker screen."
+  },
   "languageSystemDefault": "System default",
-  "@languageSystemDefault": { "description": "Option that follows the device's language instead of a fixed app language." },
+  "@languageSystemDefault": {
+    "description": "Option that follows the device's language instead of a fixed app language."
+  },
   "languageSystemDefaultSubtitle": "Follow your device language",
-  "@languageSystemDefaultSubtitle": { "description": "Subtitle for the System default language option." },
-
+  "@languageSystemDefaultSubtitle": {
+    "description": "Subtitle for the System default language option."
+  },
   "loginContinueWithPhone": "Continue with Phone",
-  "@loginContinueWithPhone": { "description": "Primary login button: start phone-number auth." },
+  "@loginContinueWithPhone": {
+    "description": "Primary login button: start phone-number auth."
+  },
   "loginContinueWithGoogle": "Continue with Google",
-  "@loginContinueWithGoogle": { "description": "Login button: sign in with a Google account." },
+  "@loginContinueWithGoogle": {
+    "description": "Login button: sign in with a Google account."
+  },
   "loginUseEmailPassword": "Use Email & Password",
-  "@loginUseEmailPassword": { "description": "Login button: reveal the email/password form." },
+  "@loginUseEmailPassword": {
+    "description": "Login button: reveal the email/password form."
+  },
   "loginSignIn": "Sign In",
-  "@loginSignIn": { "description": "Sign In mode chip and submit button." },
+  "@loginSignIn": {
+    "description": "Sign In mode chip and submit button."
+  },
   "loginSignUp": "Sign Up",
-  "@loginSignUp": { "description": "Sign Up mode chip." },
+  "@loginSignUp": {
+    "description": "Sign Up mode chip."
+  },
   "loginCreateAccount": "Create Account",
-  "@loginCreateAccount": { "description": "Submit button in sign-up mode." },
+  "@loginCreateAccount": {
+    "description": "Submit button in sign-up mode."
+  },
   "loginForgotPassword": "Forgot Password?",
-  "@loginForgotPassword": { "description": "Link that triggers a password-reset email." },
+  "@loginForgotPassword": {
+    "description": "Link that triggers a password-reset email."
+  },
   "loginOfflineChat": "Offline Chat",
-  "@loginOfflineChat": { "description": "Bottom link to the offline/nearby mesh chat." },
+  "@loginOfflineChat": {
+    "description": "Bottom link to the offline/nearby mesh chat."
+  },
   "loginHintName": "Your Name",
-  "@loginHintName": { "description": "Name field placeholder on sign-up." },
+  "@loginHintName": {
+    "description": "Name field placeholder on sign-up."
+  },
   "loginHintEmail": "Email",
-  "@loginHintEmail": { "description": "Email field placeholder." },
+  "@loginHintEmail": {
+    "description": "Email field placeholder."
+  },
   "loginHintPassword": "Password",
-  "@loginHintPassword": { "description": "Password field placeholder." },
+  "@loginHintPassword": {
+    "description": "Password field placeholder."
+  },
   "loginPasswordHelper": "At least 8 characters, with a letter and a number",
-  "@loginPasswordHelper": { "description": "Helper text under the password field on sign-up." },
+  "@loginPasswordHelper": {
+    "description": "Helper text under the password field on sign-up."
+  },
   "loginResetEmailSent": "Password reset email sent to {email}",
   "@loginResetEmailSent": {
     "description": "Confirmation snackbar after a password-reset email is sent.",
-    "placeholders": { "email": { "type": "String" } }
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
   },
-
   "loginErrorEnterEmail": "Please enter your email",
-  "@loginErrorEnterEmail": { "description": "Validation: email field empty." },
+  "@loginErrorEnterEmail": {
+    "description": "Validation: email field empty."
+  },
   "loginErrorValidEmail": "Please enter a valid email",
-  "@loginErrorValidEmail": { "description": "Validation: email format invalid." },
+  "@loginErrorValidEmail": {
+    "description": "Validation: email format invalid."
+  },
   "loginErrorEnterPassword": "Please enter your password",
-  "@loginErrorEnterPassword": { "description": "Validation: password field empty (sign-in)." },
+  "@loginErrorEnterPassword": {
+    "description": "Validation: password field empty (sign-in)."
+  },
   "loginErrorPasswordMin6": "Password must be at least 6 characters",
-  "@loginErrorPasswordMin6": { "description": "Validation: sign-in password too short." },
+  "@loginErrorPasswordMin6": {
+    "description": "Validation: sign-in password too short."
+  },
   "loginErrorEnterPasswordSignup": "Please enter a password",
-  "@loginErrorEnterPasswordSignup": { "description": "Validation: password field empty (sign-up)." },
+  "@loginErrorEnterPasswordSignup": {
+    "description": "Validation: password field empty (sign-up)."
+  },
   "loginErrorPasswordMin8": "Password must be at least 8 characters",
-  "@loginErrorPasswordMin8": { "description": "Validation: sign-up password too short." },
+  "@loginErrorPasswordMin8": {
+    "description": "Validation: sign-up password too short."
+  },
   "loginErrorPasswordLetter": "Password must include a letter",
-  "@loginErrorPasswordLetter": { "description": "Validation: sign-up password needs a letter." },
+  "@loginErrorPasswordLetter": {
+    "description": "Validation: sign-up password needs a letter."
+  },
   "loginErrorPasswordNumber": "Password must include a number",
-  "@loginErrorPasswordNumber": { "description": "Validation: sign-up password needs a number." },
+  "@loginErrorPasswordNumber": {
+    "description": "Validation: sign-up password needs a number."
+  },
   "loginErrorEnterName": "Please enter your name",
-  "@loginErrorEnterName": { "description": "Validation: name field empty on sign-up." },
-
+  "@loginErrorEnterName": {
+    "description": "Validation: name field empty on sign-up."
+  },
   "loginErrorGoogleCancelled": "Google sign-in was cancelled.",
-  "@loginErrorGoogleCancelled": { "description": "Google sign-in dismissed by the user." },
+  "@loginErrorGoogleCancelled": {
+    "description": "Google sign-in dismissed by the user."
+  },
   "loginErrorProfileLoad": "Couldn't load your profile. Check your connection and try again.",
-  "@loginErrorProfileLoad": { "description": "Profile read failed during sign-in." },
+  "@loginErrorProfileLoad": {
+    "description": "Profile read failed during sign-in."
+  },
   "loginErrorGoogleFailed": "Google sign-in failed. Please try again.",
-  "@loginErrorGoogleFailed": { "description": "Generic Google sign-in failure." },
+  "@loginErrorGoogleFailed": {
+    "description": "Generic Google sign-in failure."
+  },
   "loginErrorSignInFailed": "Failed to sign in. Please try again.",
-  "@loginErrorSignInFailed": { "description": "Email sign-in returned no user." },
+  "@loginErrorSignInFailed": {
+    "description": "Email sign-in returned no user."
+  },
   "loginErrorSignUpFailed": "Failed to sign up. Please try again.",
-  "@loginErrorSignUpFailed": { "description": "Email sign-up returned no user." },
+  "@loginErrorSignUpFailed": {
+    "description": "Email sign-up returned no user."
+  },
   "loginErrorGeneric": "An error occurred. Please try again.",
-  "@loginErrorGeneric": { "description": "Fallback error for an unexpected failure." },
+  "@loginErrorGeneric": {
+    "description": "Fallback error for an unexpected failure."
+  },
   "loginErrorResetFailed": "Failed to send reset email. Please try again.",
-  "@loginErrorResetFailed": { "description": "Password-reset email could not be sent." },
+  "@loginErrorResetFailed": {
+    "description": "Password-reset email could not be sent."
+  },
   "loginErrorUserNotFound": "No account found with this email. Please sign up.",
-  "@loginErrorUserNotFound": { "description": "Firebase auth: user-not-found." },
+  "@loginErrorUserNotFound": {
+    "description": "Firebase auth: user-not-found."
+  },
   "loginErrorWrongPassword": "Incorrect password. Please try again.",
-  "@loginErrorWrongPassword": { "description": "Firebase auth: wrong-password." },
+  "@loginErrorWrongPassword": {
+    "description": "Firebase auth: wrong-password."
+  },
   "loginErrorEmailInUse": "An account already exists with this email. Please sign in.",
-  "@loginErrorEmailInUse": { "description": "Firebase auth: email-already-in-use." },
+  "@loginErrorEmailInUse": {
+    "description": "Firebase auth: email-already-in-use."
+  },
   "loginErrorInvalidEmail": "Please enter a valid email address.",
-  "@loginErrorInvalidEmail": { "description": "Firebase auth: invalid-email." },
+  "@loginErrorInvalidEmail": {
+    "description": "Firebase auth: invalid-email."
+  },
   "loginErrorWeakPassword": "Password is too weak. Use at least 6 characters.",
-  "@loginErrorWeakPassword": { "description": "Firebase auth: weak-password." },
+  "@loginErrorWeakPassword": {
+    "description": "Firebase auth: weak-password."
+  },
   "loginErrorInvalidCredential": "Invalid email or password. Please check and try again.",
-  "@loginErrorInvalidCredential": { "description": "Firebase auth: invalid-credential." },
+  "@loginErrorInvalidCredential": {
+    "description": "Firebase auth: invalid-credential."
+  },
   "loginErrorTooManyRequests": "Too many attempts. Please try again later.",
-  "@loginErrorTooManyRequests": { "description": "Firebase auth: too-many-requests." }
+  "@loginErrorTooManyRequests": {
+    "description": "Firebase auth: too-many-requests."
+  },
+  "homeNavChats": "Gup",
+  "@homeNavChats": {
+    "description": "Bottom nav: Chats tab."
+  },
+  "homeNavMoments": "Moments",
+  "@homeNavMoments": {
+    "description": "Bottom nav: Moments tab."
+  },
+  "homeNavCalls": "Calls",
+  "@homeNavCalls": {
+    "description": "Bottom nav: Calls tab."
+  },
+  "homeNavProfile": "Profile",
+  "@homeNavProfile": {
+    "description": "Bottom nav: Profile tab."
+  },
+  "homeTooltipOfflineChat": "Offline Chat — talk to people nearby",
+  "@homeTooltipOfflineChat": {
+    "description": "Tooltip for offline mesh chat icon in home app bar."
+  },
+  "homeTooltipSearch": "Search",
+  "@homeTooltipSearch": {
+    "description": "Tooltip for search icon in home app bar."
+  },
+  "homeMenuProfile": "Profile",
+  "@homeMenuProfile": {
+    "description": "Overflow menu item: Profile."
+  },
+  "homeMenuSettings": "Settings",
+  "@homeMenuSettings": {
+    "description": "Overflow menu item: Settings."
+  },
+  "homeMenuRateUs": "Rate us",
+  "@homeMenuRateUs": {
+    "description": "Overflow menu item: Rate us."
+  },
+  "homeMenuReportIssue": "Report Issue",
+  "@homeMenuReportIssue": {
+    "description": "Overflow menu item: Report Issue."
+  },
+  "homeMenuWhatsNew": "What's New",
+  "@homeMenuWhatsNew": {
+    "description": "Overflow menu item: What's New."
+  },
+  "homeMenuLogOut": "Log out",
+  "@homeMenuLogOut": {
+    "description": "Overflow menu item: Log out."
+  },
+  "homeEmptyChatsTitle": "No chats yet",
+  "@homeEmptyChatsTitle": {
+    "description": "Empty state title when user has no chats."
+  },
+  "homeEmptyChatsSubtitle": "Start a conversation by tapping the button below",
+  "@homeEmptyChatsSubtitle": {
+    "description": "Empty state subtitle in chats tab."
+  },
+  "homeNewChatButton": "New chat",
+  "@homeNewChatButton": {
+    "description": "Button to start a new chat in empty state."
+  },
+  "homeAiAssistantTitle": "GupAI",
+  "@homeAiAssistantTitle": {
+    "description": "Pinned AI Assistant tile title."
+  },
+  "homeAiAssistantSubtitle": "Draft, translate, summarise & more",
+  "@homeAiAssistantSubtitle": {
+    "description": "Pinned AI Assistant tile subtitle."
+  },
+  "homeStrangerMatchTitle": "Connect with a Stranger",
+  "@homeStrangerMatchTitle": {
+    "description": "Anonymous match banner title."
+  },
+  "homeStrangerMatchSubtitle": "Anonymous chat — tap to match!",
+  "@homeStrangerMatchSubtitle": {
+    "description": "Anonymous match banner subtitle."
+  },
+  "homeMyMoment": "My Moment",
+  "@homeMyMoment": {
+    "description": "Moments tab section header for current user's status."
+  },
+  "homeRecentMoments": "Recent Moments",
+  "@homeRecentMoments": {
+    "description": "Moments tab section header for friends' statuses."
+  },
+  "homeEmptyMomentsTitle": "No updates yet.",
+  "@homeEmptyMomentsTitle": {
+    "description": "Empty state title in moments tab."
+  },
+  "homeEmptyMomentsSubtitle": "Tap the camera to share.",
+  "@homeEmptyMomentsSubtitle": {
+    "description": "Empty state subtitle in moments tab."
+  },
+  "homeTapToAddMoment": "Tap to add an update",
+  "@homeTapToAddMoment": {
+    "description": "Prompt when current user has no active moment."
+  },
+  "homeEmptyCallsTitle": "No call history",
+  "@homeEmptyCallsTitle": {
+    "description": "Empty state title in calls tab."
+  },
+  "homeEmptyCallsSubtitle": "Your recent calls will appear here",
+  "@homeEmptyCallsSubtitle": {
+    "description": "Empty state subtitle in calls tab."
+  },
+  "chatInputHint": "Message...",
+  "@chatInputHint": {
+    "description": "Message input placeholder in chat."
+  },
+  "chatSearchHint": "Search messages...",
+  "@chatSearchHint": {
+    "description": "Search input placeholder in chat."
+  },
+  "chatStatusTyping": "typing...",
+  "@chatStatusTyping": {
+    "description": "Subtitle typing status indicator in chat header."
+  },
+  "chatStatusOnline": "Online",
+  "@chatStatusOnline": {
+    "description": "Subtitle online status in chat header."
+  },
+  "chatStatusOffline": "Offline",
+  "@chatStatusOffline": {
+    "description": "Subtitle offline status in chat header."
+  },
+  "chatStatusLastSeen": "Last seen {time}",
+  "@chatStatusLastSeen": {
+    "description": "Subtitle last seen status in chat header.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "chatEndToEndEncrypted": "End-to-end encrypted",
+  "@chatEndToEndEncrypted": {
+    "description": "Security trust banner in chat."
+  },
+  "chatNoInternetOfflineTitle": "No internet? Chat offline with nearby devices",
+  "@chatNoInternetOfflineTitle": {
+    "description": "Offline mesh banner in chat when internet is down."
+  },
+  "chatEnableOfflineButton": "Enable",
+  "@chatEnableOfflineButton": {
+    "description": "Button to activate nearby mesh chat in offline banner."
+  },
+  "chatSlideToCancel": "Slide to cancel",
+  "@chatSlideToCancel": {
+    "description": "Audio recording gesture instruction."
+  },
+  "chatTooltipVoiceCall": "Voice Call",
+  "@chatTooltipVoiceCall": {
+    "description": "Tooltip for voice call icon in chat app bar."
+  },
+  "chatTooltipVideoCall": "Video Call",
+  "@chatTooltipVideoCall": {
+    "description": "Tooltip for video call icon in chat app bar."
+  },
+  "chatMenuContactInfo": "Contact info",
+  "@chatMenuContactInfo": {
+    "description": "Chat app bar overflow menu: Contact info."
+  },
+  "chatMenuSearch": "Search",
+  "@chatMenuSearch": {
+    "description": "Chat app bar overflow menu: Search."
+  },
+  "chatMenuChatTheme": "Chat theme",
+  "@chatMenuChatTheme": {
+    "description": "Chat app bar overflow menu: Chat theme."
+  },
+  "chatMenuExportChat": "Export chat",
+  "@chatMenuExportChat": {
+    "description": "Chat app bar overflow menu: Export chat."
+  },
+  "chatMenuMuteNotifications": "Mute notifications",
+  "@chatMenuMuteNotifications": {
+    "description": "Chat app bar overflow menu: Mute."
+  },
+  "chatMenuUnmuteNotifications": "Unmute notifications",
+  "@chatMenuUnmuteNotifications": {
+    "description": "Chat app bar overflow menu: Unmute."
+  },
+  "chatMenuBlockContact": "Block contact",
+  "@chatMenuBlockContact": {
+    "description": "Chat app bar overflow menu: Block contact."
+  },
+  "chatActionReply": "Reply",
+  "@chatActionReply": {
+    "description": "Message long-press action: Reply."
+  },
+  "chatActionCopy": "Copy",
+  "@chatActionCopy": {
+    "description": "Message long-press action: Copy."
+  },
+  "chatActionForward": "Forward",
+  "@chatActionForward": {
+    "description": "Message long-press action: Forward."
+  },
+  "chatActionTranslate": "Translate",
+  "@chatActionTranslate": {
+    "description": "Message long-press action: Translate."
+  },
+  "chatActionSummarise": "Summarise",
+  "@chatActionSummarise": {
+    "description": "Message long-press action: Summarise."
+  },
+  "chatActionAskGupAi": "Ask GupAI",
+  "@chatActionAskGupAi": {
+    "description": "Message long-press action: Ask GupAI."
+  },
+  "chatActionEdit": "Edit",
+  "@chatActionEdit": {
+    "description": "Message long-press action: Edit."
+  },
+  "chatActionDelete": "Delete",
+  "@chatActionDelete": {
+    "description": "Message long-press action: Delete."
+  },
+  "chatDeleteMessageTitle": "Delete message?",
+  "@chatDeleteMessageTitle": {
+    "description": "Confirmation title when deleting a message."
+  },
+  "chatDeleteMessageForEveryonePrompt": "Delete it just for you, or for everyone in this chat?",
+  "@chatDeleteMessageForEveryonePrompt": {
+    "description": "Delete prompt giving options for me or everyone."
+  },
+  "chatDeleteMessageForMeOnlyPrompt": "This removes it from your devices only. {name} will still see it.",
+  "@chatDeleteMessageForMeOnlyPrompt": {
+    "description": "Delete prompt when message cannot be deleted for everyone.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "chatDeleteForMe": "Delete for me",
+  "@chatDeleteForMe": {
+    "description": "Button to delete message for current user only."
+  },
+  "chatDeleteForEveryone": "Delete for everyone",
+  "@chatDeleteForEveryone": {
+    "description": "Button to delete message for everyone."
+  },
+  "chatBlockContactTitle": "Block {name}?",
+  "@chatBlockContactTitle": {
+    "description": "Confirmation dialog title when blocking contact.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "chatBlockContactPrompt": "Blocked contacts cannot send you messages or call you. You can unblock them from Settings → Privacy → Blocked contacts.",
+  "@chatBlockContactPrompt": {
+    "description": "Confirmation description when blocking contact."
+  },
+  "chatBlockButton": "Block",
+  "@chatBlockButton": {
+    "description": "Button to confirm blocking a contact."
+  },
+  "chatForwardTo": "Forward to",
+  "@chatForwardTo": {
+    "description": "Header in forward message sheet."
+  },
+  "chatNoForwardChats": "No other chats to forward to",
+  "@chatNoForwardChats": {
+    "description": "Empty state in forward message sheet."
+  },
+  "chatCannotSendMediaBlocked": "Cannot send media to this contact",
+  "@chatCannotSendMediaBlocked": {
+    "description": "Snackbar when trying to send media to blocked contact."
+  },
+  "attachmentShareTitle": "Share",
+  "@attachmentShareTitle": {
+    "description": "Title of attachment sheet."
+  },
+  "attachmentPhoto": "Photo",
+  "@attachmentPhoto": {
+    "description": "Attachment option: Photo."
+  },
+  "attachmentPhotoSubtitle": "Choose an image from your gallery",
+  "@attachmentPhotoSubtitle": {
+    "description": "Subtitle for Photo attachment."
+  },
+  "attachmentVideo": "Video",
+  "@attachmentVideo": {
+    "description": "Attachment option: Video."
+  },
+  "attachmentVideoSubtitle": "Choose a video from your gallery",
+  "@attachmentVideoSubtitle": {
+    "description": "Subtitle for Video attachment."
+  },
+  "attachmentDocument": "Document",
+  "@attachmentDocument": {
+    "description": "Attachment option: Document."
+  },
+  "attachmentDocumentSubtitle": "PDF, Office file, archive — sent as-is",
+  "@attachmentDocumentSubtitle": {
+    "description": "Subtitle for Document attachment."
+  },
+  "attachmentLocation": "Location",
+  "@attachmentLocation": {
+    "description": "Attachment option: Location."
+  },
+  "attachmentLocationSubtitle": "Share your current location",
+  "@attachmentLocationSubtitle": {
+    "description": "Subtitle for Location attachment."
+  },
+  "attachmentViewOnce": "View once",
+  "@attachmentViewOnce": {
+    "description": "Toggle switch title for View Once mode."
+  },
+  "attachmentViewOnceSubtitle": "Photo or video disappears after it's opened",
+  "@attachmentViewOnceSubtitle": {
+    "description": "Toggle switch subtitle for View Once mode."
+  },
+  "contactsTitle": "Contacts & Discover",
+  "@contactsTitle": {
+    "description": "Title of Contacts & Discover screen."
+  },
+  "contactsTabFriends": "Friends",
+  "@contactsTabFriends": {
+    "description": "Tab label for Friends list."
+  },
+  "contactsTabRequests": "Requests",
+  "@contactsTabRequests": {
+    "description": "Tab label for Incoming Requests."
+  },
+  "contactsTabDiscover": "Discover",
+  "@contactsTabDiscover": {
+    "description": "Tab label for Discover tab."
+  },
+  "contactsScanQrTooltip": "Scan QR Code",
+  "@contactsScanQrTooltip": {
+    "description": "Tooltip for Scan QR button in app bar."
+  },
+  "contactsMyHandleTooltip": "My Handle",
+  "@contactsMyHandleTooltip": {
+    "description": "Tooltip for My Handle button in app bar."
+  },
+  "contactsSetUsernamePrompt": "Set a @username in your profile first — that's what your QR code shares.",
+  "@contactsSetUsernamePrompt": {
+    "description": "Prompt when user hasn't set username for QR code."
+  },
+  "contactsMyQrCodeTitle": "My Profile QR Code",
+  "@contactsMyQrCodeTitle": {
+    "description": "Title in profile QR bottom sheet."
+  },
+  "contactsMyQrCodeSubtitle": "Friends can scan this QR code to connect with you instantly",
+  "@contactsMyQrCodeSubtitle": {
+    "description": "Subtitle in profile QR bottom sheet."
+  },
+  "contactsCopyProfileLink": "Copy Profile Link",
+  "@contactsCopyProfileLink": {
+    "description": "Button to copy profile link."
+  },
+  "contactsProfileLinkCopied": "Profile link for @{username} copied!",
+  "@contactsProfileLinkCopied": {
+    "description": "Snackbar confirming profile link copied.",
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "contactsScanSomeonesCode": "Scan Someone's Code",
+  "@contactsScanSomeonesCode": {
+    "description": "Button to scan someone else's QR code."
+  },
+  "contactsPermissionDenied": "Permission to access contacts was denied.",
+  "@contactsPermissionDenied": {
+    "description": "Snackbar when contacts permission denied."
+  },
+  "contactsNoUsersFound": "No GupShupGo users found in your contacts yet.",
+  "@contactsNoUsersFound": {
+    "description": "Snackbar when no contacts match app users."
+  },
+  "contactsFailedToSync": "Failed to sync contacts: {error}",
+  "@contactsFailedToSync": {
+    "description": "Snackbar when contacts sync fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "contactsMatchedCount": "{count} contacts on GupShupGo",
+  "@contactsMatchedCount": {
+    "description": "Header in matched contacts sheet.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsFromDeviceContacts": "From your device contacts",
+  "@contactsFromDeviceContacts": {
+    "description": "Subtitle on user tile matched from device contacts."
+  },
+  "contactsLoadFriendsError": "Couldn't load your friends.",
+  "@contactsLoadFriendsError": {
+    "description": "Error message when loading friends fails."
+  },
+  "contactsNoFriendsTitle": "No Friends Added Yet",
+  "@contactsNoFriendsTitle": {
+    "description": "Title in empty friends tab."
+  },
+  "contactsNoFriendsPrompt": "Use the Discover tab to search for users by @username, phone, or email and send them a friend request!",
+  "@contactsNoFriendsPrompt": {
+    "description": "Description in empty friends tab."
+  },
+  "contactsDiscoverPeopleButton": "Discover People",
+  "@contactsDiscoverPeopleButton": {
+    "description": "Button to switch to discover tab."
+  },
+  "contactsQuickConnectHeader": "QUICK CONNECT",
+  "@contactsQuickConnectHeader": {
+    "description": "Section header for quick connect suggestions."
+  },
+  "contactsNoSuggestions": "No suggestions available at the moment.",
+  "@contactsNoSuggestions": {
+    "description": "Empty state for quick suggestions."
+  },
+  "contactsLoadRequestsError": "Couldn't load your requests.",
+  "@contactsLoadRequestsError": {
+    "description": "Error message when loading requests fails."
+  },
+  "contactsPendingRequestsHeader": "PENDING REQUESTS ({count})",
+  "@contactsPendingRequestsHeader": {
+    "description": "Section header for pending incoming requests.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsNoPendingRequestsTitle": "No Pending Requests",
+  "@contactsNoPendingRequestsTitle": {
+    "description": "Title when there are no incoming requests."
+  },
+  "contactsNoPendingRequestsSubtitle": "When users send you a connection request, they will show up here.",
+  "@contactsNoPendingRequestsSubtitle": {
+    "description": "Subtitle when there are no incoming requests."
+  },
+  "contactsWantsToConnect": "Wants to connect",
+  "@contactsWantsToConnect": {
+    "description": "Subtitle on incoming request tile when username missing."
+  },
+  "contactsAcceptButton": "ACCEPT",
+  "@contactsAcceptButton": {
+    "description": "Button to accept friend request."
+  },
+  "contactsAcceptFailed": "Couldn't accept the request. Please try again.",
+  "@contactsAcceptFailed": {
+    "description": "Snackbar when accepting friend request fails."
+  },
+  "contactsConnectedWith": "Connected with {name}!",
+  "@contactsConnectedWith": {
+    "description": "Snackbar when friend request accepted.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "contactsDeclineFailed": "Couldn't decline the request. Please try again.",
+  "@contactsDeclineFailed": {
+    "description": "Snackbar when declining request fails."
+  },
+  "contactsYouMightKnowHeader": "YOU MIGHT KNOW",
+  "@contactsYouMightKnowHeader": {
+    "description": "Header for You Might Know suggestion grid."
+  },
+  "contactsSeeAll": "SEE ALL",
+  "@contactsSeeAll": {
+    "description": "Link to see all suggestions."
+  },
+  "contactsSearchHint": "Search name, @handle, phone or email...",
+  "@contactsSearchHint": {
+    "description": "Search hint for universal discover search."
+  },
+  "contactsTurnOnDiscoverability": "Turn on Discoverability to appear in search and suggestions.",
+  "@contactsTurnOnDiscoverability": {
+    "description": "Banner text when discoverability is disabled."
+  },
+  "contactsNoMatchingUsersTitle": "No Matching Users Found",
+  "@contactsNoMatchingUsersTitle": {
+    "description": "Title when no search results found."
+  },
+  "contactsNoMatchingUsersSubtitle": "Check the @username, phone number, or email and try again.",
+  "@contactsNoMatchingUsersSubtitle": {
+    "description": "Subtitle when no search results found."
+  },
+  "contactsDiscoverHeroTitle": "Discover People on GupShupGo",
+  "@contactsDiscoverHeroTitle": {
+    "description": "Hero title in Discover tab."
+  },
+  "contactsDiscoverHeroSubtitle": "Expand your circle with high-fidelity connections across the globe.",
+  "@contactsDiscoverHeroSubtitle": {
+    "description": "Hero subtitle in Discover tab."
+  },
+  "contactsSyncDeviceContacts": "Sync Device Contacts",
+  "@contactsSyncDeviceContacts": {
+    "description": "Title of sync device contacts card."
+  },
+  "contactsSyncingContacts": "Syncing Contacts...",
+  "@contactsSyncingContacts": {
+    "description": "Title while syncing device contacts."
+  },
+  "contactsSyncDeviceSubtitle": "Find your friends instantly from phone contacts",
+  "@contactsSyncDeviceSubtitle": {
+    "description": "Subtitle of sync device contacts card."
+  },
+  "contactsSuggestedUsersHeader": "SUGGESTED USERS",
+  "@contactsSuggestedUsersHeader": {
+    "description": "Header for suggested users list."
+  },
+  "contactsAddFriendButton": "ADD FRIEND",
+  "@contactsAddFriendButton": {
+    "description": "Button to send friend request."
+  },
+  "contactsRequestedButton": "Requested",
+  "@contactsRequestedButton": {
+    "description": "Button label when friend request was sent."
+  },
+  "contactsRequestSent": "Friend request sent to {name}!",
+  "@contactsRequestSent": {
+    "description": "Snackbar when friend request sent.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "contactsRequestFailed": "Friend request is already pending or failed.",
+  "@contactsRequestFailed": {
+    "description": "Snackbar when friend request fails or already pending."
+  },
+  "contactsRequestUnavailable": "That request is no longer available.",
+  "@contactsRequestUnavailable": {
+    "description": "Snackbar when request is no longer available."
+  },
+  "profileEditTitle": "Edit Profile",
+  "@profileEditTitle": {
+    "description": "Title of Edit Profile screen."
+  },
+  "profileSaveButton": "Save",
+  "@profileSaveButton": {
+    "description": "Button to save profile changes."
+  },
+  "profileTapToChangePhoto": "Tap to change photo",
+  "@profileTapToChangePhoto": {
+    "description": "Hint beneath avatar to change photo."
+  },
+  "profileUpgradeToPro": "Upgrade to Pro",
+  "@profileUpgradeToPro": {
+    "description": "Button to upgrade to GupShupGo Pro."
+  },
+  "profileSectionName": "YOUR NAME",
+  "@profileSectionName": {
+    "description": "Section label for user's full name."
+  },
+  "profileNameHint": "Enter your name",
+  "@profileNameHint": {
+    "description": "Placeholder for user name field."
+  },
+  "profileSectionHandle": "UNIQUE HANDLE",
+  "@profileSectionHandle": {
+    "description": "Section label for username handle."
+  },
+  "profileHandleNotSet": "Not set yet",
+  "@profileHandleNotSet": {
+    "description": "Text when username handle is not yet set."
+  },
+  "profileChangeHandle": "Change",
+  "@profileChangeHandle": {
+    "description": "Button to change username handle."
+  },
+  "profileSectionAbout": "ABOUT",
+  "@profileSectionAbout": {
+    "description": "Section label for about/bio text."
+  },
+  "profileAboutHint": "What's on your mind?",
+  "@profileAboutHint": {
+    "description": "Placeholder for about/bio text."
+  },
+  "profileDefaultAbout": "Hey there! I am using GupShupGo.",
+  "@profileDefaultAbout": {
+    "description": "Default user status message."
+  },
+  "profileSectionPhone": "PHONE",
+  "@profileSectionPhone": {
+    "description": "Section label for phone number."
+  },
+  "profileSectionEmail": "EMAIL",
+  "@profileSectionEmail": {
+    "description": "Section label for email address."
+  },
+  "profileSectionLinkedMethods": "LINKED SIGN-IN METHODS",
+  "@profileSectionLinkedMethods": {
+    "description": "Section label for linked sign-in methods."
+  },
+  "profileNotLinked": "Not linked",
+  "@profileNotLinked": {
+    "description": "Label when sign-in method is not linked."
+  },
+  "profileNameEmpty": "Name cannot be empty.",
+  "@profileNameEmpty": {
+    "description": "Validation error when name is blank."
+  },
+  "profileUpdatedSuccess": "Profile updated",
+  "@profileUpdatedSuccess": {
+    "description": "Snackbar on profile update success."
+  },
+  "profileUploadPhotoFailed": "Failed to upload photo: {error}",
+  "@profileUploadPhotoFailed": {
+    "description": "Error snackbar when photo upload fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "profileSaveFailed": "Failed to save profile: {error}",
+  "@profileSaveFailed": {
+    "description": "Error snackbar when profile saving fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "profilePoints": "Points",
+  "@profilePoints": {
+    "description": "Label for points in arcade mini stat."
+  },
+  "profileBadges": "Badges",
+  "@profileBadges": {
+    "description": "Label for badges in arcade mini stat."
+  },
+  "profileBestBond": "Best Bond",
+  "@profileBestBond": {
+    "description": "Label for best streak bond in arcade mini stat."
+  },
+  "settingsAccountCard": "Account",
+  "@settingsAccountCard": {
+    "description": "Header for Account settings card."
+  },
+  "settingsProfileTile": "Profile",
+  "@settingsProfileTile": {
+    "description": "Settings tile for Profile."
+  },
+  "settingsLinkedMethodsTile": "Linked sign-in methods",
+  "@settingsLinkedMethodsTile": {
+    "description": "Settings tile for Linked sign-in methods."
+  },
+  "settingsPhoneTile": "Phone number",
+  "@settingsPhoneTile": {
+    "description": "Settings tile for Phone number."
+  },
+  "settingsEmailTile": "Email",
+  "@settingsEmailTile": {
+    "description": "Settings tile for Email address."
+  },
+  "settingsPrivacyCard": "Privacy",
+  "@settingsPrivacyCard": {
+    "description": "Header for Privacy settings card."
+  },
+  "settingsDiscoverability": "Discoverability",
+  "@settingsDiscoverability": {
+    "description": "Switch tile for Discoverability."
+  },
+  "settingsLastSeen": "Last seen",
+  "@settingsLastSeen": {
+    "description": "Switch tile for Last seen."
+  },
+  "settingsReadReceipts": "Read receipts",
+  "@settingsReadReceipts": {
+    "description": "Switch tile for Read receipts."
+  },
+  "settingsAdPreferences": "Ad preferences",
+  "@settingsAdPreferences": {
+    "description": "Tile for Google Ad preferences."
+  },
+  "settingsManage": "Manage",
+  "@settingsManage": {
+    "description": "Button or trailing label for manage action."
+  },
+  "settingsAppearanceCard": "Appearance",
+  "@settingsAppearanceCard": {
+    "description": "Header for Appearance settings card."
+  },
+  "settingsTheme": "Theme",
+  "@settingsTheme": {
+    "description": "Tile label for Theme selection."
+  },
+  "settingsThemeLight": "Light",
+  "@settingsThemeLight": {
+    "description": "Light theme mode."
+  },
+  "settingsThemeDark": "Dark",
+  "@settingsThemeDark": {
+    "description": "Dark theme mode."
+  },
+  "settingsThemeSystem": "System",
+  "@settingsThemeSystem": {
+    "description": "System theme mode."
+  },
+  "settingsChatTheme": "Chat theme",
+  "@settingsChatTheme": {
+    "description": "Tile label for Chat theme customization."
+  },
+  "settingsHelpSecurityCard": "Help & Security",
+  "@settingsHelpSecurityCard": {
+    "description": "Header for Help & Security settings card."
+  },
+  "settingsHelpCenter": "Help Center",
+  "@settingsHelpCenter": {
+    "description": "Tile label for Help Center."
+  },
+  "settingsReportProblem": "Report a problem",
+  "@settingsReportProblem": {
+    "description": "Tile label for Report a problem."
+  },
+  "settingsE2EEShield": "End-to-end encryption (Vault)",
+  "@settingsE2EEShield": {
+    "description": "Tile label for Vault end-to-end encryption."
+  },
+  "settingsVerifySafetyNumber": "Verify safety number",
+  "@settingsVerifySafetyNumber": {
+    "description": "Tile label for Verify safety number."
+  },
+  "settingsBlockedContacts": "Blocked contacts",
+  "@settingsBlockedContacts": {
+    "description": "Tile label for Blocked contacts."
+  },
+  "settingsClearAllGupHistory": "Clear all gup history",
+  "@settingsClearAllGupHistory": {
+    "description": "Tile label for Clear all gup history."
+  },
+  "settingsRateUs": "Rate us",
+  "@settingsRateUs": {
+    "description": "Tile label for Rate us."
+  },
+  "settingsWhatsNew": "What's New",
+  "@settingsWhatsNew": {
+    "description": "Tile label for What's New."
+  },
+  "settingsCheckForUpdates": "Check for updates",
+  "@settingsCheckForUpdates": {
+    "description": "Tile label for Check for updates."
+  },
+  "settingsAppInfo": "App info",
+  "@settingsAppInfo": {
+    "description": "Tile label for App info."
+  },
+  "settingsLogOut": "Log Out",
+  "@settingsLogOut": {
+    "description": "Button to log out of the application."
+  },
+  "settingsLogOutConfirmTitle": "Log out",
+  "@settingsLogOutConfirmTitle": {
+    "description": "Title of log out confirmation dialog."
+  },
+  "settingsLogOutConfirmPrompt": "Are you sure you want to log out of GupShupGo?",
+  "@settingsLogOutConfirmPrompt": {
+    "description": "Prompt of log out confirmation dialog."
+  },
+  "settingsSigningOut": "Signing out…",
+  "@settingsSigningOut": {
+    "description": "Loading message while signing out."
+  },
+  "settingsClearChatsConfirmTitle": "Clear all chats",
+  "@settingsClearChatsConfirmTitle": {
+    "description": "Title of clear chats confirmation dialog."
+  },
+  "settingsClearChatsConfirmPrompt": "This will permanently delete all your message history. This action cannot be undone.",
+  "@settingsClearChatsConfirmPrompt": {
+    "description": "Prompt of clear chats confirmation dialog."
+  },
+  "settingsDeleteAll": "Delete All",
+  "@settingsDeleteAll": {
+    "description": "Confirm button in clear chats dialog."
+  },
+  "settingsClearingChats": "Clearing chats...",
+  "@settingsClearingChats": {
+    "description": "Snackbar while clearing chats."
+  },
+  "settingsAllChatsCleared": "All chats cleared",
+  "@settingsAllChatsCleared": {
+    "description": "Snackbar when all chats cleared."
+  },
+  "settingsClearChatsFailed": "Failed to clear chats: {error}",
+  "@settingsClearChatsFailed": {
+    "description": "Snackbar when clearing chats fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsChooseThemeTitle": "Choose theme",
+  "@settingsChooseThemeTitle": {
+    "description": "Title in theme selection bottom sheet."
+  },
+  "settingsUnlockPremiumFeatures": "Unlock premium features",
+  "@settingsUnlockPremiumFeatures": {
+    "description": "Subtitle on Pro card when not subscribed."
+  },
+  "settingsProDaysLeft": "{planLabel} · {daysRemaining} days left",
+  "@settingsProDaysLeft": {
+    "description": "Subtitle on Pro card with remaining subscription days.",
+    "placeholders": {
+      "planLabel": {
+        "type": "String"
+      },
+      "daysRemaining": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsCheckingForUpdates": "Checking for updates…",
+  "@settingsCheckingForUpdates": {
+    "description": "Loading message while checking for updates."
+  },
+  "settingsUpToDate": "You're on the latest version (v{version}).",
+  "@settingsUpToDate": {
+    "description": "Snackbar confirming app is up to date.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUpdateCheckUnavailable": "Couldn't check for updates. Make sure GupShupGo was installed from the Google Play Store.",
+  "@settingsUpdateCheckUnavailable": {
+    "description": "Snackbar when update check is unavailable."
+  },
+  "settingsNoBlockedContacts": "No blocked contacts",
+  "@settingsNoBlockedContacts": {
+    "description": "Empty state in blocked contacts sheet."
+  },
+  "settingsUnblock": "Unblock",
+  "@settingsUnblock": {
+    "description": "Action button to unblock a user."
+  },
+  "settingsUserUnblocked": "{name} unblocked",
+  "@settingsUserUnblocked": {
+    "description": "Snackbar when a user is unblocked.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsVerifyContactTitle": "Verify a contact",
+  "@settingsVerifyContactTitle": {
+    "description": "Header in verify safety number sheet."
+  },
+  "settingsVerifyContactSubtitle": "Select a contact to view your shared safety number.",
+  "@settingsVerifyContactSubtitle": {
+    "description": "Subtitle in verify safety number sheet."
+  },
+  "settingsComputingSafetyNumber": "Computing safety number…",
+  "@settingsComputingSafetyNumber": {
+    "description": "Loading message while computing safety number."
+  },
+  "settingsSafetyNumberExplanation": "If the number below matches on {name}'s device, your end-to-end encryption is verified.",
+  "@settingsSafetyNumberExplanation": {
+    "description": "Explanation text in safety number dialog.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSafetyNumberNoBundle": "This contact hasn't published an encryption key bundle yet. They may be using an older version of GupShupGo.",
+  "@settingsSafetyNumberNoBundle": {
+    "description": "Notice when peer hasn't published key bundle."
+  },
+  "settingsSafetyNumberCompareHint": "Compare this number in person or over a trusted call.",
+  "@settingsSafetyNumberCompareHint": {
+    "description": "Footer hint in safety number dialog."
+  },
+  "callEndToEndEncrypted": "End-to-end encrypted",
+  "@callEndToEndEncrypted": {
+    "description": "Label indicating call is end-to-end encrypted."
+  },
+  "callSecuring": "Securing call…",
+  "@callSecuring": {
+    "description": "Badge status when establishing call encryption."
+  },
+  "callNotEncrypted": "Not encrypted",
+  "@callNotEncrypted": {
+    "description": "Badge status when call is not encrypted."
+  },
+  "callIncomingVoice": "Incoming Voice Call",
+  "@callIncomingVoice": {
+    "description": "Title on incoming voice call."
+  },
+  "callIncomingVideo": "Incoming Video Call",
+  "@callIncomingVideo": {
+    "description": "Title on incoming video call."
+  },
+  "callVoiceCall": "Voice Call",
+  "@callVoiceCall": {
+    "description": "Subtitle for voice call."
+  },
+  "callVideoCall": "Video Call",
+  "@callVideoCall": {
+    "description": "Subtitle for video call."
+  },
+  "callDecline": "Decline",
+  "@callDecline": {
+    "description": "Decline incoming call button."
+  },
+  "callAccept": "Accept",
+  "@callAccept": {
+    "description": "Accept incoming call button."
+  },
+  "callConnecting": "Connecting...",
+  "@callConnecting": {
+    "description": "Status text while connecting call."
+  },
+  "callSettingUp": "Setting up call...",
+  "@callSettingUp": {
+    "description": "Status text while setting up call."
+  },
+  "callNotifying": "Notifying {name}...",
+  "@callNotifying": {
+    "description": "Status text while notifying remote callee.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "callRinging": "Ringing...",
+  "@callRinging": {
+    "description": "Status text while call is ringing."
+  },
+  "callConnected": "Connected",
+  "@callConnected": {
+    "description": "Status text when call is connected."
+  },
+  "callOnHold": "On hold",
+  "@callOnHold": {
+    "description": "Status text when call is on hold."
+  },
+  "callCalling": "Calling...",
+  "@callCalling": {
+    "description": "Status text when calling."
+  },
+  "callWaitingForUser": "Waiting for remote user...",
+  "@callWaitingForUser": {
+    "description": "Status text when waiting for remote user video."
+  },
+  "callEnded": "Call Ended",
+  "@callEnded": {
+    "description": "Status text when call has ended."
+  },
+  "callDeclined": "Call Declined",
+  "@callDeclined": {
+    "description": "Status text when call was declined."
+  },
+  "callNoAnswer": "No Answer",
+  "@callNoAnswer": {
+    "description": "Status text when call timed out or was not answered."
+  },
+  "callFailedToConnect": "Failed to connect",
+  "@callFailedToConnect": {
+    "description": "Status text when connection fails."
+  },
+  "callFailedToStart": "Failed to start call: {error}",
+  "@callFailedToStart": {
+    "description": "Snackbar when call fails to start.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "callTokenExpired": "Token expired or invalid. Please restart the call.",
+  "@callTokenExpired": {
+    "description": "Snackbar when RTC token expired."
+  },
+  "callFailedToInit": "Failed to initialize {type} call: {error}",
+  "@callFailedToInit": {
+    "description": "Snackbar when call initialization fails.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "callTurnOffSpeaker": "Turn off speaker",
+  "@callTurnOffSpeaker": {
+    "description": "Tooltip to turn off speaker."
+  },
+  "callTurnOnSpeaker": "Turn on speaker",
+  "@callTurnOnSpeaker": {
+    "description": "Tooltip to turn on speaker."
+  },
+  "callMuteMic": "Mute microphone",
+  "@callMuteMic": {
+    "description": "Tooltip to mute microphone."
+  },
+  "callUnmuteMic": "Unmute microphone",
+  "@callUnmuteMic": {
+    "description": "Tooltip to unmute microphone."
+  },
+  "callEndCall": "End call",
+  "@callEndCall": {
+    "description": "Tooltip to end call."
+  },
+  "callSwitchCamera": "Switch camera",
+  "@callSwitchCamera": {
+    "description": "Tooltip to switch camera."
+  },
+  "callTurnOffCamera": "Turn off camera",
+  "@callTurnOffCamera": {
+    "description": "Tooltip to turn off camera."
+  },
+  "callTurnOnCamera": "Turn on camera",
+  "@callTurnOnCamera": {
+    "description": "Tooltip to turn on camera."
+  },
+  "statusViewedByCount": "Viewed by {count}",
+  "@statusViewedByCount": {
+    "description": "Header showing how many viewed the status.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statusNoViewsYet": "No views yet",
+  "@statusNoViewsYet": {
+    "description": "Empty state when status has no views."
+  },
+  "statusViewCount": "{count, plural, =1{1 view} other{{count} views}}",
+  "@statusViewCount": {
+    "description": "Viewer count string on status view.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statusDeleteTitle": "Delete Status",
+  "@statusDeleteTitle": {
+    "description": "Title of delete status dialog."
+  },
+  "statusDeleteConfirm": "Are you sure you want to delete this status?",
+  "@statusDeleteConfirm": {
+    "description": "Confirmation prompt to delete status."
+  },
+  "statusDeleteButton": "Delete",
+  "@statusDeleteButton": {
+    "description": "Delete button in dialog."
+  },
+  "statusReplySent": "Reply sent",
+  "@statusReplySent": {
+    "description": "Snackbar confirming status reply sent."
+  },
+  "statusReplyFailed": "Failed to send reply: {error}",
+  "@statusReplyFailed": {
+    "description": "Snackbar when status reply fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "statusNoActive": "No active status",
+  "@statusNoActive": {
+    "description": "Empty state when no active status items."
+  },
+  "statusCouldNotLoad": "Couldn't load this update",
+  "@statusCouldNotLoad": {
+    "description": "Error message when status cannot be decrypted."
+  },
+  "statusTapToRetry": "Tap to retry",
+  "@statusTapToRetry": {
+    "description": "Prompt to tap and retry loading status."
+  },
+  "statusFailedToLoadImage": "Failed to load image",
+  "@statusFailedToLoadImage": {
+    "description": "Error message when status image fails to load."
+  },
+  "statusLoadingVideo": "Loading video...",
+  "@statusLoadingVideo": {
+    "description": "Loading message for status video."
+  },
+  "statusEnterTextPrompt": "Please enter some text",
+  "@statusEnterTextPrompt": {
+    "description": "Warning when trying to post empty text status."
+  },
+  "statusNoContactsNotice": "No contacts yet — start a chat before posting a status.",
+  "@statusNoContactsNotice": {
+    "description": "Warning when user has no contacts for status."
+  },
+  "statusPostFailed": "Failed to post status: {error}",
+  "@statusPostFailed": {
+    "description": "Snackbar when posting status fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "statusTypeHint": "Type a status...",
+  "@statusTypeHint": {
+    "description": "Hint text for text status editor."
+  },
+  "statusCamera": "Camera",
+  "@statusCamera": {
+    "description": "Media picker Camera option."
+  },
+  "statusTakePhoto": "Take a photo",
+  "@statusTakePhoto": {
+    "description": "Subtitle to take a photo."
+  },
+  "statusGalleryPhoto": "Gallery Photo",
+  "@statusGalleryPhoto": {
+    "description": "Media picker Gallery Photo option."
+  },
+  "statusChooseImageGallery": "Choose an image from gallery",
+  "@statusChooseImageGallery": {
+    "description": "Subtitle to choose photo from gallery."
+  },
+  "statusRecordVideo": "Record Video",
+  "@statusRecordVideo": {
+    "description": "Media picker Record Video option."
+  },
+  "statusRecordShortVideo": "Record a short video",
+  "@statusRecordShortVideo": {
+    "description": "Subtitle to record short video."
+  },
+  "statusGalleryVideo": "Gallery Video",
+  "@statusGalleryVideo": {
+    "description": "Media picker Gallery Video option."
+  },
+  "statusChooseVideoGallery": "Choose a video from gallery",
+  "@statusChooseVideoGallery": {
+    "description": "Subtitle to choose video from gallery."
+  },
+  "statusFailedPickImage": "Failed to pick image: {error}",
+  "@statusFailedPickImage": {
+    "description": "Snackbar when picking image fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "statusFailedPickVideo": "Failed to pick video: {error}",
+  "@statusFailedPickVideo": {
+    "description": "Snackbar when picking video fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "statusChangeBgColorTooltip": "Change background color",
+  "@statusChangeBgColorTooltip": {
+    "description": "Tooltip for changing status background color."
+  },
+  "aiMessagesRemaining": "{count} left",
+  "@aiMessagesRemaining": {
+    "description": "Chip label showing remaining AI messages.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "aiQuotaDialogTitle": "GupAI messages",
+  "@aiQuotaDialogTitle": {
+    "description": "Title of AI quota info dialog."
+  },
+  "aiQuotaRemainingOfTotal": "{remaining} of {total} left today",
+  "@aiQuotaRemainingOfTotal": {
+    "description": "Quota status text.",
+    "placeholders": {
+      "remaining": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "aiQuotaUsedResetNote": "Used {used} today · resets tomorrow. Watch an ad or go Pro for more.",
+  "@aiQuotaUsedResetNote": {
+    "description": "Quota explanation footer note.",
+    "placeholders": {
+      "used": {
+        "type": "int"
+      }
+    }
+  },
+  "aiQuotaGotIt": "Got it",
+  "@aiQuotaGotIt": {
+    "description": "Dismiss button in quota dialog."
+  },
+  "aiTitle": "GupAI",
+  "@aiTitle": {
+    "description": "App bar title for AI Assistant."
+  },
+  "aiSubtitle": "Your in-app assistant",
+  "@aiSubtitle": {
+    "description": "App bar subtitle for AI Assistant."
+  },
+  "aiEmptyHelpTitle": "How can I help?",
+  "@aiEmptyHelpTitle": {
+    "description": "Greeting title on empty AI chat."
+  },
+  "aiEmptyHelpSubtitle": "Draft replies, translate, summarise, brainstorm, or just ask a question. Tap an idea to start.",
+  "@aiEmptyHelpSubtitle": {
+    "description": "Description on empty AI chat."
+  },
+  "meshOfflineChatConnected": "Offline chat · connected",
+  "@meshOfflineChatConnected": {
+    "description": "Status text when mesh peer connected."
+  },
+  "meshConnecting": "Connecting…",
+  "@meshConnecting": {
+    "description": "Status text when mesh peer is connecting."
+  },
+  "meshBannerNotice": "Offline chat — no internet, no servers",
+  "@meshBannerNotice": {
+    "description": "Banner explaining offline mesh mode."
+  },
+  "meshSayHiTo": "Say hi to {name}",
+  "@meshSayHiTo": {
+    "description": "Empty state title in mesh chat.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "meshOfflineDescription": "You're in offline chat. Messages stay between you and {name}.",
+  "@meshOfflineDescription": {
+    "description": "Empty state description in mesh chat.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "meshMediaUnavailable": "This media is no longer available.",
+  "@meshMediaUnavailable": {
+    "description": "Snackbar when view once media is gone."
+  },
+  "meshViewOnceTitle": "View once",
+  "@meshViewOnceTitle": {
+    "description": "Title of view once confirmation modal."
+  },
+  "meshViewOncePrompt": "You can only open this {type} one time. It closes for good when you leave.",
+  "@meshViewOncePrompt": {
+    "description": "Prompt explaining view once limitations.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "arcadeTabOverview": "Overview",
+  "@arcadeTabOverview": {
+    "description": "Arcade tab label for Overview."
+  },
+  "arcadeTabChallenges": "Challenges",
+  "@arcadeTabChallenges": {
+    "description": "Arcade tab label for Challenges."
+  },
+  "arcadeTabLeaderboard": "Leaderboard",
+  "@arcadeTabLeaderboard": {
+    "description": "Arcade tab label for Leaderboard."
+  },
+  "arcadeFailedLoadStats": "Failed to load reputation stats.",
+  "@arcadeFailedLoadStats": {
+    "description": "Error message when arcade stats fail to load."
+  },
+  "aiAskHint": "Ask GupAI anything…",
+  "@aiAskHint": {
+    "description": "Hint text for AI composer input field."
+  }
 }

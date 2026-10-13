@@ -6,9 +6,11 @@ arb-dir: lib/l10n
 template-arb-file: app_en.arb
 output-localization-file: app_localizations.dart
 output-class: AppLocalizations
+output-dir: lib/l10n
 # Non-nullable getter: AppLocalizations.of(context) returns a non-null instance
 # (the delegates are always installed in MaterialApp), so call sites stay clean.
 nullable-getter: false
 # Emit untranslated-key reports during generation so missing translations are
 # visible in CI/build logs rather than silently falling back to English.
 untranslated-messages-file: lib/l10n/untranslated.txt
+
