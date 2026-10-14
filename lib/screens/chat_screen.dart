@@ -78,6 +78,7 @@ import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/widgets/ai/ai_action_sheet.dart';
 import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
+import 'package:video_chat_app/widgets/notification_permission_prompt.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class Contact {
@@ -414,6 +415,16 @@ class _ChatScreenState extends State<ChatScreen> {
     SignalService.instance
         .prewarmSessions([widget.currentUserId, widget.contact.id]);
     _scrollController.addListener(_onScroll);
+
+    // Opening a chat is the natural moment to ask about notifications — this is
+    // where they matter. Deferred here (once, soft-ask) instead of firing at
+    // sign-in with the rest of the onboarding prompts. Post-frame so the
+    // Navigator exists before showDialog.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(NotificationPermissionPrompt.maybeAsk(context,
+          userId: widget.currentUserId));
+    });
   }
 
   @override
@@ -2990,23 +3001,8 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // GupAI compose-help: rewrite the draft, or suggest replies to the
-          // last message. Gated behind the in-chat flag.
-          if (_aiInChatEnabled)
-            IconButton(
-              tooltip: 'GupAI',
-              icon: _aiSuggesting
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: c.primary),
-                    )
-                  : Icon(Icons.auto_awesome_rounded, color: c.primary, size: 22),
-              onPressed: _aiSuggesting ? null : _showComposeHelp,
-            ),
-          // Attachment Paperclip
-          // Attachment Paperclip. One button for photo, video *and* document —
+          // Attachment paperclip — stays outside, on the left. One button for
+          // photo, video, document, location *and* screen share —
           // tapping it opens a chooser sheet; while any of them is uploading it
           // becomes the shared progress ring. Only one can ever be in flight
           // (the sheet is unreachable behind the ring), so the composer reads
@@ -3069,6 +3065,33 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               child: Row(
                 children: [
+                  // GupAI compose-help, inside the field on the left — rewrite
+                  // the draft, or suggest replies to the last message. Gated
+                  // behind the in-chat flag.
+                  if (_aiInChatEnabled)
+                    Tooltip(
+                      message: 'GupAI',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _aiSuggesting ? null : _showComposeHelp,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 2),
+                          child: NewFeatureDot(
+                            anchor: NewFeatureAnchor.chatComposerAi,
+                            offset: NewFeatureDot.narrowGlyph,
+                            child: _aiSuggesting
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: c.primary),
+                                  )
+                                : Icon(Icons.auto_awesome_rounded,
+                                    color: c.primary, size: 22),
+                          ),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: TextField(
                       controller: _messageController,
@@ -3099,8 +3122,14 @@ class _ChatScreenState extends State<ChatScreen> {
                         focusedBorder: InputBorder.none,
                         fillColor: Colors.transparent,
                         filled: false,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 12),
+                        contentPadding: EdgeInsets.only(
+                          // Tighten the left gap when the ✨ prefix is present so
+                          // the hint sits just after it, not double-indented.
+                          left: _aiInChatEnabled ? 6 : 18,
+                          right: 16,
+                          top: 12,
+                          bottom: 12,
+                        ),
                       ),
                       onSubmitted: (_) => _sendMessage(),
                     ),
@@ -3144,37 +3173,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
-          ),
-
-          // Optional Screen Share shortcut
-          const SizedBox(width: 4),
-          IconButton(
-            icon: _startingScreenShare
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                          c.isDark ? Colors.white54 : c.textMid),
-                    ),
-                  )
-                : Icon(Icons.screen_share_rounded,
-                    color: c.isDark ? Colors.white54 : c.textMid, size: 20),
-            tooltip: 'Share screen',
-            onPressed: _startingScreenShare
-                ? null
-                : () {
-                    if (PremiumGate.checkAndPrompt(
-                      context,
-                      featureName: 'Screen Sharing',
-                      featureIcon: Icons.screen_share_rounded,
-                      description:
-                          'Share your screen live during chats with GupShupGo Pro.',
-                    )) {
-                      _initiateScreenShare();
-                    }
-                  },
           ),
         ],
       ),
@@ -3952,6 +3950,23 @@ class _ChatScreenState extends State<ChatScreen> {
           kind: AttachmentKind.location,
           newFeatureId: NewFeature.locationShare,
           onTap: (_) => _pickAndSendLocation(),
+        ),
+        // Screen share lives here now (moved out of the composer row to
+        // declutter it). Still Pro-gated; the upgrade prompt and the session
+        // launch both fire after the sheet is dismissed.
+        AttachmentAction(
+          kind: AttachmentKind.screenShare,
+          onTap: (_) {
+            if (PremiumGate.checkAndPrompt(
+              context,
+              featureName: 'Screen Sharing',
+              featureIcon: Icons.screen_share_rounded,
+              description:
+                  'Share your screen live during chats with GupShupGo Pro.',
+            )) {
+              _initiateScreenShare();
+            }
+          },
         ),
       ],
       viewOnce: const AttachmentViewOnce(
@@ -4857,6 +4872,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Composer ✨ → a contextual menu of compose-help actions.
   Future<void> _showComposeHelp() async {
+    // Tapping the ✨ counts as discovering GupAI's in-chat powers — clear the dot.
+    WhatsNewService.instance.markSeen(NewFeature.aiInChat);
     final c = AppThemeColors.of(context);
     final hasDraft = _messageController.text.trim().isNotEmpty;
     final hasIncoming = _lastIncomingText() != null;

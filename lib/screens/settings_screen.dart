@@ -28,12 +28,15 @@ import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/notification_service.dart';
+import 'package:video_chat_app/services/fcm_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/screens/premium_screen.dart';
 import 'package:video_chat_app/widgets/premium_badge.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
+import 'package:video_chat_app/utils/url_opener.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
 import 'package:video_chat_app/widgets/update_dialogs.dart';
 
@@ -54,16 +57,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late UserModel _user;
   Map<String, bool> _notifPrefs = {};
 
+  /// Whether the OS currently permits notifications. Drives the Notifications
+  /// settings row's On/Off status; refreshed on open.
+  bool _notificationsOn = false;
+
   @override
   void initState() {
     super.initState();
     _user = widget.currentUser;
     _loadNotifPrefs();
+    _loadNotificationStatus();
   }
 
   Future<void> _loadNotifPrefs() async {
     final prefs = await NotificationService.instance.getPreferences();
     if (mounted) setState(() => _notifPrefs = prefs);
+  }
+
+  Future<void> _loadNotificationStatus() async {
+    final on = await FCMService().hasNotificationPermission();
+    if (mounted) setState(() => _notificationsOn = on);
+  }
+
+  /// Settings entry point to (re)enable notifications after the onboarding
+  /// soft-ask was declined. If the OS permission can still be requested in-app
+  /// this grants it; once the OS has hard-denied it, only system settings can
+  /// change it, so we deep-link there.
+  Future<void> _manageNotifications() async {
+    final fcm = FCMService();
+    if (!await fcm.hasNotificationPermission()) {
+      // Try the in-app request first (works until the OS one-shot is spent).
+      await fcm.setupFCM(userId: _user.id, requestPermissions: true);
+    }
+    final nowOn = await fcm.hasNotificationPermission();
+    if (!mounted) return;
+    setState(() => _notificationsOn = nowOn);
+    final l10n = AppLocalizations.of(context);
+
+    if (nowOn) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text(l10n.settingsNotificationsEnabledToast),
+          behavior: SnackBarBehavior.floating,
+        ));
+      return;
+    }
+
+    // Still off → the OS has hard-denied; only system settings can change it.
+    final c = AppThemeColors.of(context);
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surfaceAlt,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: c.border, width: 1),
+        ),
+        title: Text(
+          l10n.settingsEnableNotificationsTitle,
+          style: GoogleFonts.poppins(
+              color: c.textHigh, fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          l10n.settingsEnableNotificationsBody,
+          style:
+              GoogleFonts.poppins(color: c.textMid, fontSize: 13, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.commonCancel,
+                style: GoogleFonts.poppins(
+                    color: c.textMid, fontWeight: FontWeight.w600)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: c.primary,
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.settingsOpenSystemSettings,
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (open == true) await openAppSettings();
   }
 
   Future<void> _setNotifPref(String key, bool value) async {
@@ -619,6 +700,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _buildStitchDivider(),
               _buildStitchTile(
+                icon: Icons.notifications_active_outlined,
+                title: l10n.settingsNotificationsTile,
+                trailingText: _notificationsOn
+                    ? l10n.settingsNotificationsStatusOn
+                    : l10n.settingsNotificationsStatusOff,
+                onTap: _manageNotifications,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
                 icon: Icons.shield_outlined,
                 title: l10n.settingsE2EEShield,
                 onTap: _openVaultSettings,
@@ -668,6 +758,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // away from the version the What's New dialog announces.
                 trailingText: 'v$kCurrentVersion',
                 onTap: _showAboutDialog,
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.privacy_tip_outlined,
+                title: l10n.settingsPrivacyPolicy,
+                onTap: () =>
+                    openExternalUrl(context, 'https://www.gupshupgo.app/privacy'),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.description_outlined,
+                title: l10n.settingsTerms,
+                onTap: () =>
+                    openExternalUrl(context, 'https://www.gupshupgo.app/terms'),
+              ),
+              _buildStitchDivider(),
+              _buildStitchTile(
+                icon: Icons.no_accounts_outlined,
+                title: l10n.settingsDeleteAccount,
+                onTap: () => openExternalUrl(
+                    context, 'https://www.gupshupgo.app/delete-account'),
               ),
             ],
           ),

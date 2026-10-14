@@ -125,13 +125,15 @@ class FCMService {
     }
   }
 
-  Future<void> setupFCM({required String userId}) async {
-    print('Setting up FCM for user: $userId');
+  /// Requests the OS permissions messaging needs: notification permission
+  /// (iOS/FCM + Android 13+ POST_NOTIFICATIONS) and CallKit's call-UI
+  /// permissions. Deferred behind an explicit opt-in — see [setupFCM]'s
+  /// `requestPermissions` flag — so these system dialogs never fire on the
+  /// cold-start path (sign-in / resume / home init). Every step is non-fatal.
+  Future<void> _requestMessagingPermissions() async {
     final FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1: Request notification permission (non-fatal if denied)
-    // ═══════════════════════════════════════════════════════════════════════
+    // iOS / FCM notification permission.
     try {
       final settings = await messaging.requestPermission(
         alert: true,
@@ -145,12 +147,8 @@ class FCMService {
       print('Permission request error (non-fatal): $e');
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1b: Android 13+ (API 33) runtime permission for POST_NOTIFICATIONS
-    // FirebaseMessaging.requestPermission() only handles iOS permission and
-    // FCM's internal state — it does NOT trigger the Android OS-level runtime
-    // permission dialog. Without this, notifications are silently blocked.
-    // ═══════════════════════════════════════════════════════════════════════
+    // Android 13+ (API 33) runtime POST_NOTIFICATIONS — requestPermission()
+    // above only handles iOS/FCM state, not the Android OS-level dialog.
     if (Platform.isAndroid) {
       try {
         final notifStatus = await Permission.notification.status;
@@ -165,15 +163,10 @@ class FCMService {
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1c: CallKit permissions for incoming-call UI (once per process)
-    // Requested here — after sign-in, when we wire up call receiving — rather
-    // than on the login screen, so we never prompt before the user is in.
+    // CallKit permissions for incoming-call UI (once per process):
     //   • requestNotificationPermission → CallKit's heads-up notification
-    //     (shares Android 13+ POST_NOTIFICATIONS, already handled above)
     //   • requestFullIntentPermission   → USE_FULL_SCREEN_INTENT (Android 14+),
     //     needed to show the full-screen incoming-call screen over the lock UI
-    // ═══════════════════════════════════════════════════════════════════════
     if (!_callKitPermissionsRequested) {
       _callKitPermissionsRequested = true;
       try {
@@ -187,6 +180,42 @@ class FCMService {
       } catch (e) {
         print('CallKit permission request error (non-fatal): $e');
       }
+    }
+  }
+
+  /// Whether the OS currently lets us show notifications. Lets the soft-ask skip
+  /// prompting when permission is already granted (e.g. a returning user).
+  Future<bool> hasNotificationPermission() async {
+    try {
+      if (Platform.isAndroid) {
+        return (await Permission.notification.status).isGranted;
+      }
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      return s.authorizationStatus == AuthorizationStatus.authorized ||
+          s.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Registers this device for messaging: push token, topics, and the
+  /// foreground/background handlers. Safe to call repeatedly.
+  ///
+  /// It does NOT prompt for OS permissions by default — notification and CallKit
+  /// dialogs are deferred out of the cold-start path so first launch isn't a
+  /// wall of system prompts. Pass [requestPermissions] true only from the
+  /// contextual soft-ask (NotificationPermissionPrompt); after the user grants,
+  /// this is called again so the token registers (iOS won't mint one until the
+  /// permission exists).
+  Future<void> setupFCM({
+    required String userId,
+    bool requestPermissions = false,
+  }) async {
+    print('Setting up FCM for user: $userId');
+    final FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    if (requestPermissions) {
+      await _requestMessagingPermissions();
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
@@ -43,52 +44,55 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
   }
 
   Future<void> _linkGoogle() async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _isLinkingGoogle = true;
       _errorMessage = null;
     });
     try {
       await _authService.linkGoogleProvider();
+      if (!mounted) return;
       setState(() {
         _isLinkingGoogle = false;
         _googleLinked = true;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Google account linked successfully!'),
+        SnackBar(
+          content: Text(l10n.linkGoogleSuccess),
           backgroundColor: Colors.green,
         ),
       );
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       setState(() => _isLinkingGoogle = false);
       if (e.code == 'credential-already-in-use' ||
           e.code == 'account-exists-with-different-credential') {
-        setState(() => _errorMessage =
-            'This Google account is already registered as a separate GupShupGo account. '
-                'To merge, sign out and sign in with Google, then link your phone number from settings.');
+        setState(() => _errorMessage = l10n.linkGoogleAlreadyUsed);
       } else {
-        setState(() => _errorMessage = e.message ?? 'Failed to link Google.');
+        setState(() => _errorMessage = e.message ?? l10n.linkGoogleFailed);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLinkingGoogle = false;
         _errorMessage = e.toString().contains('No active session')
-            ? 'Session expired. Please sign in again.'
-            : 'Google linking failed. Try again.';
+            ? l10n.linkSessionExpired
+            : l10n.linkGoogleFailed;
       });
     }
   }
 
   Future<void> _linkEmail() async {
+    final l10n = AppLocalizations.of(context);
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
     if (email.isEmpty || !email.contains('@')) {
-      setState(() => _errorMessage = 'Enter a valid email address.');
+      setState(() => _errorMessage = l10n.linkEmailInvalid);
       return;
     }
     if (password.length < 6) {
-      setState(() => _errorMessage = 'Password must be at least 6 characters.');
+      setState(() => _errorMessage = l10n.linkPasswordTooShort);
       return;
     }
 
@@ -98,40 +102,41 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
     });
     try {
       await _authService.linkEmailProvider(email: email, password: password);
+      if (!mounted) return;
       setState(() {
         _isLinkingEmail = false;
         _emailLinked = true;
         _showEmailForm = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Email linked successfully!'),
+        SnackBar(
+          content: Text(l10n.linkEmailSuccess),
           backgroundColor: Colors.green,
         ),
       );
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       setState(() => _isLinkingEmail = false);
       if (e.code == 'email-already-in-use' ||
           e.code == 'credential-already-in-use') {
-        setState(() => _errorMessage =
-            'This email is already registered separately on GupShupGo. '
-                'Sign in with email first, then link your phone from settings.');
+        setState(() => _errorMessage = l10n.linkEmailAlreadyInUse);
       } else if (e.code == 'provider-already-linked') {
-        setState(() =>
-            _errorMessage = 'An email is already linked to your account.');
+        setState(() => _errorMessage = l10n.linkEmailAlreadyLinked);
       } else {
-        setState(() => _errorMessage = e.message ?? 'Failed to link email.');
+        setState(() => _errorMessage = e.message ?? l10n.linkEmailFailed);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLinkingEmail = false;
-        _errorMessage = 'Email linking failed. Try again.';
+        _errorMessage = l10n.linkEmailFailed;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final linkedProviders = _authService.getLinkedProviders();
     final alreadyHasGoogle =
@@ -148,7 +153,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
           TextButton(
             onPressed: _goHome,
             child: Text(
-              'Skip',
+              l10n.linkSkip,
               style: TextStyle(fontSize: 15, color: c.textMid),
             ),
           ),
@@ -163,7 +168,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
               Icon(Icons.link_rounded, size: 64, color: c.primary),
               const SizedBox(height: 20),
               Text(
-                'Add a backup sign-in method',
+                l10n.linkBackupTitle,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 22,
@@ -172,7 +177,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Link Google or email so you can sign back in\neven if your SIM is unavailable.',
+                l10n.linkBackupSubtitle,
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: c.textMid),
               ),
@@ -182,10 +187,10 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
               _LinkTile(
                 icon: Icons.g_mobiledata,
                 iconColor: Colors.red,
-                title: 'Link Google Account',
+                title: l10n.linkGoogleTitle,
                 subtitle: alreadyHasGoogle
-                    ? 'Linked ✓'
-                    : 'One-tap sign-in without SIM',
+                    ? l10n.linkGoogleSubtitleLinked
+                    : l10n.linkGoogleSubtitleUnlinked,
                 trailing: alreadyHasGoogle
                     ? const Icon(Icons.check_circle, color: Colors.green)
                     : _isLinkingGoogle
@@ -204,7 +209,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                                   side:
                                       BorderSide(color: c.border)),
                             ),
-                            child: const Text('Link'),
+                            child: Text(l10n.linkGoogleAction),
                           ),
               ),
 
@@ -214,16 +219,16 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
               _LinkTile(
                 icon: Icons.email_outlined,
                 iconColor: Colors.blue,
-                title: 'Link Email & Password',
+                title: l10n.linkEmailTitle,
                 subtitle: alreadyHasEmail
-                    ? 'Linked ✓'
-                    : 'Sign in with email if no SIM or Google',
+                    ? l10n.linkEmailSubtitleLinked
+                    : l10n.linkEmailSubtitleUnlinked,
                 trailing: alreadyHasEmail
                     ? const Icon(Icons.check_circle, color: Colors.green)
                     : TextButton(
                         onPressed: () =>
                             setState(() => _showEmailForm = !_showEmailForm),
-                        child: Text(_showEmailForm ? 'Cancel' : 'Add'),
+                        child: Text(_showEmailForm ? l10n.linkEmailActionCancel : l10n.linkEmailActionAdd),
                       ),
               ),
 
@@ -234,7 +239,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
                   decoration: InputDecoration(
-                    labelText: 'Email',
+                    labelText: l10n.linkEmailFieldLabel,
                     prefixIcon: const Icon(Icons.email_outlined),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
@@ -245,7 +250,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
-                    labelText: 'Create a password',
+                    labelText: l10n.linkPasswordFieldLabel,
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(_obscurePassword
@@ -256,7 +261,7 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                     ),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
-                    helperText: 'Minimum 6 characters',
+                    helperText: l10n.linkPasswordHelper,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -274,8 +279,8 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                           width: 20,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
-                      : const Text('Link Email',
-                          style: TextStyle(color: Colors.white, fontSize: 15)),
+                      : Text(l10n.linkEmailButton,
+                          style: const TextStyle(color: Colors.white, fontSize: 15)),
                 ),
               ],
 
@@ -320,8 +325,8 @@ class _LinkAccountsScreenState extends State<LinkAccountsScreen> {
                 ),
                 child: Text(
                   (alreadyHasGoogle || alreadyHasEmail)
-                      ? 'Continue to App'
-                      : 'Skip for Now',
+                      ? l10n.linkContinueToApp
+                      : l10n.linkSkipForNow,
                   style: const TextStyle(fontSize: 16, color: Colors.white),
                 ),
               ),

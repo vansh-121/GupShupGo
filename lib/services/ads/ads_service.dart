@@ -50,6 +50,12 @@ class AdsService extends ChangeNotifier {
   bool _starting = false;
   bool _wired = false;
 
+  /// How many callers are currently asking the banner to stay hidden. A count,
+  /// not a bool, so overlapping suppressors (e.g. a dialog shown over another)
+  /// compose correctly — the banner returns only when the last one releases.
+  /// See [suppressBanner].
+  int _bannerSuppressors = 0;
+
   /// Whether the Mobile Ads SDK has been initialised and may be asked for ads.
   bool get isReady => _sdkReady;
 
@@ -159,6 +165,12 @@ class AdsService extends ChangeNotifier {
   /// call can arrive over any screen, so this is the belt to the placement
   /// rules' braces: it guarantees no banner is ever live under call UI, which
   /// would be both an obscured-ad policy problem and an accidental-click risk.
+  ///
+  /// A banner is also withheld while something has called [suppressBanner] —
+  /// used while a text-entry modal (e.g. the vault PIN dialog) is open. The
+  /// banner's `AdWidget` is an Android platform view, and attaching/refreshing
+  /// one while the soft keyboard is up dismisses the keyboard; a banner behind a
+  /// modal is "obscured" under AdMob policy anyway, so it should not be live.
   bool canShowBanner({
     required bool hasProEntitlement,
     required CallState callState,
@@ -167,8 +179,26 @@ class AdsService extends ChangeNotifier {
         _flags.adsBannerEnabled &&
         !hasProEntitlement &&
         callState == CallState.Idle &&
+        _bannerSuppressors == 0 &&
         _consent.canRequestAds &&
         _sdkReady;
+  }
+
+  /// Hide the banner until the matching [releaseBannerSuppression] call. Pair
+  /// them exactly once (e.g. in a widget's `initState`/`dispose`). Toggling
+  /// notifies listeners, so a live [AdBanner] tears its platform view down at
+  /// once and rebuilds it only after the last suppressor releases.
+  void suppressBanner() {
+    _bannerSuppressors++;
+    if (_bannerSuppressors == 1) notifyListeners();
+  }
+
+  /// Undo one [suppressBanner]. Clamped at zero so an extra release can never
+  /// drive the count negative and strand the banner off.
+  void releaseBannerSuppression() {
+    if (_bannerSuppressors == 0) return;
+    _bannerSuppressors--;
+    if (_bannerSuppressors == 0) notifyListeners();
   }
 
   /// Whether a rewarded ad may be offered.

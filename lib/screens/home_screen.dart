@@ -38,6 +38,7 @@ import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
@@ -58,6 +59,7 @@ import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
+import 'package:video_chat_app/widgets/invite_share_sheet.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
@@ -173,9 +175,16 @@ class _HomeScreenState extends State<HomeScreen>
   // needsSetup account — it has no older messages to restore.
   bool _vaultLockedWithHistory = false;
 
+  /// Whether the user dismissed the "Connect with a Stranger" banner. Persisted
+  /// so a feature that can't match anyone yet (small user base) doesn't nag on
+  /// every launch.
+  bool _anonBannerDismissed = false;
+
   @override
   void initState() {
     super.initState();
+    _anonBannerDismissed =
+        sharedPrefs.getBool('anon_banner_dismissed_v1') ?? false;
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
@@ -399,6 +408,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (updated != null) {
             setState(() => _currentUser = updated);
           }
+          await _maybeShowInvitePrompt();
           return;
         }
 
@@ -946,6 +956,79 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     });
+  }
+
+  /// One-time, gentle "invite a friend" nudge shown right after onboarding
+  /// (new users, after username setup). Deliberately a single dismissible
+  /// prompt — not another wall — and only ever shown once. The invite flow is
+  /// also always reachable from the home ⋮ menu.
+  Future<void> _maybeShowInvitePrompt() async {
+    if (!mounted) return;
+    if (sharedPrefs.getBool('invite_prompt_shown_v1') == true) return;
+    await sharedPrefs.setBool('invite_prompt_shown_v1', true);
+    if (!mounted) return;
+    final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.person_add_alt_1_rounded, color: c.primary, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                l10n.invitePromptTitle,
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                    color: c.textHigh),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          l10n.invitePromptBody,
+          style: GoogleFonts.poppins(
+              fontSize: 13.5, height: 1.4, color: c.textMid),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              l10n.invitePromptLater,
+              style: GoogleFonts.poppins(
+                  color: c.textMid, fontWeight: FontWeight.w600),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c.primary),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              l10n.invitePromptInvite,
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      await showInviteShareSheet(context, handle: _currentUser?.username);
+    }
+  }
+
+  /// Opens the offline (Bluetooth/Wi-Fi mesh) chat screen. Shared by the
+  /// app-bar sensors icon and the home offline/nearby banners. The Nearby
+  /// screen itself requests mesh permissions and calls [MeshNetworkService.start],
+  /// so this never prompts from the home surface.
+  void _openOfflineChat() {
+    markStarterMeshVisited();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
+    );
   }
 
   Widget _buildContactItem(UserModel user) {
@@ -2482,6 +2565,9 @@ class _HomeScreenState extends State<HomeScreen>
                     ReportProblemDialog.show(context, user: _currentUser));
               } else if (value == 'whatsnew') {
                 unawaited(showWhatsNewDialog(context));
+              } else if (value == 'invite') {
+                await showInviteShareSheet(context,
+                    handle: _currentUser?.username);
               } else if (value == 'logout') {
                 _signOut();
               }
@@ -2508,6 +2594,17 @@ class _HomeScreenState extends State<HomeScreen>
                       const SizedBox(width: 12),
                       Text(l10n.homeMenuSettings),
                       const NewFeatureChip(featureId: NewFeature.chatThemes),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'invite',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_add_alt_1_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Text(l10n.homeMenuInvite),
                     ],
                   ),
                 ),
@@ -2565,8 +2662,45 @@ class _HomeScreenState extends State<HomeScreen>
           // [InterstitialAdService.armPostCall].
           const PostCallInterstitial(),
           if (!_hasFirebaseSession) _buildReverifyBanner(),
-          // ── Anonymous Match Banner — only on Gup tab ──────────────
+          // ── Offline / nearby-peers banner — the differentiator, surfaced
+          // exactly when it's useful. Only on the Gup tab. Never starts mesh
+          // (and so never prompts for permissions) from here: the "N nearby"
+          // variant only appears when the user already turned mesh on, and the
+          // offline variant just invites them into the Nearby screen, which
+          // owns the permission request. ──────────────────────────────────
           if (_tabController.index == 0 && _currentUserId != null)
+            Consumer2<ConnectivityProvider, MeshNetworkService>(
+              builder: (context, conn, mesh, _) {
+                final t = AppLocalizations.of(context);
+                final c = AppThemeColors.of(context);
+                final nearby = mesh.peers.length;
+                // Priority: live peers nearby (the "wow") beats the plain
+                // offline nudge; when online with no peers, show nothing.
+                if (mesh.isActive && nearby > 0) {
+                  return _OfflineMeshBanner(
+                    icon: Icons.sensors_rounded,
+                    accent: c.primary,
+                    title: t.homeNearbyBannerTitle(nearby),
+                    subtitle: t.homeNearbyBannerSubtitle,
+                    onTap: _openOfflineChat,
+                  );
+                }
+                if (!conn.isOnline) {
+                  return _OfflineMeshBanner(
+                    icon: Icons.wifi_off_rounded,
+                    accent: c.primary,
+                    title: t.homeOfflineBannerTitle,
+                    subtitle: t.homeOfflineBannerSubtitle,
+                    onTap: _openOfflineChat,
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+          // ── Anonymous Match Banner — only on Gup tab, until dismissed ──────
+          if (_tabController.index == 0 &&
+              _currentUserId != null &&
+              !_anonBannerDismissed)
             _AnonymousMatchBanner(
               onTap: () {
                 Navigator.push(
@@ -2578,6 +2712,10 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 );
+              },
+              onClose: () {
+                setState(() => _anonBannerDismissed = true);
+                sharedPrefs.setBool('anon_banner_dismissed_v1', true);
               },
             ),
           Expanded(
@@ -3068,10 +3206,90 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 /// ─── Full-width Anonymous Match Banner with animated gradient shimmer ───────
-class _AnonymousMatchBanner extends StatefulWidget {
+/// Compact, tappable banner that surfaces offline / nearby-peers mesh chat on
+/// the home screen. Purely presentational — the parent decides when (and with
+/// what copy) to show it; see the [Consumer2] in the home body.
+class _OfflineMeshBanner extends StatelessWidget {
+  const _OfflineMeshBanner({
+    required this.icon,
+    required this.accent,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
 
-  const _AnonymousMatchBanner({required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: accent.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: accent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: c.textHigh,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: c.textMid,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right_rounded, color: accent, size: 22),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnonymousMatchBanner extends StatefulWidget {
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  const _AnonymousMatchBanner({required this.onTap, required this.onClose});
 
   @override
   State<_AnonymousMatchBanner> createState() => _AnonymousMatchBannerState();
@@ -3195,6 +3413,20 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                     Icons.arrow_forward_rounded,
                     color: Colors.white,
                     size: 18,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                // ── Dismiss (opaque hit-test so it doesn't trigger onTap) ──
+                GestureDetector(
+                  onTap: widget.onClose,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.close_rounded,
+                      color: Colors.white.withOpacity(0.85),
+                      size: 18,
+                    ),
                   ),
                 ),
               ],

@@ -11,6 +11,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
@@ -75,6 +76,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
   }
 
   Future<void> _pickRetention() async {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final current = _settings?.retentionDays;
     final picked = await showModalBottomSheet<int?>(
@@ -90,7 +92,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Auto-delete old messages',
+                child: Text(l10n.vaultSettingsAutoDelete,
                     style: TextStyle(
                         color: c.textHigh,
                         fontSize: 16,
@@ -99,7 +101,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
             ),
             for (final opt in _retentionOptions)
               ListTile(
-                title: Text(opt.label, style: TextStyle(color: c.textHigh)),
+                title: Text(opt.days == null ? l10n.vaultSettingsKeepForever : opt.label, style: TextStyle(color: c.textHigh)),
                 trailing: opt.days == current
                     ? Icon(Icons.check_rounded, color: c.primary)
                     : null,
@@ -131,9 +133,6 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
       _settings = VaultSettings(
         retentionDays: picked,
         createdAt: _settings?.createdAt,
-        // Carry the flags through — rebuilding without them would reset the
-        // in-memory copy to false and mis-report custody, or open the wrong
-        // keyboard, for anything that reads _settings later.
         pinIsUserChosen: _settings?.pinIsUserChosen ?? false,
         pinIsNumeric: _settings?.pinIsNumeric ?? false,
       );
@@ -146,38 +145,25 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
   }
 
   Future<void> _changePin() async {
+    final l10n = AppLocalizations.of(context);
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _ChangePinDialog(
         uid: widget.uid,
-        // The current-PIN field recalls the PIN that exists now, so it follows
-        // the recorded hint; the two new-PIN fields below it are choosing one
-        // and start on the number pad regardless.
         numericPinHint: _settings?.pinIsNumeric ?? false,
       ),
     );
     if (result == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('PIN changed.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l10n.vaultSettingsPinChanged),
       ));
-      // The new PIN may be a different character class than the old one, so
-      // the cached settings — and the hint they carry — are now stale.
       await _load();
     }
   }
 
-  /// Turns fingerprint unlock on or off for this device.
-  ///
-  /// Enabling has to ask for the PIN even though the vault is already open:
-  /// the vault holds the *derived key*, not the PIN, and it is the PIN that
-  /// biometrics needs to release on a later cold start. Verifying it through
-  /// `unlock` also proves custody, so opting in here clears the rescue prompt.
-  ///
-  /// Disabling deletes the stored PIN — its absence *is* the off state — and
-  /// records the dismissal so the unlock dialog does not immediately offer the
-  /// opt-in again and undo a deliberate choice.
   Future<void> _toggleFingerprint() async {
+    final l10n = AppLocalizations.of(context);
     final pinKey = biometricPinKey(widget.uid);
     final dismissedKey = biometricOfferDismissedKey(widget.uid);
 
@@ -186,8 +172,8 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
       await _storage.write(key: dismissedKey, value: 'true');
       if (!mounted) return;
       setState(() => _bioEnabled = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Fingerprint unlock turned off. Your PIN still works.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l10n.vaultSettingsBioTurnedOff),
       ));
       return;
     }
@@ -197,7 +183,6 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
       barrierDismissible: false,
       builder: (_) => _FingerprintPinDialog(
         uid: widget.uid,
-        // Recalling the existing PIN, so follow the recorded hint.
         numericPinHint: _settings?.pinIsNumeric ?? false,
       ),
     );
@@ -206,7 +191,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     // Confirm it is really them before binding the PIN to a scan.
     try {
       final authed = await _auth.authenticate(
-        localizedReason: 'Confirm your fingerprint to enable quick unlock',
+        localizedReason: l10n.vaultBioReasonEnrol,
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -218,40 +203,38 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     }
 
     await _storage.write(key: pinKey, value: pin);
-    // They just opted in, so an earlier "not now" no longer applies.
     await _storage.delete(key: dismissedKey);
     if (!mounted) return;
     setState(() => _bioEnabled = true);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Fingerprint unlock enabled on this device.'),
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(l10n.vaultSettingsBioTurnedOn),
     ));
   }
 
   Future<void> _confirmClearData() async {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: c.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Delete vault data?',
+        title: Text(l10n.vaultSettingsClearDataTitle,
             style: TextStyle(
                 color: c.textHigh, fontSize: 17, fontWeight: FontWeight.w700)),
         content: Text(
-          'Removes every encrypted message and status from the cloud vault. '
-          'Your PIN stays the same — new messages will encrypt under it as '
-          'before. Cannot be undone.',
+          l10n.vaultSettingsClearDataDesc,
           style: TextStyle(color: c.textMid, fontSize: 13),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: c.textMid)),
+            child: Text(l10n.vaultSettingsClearDataCancel, style: TextStyle(color: c.textMid)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete data'),
+            child: Text(l10n.vaultSettingsClearDataConfirm),
           ),
         ],
       ),
@@ -263,44 +246,40 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     StatusService.invalidatePreWarm(widget.uid);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Vault data deleted.')),
+      SnackBar(content: Text(l10n.vaultSettingsDataDeleted)),
     );
   }
 
   Future<void> _confirmReset() async {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: c.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Reset vault?',
+        title: Text(l10n.vaultSettingsResetTitle,
             style: TextStyle(
                 color: c.textHigh, fontSize: 17, fontWeight: FontWeight.w700)),
         content: Text(
-          'Removes your PIN, deletes every encrypted entry, and clears the '
-          'local cache. You will be asked to set a fresh PIN. Cannot be '
-          'undone.',
+          l10n.vaultSettingsResetDesc,
           style: TextStyle(color: c.textMid, fontSize: 13),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: c.textMid)),
+            child: Text(l10n.vaultSettingsClearDataCancel, style: TextStyle(color: c.textMid)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Reset'),
+            child: Text(l10n.vaultSettingsResetConfirm),
           ),
         ],
       ),
     );
     if (ok != true || !mounted) return;
     await VaultCipher.instance.reset(widget.uid);
-    // The stored PIN belongs to the vault that just went away. Leaving it
-    // behind would offer a fingerprint unlock that cannot work after the next
-    // setup, so clear both keys and let the fresh vault opt in again.
     await _storage.delete(key: biometricPinKey(widget.uid));
     await _storage.delete(key: biometricOfferDismissedKey(widget.uid));
     ChatService.invalidatePreWarm(widget.uid);
@@ -316,11 +295,12 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: c.chatBg,
       appBar: AppBar(
         backgroundColor: c.surface,
-        title: Text('Vault',
+        title: Text(l10n.vaultSettingsTitle,
             style: TextStyle(
                 color: c.textHigh, fontSize: 18, fontWeight: FontWeight.w700)),
         iconTheme: IconThemeData(color: c.textHigh),
@@ -331,25 +311,25 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
           : ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                _aboutCard(c),
+                _aboutCard(c, l10n),
                 const SizedBox(height: 8),
-                _sectionHeader(c, 'PRIVACY'),
+                _sectionHeader(c, l10n.vaultSettingsSectionPrivacy),
                 _card(c, [
                   _tile(c,
                       icon: Icons.timer_outlined,
                       iconColor: c.primary,
-                      title: 'Auto-delete old messages',
-                      subtitle: _retentionLabel(),
+                      title: l10n.vaultSettingsAutoDelete,
+                      subtitle: _retentionLabel(l10n),
                       onTap: _settings == null ? null : _pickRetention),
                 ]),
                 const SizedBox(height: 8),
-                _sectionHeader(c, 'PIN'),
+                _sectionHeader(c, l10n.vaultSettingsSectionPin),
                 _card(c, [
                   _tile(c,
                       icon: Icons.password_rounded,
                       iconColor: Colors.blue,
-                      title: 'Change PIN',
-                      subtitle: 'Re-encrypts every vault entry',
+                      title: l10n.vaultSettingsChangePin,
+                      subtitle: l10n.vaultSettingsChangePinSubtitle,
                       onTap: _settings == null ? null : _changePin),
                   // Hidden outright on devices without biometric hardware —
                   // a permanently-off switch explains nothing.
@@ -358,10 +338,10 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
                     _tile(c,
                         icon: Icons.fingerprint_rounded,
                         iconColor: Colors.teal,
-                        title: 'Unlock with fingerprint',
+                        title: l10n.vaultSettingsBioTitle,
                         subtitle: _bioEnabled
-                            ? 'On for this device'
-                            : 'Skip typing your PIN on this device',
+                            ? l10n.vaultSettingsBioSubOn
+                            : l10n.vaultSettingsBioSubOff,
                         onTap: _settings == null ? null : _toggleFingerprint,
                         // No colour overrides here: the app's switchTheme
                         // already paints a white thumb on a primary track.
@@ -377,20 +357,20 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
                   ],
                 ]),
                 const SizedBox(height: 8),
-                _sectionHeader(c, 'DANGER ZONE'),
+                _sectionHeader(c, l10n.vaultSettingsSectionDanger),
                 _card(c, [
                   _tile(c,
                       icon: Icons.delete_sweep_outlined,
                       iconColor: Colors.orange,
-                      title: 'Delete vault data',
-                      subtitle: 'Wipes encrypted history, keeps PIN',
+                      title: l10n.vaultSettingsDeleteData,
+                      subtitle: l10n.vaultSettingsDeleteDataSubtitle,
                       onTap: _settings == null ? null : _confirmClearData),
                   Divider(color: c.surfaceAlt, height: 1),
                   _tile(c,
                       icon: Icons.lock_reset_rounded,
                       iconColor: Colors.red,
-                      title: 'Reset vault',
-                      subtitle: 'Forgets PIN and deletes everything',
+                      title: l10n.vaultSettingsResetVault,
+                      subtitle: l10n.vaultSettingsResetVaultSubtitle,
                       onTap: _settings == null ? null : _confirmReset),
                 ]),
                 const SizedBox(height: 24),
@@ -399,13 +379,14 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
     );
   }
 
-  String _retentionLabel() {
+  String _retentionLabel(AppLocalizations l10n) {
     final d = _settings?.retentionDays;
-    if (d == null) return 'Keep forever';
-    return 'Delete after ${_retentionOptions.firstWhere((o) => o.days == d, orElse: () => (days: d, label: '$d days')).label}';
+    if (d == null) return l10n.vaultSettingsKeepForever;
+    final label = _retentionOptions.firstWhere((o) => o.days == d, orElse: () => (days: d, label: '$d days')).label;
+    return l10n.vaultSettingsDeleteAfter(label);
   }
 
-  Widget _aboutCard(AppThemeColors c) {
+  Widget _aboutCard(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(16),
@@ -418,7 +399,7 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
         Row(children: [
           Icon(Icons.shield_outlined, color: c.primary, size: 22),
           const SizedBox(width: 8),
-          Text('About the vault',
+          Text(l10n.vaultSettingsAboutTitle,
               style: TextStyle(
                   color: c.textHigh,
                   fontSize: 15,
@@ -426,19 +407,15 @@ class _VaultSettingsScreenState extends State<VaultSettingsScreen> {
         ]),
         const SizedBox(height: 10),
         Text(
-          'A private backup of your chat history, locked with your PIN. It '
-          'brings your messages back when you reinstall the app or switch to '
-          'a new phone. Only your PIN can open it — nobody else can read '
-          'what is inside, not even us.',
+          l10n.vaultSettingsAboutDesc,
           style: TextStyle(color: c.textMid, fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 10),
-        _bullet(c, 'Your messages'),
-        _bullet(c, 'Statuses you can see'),
+        _bullet(c, l10n.vaultSettingsBulletMessages),
+        _bullet(c, l10n.vaultSettingsBulletStatuses),
         const SizedBox(height: 10),
         Text(
-          'Never kept here: your call history, contacts, photos shared in '
-          'chats, or anyone else\'s private messages.',
+          l10n.vaultSettingsNeverKept,
           style: TextStyle(color: c.textLow, fontSize: 12, height: 1.4),
         ),
       ]),
@@ -572,16 +549,17 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context);
     if (_old.text.isEmpty) {
-      setState(() => _error = 'Enter your current PIN.');
+      setState(() => _error = l10n.vaultSettingsEnterCurrentPin);
       return;
     }
     if (_new.text.length < 6) {
-      setState(() => _error = 'New PIN must be at least 6 characters.');
+      setState(() => _error = l10n.vaultSettingsNewPinMinLength);
       return;
     }
     if (_new.text != _confirm.text) {
-      setState(() => _error = 'New PINs do not match.');
+      setState(() => _error = l10n.vaultSettingsNewPinMismatch);
       return;
     }
     setState(() {
@@ -606,7 +584,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
     if (!ok) {
       setState(() {
         _busy = false;
-        _error = 'Current PIN is incorrect.';
+        _error = l10n.vaultSettingsCurrentPinIncorrect;
         _old.clear();
       });
       return;
@@ -617,29 +595,29 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     return PopScope(
       canPop: !_busy,
       child: AlertDialog(
         backgroundColor: c.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Change PIN',
+        title: Text(l10n.vaultSettingsChangePin,
             style: TextStyle(
                 color: c.textHigh, fontSize: 17, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 320,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(
-              'Every encrypted entry will be re-encrypted under the new PIN. '
-              'Keep the app open until this finishes.',
+              l10n.vaultSettingsChangeDialogDesc,
               style: TextStyle(color: c.textMid, fontSize: 12.5),
             ),
             const SizedBox(height: 16),
-            _field(c, _old, 'Current PIN',
+            _field(c, _old, l10n.vaultSettingsCurrentPin,
                 focusNode: _oldFocus, autofocus: true),
             const SizedBox(height: 10),
-            _field(c, _new, 'New PIN', focusNode: _newFocus),
+            _field(c, _new, l10n.vaultSettingsNewPin, focusNode: _newFocus),
             const SizedBox(height: 10),
-            _field(c, _confirm, 'Confirm new PIN', focusNode: _confirmFocus),
+            _field(c, _confirm, l10n.vaultSettingsConfirmNewPin, focusNode: _confirmFocus),
             PinKeyboardToggle(
               numeric: _numeric,
               onToggle: _toggleKeyboard,
@@ -658,7 +636,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
                 color: c.primary,
               ),
               const SizedBox(height: 6),
-              Text('Re-encrypting $_done of $_total…',
+              Text(l10n.vaultSettingsReencryptingCount(_done, _total),
                   style: TextStyle(color: c.textLow, fontSize: 11)),
             ],
           ]),
@@ -666,7 +644,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
         actions: [
           TextButton(
             onPressed: _busy ? null : () => Navigator.pop(context, false),
-            child: Text('Cancel', style: TextStyle(color: c.textMid)),
+            child: Text(l10n.commonCancel, style: TextStyle(color: c.textMid)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: c.primary),
@@ -677,7 +655,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
                     height: 18,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                : const Text('Change'),
+                : Text(l10n.vaultSettingsChangeBtn),
           ),
         ],
       ),
@@ -756,8 +734,9 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context);
     if (_pin.text.isEmpty) {
-      setState(() => _error = 'Enter your PIN.');
+      setState(() => _error = l10n.vaultSettingsEnterCurrentPin);
       return;
     }
     setState(() {
@@ -769,7 +748,7 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
     if (!ok) {
       setState(() {
         _busy = false;
-        _error = 'That PIN is incorrect.';
+        _error = l10n.vaultIncorrectPin;
         _pin.clear();
       });
       return;
@@ -782,21 +761,20 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     return PopScope(
       canPop: !_busy,
       child: AlertDialog(
         backgroundColor: c.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Enter your PIN',
+        title: Text(l10n.vaultSettingsBioPinDialogTitle,
             style: TextStyle(
                 color: c.textHigh, fontSize: 17, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 320,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(
-              'Your PIN is stored on this device so your fingerprint can '
-              'unlock the vault. You will still need the PIN itself on a new '
-              'phone or after reinstalling, so keep it somewhere safe.',
+              l10n.vaultSettingsBioPinDialogDesc,
               style: TextStyle(color: c.textMid, fontSize: 12.5),
             ),
             const SizedBox(height: 16),
@@ -814,7 +792,7 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
               inputFormatters: [LengthLimitingTextInputFormatter(64)],
               style: TextStyle(color: c.textHigh, letterSpacing: 2),
               decoration: InputDecoration(
-                hintText: 'Vault PIN',
+                hintText: l10n.vaultSettingsCurrentPin,
                 hintStyle: TextStyle(color: c.textLow),
                 filled: true,
                 fillColor: c.surfaceAlt,
@@ -843,7 +821,7 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
         actions: [
           TextButton(
             onPressed: _busy ? null : () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: c.textMid)),
+            child: Text(l10n.commonCancel, style: TextStyle(color: c.textMid)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: c.primary),
@@ -854,10 +832,11 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
                     height: 18,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                : const Text('Continue'),
+                : Text(l10n.vaultSettingsContinueBtn),
           ),
         ],
       ),
     );
   }
 }
+

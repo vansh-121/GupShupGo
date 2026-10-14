@@ -159,7 +159,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get loginErrorTooManyRequests => '試行回数が多すぎます。しばらくしてから再試行してください。';
 
   @override
-  String get homeNavChats => 'チャット';
+  String get homeNavChats => 'メッセージ';
 
   @override
   String get homeNavMoments => 'モーメント';
@@ -384,6 +384,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get attachmentLocationSubtitle => '現在地を共有';
+
+  @override
+  String get attachmentScreenShare => '画面共有';
+
+  @override
+  String get attachmentScreenShareSubtitle => 'チャット中に画面をリアルタイムで共有';
 
   @override
   String get attachmentViewOnce => '1回のみ表示';
@@ -1077,4 +1083,1202 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get aiAskHint => 'GupAIに何でも質問してください…';
+
+  @override
+  String get settingsNotificationsTile => '通知';
+
+  @override
+  String get settingsNotificationsStatusOn => 'オン';
+
+  @override
+  String get settingsNotificationsStatusOff => 'オフ';
+
+  @override
+  String get settingsNotificationsEnabledToast => '通知はオンです。';
+
+  @override
+  String get settingsEnableNotificationsTitle => '通知を有効にする';
+
+  @override
+  String get settingsEnableNotificationsBody =>
+      '通知が無効になっています。新しいメッセージや着信をGupShupGoから通知できるようにシステム設定を開いてください。';
+
+  @override
+  String get settingsOpenSystemSettings => '設定を開く';
+
+  @override
+  String get loginTagline => 'インターネットがなくても使えるプライベートメッセージ。';
+
+  @override
+  String get settingsPrivacyPolicy => 'プライバシーポリシー';
+
+  @override
+  String get settingsTerms => '利用規約';
+
+  @override
+  String get settingsDeleteAccount => 'アカウントを削除';
+
+  @override
+  String get inviteSheetTitle => '友達を招待';
+
+  @override
+  String get inviteSheetSubtitle => 'みんなに教えよう — GupShupGoをシェア';
+
+  @override
+  String get inviteShareImageBtn => '画像を共有';
+
+  @override
+  String get inviteShareLinkBtn => 'リンクを共有';
+
+  @override
+  String get inviteCopyLinkBtn => 'リンクをコピー';
+
+  @override
+  String get inviteLinkCopied => '招待リンクをコピーしました';
+
+  @override
+  String inviteMessage(String link) {
+    return 'GupShupGoでチャットしよう — インターネットがなくても使えます 👋 $link';
+  }
+
+  @override
+  String get inviteCardTagline => 'オフラインでも使えるプライベートチャット';
+
+  @override
+  String get inviteCardScan => 'スキャンしてダウンロード';
+
+  @override
+  String get inviteCardDownload => 'Google Playでダウンロード';
+
+  @override
+  String get homeMenuInvite => '友達を招待';
+
+  @override
+  String get invitePromptTitle => 'GupShupGoを楽しんでいますか？';
+
+  @override
+  String get invitePromptBody => '友達と一緒ならもっと便利 — オフラインでも使えます。招待してみませんか？';
+
+  @override
+  String get invitePromptInvite => '友達を招待';
+
+  @override
+  String get invitePromptLater => 'あとで';
+
+  @override
+  String get homeOfflineBannerTitle => 'ネットがつながらない？ 問題ありません';
+
+  @override
+  String get homeOfflineBannerSubtitle => 'Bluetoothを使って近くの人にメッセージを送ることができます。';
+
+  @override
+  String homeNearbyBannerTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '近くに$count人',
+      one: '近くに1人',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeNearbyBannerSubtitle => 'Bluetoothでチャット — インターネット不要。';
+
+  @override
+  String get linkBackupTitle => '予備のログイン方法を追加';
+
+  @override
+  String get linkBackupSubtitle =>
+      'SIMカードが利用できない場合でも、Googleやメールを連携しておけば\n簡単に再ログインできます。';
+
+  @override
+  String get linkGoogleTitle => 'Googleアカウントを連携';
+
+  @override
+  String get linkGoogleSubtitleLinked => '連携済み ✓';
+
+  @override
+  String get linkGoogleSubtitleUnlinked => 'SIM不要のワンタップログイン';
+
+  @override
+  String get linkGoogleAction => '連携する';
+
+  @override
+  String get linkGoogleSuccess => 'Googleアカウントが正常に連携されました！';
+
+  @override
+  String get linkGoogleAlreadyUsed =>
+      'このGoogleアカウントはすでに別のGupShupGoアカウントに登録されています。統合するには、一度ログアウトしてGoogleでサインインし、設定から電話番号を連携してください。';
+
+  @override
+  String get linkGoogleFailed => 'Googleの連携に失敗しました。もう一度お試しください。';
+
+  @override
+  String get linkSessionExpired => 'セッションの有効期限が切れました。再度ログインしてください。';
+
+  @override
+  String get linkEmailTitle => 'メールアドレスとパスワードを連携';
+
+  @override
+  String get linkEmailSubtitleLinked => '連携済み ✓';
+
+  @override
+  String get linkEmailSubtitleUnlinked => 'SIMやGoogleがない場合でもメールでログイン';
+
+  @override
+  String get linkEmailActionAdd => '追加';
+
+  @override
+  String get linkEmailActionCancel => 'キャンセル';
+
+  @override
+  String get linkEmailFieldLabel => 'メールアドレス';
+
+  @override
+  String get linkPasswordFieldLabel => 'パスワードを作成';
+
+  @override
+  String get linkPasswordHelper => '6文字以上';
+
+  @override
+  String get linkEmailButton => 'メールを連携';
+
+  @override
+  String get linkEmailSuccess => 'メールアドレスが正常に連携されました！';
+
+  @override
+  String get linkEmailInvalid => '有効なメールアドレスを入力してください。';
+
+  @override
+  String get linkPasswordTooShort => 'パスワードは6文字以上である必要があります。';
+
+  @override
+  String get linkEmailAlreadyInUse =>
+      'このメールアドレスは既にGupShupGoに登録されています。まずメールでログインし、設定から電話番号を連携してください。';
+
+  @override
+  String get linkEmailAlreadyLinked => 'すでにメールアドレスがアカウントに連携されています。';
+
+  @override
+  String get linkEmailFailed => 'メールの連携に失敗しました。もう一度お試しください。';
+
+  @override
+  String get linkContinueToApp => 'アプリへ進む';
+
+  @override
+  String get linkSkipForNow => '今はスキップ';
+
+  @override
+  String get linkSkip => 'スキップ';
+
+  @override
+  String get phoneAuthTitleEntry => '電話番号でログインします。';
+
+  @override
+  String get phoneAuthTitleOtp => '送信された確認コードを入力してください。';
+
+  @override
+  String get phoneAuthNameHint => 'お名前';
+
+  @override
+  String get phoneAuthPhoneHint => '電話番号';
+
+  @override
+  String get phoneAuthUseSim => 'SIMを使用';
+
+  @override
+  String get phoneAuthSendOtp => '認証コードを送信';
+
+  @override
+  String phoneAuthOtpPrompt(String phone) {
+    return '$phone に送信された6桁のコードを入力';
+  }
+
+  @override
+  String get phoneAuthOtpPromptGeneric => '送信された6桁のコードを入力してください';
+
+  @override
+  String get phoneAuthOtpHint => 'コードを入力';
+
+  @override
+  String get phoneAuthVerify => '認証する';
+
+  @override
+  String get phoneAuthGoBack => '戻る';
+
+  @override
+  String get phoneAuthResendCode => 'コードを再送';
+
+  @override
+  String get phoneAuthEnterName => 'お名前を入力してください';
+
+  @override
+  String get phoneAuthEnterValidPhone => '有効な電話番号を入力してください';
+
+  @override
+  String get phoneAuthEnterCode => 'コードを入力してください';
+
+  @override
+  String get phoneAuthRequestNewCode => '新しいコードをリクエストしてください。';
+
+  @override
+  String get phoneAuthCodeIncorrect => 'コードが正しくありません。もう一度お試しください。';
+
+  @override
+  String get phoneAuthErrCodeIncorrect => '認証コードが違います。再試行してください。';
+
+  @override
+  String get phoneAuthErrCodeExpired => 'コードの有効期限が切れました。再取得してください。';
+
+  @override
+  String get phoneAuthErrTooManyRequests => 'リクエストが多すぎます。1分ほど待ってから再試行してください。';
+
+  @override
+  String get phoneAuthErrInvalidPhone => '無効な電話番号です。';
+
+  @override
+  String get phoneAuthErrQuotaExceeded => 'SMS送信の上限に達しました。しばらくしてからお試しください。';
+
+  @override
+  String get phoneAuthErrFailed => 'コードの送信に失敗しました。再試行してください。';
+
+  @override
+  String get usernameSetupAppBarTitle => 'ユーザー名設定';
+
+  @override
+  String get usernameSetupHeaderTitle => 'ユーザー名を選択';
+
+  @override
+  String get usernameSetupHeaderDesc =>
+      '友達がGupShupGoであなたを見つけられるように、固有のIDを設定しましょう。';
+
+  @override
+  String get usernameSetupInputHint => 'username';
+
+  @override
+  String get usernameSetupChecking => '利用可能か確認中…';
+
+  @override
+  String usernameSetupAvailable(String handle) {
+    return '@$handle は利用可能です！';
+  }
+
+  @override
+  String usernameSetupTaken(String handle) {
+    return '@$handle は既に使用されています。';
+  }
+
+  @override
+  String get usernameSetupCharRules => '使用可能文字: a-z、0-9、アンダースコア(_)、ドット(.)';
+
+  @override
+  String get usernameSetupTooShort => 'ユーザー名は3文字以上必要です';
+
+  @override
+  String get usernameSetupTooLong => 'ユーザー名は最大20文字までです';
+
+  @override
+  String get usernameSetupInvalidChars => '小文字、数字、_、. のみ使用できます';
+
+  @override
+  String get usernameSetupRecommended => 'おすすめ:';
+
+  @override
+  String get usernameSetupSaveBtn => 'ユーザー名を保存';
+
+  @override
+  String get usernameSetupSkipBtn => '今はスキップ';
+
+  @override
+  String usernameSetupFailed(String error) {
+    return 'ユーザー名の設定に失敗しました: $error';
+  }
+
+  @override
+  String get vaultProtectTitle => '秘密のチャットを保護';
+
+  @override
+  String get vaultUnlockTitle => '暗号化ボールトを解除';
+
+  @override
+  String get vaultSetupDesc => 'ボールトチャットを暗号化するためのPINまたはパスフレーズを設定します。';
+
+  @override
+  String get vaultUnlockDescBio => '生体認証を使用するか、PINを入力してアクセスします。';
+
+  @override
+  String get vaultUnlockDescPin => 'メッセージを復号化するためにボールトPINを入力してください。';
+
+  @override
+  String get vaultReinstallHint => '再インストールしましたか？以前作成したPINを入力してください。';
+
+  @override
+  String get vaultUnlockWithFingerprint => '指紋認証で解除';
+
+  @override
+  String get vaultOrDivider => 'または';
+
+  @override
+  String get vaultNewPin => '新しいボールトPIN';
+
+  @override
+  String get vaultConfirmPin => '新しいPINの確認';
+
+  @override
+  String get vaultEnterPin => 'ボールトPINを入力';
+
+  @override
+  String get vaultKeyboardUseLetters => '文字キーボード（パスフレーズ）';
+
+  @override
+  String get vaultKeyboardUseNumbers => '数字キーパッド（PIN）';
+
+  @override
+  String get vaultRestoreLater => '後で復元';
+
+  @override
+  String get vaultForgotPin => 'PINをお忘れですか？';
+
+  @override
+  String get vaultSetPinBtn => 'PINを設定して暗号化';
+
+  @override
+  String get vaultDecryptBtn => '復号化してロック解除';
+
+  @override
+  String get vaultPinMinLength => 'PINは4文字以上である必要があります';
+
+  @override
+  String get vaultPinsDoNotMatch => 'PINが一致しません';
+
+  @override
+  String get vaultSetupFailed => 'ボールトの設定に失敗しました。もう一度お試しください。';
+
+  @override
+  String get vaultIncorrectPin => 'PINが正しくありません';
+
+  @override
+  String get vaultFingerprintOutOfDate => '指紋情報が更新されました。PINを使用してください。';
+
+  @override
+  String get vaultBiometricError => '生体認証が利用できません';
+
+  @override
+  String get vaultBioReasonUnlock => 'ボールトチャットをロック解除するために認証してください';
+
+  @override
+  String get vaultBioReasonEnrol => '生体認証アクセスを有効にするために認証してください';
+
+  @override
+  String get vaultAskBioTitle => '生体認証ロック解除を有効にしますか？';
+
+  @override
+  String get vaultAskBioDesc => '指紋や顔認証を使用して、ボールトを迅速かつ安全にロック解除します。';
+
+  @override
+  String get vaultAskBioNotNow => '後で';
+
+  @override
+  String get vaultAskBioEnable => '有効にする';
+
+  @override
+  String get vaultDeleteMessagesTitle => 'ボールトメッセージを削除しますか？';
+
+  @override
+  String get vaultDeleteMessagesDesc =>
+      'PINをお忘れの場合、暗号化されたメッセージを復元することはできません。新しいPINを設定するには、現在のボールトメッセージを消去する必要があります。';
+
+  @override
+  String get vaultDeleteMessagesCancel => 'キャンセル';
+
+  @override
+  String get vaultDeleteMessagesConfirm => 'メッセージを削除してPINをリセット';
+
+  @override
+  String get vaultCustodyConfirmTitle => 'ボールト管理モデルの確認';
+
+  @override
+  String get vaultCustodyChooseTitle => 'ボールトキー管理モデル';
+
+  @override
+  String get vaultCustodyConfirmDesc => '暗号化キーの保存方法の設定を確認してください。';
+
+  @override
+  String get vaultCustodyChooseDesc => 'ボールト暗号化キーをどこに保存し保護するかを選択します。';
+
+  @override
+  String get vaultCustodyDontKnow => '不明な場合は、後からボールト設定でいつでも変更できます。';
+
+  @override
+  String get vaultCustodyConfirmBtn => '確認して続行';
+
+  @override
+  String get vaultCustodySaveBtn => '保存して続行';
+
+  @override
+  String get vaultCustodyMismatchError => 'メタデータの不一致が発生しました。もう一度お試しください。';
+
+  @override
+  String get vaultCustodyAutoUpdateFailed => '管理モデルの自動更新に失敗しました。';
+
+  @override
+  String vaultCustodyReencrypting(int done, int total) {
+    return '$total 件中 $done 件を再暗号化中… アプリを開いたままにしてください。';
+  }
+
+  @override
+  String get vaultCustodyPreparing => '暗号化を準備中…';
+
+  @override
+  String get vaultSettingsTitle => 'ボールト設定';
+
+  @override
+  String get vaultSettingsAboutTitle => '暗号化ボールトについて';
+
+  @override
+  String get vaultSettingsAboutDesc =>
+      'ボールトは専用のPINで保護された、機密性の高いチャットのためのプライベート空間です。';
+
+  @override
+  String get vaultSettingsBulletMessages =>
+      'ボールト内のすべてのメッセージとメディアをエンドツーエンドで暗号化。';
+
+  @override
+  String get vaultSettingsBulletStatuses => 'システム通知や通常の履歴に表示されない完全隔離チャット。';
+
+  @override
+  String get vaultSettingsNeverKept => '復号キーがプレーンテキストでサーバーに保存されることは一切ありません。';
+
+  @override
+  String get vaultSettingsSectionPrivacy => 'プライバシーと自動消去';
+
+  @override
+  String get vaultSettingsAutoDelete => 'ボールトメッセージの自動消去';
+
+  @override
+  String get vaultSettingsKeepForever => '無期限に保持';
+
+  @override
+  String vaultSettingsDeleteAfter(String label) {
+    return '$label 後に消去';
+  }
+
+  @override
+  String get vaultSettingsSectionPin => 'PINと生体認証';
+
+  @override
+  String get vaultSettingsChangePin => 'ボールトPINを変更';
+
+  @override
+  String get vaultSettingsChangePinSubtitle => 'PINコードまたはパスフレーズを更新します';
+
+  @override
+  String get vaultSettingsBioTitle => '生体認証ロック解除';
+
+  @override
+  String get vaultSettingsBioSubOn => '指紋や顔認証でボールトを解除';
+
+  @override
+  String get vaultSettingsBioSubOff => '生体認証は無効です';
+
+  @override
+  String get vaultSettingsSectionDanger => '危険エリア';
+
+  @override
+  String get vaultSettingsDeleteData => 'ボールトデータを消去';
+
+  @override
+  String get vaultSettingsDeleteDataSubtitle =>
+      'この端末からすべての暗号化メッセージとメディアを完全に削除します';
+
+  @override
+  String get vaultSettingsResetVault => 'ボールトを完全リセット';
+
+  @override
+  String get vaultSettingsResetVaultSubtitle => 'ボールトPINを削除し、すべてのボールトデータを消去します';
+
+  @override
+  String get vaultSettingsPinChanged => 'ボールトPINが変更されました！';
+
+  @override
+  String get vaultSettingsBioTurnedOff => '生体認証ロック解除を無効にしました。';
+
+  @override
+  String get vaultSettingsBioTurnedOn => '生体認証ロック解除を有効にしました。';
+
+  @override
+  String get vaultSettingsClearDataTitle => 'すべてのボールトデータを消去しますか？';
+
+  @override
+  String get vaultSettingsClearDataDesc =>
+      'この端末からボールト内のすべてのメッセージとメディアが完全に削除され、復元できなくなります。';
+
+  @override
+  String get vaultSettingsClearDataCancel => 'キャンセル';
+
+  @override
+  String get vaultSettingsClearDataConfirm => 'データを消去';
+
+  @override
+  String get vaultSettingsDataDeleted => 'ボールトデータが消去されました。';
+
+  @override
+  String get vaultSettingsResetTitle => 'ボールトをリセットしますか？';
+
+  @override
+  String get vaultSettingsResetDesc =>
+      'すべての内容が完全に削除され、PINがリセットされます。ボールトを一から再設定する必要があります。';
+
+  @override
+  String get vaultSettingsResetConfirm => 'リセットして消去';
+
+  @override
+  String get vaultSettingsChangeDialogDesc => '現在のPINを入力し、新しいPINを設定してください。';
+
+  @override
+  String get vaultSettingsCurrentPin => '現在のPIN';
+
+  @override
+  String get vaultSettingsNewPin => '新しいPIN';
+
+  @override
+  String get vaultSettingsConfirmNewPin => '新しいPINの確認';
+
+  @override
+  String get vaultSettingsEnterCurrentPin => '現在のPINを入力';
+
+  @override
+  String get vaultSettingsNewPinMinLength => '新しいPINは4文字以上必要です';
+
+  @override
+  String get vaultSettingsNewPinMismatch => '新しいPINが一致しません';
+
+  @override
+  String get vaultSettingsCurrentPinIncorrect => '現在のPINが正しくありません';
+
+  @override
+  String vaultSettingsReencryptingCount(int done, int total) {
+    return '$total 件中 $done 件を再暗号化中…';
+  }
+
+  @override
+  String get vaultSettingsChangeBtn => 'PINを変更';
+
+  @override
+  String get vaultSettingsBioPinDialogTitle => 'ボールトPINを入力';
+
+  @override
+  String get vaultSettingsBioPinDialogDesc => '生体認証設定を変更するには、ボールトPINを入力してください。';
+
+  @override
+  String get vaultSettingsContinueBtn => '続行';
+
+  @override
+  String get premiumTitle => 'GupShupGo プレミアム';
+
+  @override
+  String get premiumSubtitleMember => 'プレミアムメンバーです';
+
+  @override
+  String get premiumSubtitleUnlock => '最高のプライバシーと全機能を解放する';
+
+  @override
+  String premiumActiveDaysRemaining(int days) {
+    return '残り $days 日';
+  }
+
+  @override
+  String get premiumFeaturesHeader => '利用可能なすべての機能';
+
+  @override
+  String get premiumPlansHeader => 'プランを選択';
+
+  @override
+  String get premiumSubscribeBtn => '今すぐアップグレード';
+
+  @override
+  String get premiumCancelAnytime => 'いつでもアプリストアからキャンセル可能';
+
+  @override
+  String get premiumRestoreBtn => '購入を復元';
+
+  @override
+  String get premiumRestoring => '購入を復元中…';
+
+  @override
+  String get premiumRestoredSuccess => '購入が正常に復元されました！';
+
+  @override
+  String get premiumNoActiveSub => '有効なサブスクリプションが見つかりません。';
+
+  @override
+  String get premiumProductUnavailable => '現在商品をご利用いただけません。後でもう一度お試しください。';
+
+  @override
+  String get premiumFeatureMediaTitle => '無劣化オリジナル品質メディア';
+
+  @override
+  String get premiumFeatureMediaDesc => '写真や動画を圧縮せず最高のオリジナル画質のまま送信';
+
+  @override
+  String get premiumFeatureMediaFree => '標準圧縮メディア';
+
+  @override
+  String get premiumFeatureMediaPro => '最高画質（圧縮なし）';
+
+  @override
+  String get premiumFeatureScreenShareTitle => '高画質画面共有';
+
+  @override
+  String get premiumFeatureScreenShareDesc =>
+      '最大1080p 60fpsの超スムーズでクリアな画面ストリーミング';
+
+  @override
+  String get premiumFeatureScreenShareFree => '標準720pストリーミング';
+
+  @override
+  String get premiumFeatureScreenSharePro => '超高精細1080p 60fps';
+
+  @override
+  String get premiumFeatureThemesTitle => '限定プレミアムテーマ';
+
+  @override
+  String get premiumFeatureThemesDesc => 'すべてのダークテーマ、アクセントカラー、吹き出しスタイルを解放';
+
+  @override
+  String get premiumFeatureThemesFree => 'デフォルトテーマのみ';
+
+  @override
+  String get premiumFeatureThemesPro => 'すべての限定テーマが無制限';
+
+  @override
+  String get premiumFeatureVoiceTitle => '長尺ボイスメッセージ';
+
+  @override
+  String get premiumFeatureVoiceDesc => '最大30分の高音質ボイスメモを録音して共有可能';
+
+  @override
+  String get premiumFeatureVoiceFree => '最長2分まで';
+
+  @override
+  String get premiumFeatureVoicePro => '最大30分まで対応';
+
+  @override
+  String get premiumFeatureQualityTitle => '最優先ネットワーク回線';
+
+  @override
+  String get premiumFeatureQualityDesc => '専用サーバーによる最速のアップロード＆ダウンロード速度';
+
+  @override
+  String get premiumFeatureQualityFree => '標準帯域幅';
+
+  @override
+  String get premiumFeatureQualityPro => '超高速プライオリティ回線';
+
+  @override
+  String get premiumFeatureBondTitle => '特別な親密関係バッジ';
+
+  @override
+  String get premiumFeatureBondDesc => '親しい友達とのチャットで特別なエフェクトやバッジを表示';
+
+  @override
+  String get premiumFeatureBondFree => '標準レベル表示';
+
+  @override
+  String get premiumFeatureBondPro => '限定アニメーション＆特別バッジ';
+
+  @override
+  String get premiumFeatureBadgeTitle => 'プロフィールPROバッジ';
+
+  @override
+  String get premiumFeatureBadgeDesc => 'お名前の横に輝くプレミアムPROバッジを表示';
+
+  @override
+  String get premiumFeatureBadgeFree => 'バッジなし';
+
+  @override
+  String get premiumFeatureBadgePro => 'ゴールドPROバッジ';
+
+  @override
+  String get premiumFeatureExportTitle => 'チャット完全エクスポート';
+
+  @override
+  String get premiumFeatureExportDesc => 'チャット履歴やメディアをPDFやZIP形式で一括バックアップ出力';
+
+  @override
+  String get premiumFeatureExportFree => 'エクスポート不可';
+
+  @override
+  String get premiumFeatureExportPro => 'ワンタップ完全エクスポート';
+
+  @override
+  String get premiumFeatureAdFreeTitle => '完全広告なしの快適体験';
+
+  @override
+  String get premiumFeatureAdFreeDesc => '広告が一切ない快適で純粋なメッセージング空間';
+
+  @override
+  String get premiumFeatureAdFreeFree => 'サポート広告あり';
+
+  @override
+  String get premiumFeatureAdFreePro => '100% 広告なし';
+
+  @override
+  String get premiumPlanMonthly => '月払い';
+
+  @override
+  String get premiumPlanYearly => '年払い';
+
+  @override
+  String get premiumPlanSavings => '40% お得';
+
+  @override
+  String get premiumPeriodMonth => '月額';
+
+  @override
+  String get premiumPeriodYear => '年額';
+
+  @override
+  String get nearbyOfflineChatTitle => 'オフライン近隣チャット';
+
+  @override
+  String get nearbySearchingDevices => '周辺の端末を検索中…';
+
+  @override
+  String get nearbyTooltipStop => '検索を停止';
+
+  @override
+  String get nearbyTooltipStart => '検索を開始';
+
+  @override
+  String get nearbyDevicesSection => '検出された端末';
+
+  @override
+  String get nearbyDiscoveryOn => '周辺検索がオン';
+
+  @override
+  String get nearbyDiscoveryOff => '周辺検索がオフ';
+
+  @override
+  String get nearbyHeroTitle => 'いつでもどこでも通信可能';
+
+  @override
+  String nearbyHeroNearbyCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '近くに $count 台の端末',
+      one: '近くに 1 台の端末',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get nearbyHeroOff => 'オフライン検索はオフです';
+
+  @override
+  String get nearbyHeroDesc =>
+      'インターネットに接続されていなくても、Wi-FiとBluetoothを使って近くの人と直接チャットできます。';
+
+  @override
+  String get nearbyYourNameHint => '相手に表示されるあなたの名前';
+
+  @override
+  String get nearbyEmptySearching => '近くの端末を探しています…';
+
+  @override
+  String get nearbyEmptyOff => '周辺検索が停止しています';
+
+  @override
+  String get nearbyEmptySearchingDesc => '近くの端末でもこの画面が開いていることを確認してください。';
+
+  @override
+  String get nearbyEmptyOffDesc => '右上の再生ボタンをタップして周辺端末のスキャンを開始します。';
+
+  @override
+  String get nearbyPeerConnected => '接続済み';
+
+  @override
+  String get nearbyPeerConnecting => '接続中…';
+
+  @override
+  String get nearbyPeerTapToConnect => 'タップして接続';
+
+  @override
+  String get nearbyActionChat => 'チャット';
+
+  @override
+  String get nearbyActionConnecting => '接続中…';
+
+  @override
+  String get nearbyActionConnect => '接続';
+
+  @override
+  String get nearbyPermNeededTitle => '権限が必要です';
+
+  @override
+  String get nearbyPermNeededDesc => 'オフライン通信には位置情報および周辺デバイスの検出権限が必要です。';
+
+  @override
+  String get nearbyTryAgainBtn => '再試行';
+
+  @override
+  String get nearbySettingsBtn => '設定を開く';
+
+  @override
+  String get nearbyHelpTip => 'ヒント: 両方の端末でWi-FiとBluetoothがオンになっていることを確認してください。';
+
+  @override
+  String get anonLobbyTitle => 'ランダム匿名チャット';
+
+  @override
+  String get anonLobbyFinding => '会話相手を探しています…';
+
+  @override
+  String get anonLobbyHangTight => '少々お待ちください。相手を見つけています。';
+
+  @override
+  String get anonLobbyCancelBtn => 'マッチングをキャンセル';
+
+  @override
+  String get anonLobbyPrivacyNote =>
+      '完全匿名です。相手にあなたの名前や電話番号、プロフィールが表示されることはありません。';
+
+  @override
+  String get anonLobbyConnecting => '接続を確立中…';
+
+  @override
+  String get anonLobbyWaitingOthers => '他のユーザーの参加を待っています…';
+
+  @override
+  String anonLobbyOnlineCount(int count) {
+    return '現在 $count 人がオンライン';
+  }
+
+  @override
+  String get anonChatNotEncrypted =>
+      '注意: 迷惑行為の通報を可能にするため、ランダムチャットはエンドツーエンド暗号化されません。';
+
+  @override
+  String get anonChatRequestSentTooltip => '友達リクエスト送信済み';
+
+  @override
+  String get anonChatAddFriendTooltip => '友達に追加';
+
+  @override
+  String get anonChatNextStrangerTooltip => '次の相手を探す';
+
+  @override
+  String get anonChatReportTooltip => '通報する';
+
+  @override
+  String get anonChatSayHi => '挨拶してみましょう！匿名ユーザーと接続されました。';
+
+  @override
+  String get anonChatFriendsTransition => '友達になりました！チャットはメインの会話リストに移動しました。';
+
+  @override
+  String get anonChatStrangerDisconnected => '相手が退出しました。';
+
+  @override
+  String get anonChatFindNextBtn => '次の相手を見つける';
+
+  @override
+  String get anonChatFriendReqTitle => '友達リクエスト';
+
+  @override
+  String get anonChatFriendReqDesc => '相手が友達追加とお互いのプロフィール公開を希望しています。';
+
+  @override
+  String get anonChatDecline => '辞退';
+
+  @override
+  String get anonChatAccept => '承認';
+
+  @override
+  String get anonChatWaitingReqTitle => 'リクエスト送信済み';
+
+  @override
+  String get anonChatWaitingReqDesc => '相手が身元公開リクエストを承認するのを待っています…';
+
+  @override
+  String get anonChatReportTitle => '匿名ユーザーを通報';
+
+  @override
+  String get anonChatReportQuestion => 'このユーザーを通報する理由は何ですか？';
+
+  @override
+  String get anonChatReportReasonInappropriate => '不適切なコンテンツや露骨な表現';
+
+  @override
+  String get anonChatReportReasonHarassment => '嫌がらせや誹謗中傷';
+
+  @override
+  String get anonChatReportReasonSpam => 'スパムまたは詐欺行為';
+
+  @override
+  String get anonChatReportReasonThreatening => '脅迫または危険な行為';
+
+  @override
+  String get anonChatReportReasonOther => 'その他の理由';
+
+  @override
+  String get anonChatReportCancel => 'キャンセル';
+
+  @override
+  String get anonChatReportSubmit => '通報を送信';
+
+  @override
+  String get anonChatReportSubmitted => '通報が送信されました。安全なコミュニティ維持にご協力ありがとうございます。';
+
+  @override
+  String get anonChatViewOnceVideoTitle => '1回限りの動画';
+
+  @override
+  String get anonChatViewOncePhotoTitle => '1回限りの写真';
+
+  @override
+  String get anonChatViewOnceVideoDesc => 'この動画は1回のみ再生できます。視聴後に消去されます。';
+
+  @override
+  String get anonChatViewOncePhotoDesc => 'この写真は1回のみ開くことができます。閉じると消去されます。';
+
+  @override
+  String get anonChatViewOnceCancel => 'キャンセル';
+
+  @override
+  String get anonChatViewOnceOpen => '開いて表示';
+
+  @override
+  String get unsupportedVersionTitle => 'アプリのアップデートが必要です';
+
+  @override
+  String get unsupportedVersionDesc =>
+      '現在お使いのバージョンのGupShupGoはサポートを終了しました。安全にチャットや通話を続けるために、最新バージョンにアップデートしてください。';
+
+  @override
+  String get unsupportedVersionUpdateNow => '今すぐアップデート';
+
+  @override
+  String get unsupportedVersionOpenPlayStore => 'アプリストアを開く';
+
+  @override
+  String publicProfileNotFound(String username) {
+    return '@$username は見つかりません';
+  }
+
+  @override
+  String get publicProfileUserNotFound => 'ユーザーが見つかりません';
+
+  @override
+  String get publicProfileNotFoundDesc =>
+      'ユーザー名が変更されたか、アカウントが利用できなくなっている可能性があります。';
+
+  @override
+  String get publicProfileTitle => 'プロフィール';
+
+  @override
+  String get publicProfileOnline => 'オンライン';
+
+  @override
+  String publicProfileLastSeen(String time) {
+    return '最終ログイン: $time';
+  }
+
+  @override
+  String get publicProfileJustNow => 'たった今';
+
+  @override
+  String publicProfileMinutesAgo(int minutes) {
+    return '$minutes分前';
+  }
+
+  @override
+  String publicProfileHoursAgo(int hours) {
+    return '$hours時間前';
+  }
+
+  @override
+  String publicProfileDaysAgo(int days) {
+    return '$days日前';
+  }
+
+  @override
+  String publicProfileJoined(String date) {
+    return '登録日: $date';
+  }
+
+  @override
+  String get publicProfileOwnLink => 'これはあなたの公開プロフィールです';
+
+  @override
+  String publicProfileGupPoints(int points) {
+    return '$points Gupポイント';
+  }
+
+  @override
+  String publicProfileLevel(int level) {
+    return 'レベル $level';
+  }
+
+  @override
+  String get publicProfileStatPoints => 'ポイント';
+
+  @override
+  String get publicProfileStatBadges => 'バッジ';
+
+  @override
+  String get publicProfileStatBestBond => '親密度トップ';
+
+  @override
+  String get publicProfileBadges => '獲得バッジ';
+
+  @override
+  String get qrScannerTitle => 'QRコードをスキャン';
+
+  @override
+  String get qrScannerFlashOnTooltip => 'ライトをオン';
+
+  @override
+  String get qrScannerFlashOffTooltip => 'ライトをオフ';
+
+  @override
+  String get qrScannerPrompt => 'カメラをQRコードに向けて友達追加や接続を行います';
+
+  @override
+  String get qrScannerNotProfileCode => 'このコードは有効なGupShupGoプロフィールコードではありません。';
+
+  @override
+  String get qrScannerCameraErrorTitle => 'カメラエラー';
+
+  @override
+  String get qrScannerCameraErrorRetry => '再試行';
+
+  @override
+  String get qrScannerPermissionMsg => 'QRコードをスキャンするにはカメラへのアクセス権限が必要です。';
+
+  @override
+  String get qrScannerPermissionAllow => 'アクセスを許可';
+
+  @override
+  String get qrScannerBlockedMsg => 'カメラへのアクセスが拒否されています。端末の設定から許可してください。';
+
+  @override
+  String get qrScannerBlockedSettings => '設定を開く';
+
+  @override
+  String get screenShareIncomingTitle => '画面共有のリクエスト';
+
+  @override
+  String get screenShareWantsToShare => '画面を共有しようとしています。';
+
+  @override
+  String get screenShareReject => '拒否';
+
+  @override
+  String get screenShareAccept => '承認';
+
+  @override
+  String get screenShareCantAccept => '現在画面共有を受信できません。';
+
+  @override
+  String screenShareDeclined(String name) {
+    return '$name が画面共有を辞退しました';
+  }
+
+  @override
+  String get screenShareNoAnswer => '応答がありませんでした。';
+
+  @override
+  String get screenShareStartError => '画面共有を開始できませんでした。もう一度お試しください。';
+
+  @override
+  String get screenShareStatusRequesting => 'リクエスト中…';
+
+  @override
+  String get screenShareStatusInitializing => '初期化中…';
+
+  @override
+  String get screenShareStatusWaitingParticipant => '参加者の接続を待機中…';
+
+  @override
+  String get screenShareStatusActive => '画面を共有しています';
+
+  @override
+  String screenShareSubWaitingAccept(String name) {
+    return '$name の承認を待っています…';
+  }
+
+  @override
+  String get screenShareSubEstablishing => '安全な接続を確立中…';
+
+  @override
+  String screenShareSubWaitingJoin(String name) {
+    return '$name が参加するのを待っています...';
+  }
+
+  @override
+  String get screenShareSubActive => 'あなたの画面が相手にリアルタイム配信されています';
+
+  @override
+  String get screenShareBadgeRequesting => 'リクエスト中';
+
+  @override
+  String get screenShareBadgeConnecting => '接続中';
+
+  @override
+  String get screenShareSharedWith => '共有先:';
+
+  @override
+  String get screenShareRequestingFrom => 'リクエスト送信元:';
+
+  @override
+  String get screenShareMinimizeTip => '共有中はこの通知バーを最小化できます';
+
+  @override
+  String get screenShareStop => '共有を停止';
+
+  @override
+  String get screenShareCancelRequest => 'リクエストをキャンセル';
+
+  @override
+  String screenShareViewerTitle(String name) {
+    return '$name の画面';
+  }
+
+  @override
+  String get screenShareViewerLive => 'ライブ配信';
+
+  @override
+  String get screenShareViewerMinimize => '最小化';
+
+  @override
+  String get screenShareViewerLeave => '退出する';
+
+  @override
+  String screenShareViewerWaitingStream(String name) {
+    return '$name の画面配信を待機中...';
+  }
+
+  @override
+  String get screenShareViewerConnecting => '配信に接続中…';
+
+  @override
+  String get viewOnceVideoTitle => '1回限定動画';
+
+  @override
+  String get viewOncePhotoTitle => '1回限定写真';
+
+  @override
+  String get viewOnceCantOpen => '期限切れのメディアは開けません。';
+
+  @override
+  String get viewOnceUnavailable => 'このメディアは利用できないか、既に閲覧期限が切れています。';
+
+  @override
+  String get viewOnceBlockedFooter => 'プライバシー保護のためスクリーンショットはブロックされています。';
+
+  @override
+  String get viewOnceUnblockedFooter => 'この画面を閉じるとメディアは完全に消去されます。';
 }

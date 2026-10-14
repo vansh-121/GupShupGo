@@ -14,6 +14,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/utils/url_opener.dart';
@@ -49,6 +50,7 @@ class _UnsupportedVersionScreenState extends State<UnsupportedVersionScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: c.surface,
@@ -74,7 +76,7 @@ class _UnsupportedVersionScreenState extends State<UnsupportedVersionScreen> {
                 ),
                 const SizedBox(height: 28),
                 Text(
-                  'Update GupShupGo',
+                  l10n.unsupportedVersionTitle,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.poppins(
                     fontSize: 22,
@@ -84,9 +86,7 @@ class _UnsupportedVersionScreenState extends State<UnsupportedVersionScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'This version of GupShupGo is no longer supported. Update to '
-                  'the latest version to keep chatting — your messages and '
-                  'chats are safe and will be there when you come back.',
+                  l10n.unsupportedVersionDesc,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
@@ -116,7 +116,7 @@ class _UnsupportedVersionScreenState extends State<UnsupportedVersionScreen> {
                             ),
                           )
                         : Text(
-                            'Update now',
+                            l10n.unsupportedVersionUpdateNow,
                             style: GoogleFonts.poppins(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
@@ -132,7 +132,7 @@ class _UnsupportedVersionScreenState extends State<UnsupportedVersionScreen> {
                       : () =>
                           openExternalUrl(context, UpdateService.playStoreUrl),
                   child: Text(
-                    'Open Play Store',
+                    l10n.unsupportedVersionOpenPlayStore,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
@@ -111,10 +112,12 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
     if (!mounted) return;
     if (!answered) {
       _isResponding = false;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Couldn't accept the screen share — check your "
-              'connection and try again.'),
+        SnackBar(
+          content: Text(
+            l10n.screenShareCantAccept,
+          ),
         ),
       );
       return;
@@ -150,6 +153,7 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
   Widget build(BuildContext context) {
     final hasPhoto =
         widget.sharerPhotoUrl != null && widget.sharerPhotoUrl!.isNotEmpty;
+    final l10n = AppLocalizations.of(context);
 
     return PopScope(
       canPop: false, // Force an explicit Accept / Reject choice.
@@ -185,9 +189,9 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
                 ),
                 const SizedBox(height: 60),
 
-                const Text(
-                  'Incoming Screen Share',
-                  style: TextStyle(
+                Text(
+                  l10n.screenShareIncomingTitle,
+                  style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 16,
                     fontWeight: FontWeight.w400,
@@ -231,9 +235,9 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'wants to share their screen',
-                  style: TextStyle(
+                Text(
+                  l10n.screenShareWantsToShare,
+                  style: const TextStyle(
                     color: Colors.white54,
                     fontSize: 16,
                   ),
@@ -267,9 +271,9 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Reject',
-                            style: TextStyle(
+                          Text(
+                            l10n.screenShareReject,
+                            style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
                             ),
@@ -296,9 +300,9 @@ class _IncomingScreenShareScreenState extends State<IncomingScreenShareScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'Accept',
-                            style: TextStyle(
+                          Text(
+                            l10n.screenShareAccept,
+                            style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
                             ),

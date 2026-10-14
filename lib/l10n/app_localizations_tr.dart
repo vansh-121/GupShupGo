@@ -170,7 +170,7 @@ class AppLocalizationsTr extends AppLocalizations {
       'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.';
 
   @override
-  String get homeNavChats => 'Sohbetler';
+  String get homeNavChats => 'Mesajlar';
 
   @override
   String get homeNavMoments => 'Anlar';
@@ -400,6 +400,13 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get attachmentLocationSubtitle => 'Mevcut konumunuzu paylaşın';
+
+  @override
+  String get attachmentScreenShare => 'Ekran paylaş';
+
+  @override
+  String get attachmentScreenShareSubtitle =>
+      'Sohbet sırasında ekranınızı canlı gösterin';
 
   @override
   String get attachmentViewOnce => 'Tek seferlik görüntüleme';
@@ -1114,4 +1121,1239 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get aiAskHint => 'GupAI\'ye her şeyi sorabilirsiniz…';
+
+  @override
+  String get settingsNotificationsTile => 'Bildirimler';
+
+  @override
+  String get settingsNotificationsStatusOn => 'Açık';
+
+  @override
+  String get settingsNotificationsStatusOff => 'Kapalı';
+
+  @override
+  String get settingsNotificationsEnabledToast => 'Bildirimler açık.';
+
+  @override
+  String get settingsEnableNotificationsTitle => 'Bildirimleri etkinleştir';
+
+  @override
+  String get settingsEnableNotificationsBody =>
+      'Bildirimler kapalı. GupShupGo\'nun yeni mesajlar ve aramalar hakkında sizi bilgilendirmesi için sistem ayarlarını açın.';
+
+  @override
+  String get settingsOpenSystemSettings => 'Ayarları aç';
+
+  @override
+  String get loginTagline => 'İnternet olmadan bile çalışan gizli mesajlaşma.';
+
+  @override
+  String get settingsPrivacyPolicy => 'Gizlilik Politikası';
+
+  @override
+  String get settingsTerms => 'Hizmet Şartları';
+
+  @override
+  String get settingsDeleteAccount => 'Hesabı sil';
+
+  @override
+  String get inviteSheetTitle => 'Arkadaşlarını davet et';
+
+  @override
+  String get inviteSheetSubtitle => 'Herkese duyur — GupShupGo\'yu paylaş';
+
+  @override
+  String get inviteShareImageBtn => 'Resmi paylaş';
+
+  @override
+  String get inviteShareLinkBtn => 'Bağlantıyı paylaş';
+
+  @override
+  String get inviteCopyLinkBtn => 'Bağlantıyı kopyala';
+
+  @override
+  String get inviteLinkCopied => 'Davet bağlantısı kopyalandı';
+
+  @override
+  String inviteMessage(String link) {
+    return 'GupShupGo\'da benimle sohbet et — internet olmadan bile çalışır 👋 $link';
+  }
+
+  @override
+  String get inviteCardTagline => 'Çevrimdışı bile çalışan özel sohbet';
+
+  @override
+  String get inviteCardScan => 'İndirmek için tara';
+
+  @override
+  String get inviteCardDownload => 'Google Play\'den indirin';
+
+  @override
+  String get homeMenuInvite => 'Arkadaşlarını davet et';
+
+  @override
+  String get invitePromptTitle => 'GupShupGo hoşunuza gidiyor mu?';
+
+  @override
+  String get invitePromptBody =>
+      'Arkadaşlarla daha güzel — ve internet olmadan da çalışıyor. Birini davet etmek ister misiniz?';
+
+  @override
+  String get invitePromptInvite => 'Arkadaşlarını davet et';
+
+  @override
+  String get invitePromptLater => 'Belki sonra';
+
+  @override
+  String get homeOfflineBannerTitle => 'İnternet yok mu? Sorun değil';
+
+  @override
+  String get homeOfflineBannerSubtitle =>
+      'Yakındaki kişilere Bluetooth üzerinden mesaj göndermeye devam edebilirsiniz.';
+
+  @override
+  String homeNearbyBannerTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Yakında $count kişi',
+      one: 'Yakında 1 kişi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeNearbyBannerSubtitle =>
+      'Bluetooth üzerinden sohbet edin — internet gerekmez.';
+
+  @override
+  String get linkBackupTitle => 'Yedek giriş yöntemi ekle';
+
+  @override
+  String get linkBackupSubtitle =>
+      'SIM kartınız olmasa bile tekrar giriş yapabilmek için Google veya e-posta bağlayın.';
+
+  @override
+  String get linkGoogleTitle => 'Google Hesabı Bağla';
+
+  @override
+  String get linkGoogleSubtitleLinked => 'Bağlandı ✓';
+
+  @override
+  String get linkGoogleSubtitleUnlinked => 'SIM olmadan tek dokunuşla giriş';
+
+  @override
+  String get linkGoogleAction => 'Bağla';
+
+  @override
+  String get linkGoogleSuccess => 'Google hesabı başarıyla bağlandı!';
+
+  @override
+  String get linkGoogleAlreadyUsed =>
+      'Bu Google hesabı başka bir GupShupGo hesabına kayıtlı.';
+
+  @override
+  String get linkGoogleFailed =>
+      'Google bağlantısı başarısız oldu. Tekrar deneyin.';
+
+  @override
+  String get linkSessionExpired =>
+      'Oturum süresi doldu. Lütfen tekrar giriş yapın.';
+
+  @override
+  String get linkEmailTitle => 'E-posta ve Şifre Bağla';
+
+  @override
+  String get linkEmailSubtitleLinked => 'Bağlandı ✓';
+
+  @override
+  String get linkEmailSubtitleUnlinked =>
+      'SIM veya Google yoksa e-posta ile giriş yapın';
+
+  @override
+  String get linkEmailActionAdd => 'Ekle';
+
+  @override
+  String get linkEmailActionCancel => 'İptal';
+
+  @override
+  String get linkEmailFieldLabel => 'E-posta';
+
+  @override
+  String get linkPasswordFieldLabel => 'Şifre oluştur';
+
+  @override
+  String get linkPasswordHelper => 'En az 6 karakter';
+
+  @override
+  String get linkEmailButton => 'E-postayı Bağla';
+
+  @override
+  String get linkEmailSuccess => 'E-posta başarıyla bağlandı!';
+
+  @override
+  String get linkEmailInvalid => 'Geçerli bir e-posta adresi girin.';
+
+  @override
+  String get linkPasswordTooShort => 'Şifre en az 6 karakter olmalıdır.';
+
+  @override
+  String get linkEmailAlreadyInUse => 'Bu e-posta zaten kullanımda.';
+
+  @override
+  String get linkEmailAlreadyLinked => 'Hesabınıza zaten bir e-posta bağlı.';
+
+  @override
+  String get linkEmailFailed => 'E-posta bağlantısı başarısız oldu.';
+
+  @override
+  String get linkContinueToApp => 'Uygulamaya Devam Et';
+
+  @override
+  String get linkSkipForNow => 'Şimdilik Atla';
+
+  @override
+  String get linkSkip => 'Atla';
+
+  @override
+  String get phoneAuthTitleEntry => 'Telefon numaranızla giriş yapın.';
+
+  @override
+  String get phoneAuthTitleOtp => 'Gönderdiğimiz kodu girin.';
+
+  @override
+  String get phoneAuthNameHint => 'Adınız';
+
+  @override
+  String get phoneAuthPhoneHint => 'Telefon Numarası';
+
+  @override
+  String get phoneAuthUseSim => 'SIM Kullan';
+
+  @override
+  String get phoneAuthSendOtp => 'Kodu Gönder';
+
+  @override
+  String phoneAuthOtpPrompt(String phone) {
+    return '$phone numarasına gönderilen 6 haneli kodu girin';
+  }
+
+  @override
+  String get phoneAuthOtpPromptGeneric => 'Gönderdiğimiz 6 haneli kodu girin';
+
+  @override
+  String get phoneAuthOtpHint => 'Kodu girin';
+
+  @override
+  String get phoneAuthVerify => 'Doğrula';
+
+  @override
+  String get phoneAuthGoBack => 'Geri Dön';
+
+  @override
+  String get phoneAuthResendCode => 'Kodu tekrar gönder';
+
+  @override
+  String get phoneAuthEnterName => 'Lütfen adınızı girin';
+
+  @override
+  String get phoneAuthEnterValidPhone =>
+      'Lütfen geçerli bir telefon numarası girin';
+
+  @override
+  String get phoneAuthEnterCode => 'Lütfen kodu girin';
+
+  @override
+  String get phoneAuthRequestNewCode => 'Lütfen yeni bir kod isteyin.';
+
+  @override
+  String get phoneAuthCodeIncorrect => 'Kod hatalı. Tekrar deneyin.';
+
+  @override
+  String get phoneAuthErrCodeIncorrect =>
+      'Bu kod hatalı. Lütfen kontrol edip tekrar deneyin.';
+
+  @override
+  String get phoneAuthErrCodeExpired => 'Kodun süresi doldu.';
+
+  @override
+  String get phoneAuthErrTooManyRequests =>
+      'Çok fazla deneme yapıldı. Lütfen bekleyin.';
+
+  @override
+  String get phoneAuthErrInvalidPhone => 'Telefon numarası geçersiz görünüyor.';
+
+  @override
+  String get phoneAuthErrQuotaExceeded => 'SMS limitine ulaşıldı.';
+
+  @override
+  String get phoneAuthErrFailed => 'Doğrulama başarısız oldu.';
+
+  @override
+  String get usernameSetupAppBarTitle => 'Kullanıcı Adınızı Seçin';
+
+  @override
+  String get usernameSetupHeaderTitle => 'Kimliğinizi Güvenceye Alın';
+
+  @override
+  String get usernameSetupHeaderDesc =>
+      'Kullanıcı adınız (@handle) GupShupGo\'daki benzersiz anahtarınızdır. Başkaları numaranızı bilmeden sizi ekleyebilir.';
+
+  @override
+  String get usernameSetupInputHint => 'kullanici_adiniz';
+
+  @override
+  String get usernameSetupChecking => 'Uygunluk kontrol ediliyor...';
+
+  @override
+  String usernameSetupAvailable(String handle) {
+    return '@$handle kullanılabilir!';
+  }
+
+  @override
+  String usernameSetupTaken(String handle) {
+    return '@$handle zaten alınmış.';
+  }
+
+  @override
+  String get usernameSetupCharRules => '3–20 karakter (a-z, 0-9, _)';
+
+  @override
+  String get usernameSetupTooShort => 'En az 3 karakter olmalıdır.';
+
+  @override
+  String get usernameSetupTooLong => 'En fazla 20 karakter olabilir.';
+
+  @override
+  String get usernameSetupInvalidChars =>
+      'Yalnızca harf, rakam ve alt çizgi kullanılabilir.';
+
+  @override
+  String get usernameSetupRecommended => 'SİZİN İÇİN ÖNERİLENLER';
+
+  @override
+  String get usernameSetupSaveBtn => 'Kaydet ve Devam Et';
+
+  @override
+  String get usernameSetupSkipBtn => 'Şimdilik atla';
+
+  @override
+  String usernameSetupFailed(String error) {
+    return 'Kullanıcı adı kaydedilemedi: $error';
+  }
+
+  @override
+  String get vaultProtectTitle => 'Kasayı Koru';
+
+  @override
+  String get vaultUnlockTitle => 'Kasa Kilidini Aç';
+
+  @override
+  String get vaultSetupDesc =>
+      'Mesaj geçmişinizi şifrelemek için bir PIN seçin. Yeni bir telefonda buna ihtiyacınız olacak.';
+
+  @override
+  String get vaultUnlockDescBio =>
+      'Geçmişi açmak için PIN girin veya parmak izinizi kullanın.';
+
+  @override
+  String get vaultUnlockDescPin => 'Geçmişinizi açmak için PIN kodunuzu girin.';
+
+  @override
+  String get vaultReinstallHint =>
+      'Geçmişi geri yüklemek için PIN kodunuzu girin.';
+
+  @override
+  String get vaultUnlockWithFingerprint => 'Parmak İziyle Aç';
+
+  @override
+  String get vaultOrDivider => 'VEYA';
+
+  @override
+  String get vaultNewPin => 'Yeni PIN';
+
+  @override
+  String get vaultConfirmPin => 'PIN\'i Onayla';
+
+  @override
+  String get vaultEnterPin => 'PIN Girin';
+
+  @override
+  String get vaultKeyboardUseLetters => 'Harf kullan';
+
+  @override
+  String get vaultKeyboardUseNumbers => 'Rakam kullan';
+
+  @override
+  String get vaultRestoreLater => 'Sonra geri yükle';
+
+  @override
+  String get vaultForgotPin => 'PIN\'i unuttunuz mu?';
+
+  @override
+  String get vaultSetPinBtn => 'PIN Ayarla';
+
+  @override
+  String get vaultDecryptBtn => 'Kilidi Aç';
+
+  @override
+  String get vaultPinMinLength => 'PIN en az 6 karakter olmalıdır.';
+
+  @override
+  String get vaultPinsDoNotMatch => 'PIN kodları eşleşmiyor.';
+
+  @override
+  String get vaultSetupFailed => 'Kurulum başarısız oldu.';
+
+  @override
+  String get vaultIncorrectPin => 'Hatalı PIN. Tekrar deneyin.';
+
+  @override
+  String get vaultFingerprintOutOfDate => 'Parmak izi güncel değil. PIN girin.';
+
+  @override
+  String get vaultBiometricError => 'Biyometrik hata. PIN\'i elle girin.';
+
+  @override
+  String get vaultBioReasonUnlock => 'Kasayı açmak için biyometriyi kullanın';
+
+  @override
+  String get vaultBioReasonEnrol =>
+      'Hızlı kilit açmayı etkinleştirmek için parmak izinizi onaylayın';
+
+  @override
+  String get vaultAskBioTitle => 'Parmak iziyle açılsın mı?';
+
+  @override
+  String get vaultAskBioDesc =>
+      'Bu telefonda PIN yazmaktan kurtulun. Ancak yeni telefonlar için PIN\'inizi unutmayın.';
+
+  @override
+  String get vaultAskBioNotNow => 'Şimdi değil';
+
+  @override
+  String get vaultAskBioEnable => 'Etkinleştir';
+
+  @override
+  String get vaultDeleteMessagesTitle => 'Tüm mesajlar silinsin mi?';
+
+  @override
+  String get vaultDeleteMessagesDesc =>
+      'PIN olmadan geçmiş çözülemez, sıfırlama işlemi her şeyi silecektir. Geri alınamaz.';
+
+  @override
+  String get vaultDeleteMessagesCancel => 'İptal';
+
+  @override
+  String get vaultDeleteMessagesConfirm => 'Her şeyi sil';
+
+  @override
+  String get vaultCustodyConfirmTitle => 'Kasa PIN kodunuzu onaylayın';
+
+  @override
+  String get vaultCustodyChooseTitle => 'Bir PIN seçin';
+
+  @override
+  String get vaultCustodyConfirmDesc =>
+      'Mesaj geçmişiniz bir PIN ile korunuyor. Bir kez onaylayın.';
+
+  @override
+  String get vaultCustodyChooseDesc =>
+      'Hatırlayacağınız bir PIN seçin. Tüm mesajlar yeni PIN ile tekrar şifrelenecektir.';
+
+  @override
+  String get vaultCustodyDontKnow => 'PIN kodumu bilmiyorum';
+
+  @override
+  String get vaultCustodyConfirmBtn => 'Onayla';
+
+  @override
+  String get vaultCustodySaveBtn => 'PIN\'i Kaydet';
+
+  @override
+  String get vaultCustodyMismatchError => 'Bu PIN eşleşmiyor.';
+
+  @override
+  String get vaultCustodyAutoUpdateFailed => 'PIN otomatik güncellenemedi.';
+
+  @override
+  String vaultCustodyReencrypting(int done, int total) {
+    return '$total öğeden $done tanesi yeniden şifreleniyor… uygulamayı açık tutun.';
+  }
+
+  @override
+  String get vaultCustodyPreparing => 'Hazırlanıyor… uygulamayı açık tutun.';
+
+  @override
+  String get vaultSettingsTitle => 'Kasa';
+
+  @override
+  String get vaultSettingsAboutTitle => 'Kasa Hakkında';
+
+  @override
+  String get vaultSettingsAboutDesc =>
+      'Sohbet geçmişinizin PIN ile korunan özel yedeği. Sadece PIN kodunuz açabilir.';
+
+  @override
+  String get vaultSettingsBulletMessages => 'Mesajlarınız';
+
+  @override
+  String get vaultSettingsBulletStatuses => 'Gördüğünüz durumlar';
+
+  @override
+  String get vaultSettingsNeverKept =>
+      'Burada asla tutulmaz: Arama geçmişi, kişiler veya fotoğraflar.';
+
+  @override
+  String get vaultSettingsSectionPrivacy => 'GİZLİLİK';
+
+  @override
+  String get vaultSettingsAutoDelete => 'Eski mesajları otomatik sil';
+
+  @override
+  String get vaultSettingsKeepForever => 'Süresiz sakla';
+
+  @override
+  String vaultSettingsDeleteAfter(String label) {
+    return '$label sonra sil';
+  }
+
+  @override
+  String get vaultSettingsSectionPin => 'PIN KODU';
+
+  @override
+  String get vaultSettingsChangePin => 'PIN Değiştir';
+
+  @override
+  String get vaultSettingsChangePinSubtitle =>
+      'Tüm kasa verilerini yeniden şifreler';
+
+  @override
+  String get vaultSettingsBioTitle => 'Parmak iziyle kilit aç';
+
+  @override
+  String get vaultSettingsBioSubOn => 'Bu cihazda açık';
+
+  @override
+  String get vaultSettingsBioSubOff => 'Bu cihazda PIN girmeyi atla';
+
+  @override
+  String get vaultSettingsSectionDanger => 'TEHLİKELİ BÖLGE';
+
+  @override
+  String get vaultSettingsDeleteData => 'Kasa verilerini sil';
+
+  @override
+  String get vaultSettingsDeleteDataSubtitle =>
+      'Şifreli geçmişi siler, PIN\'i korur';
+
+  @override
+  String get vaultSettingsResetVault => 'Kasayı sıfırla';
+
+  @override
+  String get vaultSettingsResetVaultSubtitle =>
+      'PIN\'i unutur ve her şeyi siler';
+
+  @override
+  String get vaultSettingsPinChanged => 'PIN değiştirildi.';
+
+  @override
+  String get vaultSettingsBioTurnedOff => 'Parmak iziyle kilit açma kapatıldı.';
+
+  @override
+  String get vaultSettingsBioTurnedOn => 'Parmak iziyle kilit açma açıldı.';
+
+  @override
+  String get vaultSettingsClearDataTitle => 'Kasa verileri silinsin mi?';
+
+  @override
+  String get vaultSettingsClearDataDesc =>
+      'Buluttaki şifreli mesajları siler. PIN kodunuz değişmez.';
+
+  @override
+  String get vaultSettingsClearDataCancel => 'İptal';
+
+  @override
+  String get vaultSettingsClearDataConfirm => 'Verileri sil';
+
+  @override
+  String get vaultSettingsDataDeleted => 'Kasa verileri silindi.';
+
+  @override
+  String get vaultSettingsResetTitle => 'Kasa sıfırlansın mı?';
+
+  @override
+  String get vaultSettingsResetDesc =>
+      'PIN kodunuzu ve tüm geçmişi siler. Yeni PIN oluşturmanız gerekir.';
+
+  @override
+  String get vaultSettingsResetConfirm => 'Sıfırla';
+
+  @override
+  String get vaultSettingsChangeDialogDesc =>
+      'Tüm veriler yeni PIN ile yeniden şifrelenecek.';
+
+  @override
+  String get vaultSettingsCurrentPin => 'Mevcut PIN';
+
+  @override
+  String get vaultSettingsNewPin => 'Yeni PIN';
+
+  @override
+  String get vaultSettingsConfirmNewPin => 'Yeni PIN\'i onayla';
+
+  @override
+  String get vaultSettingsEnterCurrentPin => 'Mevcut PIN\'i girin.';
+
+  @override
+  String get vaultSettingsNewPinMinLength => 'En az 6 karakter olmalı.';
+
+  @override
+  String get vaultSettingsNewPinMismatch => 'Yeni PIN kodları eşleşmiyor.';
+
+  @override
+  String get vaultSettingsCurrentPinIncorrect => 'Mevcut PIN hatalı.';
+
+  @override
+  String vaultSettingsReencryptingCount(int done, int total) {
+    return '$total öğeden $done tanesi yeniden şifreleniyor…';
+  }
+
+  @override
+  String get vaultSettingsChangeBtn => 'Değiştir';
+
+  @override
+  String get vaultSettingsBioPinDialogTitle => 'PIN Kodunuzu Girin';
+
+  @override
+  String get vaultSettingsBioPinDialogDesc =>
+      'Parmak izini etkinleştirmek için PIN kodunuz gerekir.';
+
+  @override
+  String get vaultSettingsContinueBtn => 'Devam Et';
+
+  @override
+  String get premiumTitle => 'GupShupGo Pro';
+
+  @override
+  String get premiumSubtitleMember => 'Pro üyesisiniz! 🎉';
+
+  @override
+  String get premiumSubtitleUnlock => 'Tüm deneyimin kilidini açın';
+
+  @override
+  String premiumActiveDaysRemaining(int days) {
+    return '$days gün kaldı';
+  }
+
+  @override
+  String get premiumFeaturesHeader => 'Pro ile Neler Kazanırsınız';
+
+  @override
+  String get premiumPlansHeader => 'Planınızı Seçin';
+
+  @override
+  String get premiumSubscribeBtn => 'Hemen Abone Ol';
+
+  @override
+  String get premiumCancelAnytime =>
+      'Google Play\'den istediğiniz zaman iptal edin.';
+
+  @override
+  String get premiumRestoreBtn => 'Önceki satın alımı geri yükle';
+
+  @override
+  String get premiumRestoring => 'Geri yükleniyor…';
+
+  @override
+  String get premiumRestoredSuccess => 'Pro aboneliği geri yüklendi! 🎉';
+
+  @override
+  String get premiumNoActiveSub => 'Aktif abonelik bulunamadı.';
+
+  @override
+  String get premiumProductUnavailable => 'Ürün mevcut değil.';
+
+  @override
+  String get premiumFeatureMediaTitle => 'Medya Durumları';
+
+  @override
+  String get premiumFeatureMediaDesc =>
+      'Durum olarak fotoğraf ve video paylaşın';
+
+  @override
+  String get premiumFeatureMediaFree => 'Yalnızca metin';
+
+  @override
+  String get premiumFeatureMediaPro => 'Fotoğraf + Video';
+
+  @override
+  String get premiumFeatureScreenShareTitle => 'Ekran Paylaşımı';
+
+  @override
+  String get premiumFeatureScreenShareDesc =>
+      'Sohbet sırasında ekranınızı canlı paylaşın';
+
+  @override
+  String get premiumFeatureScreenShareFree => 'Kilitli';
+
+  @override
+  String get premiumFeatureScreenSharePro => 'Tam erişim';
+
+  @override
+  String get premiumFeatureThemesTitle => 'Sohbet Temaları';
+
+  @override
+  String get premiumFeatureThemesDesc =>
+      'Her sohbete özel arka plan ve baloncuklar';
+
+  @override
+  String get premiumFeatureThemesFree => '6 tema';
+
+  @override
+  String get premiumFeatureThemesPro => 'Tüm 12 tema + kendi fotoğrafınız';
+
+  @override
+  String get premiumFeatureVoiceTitle => 'Daha Uzun Sesli Mesajlar';
+
+  @override
+  String get premiumFeatureVoiceDesc => 'Süre sınırı olmadan ses kaydı yapın';
+
+  @override
+  String get premiumFeatureVoiceFree => '2 dakika';
+
+  @override
+  String get premiumFeatureVoicePro => 'Sınırsız';
+
+  @override
+  String get premiumFeatureQualityTitle => 'Yüksek Kaliteli Medya';
+
+  @override
+  String get premiumFeatureQualityDesc =>
+      'Daha net fotoğraflar ve 90 sn durum videoları';
+
+  @override
+  String get premiumFeatureQualityFree => 'Standart kalite';
+
+  @override
+  String get premiumFeatureQualityPro => 'Yüksek kalite + 90s video';
+
+  @override
+  String get premiumFeatureBondTitle => 'Bağ Kurtarma';
+
+  @override
+  String get premiumFeatureBondDesc =>
+      'Kopan arkadaşlık serilerini ücretsiz kurtarın';
+
+  @override
+  String get premiumFeatureBondFree => 'Puan veya reklam izleme';
+
+  @override
+  String get premiumFeatureBondPro => 'Haftada 1 ücretsiz kurtarma';
+
+  @override
+  String get premiumFeatureBadgeTitle => 'Pro Rozeti';
+
+  @override
+  String get premiumFeatureBadgeDesc => 'Pro statünüzü sergileyin';
+
+  @override
+  String get premiumFeatureBadgeFree => 'Rozet yok';
+
+  @override
+  String get premiumFeatureBadgePro => 'Özel Pro rozeti';
+
+  @override
+  String get premiumFeatureExportTitle => 'Sohbeti Dışa Aktar';
+
+  @override
+  String get premiumFeatureExportDesc =>
+      'Sohbetleri PDF veya metin dosyası olarak kaydedin';
+
+  @override
+  String get premiumFeatureExportFree => 'Kullanılamaz';
+
+  @override
+  String get premiumFeatureExportPro => 'PDF ve TXT dışa aktarma';
+
+  @override
+  String get premiumFeatureAdFreeTitle => 'Reklamsız Deneyim';
+
+  @override
+  String get premiumFeatureAdFreeDesc => 'Uygulamada hiçbir banner reklamı yok';
+
+  @override
+  String get premiumFeatureAdFreeFree => 'Banner reklamlar var';
+
+  @override
+  String get premiumFeatureAdFreePro => 'Reklamsız';
+
+  @override
+  String get premiumPlanMonthly => 'Aylık';
+
+  @override
+  String get premiumPlanYearly => 'Yıllık';
+
+  @override
+  String get premiumPlanSavings => '~%33 tasarruf';
+
+  @override
+  String get premiumPeriodMonth => '/ay';
+
+  @override
+  String get premiumPeriodYear => '/yıl';
+
+  @override
+  String get nearbyOfflineChatTitle => 'Çevrimdışı Sohbet';
+
+  @override
+  String get nearbySearchingDevices => 'Yakındaki cihazlar taranıyor…';
+
+  @override
+  String get nearbyTooltipStop => 'Çevrimdışı sohbeti durdur';
+
+  @override
+  String get nearbyTooltipStart => 'Çevrimdışı sohbeti başlat';
+
+  @override
+  String get nearbyDevicesSection => 'Yakındaki Cihazlar';
+
+  @override
+  String get nearbyDiscoveryOn => 'TARAMA AÇIK';
+
+  @override
+  String get nearbyDiscoveryOff => 'TARAMA KAPALI';
+
+  @override
+  String get nearbyHeroTitle => 'Çevrimdışı Mod';
+
+  @override
+  String nearbyHeroNearbyCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count kişi yakında',
+      one: '1 kişi yakında',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get nearbyHeroOff => 'Çevrimdışı sohbet kapalı';
+
+  @override
+  String get nearbyHeroDesc =>
+      '100 metre mesafedeki cihazlar taranıyor. İnternet gerektirmez.';
+
+  @override
+  String get nearbyYourNameHint => 'Adınız';
+
+  @override
+  String get nearbyEmptySearching => 'Yakındaki cihazlar taranıyor…';
+
+  @override
+  String get nearbyEmptyOff => 'Çevrimdışı sohbet kapalı';
+
+  @override
+  String get nearbyEmptySearchingDesc =>
+      'Diğer cihazlarda Bluetooth açıkken GupShupGo\'nun açık olduğundan emin olun.';
+
+  @override
+  String get nearbyEmptyOffDesc =>
+      'Taramayı başlatmak için sağ üstteki ikona dokunun.';
+
+  @override
+  String get nearbyPeerConnected => 'Bağlandı · Sohbet etmek için dokunun';
+
+  @override
+  String get nearbyPeerConnecting => 'Bağlanıyor…';
+
+  @override
+  String get nearbyPeerTapToConnect => 'Bağlanmak için dokunun';
+
+  @override
+  String get nearbyActionChat => 'Sohbet';
+
+  @override
+  String get nearbyActionConnecting => 'Bağlanıyor';
+
+  @override
+  String get nearbyActionConnect => 'Bağlan';
+
+  @override
+  String get nearbyPermNeededTitle => 'İzinler Gerekli';
+
+  @override
+  String get nearbyPermNeededDesc =>
+      'Çevrimdışı sohbet için Bluetooth ve yakın cihaz izni gereklidir.';
+
+  @override
+  String get nearbyTryAgainBtn => 'Tekrar Dene';
+
+  @override
+  String get nearbySettingsBtn => 'Ayarlar';
+
+  @override
+  String get nearbyHelpTip =>
+      'Arkadaşınızı göremiyor musunuz? İki cihazda da Bluetooth\'un açık olduğunu kontrol edin.';
+
+  @override
+  String get anonLobbyTitle => 'Anonim Sohbet';
+
+  @override
+  String get anonLobbyFinding => 'Biri aranıyor…';
+
+  @override
+  String get anonLobbyHangTight =>
+      'Bekleyin — rastgele biriyle eşleştiriliyorsunuz.';
+
+  @override
+  String get anonLobbyCancelBtn => 'Aramayı İptal Et';
+
+  @override
+  String get anonLobbyPrivacyNote => 'Kimliğiniz gizli kalır.';
+
+  @override
+  String get anonLobbyConnecting => 'Bağlanıyor…';
+
+  @override
+  String get anonLobbyWaitingOthers =>
+      'Diğer kullanıcıların çevrimiçi olması bekleniyor…';
+
+  @override
+  String anonLobbyOnlineCount(int count) {
+    return '$count kişi şu an çevrimiçi';
+  }
+
+  @override
+  String get anonChatNotEncrypted => 'Mesajlar uçtan uca şifreli değildir';
+
+  @override
+  String get anonChatRequestSentTooltip => 'İstek gönderildi';
+
+  @override
+  String get anonChatAddFriendTooltip => 'Arkadaş ekle';
+
+  @override
+  String get anonChatNextStrangerTooltip => 'Sonraki kişi';
+
+  @override
+  String get anonChatReportTooltip => 'Bildir';
+
+  @override
+  String get anonChatSayHi => 'Yabancıya merhaba deyin! 👋';
+
+  @override
+  String get anonChatFriendsTransition =>
+      'Artık arkadaşsınız! Güvenli sohbet açılıyor…';
+
+  @override
+  String get anonChatStrangerDisconnected => 'Yabancı sohbetten ayrıldı 👋';
+
+  @override
+  String get anonChatFindNextBtn => 'Sonraki Yabancıyı Bul';
+
+  @override
+  String get anonChatFriendReqTitle => 'Yabancı arkadaş olmak istiyor!';
+
+  @override
+  String get anonChatFriendReqDesc =>
+      'Kabul etmek gerçek profilinizi gösterir ve şifreli sohbet başlatır.';
+
+  @override
+  String get anonChatDecline => 'Reddet';
+
+  @override
+  String get anonChatAccept => 'Kabul Et';
+
+  @override
+  String get anonChatWaitingReqTitle => 'Arkadaşlık isteği gönderildi';
+
+  @override
+  String get anonChatWaitingReqDesc => 'Cevap bekleniyor…';
+
+  @override
+  String get anonChatReportTitle => 'Yabancıyı Bildir';
+
+  @override
+  String get anonChatReportQuestion => 'Neden bildiriyorsunuz?';
+
+  @override
+  String get anonChatReportReasonInappropriate => 'Uygunsuz içerik';
+
+  @override
+  String get anonChatReportReasonHarassment => 'Taciz veya zorbalık';
+
+  @override
+  String get anonChatReportReasonSpam => 'Spam veya dolandırıcılık';
+
+  @override
+  String get anonChatReportReasonThreatening => 'Tehditkar davranış';
+
+  @override
+  String get anonChatReportReasonOther => 'Diğer';
+
+  @override
+  String get anonChatReportCancel => 'İptal';
+
+  @override
+  String get anonChatReportSubmit => 'Bildir ve Ayrıl';
+
+  @override
+  String get anonChatReportSubmitted => 'Bildirim iletildi. Teşekkürler.';
+
+  @override
+  String get anonChatViewOnceVideoTitle => 'Bir kez oynat?';
+
+  @override
+  String get anonChatViewOncePhotoTitle => 'Bir kez aç?';
+
+  @override
+  String get anonChatViewOnceVideoDesc =>
+      'Bu videoyu yalnızca bir kez açabilirsiniz.';
+
+  @override
+  String get anonChatViewOncePhotoDesc =>
+      'Bu fotoğrafı yalnızca bir kez açabilirsiniz.';
+
+  @override
+  String get anonChatViewOnceCancel => 'İptal';
+
+  @override
+  String get anonChatViewOnceOpen => 'Aç';
+
+  @override
+  String get unsupportedVersionTitle => 'GupShupGo\'yu Güncelleyin';
+
+  @override
+  String get unsupportedVersionDesc =>
+      'Bu sürüm artık desteklenmiyor. Sohbete devam etmek için güncelleyin.';
+
+  @override
+  String get unsupportedVersionUpdateNow => 'Şimdi güncelle';
+
+  @override
+  String get unsupportedVersionOpenPlayStore => 'Play Store\'u aç';
+
+  @override
+  String publicProfileNotFound(String username) {
+    return '@$username bulunamadı';
+  }
+
+  @override
+  String get publicProfileUserNotFound => 'Kullanıcı bulunamadı';
+
+  @override
+  String get publicProfileNotFoundDesc =>
+      'Bu kullanıcı adı yok veya bağlantı bozuk.';
+
+  @override
+  String get publicProfileTitle => 'Profil';
+
+  @override
+  String get publicProfileOnline => 'Çevrimiçi';
+
+  @override
+  String publicProfileLastSeen(String time) {
+    return 'Son görülme $time';
+  }
+
+  @override
+  String get publicProfileJustNow => 'az önce';
+
+  @override
+  String publicProfileMinutesAgo(int minutes) {
+    return '$minutes dk önce';
+  }
+
+  @override
+  String publicProfileHoursAgo(int hours) {
+    return '$hours sa önce';
+  }
+
+  @override
+  String publicProfileDaysAgo(int days) {
+    return '$days gün önce';
+  }
+
+  @override
+  String publicProfileJoined(String date) {
+    return '$date tarihinde katıldı';
+  }
+
+  @override
+  String get publicProfileOwnLink => 'Bu sizin profil bağlantınızdır.';
+
+  @override
+  String publicProfileGupPoints(int points) {
+    return '$points Gup Puanı';
+  }
+
+  @override
+  String publicProfileLevel(int level) {
+    return 'Seviye $level';
+  }
+
+  @override
+  String get publicProfileStatPoints => 'Puan';
+
+  @override
+  String get publicProfileStatBadges => 'Rozet';
+
+  @override
+  String get publicProfileStatBestBond => 'En İyi Seri';
+
+  @override
+  String get publicProfileBadges => 'ROZETLER';
+
+  @override
+  String get qrScannerTitle => 'QR Kod Tara';
+
+  @override
+  String get qrScannerFlashOnTooltip => 'Flaş aç';
+
+  @override
+  String get qrScannerFlashOffTooltip => 'Flaş kapat';
+
+  @override
+  String get qrScannerPrompt => 'Kamerayı GupShupGo profil QR koduna doğrultun';
+
+  @override
+  String get qrScannerNotProfileCode => 'Bu bir GupShupGo profil kodu değil.';
+
+  @override
+  String get qrScannerCameraErrorTitle => 'Kamera başlatılamadı.';
+
+  @override
+  String get qrScannerCameraErrorRetry => 'Lütfen tekrar deneyin.';
+
+  @override
+  String get qrScannerPermissionMsg => 'Tarama için kamera izni gerekiyor.';
+
+  @override
+  String get qrScannerPermissionAllow => 'Kameraya izin ver';
+
+  @override
+  String get qrScannerBlockedMsg => 'Kamera engellendi. Ayarlardan açın.';
+
+  @override
+  String get qrScannerBlockedSettings => 'Ayarları aç';
+
+  @override
+  String get screenShareIncomingTitle => 'Gelen Ekran Paylaşımı';
+
+  @override
+  String get screenShareWantsToShare => 'ekranını paylaşmak istiyor';
+
+  @override
+  String get screenShareReject => 'Reddet';
+
+  @override
+  String get screenShareAccept => 'Kabul Et';
+
+  @override
+  String get screenShareCantAccept =>
+      'Kabul edilemedi. Bağlantınızı kontrol edin.';
+
+  @override
+  String screenShareDeclined(String name) {
+    return '$name ekran paylaşımını reddetti';
+  }
+
+  @override
+  String get screenShareNoAnswer => 'Cevap yok';
+
+  @override
+  String get screenShareStartError => 'Ekran paylaşımı başlatılamadı';
+
+  @override
+  String get screenShareStatusRequesting => 'İzin isteniyor';
+
+  @override
+  String get screenShareStatusInitializing => 'Yayın başlatılıyor';
+
+  @override
+  String get screenShareStatusWaitingParticipant => 'Katılımcı bekleniyor';
+
+  @override
+  String get screenShareStatusActive => 'Ekran Paylaşımı Aktif';
+
+  @override
+  String screenShareSubWaitingAccept(String name) {
+    return '$name kullanıcısının kabul etmesi bekleniyor…';
+  }
+
+  @override
+  String get screenShareSubEstablishing => 'Şifreli bağlantı kuruluyor...';
+
+  @override
+  String screenShareSubWaitingJoin(String name) {
+    return '$name katılması bekleniyor...';
+  }
+
+  @override
+  String get screenShareSubActive =>
+      'Tüm ekranınız yüksek çözünürlükte paylaşılıyor.';
+
+  @override
+  String get screenShareBadgeRequesting => 'İSTEK';
+
+  @override
+  String get screenShareBadgeConnecting => 'BAĞLANIYOR';
+
+  @override
+  String get screenShareSharedWith => 'Paylaşılan: ';
+
+  @override
+  String get screenShareRequestingFrom => 'İstek yapılan: ';
+
+  @override
+  String get screenShareMinimizeTip =>
+      'Uygulamayı kullanmaya devam etmek için küçültebilirsiniz.';
+
+  @override
+  String get screenShareStop => 'Paylaşımı durdur';
+
+  @override
+  String get screenShareCancelRequest => 'İsteği iptal et';
+
+  @override
+  String screenShareViewerTitle(String name) {
+    return '$name ekranını paylaşıyor';
+  }
+
+  @override
+  String get screenShareViewerLive => 'CANLI YAYIN';
+
+  @override
+  String get screenShareViewerMinimize => 'Küçült';
+
+  @override
+  String get screenShareViewerLeave => 'Ayrıl';
+
+  @override
+  String screenShareViewerWaitingStream(String name) {
+    return '$name kullanıcısının ekran yayını bekleniyor...';
+  }
+
+  @override
+  String get screenShareViewerConnecting => 'Yayına bağlanılıyor...';
+
+  @override
+  String get viewOnceVideoTitle => 'Video · Tek seferlik görüntüleme';
+
+  @override
+  String get viewOncePhotoTitle => 'Fotoğraf · Tek seferlik görüntüleme';
+
+  @override
+  String get viewOnceCantOpen => 'Medya açılamadı.';
+
+  @override
+  String get viewOnceUnavailable => 'Bu medya artık mevcut değil.';
+
+  @override
+  String get viewOnceBlockedFooter => 'Ekran görüntüsü engellendi.';
+
+  @override
+  String get viewOnceUnblockedFooter => 'Yalnızca bir kez açılabilir.';
 }

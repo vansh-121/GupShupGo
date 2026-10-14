@@ -13,6 +13,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
@@ -111,11 +113,16 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   @override
   void initState() {
     super.initState();
+    // Hide the Home banner behind this modal while it's open. Its AdWidget is an
+    // Android platform view, and attaching/refreshing one while the PIN keyboard
+    // is up dismisses the keyboard (the reported "keyboard keeps closing" bug).
+    AdsService.instance.suppressBanner();
     _checkBiometrics();
   }
 
   @override
   void dispose() {
+    AdsService.instance.releaseBannerSuppression();
     _pinCtrl.dispose();
     _confirmCtrl.dispose();
     _pinFocus.dispose();
@@ -151,8 +158,8 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
         // fingerprint before, but the stored PIN went with the old install.
         // Say so plainly instead of presenting a button that cannot work.
         if (!_isSetup && _canCheckBiometrics && !_hasStoredPin) {
-          _hint = 'Enter your PIN to restore your history on this device. '
-              'You can turn fingerprint unlock back on afterwards.';
+          final l10n = AppLocalizations.of(context);
+          _hint = l10n.vaultReinstallHint;
         }
       });
 
@@ -172,8 +179,9 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   /// unwrap yet.
   Future<void> _authenticateWithBiometrics({String? savedPin}) async {
     try {
+      final l10n = AppLocalizations.of(context);
       final authenticated = await _auth.authenticate(
-        localizedReason: 'Authenticate using biometrics to unlock your vault',
+        localizedReason: l10n.vaultBioReasonUnlock,
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -200,33 +208,36 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
         return;
       }
       if (mounted) {
+        final currentL10n = AppLocalizations.of(context);
         setState(() {
           _busy = false;
           // The scan succeeded but the PIN behind it no longer opens the
           // vault — e.g. the PIN was changed on another device.
           _hasStoredPin = false;
-          _error = 'Fingerprint unlock is out of date. Enter your PIN.';
+          _error = currentL10n.vaultFingerprintOutOfDate;
         });
       }
     } on PlatformException catch (e) {
       debugPrint('[Biometrics] error: $e');
       if (mounted) {
+        final currentL10n = AppLocalizations.of(context);
         setState(() {
           _busy = false;
-          _error = 'Biometric error. Enter PIN manually.';
+          _error = currentL10n.vaultBiometricError;
         });
       }
     }
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context);
     final pin = _pinCtrl.text;
     if (pin.length < _minLen) {
-      setState(() => _error = 'PIN must be at least $_minLen characters.');
+      setState(() => _error = l10n.vaultPinMinLength);
       return;
     }
     if (_isSetup && pin != _confirmCtrl.text) {
-      setState(() => _error = 'PINs do not match.');
+      setState(() => _error = l10n.vaultPinsDoNotMatch);
       return;
     }
     setState(() {
@@ -241,8 +252,8 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
       setState(() {
         _busy = false;
         _error = _isSetup
-            ? 'Setup failed. Check connection.'
-            : 'Incorrect PIN. Try again.';
+            ? l10n.vaultSetupFailed
+            : l10n.vaultIncorrectPin;
         _pinCtrl.clear();
         if (_isSetup) _confirmCtrl.clear();
       });
@@ -287,8 +298,9 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
 
     // Confirm it's really them before binding the PIN to a scan.
     try {
+      final l10n = AppLocalizations.of(context);
       final authed = await _auth.authenticate(
-        localizedReason: 'Confirm your fingerprint to enable quick unlock',
+        localizedReason: l10n.vaultBioReasonEnrol,
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -304,6 +316,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   }
 
   Future<bool?> _askEnableBiometrics() {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     return showDialog<bool>(
       context: context,
@@ -320,7 +333,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Unlock with fingerprint?',
+                l10n.vaultAskBioTitle,
                 style: GoogleFonts.poppins(
                   color: c.textHigh,
                   fontSize: 16.5,
@@ -331,9 +344,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           ],
         ),
         content: Text(
-          'Skip typing your PIN on this phone. Your PIN is still what protects '
-          'the vault — keep it somewhere safe, because you will need it on a '
-          'new phone or after reinstalling.',
+          l10n.vaultAskBioDesc,
           style:
               GoogleFonts.poppins(color: c.textMid, fontSize: 13, height: 1.35),
         ),
@@ -341,7 +352,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
-              'Not now',
+              l10n.vaultAskBioNotNow,
               style: GoogleFonts.poppins(
                   color: c.textMid, fontWeight: FontWeight.w600),
             ),
@@ -354,7 +365,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              'Enable',
+              l10n.vaultAskBioEnable,
               style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
             ),
           ),
@@ -364,6 +375,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   }
 
   Future<void> _confirmReset() async {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -375,7 +387,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           side: BorderSide(color: c.border, width: 1),
         ),
         title: Text(
-          'Delete all messages?',
+          l10n.vaultDeleteMessagesTitle,
           style: GoogleFonts.poppins(
             color: c.textHigh,
             fontSize: 17,
@@ -383,11 +395,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           ),
         ),
         content: Text(
-          'Without your PIN your history cannot be decrypted, so resetting '
-          'deletes all of it — the encrypted cloud copy and the copy on this '
-          'phone. Your chats will be empty.\n\n'
-          'Your account and contacts are not affected, and you can keep '
-          'messaging normally afterwards. This cannot be undone.',
+          l10n.vaultDeleteMessagesDesc,
           style:
               GoogleFonts.poppins(color: c.textMid, fontSize: 13, height: 1.35),
         ),
@@ -395,7 +403,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
-              'Cancel',
+              l10n.vaultDeleteMessagesCancel,
               style: GoogleFonts.poppins(
                   color: c.textMid, fontWeight: FontWeight.w600),
             ),
@@ -408,7 +416,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              'Delete everything',
+              l10n.vaultDeleteMessagesConfirm,
               style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
             ),
           ),
@@ -434,6 +442,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     return PopScope(
       canPop: false,
       child: Dialog(
@@ -480,7 +489,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _isSetup ? 'Protect Vault' : 'Unlock Vault',
+                        _isSetup ? l10n.vaultProtectTitle : l10n.vaultUnlockTitle,
                         style: GoogleFonts.poppins(
                           color: c.textHigh,
                           fontSize: 18,
@@ -491,7 +500,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                     ),
                     if (_biometricUnlockReady)
                       IconButton(
-                        tooltip: 'Use Fingerprint',
+                        tooltip: l10n.vaultUnlockWithFingerprint,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         icon: Icon(Icons.fingerprint_rounded,
@@ -506,13 +515,10 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                 // ── Subtitle Description ────────────────────────────────
                 Text(
                   _isSetup
-                      ? 'Choose a PIN to encrypt your message history. You '
-                          'will need it to read your messages on a new phone, '
-                          'so pick something you can remember.'
+                      ? l10n.vaultSetupDesc
                       : _biometricUnlockReady
-                          ? 'Enter your PIN or tap fingerprint to decrypt '
-                              'history.'
-                          : 'Enter your PIN to decrypt your history.',
+                          ? l10n.vaultUnlockDescBio
+                          : l10n.vaultUnlockDescPin,
                   style: GoogleFonts.poppins(
                     color: c.textMid,
                     fontSize: 12.5,
@@ -575,7 +581,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                           Icon(Icons.fingerprint_rounded, color: c.primary, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            'Unlock with Fingerprint',
+                            l10n.vaultUnlockWithFingerprint,
                             style: GoogleFonts.poppins(
                               color: c.primary,
                               fontSize: 13,
@@ -593,7 +599,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Text(
-                          'OR',
+                          l10n.vaultOrDivider,
                           style: GoogleFonts.poppins(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
@@ -612,7 +618,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                 _pinField(
                   c,
                   _pinCtrl,
-                  _isSetup ? 'New PIN' : 'Enter PIN',
+                  _isSetup ? l10n.vaultNewPin : l10n.vaultEnterPin,
                   focusNode: _pinFocus,
                   autofocus: !_biometricUnlockReady,
                 ),
@@ -621,7 +627,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                   _pinField(
                     c,
                     _confirmCtrl,
-                    'Confirm PIN',
+                    l10n.vaultConfirmPin,
                     focusNode: _confirmFocus,
                   ),
                 ],
@@ -668,22 +674,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                 ],
 
                 // ── Secondary actions (Unlock Mode) ────────────────────
-                // "Restore later" exists so a forgotten PIN is not a choice
-                // between destroying all history and being stuck in a modal.
-                // A locked vault is a supported state: vault writes are
-                // skipped and a later unlock backfills what was missed.
-                //
-                // Named for what it postpones, not for a decision. "Decide
-                // later" read as deferring the choice *between* this button
-                // and "Forgot PIN?" next to it, and said nothing about what
-                // happens meanwhile — so the 🔒 previews that follow looked
-                // like loss. "Restore later" both names the postponed action
-                // and implies it is still available; VaultLockedBanner is
-                // what then makes that promise reachable.
                 if (!_isSetup) ...[
-                  // Wider than the usual 8: this row and the keyboard toggle
-                  // above it are both text-sized tap targets, and confusing
-                  // them costs a dismissed dialog.
                   const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -698,7 +689,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         child: Text(
-                          'Restore later',
+                          l10n.vaultRestoreLater,
                           style: GoogleFonts.poppins(
                             color: c.textMid,
                             fontSize: 12,
@@ -714,7 +705,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         child: Text(
-                          'Forgot PIN?',
+                          l10n.vaultForgotPin,
                           style: GoogleFonts.poppins(
                             color: c.primary,
                             fontSize: 12,
@@ -751,7 +742,7 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                             ),
                           )
                         : Text(
-                            _isSetup ? 'Set PIN' : 'Decrypt',
+                            _isSetup ? l10n.vaultSetPinBtn : l10n.vaultDecryptBtn,
                             style: GoogleFonts.poppins(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,

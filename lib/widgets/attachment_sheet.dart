@@ -30,7 +30,7 @@ import 'package:video_chat_app/l10n/app_localizations.dart';
 /// The kinds of attachment a chat can offer. The icon, accent colour, title and
 /// subtitles for each live here — not at the call sites — so the four tiles
 /// look and read identically wherever they appear.
-enum AttachmentKind { photo, video, document, location }
+enum AttachmentKind { photo, video, document, location, screenShare }
 
 /// Whether view-once even makes sense for a kind. Document and location have no
 /// media key to destroy (and a pin carries no media at all), so they are
@@ -293,6 +293,8 @@ class _AttachmentTile extends StatelessWidget {
         return Icons.insert_drive_file_rounded;
       case AttachmentKind.location:
         return Icons.location_on_rounded;
+      case AttachmentKind.screenShare:
+        return Icons.screen_share_rounded;
     }
   }
 
@@ -306,6 +308,8 @@ class _AttachmentTile extends StatelessWidget {
         return Colors.indigo;
       case AttachmentKind.location:
         return Colors.redAccent;
+      case AttachmentKind.screenShare:
+        return c.primary;
     }
   }
 
@@ -319,6 +323,8 @@ class _AttachmentTile extends StatelessWidget {
         return l10n.attachmentDocument;
       case AttachmentKind.location:
         return l10n.attachmentLocation;
+      case AttachmentKind.screenShare:
+        return l10n.attachmentScreenShare;
     }
   }
 
@@ -332,6 +338,8 @@ class _AttachmentTile extends StatelessWidget {
         return l10n.attachmentDocumentSubtitle;
       case AttachmentKind.location:
         return l10n.attachmentLocationSubtitle;
+      case AttachmentKind.screenShare:
+        return l10n.attachmentScreenShareSubtitle;
     }
   }
 
@@ -343,6 +351,7 @@ class _AttachmentTile extends StatelessWidget {
         return 'Plays once, then it\'s gone';
       case AttachmentKind.document:
       case AttachmentKind.location:
+      case AttachmentKind.screenShare:
         return 'Not available for view once';
     }
   }

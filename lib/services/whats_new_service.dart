@@ -54,6 +54,12 @@ abstract final class NewFeatureAnchor {
   /// these two sheets reach different things. A stranger chat had no paperclip
   /// at all before 1.2.0, so this one advertises a door that did not exist.
   static const String anonymousAttachment = 'anonymous_attachment';
+
+  /// The chat composer's GupAI (✨) button — the in-chat AI actions behind it
+  /// (rewrite a draft, smart replies, translate/summarise a message). Added so
+  /// existing users notice GupAI can act on their messages, not just answer in
+  /// its own tab.
+  static const String chatComposerAi = 'chat_composer_ai';
 }
 
 /// Ids of the features worth pointing at.
@@ -72,6 +78,9 @@ abstract final class NewFeature {
   static const String locationShare = 'location_share';
   static const String viewOnce = 'view_once';
   static const String anonymousMedia = 'anonymous_media';
+
+  // ── GupAI in-chat ────────────────────────────────────────────────────────
+  static const String aiInChat = 'ai_in_chat';
 }
 
 /// One discoverable feature and the entry points that should advertise it.
@@ -145,6 +154,12 @@ class WhatsNewService extends ChangeNotifier {
     // ordinary composer must not be cleared by opening this one, or vice versa.
     _Discoverable(NewFeature.anonymousMedia, {
       NewFeatureAnchor.anonymousAttachment,
+    }),
+    // The GupAI (✨) button in the ordinary composer: translate / summarise /
+    // rewrite a draft / smart replies over a real message. Its own anchor, so
+    // using it clears only this dot.
+    _Discoverable(NewFeature.aiInChat, {
+      NewFeatureAnchor.chatComposerAi,
     }),
   ];
 

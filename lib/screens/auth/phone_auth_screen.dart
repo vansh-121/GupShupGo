@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
@@ -60,19 +61,20 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   }
 
   String _friendlyAuthError(FirebaseAuthException e) {
+    final l10n = AppLocalizations.of(context);
     switch (e.code) {
       case 'invalid-verification-code':
-        return 'That code is incorrect. Please check and try again.';
+        return l10n.phoneAuthErrCodeIncorrect;
       case 'session-expired':
-        return 'The code expired. Tap "Resend code" to get a new one.';
+        return l10n.phoneAuthErrCodeExpired;
       case 'too-many-requests':
-        return 'Too many attempts. Please wait a while and try again.';
+        return l10n.phoneAuthErrTooManyRequests;
       case 'invalid-phone-number':
-        return 'That phone number looks invalid. Please check it.';
+        return l10n.phoneAuthErrInvalidPhone;
       case 'quota-exceeded':
-        return 'SMS limit reached. Please try again later.';
+        return l10n.phoneAuthErrQuotaExceeded;
       default:
-        return e.message ?? 'Verification failed. Please try again.';
+        return e.message ?? l10n.phoneAuthErrFailed;
     }
   }
 
@@ -107,14 +109,15 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   // ─── Send OTP ─────────────────────────────────────────────────────────────
   Future<void> _sendOTP() async {
+    final l10n = AppLocalizations.of(context);
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      setState(() => _errorMessage = 'Please enter your name');
+      setState(() => _errorMessage = l10n.phoneAuthEnterName);
       return;
     }
     final phone = _normalizePhone(_phoneController.text);
     if (phone == null) {
-      setState(() => _errorMessage = 'Please enter a valid phone number');
+      setState(() => _errorMessage = l10n.phoneAuthEnterValidPhone);
       return;
     }
 
@@ -151,14 +154,15 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   // ─── Verify OTP ───────────────────────────────────────────────────────────
   Future<void> _verifyOTP() async {
+    final l10n = AppLocalizations.of(context);
     if (_completing) return;
     final code = _otpController.text.trim();
     if (code.isEmpty) {
-      setState(() => _errorMessage = 'Please enter the code');
+      setState(() => _errorMessage = l10n.phoneAuthEnterCode);
       return;
     }
     if (_verificationId == null) {
-      setState(() => _errorMessage = 'Please request a new code.');
+      setState(() => _errorMessage = l10n.phoneAuthRequestNewCode);
       return;
     }
 
@@ -181,7 +185,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         _completing = false;
         setState(() {
           _busy = false;
-          _errorMessage = 'That code is incorrect. Please try again.';
+          _errorMessage = l10n.phoneAuthCodeIncorrect;
         });
       }
     } on FirebaseAuthException catch (e) {
@@ -196,7 +200,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _errorMessage = 'Verification failed. Please try again.';
+        _errorMessage = l10n.phoneAuthErrFailed;
       });
     }
   }
@@ -320,8 +324,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
               const SizedBox(height: 6),
               Text(
                 _stage == PhoneAuthStage.entry
-                    ? 'Sign in with your phone number.'
-                    : 'Enter the code we sent you.',
+                    ? AppLocalizations.of(context).phoneAuthTitleEntry
+                    : AppLocalizations.of(context).phoneAuthTitleOtp,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 15, color: c.textMid),
               ),
@@ -369,6 +373,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   // ── Entry stage: name + phone + Send OTP ──
   List<Widget> _buildEntryStage(AppThemeColors c) {
+    final l10n = AppLocalizations.of(context);
     return [
       TextField(
         controller: _nameController,
@@ -376,7 +381,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         textCapitalization: TextCapitalization.words,
         decoration: _fieldDecoration(
           c,
-          hint: 'Your Name',
+          hint: l10n.phoneAuthNameHint,
           icon: Icons.person_outline_rounded,
         ),
       ),
@@ -387,12 +392,12 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         keyboardType: TextInputType.phone,
         decoration: _fieldDecoration(
           c,
-          hint: 'Phone Number',
+          hint: l10n.phoneAuthPhoneHint,
           icon: Icons.phone_outlined,
           suffix: TextButton(
             onPressed: _busy ? null : _autofillFromSim,
             child: Text(
-              'Use SIM',
+              l10n.phoneAuthUseSim,
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -423,7 +428,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       color: Colors.white, strokeWidth: 2),
                 )
               : Text(
-                  'Send OTP',
+                  l10n.phoneAuthSendOtp,
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -437,11 +442,12 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   // ── OTP stage: code + Verify + Resend + Go Back ──
   List<Widget> _buildOtpStage(AppThemeColors c) {
+    final l10n = AppLocalizations.of(context);
     return [
       Text(
         _pendingPhone != null
-            ? 'Enter the 6-digit code sent to $_pendingPhone'
-            : 'Enter the 6-digit code we sent you',
+            ? l10n.phoneAuthOtpPrompt(_pendingPhone!)
+            : l10n.phoneAuthOtpPromptGeneric,
         textAlign: TextAlign.center,
         style: GoogleFonts.poppins(fontSize: 14, color: c.textMid, height: 1.4),
       ),
@@ -454,7 +460,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         textAlign: TextAlign.center,
         decoration: _fieldDecoration(
           c,
-          hint: 'Enter code',
+          hint: l10n.phoneAuthOtpHint,
           icon: Icons.lock_outline_rounded,
         ),
       ),
@@ -479,7 +485,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       color: Colors.white, strokeWidth: 2),
                 )
               : Text(
-                  'Verify',
+                  l10n.phoneAuthVerify,
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -495,7 +501,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
           TextButton(
             onPressed: _busy ? null : _backToEntry,
             child: Text(
-              'Go Back',
+              l10n.phoneAuthGoBack,
               style: GoogleFonts.poppins(
                   color: c.textMid, fontWeight: FontWeight.w600),
             ),
@@ -503,7 +509,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
           TextButton(
             onPressed: _busy ? null : _resendCode,
             child: Text(
-              'Resend code',
+              l10n.phoneAuthResendCode,
               style: GoogleFonts.poppins(
                   color: c.primary, fontWeight: FontWeight.w600),
             ),

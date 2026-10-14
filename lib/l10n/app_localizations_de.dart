@@ -177,7 +177,7 @@ class AppLocalizationsDe extends AppLocalizations {
       'Zu viele Versuche. Bitte versuche es später noch einmal.';
 
   @override
-  String get homeNavChats => 'Chats';
+  String get homeNavChats => 'Nachrichten';
 
   @override
   String get homeNavMoments => 'Momente';
@@ -410,6 +410,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get attachmentLocationSubtitle => 'Teile deinen aktuellen Standort';
+
+  @override
+  String get attachmentScreenShare => 'Bildschirm teilen';
+
+  @override
+  String get attachmentScreenShareSubtitle =>
+      'Zeigen Sie Ihren Bildschirm live während des Chats';
 
   @override
   String get attachmentViewOnce => 'Einmal ansehen';
@@ -1129,4 +1136,1239 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aiAskHint => 'Frage GupAI irgendetwas…';
+
+  @override
+  String get settingsNotificationsTile => 'Benachrichtigungen';
+
+  @override
+  String get settingsNotificationsStatusOn => 'Ein';
+
+  @override
+  String get settingsNotificationsStatusOff => 'Aus';
+
+  @override
+  String get settingsNotificationsEnabledToast =>
+      'Benachrichtigungen sind aktiviert.';
+
+  @override
+  String get settingsEnableNotificationsTitle =>
+      'Benachrichtigungen aktivieren';
+
+  @override
+  String get settingsEnableNotificationsBody =>
+      'Benachrichtigungen sind deaktiviert. Öffne die Systemeinstellungen, damit GupShupGo dich über neue Nachrichten und Anrufe informieren kann.';
+
+  @override
+  String get settingsOpenSystemSettings => 'Einstellungen öffnen';
+
+  @override
+  String get loginTagline =>
+      'Privates Messaging, das sogar ohne Internet funktioniert.';
+
+  @override
+  String get settingsPrivacyPolicy => 'Datenschutzerklärung';
+
+  @override
+  String get settingsTerms => 'Nutzungsbedingungen';
+
+  @override
+  String get settingsDeleteAccount => 'Konto löschen';
+
+  @override
+  String get inviteSheetTitle => 'Freunde einladen';
+
+  @override
+  String get inviteSheetSubtitle => 'Erzähle es weiter — teile GupShupGo';
+
+  @override
+  String get inviteShareImageBtn => 'Bild teilen';
+
+  @override
+  String get inviteShareLinkBtn => 'Link teilen';
+
+  @override
+  String get inviteCopyLinkBtn => 'Link kopieren';
+
+  @override
+  String get inviteLinkCopied => 'Einladungslink kopiert';
+
+  @override
+  String inviteMessage(String link) {
+    return 'Chatte mit mir auf GupShupGo — es funktioniert sogar ohne Internet 👋 $link';
+  }
+
+  @override
+  String get inviteCardTagline =>
+      'Privater Chat, der sogar offline funktioniert';
+
+  @override
+  String get inviteCardScan => 'Zum Herunterladen scannen';
+
+  @override
+  String get inviteCardDownload => 'Auf Google Play herunterladen';
+
+  @override
+  String get homeMenuInvite => 'Freunde einladen';
+
+  @override
+  String get invitePromptTitle => 'Gefällt dir GupShupGo?';
+
+  @override
+  String get invitePromptBody =>
+      'Mit Freunden ist es besser — und es funktioniert sogar ohne Internet. Jemanden einladen?';
+
+  @override
+  String get invitePromptInvite => 'Freunde einladen';
+
+  @override
+  String get invitePromptLater => 'Vielleicht später';
+
+  @override
+  String get homeOfflineBannerTitle => 'Kein Internet? Kein Problem';
+
+  @override
+  String get homeOfflineBannerSubtitle =>
+      'Du kannst Personen in der Nähe immer noch über Bluetooth Nachrichten senden.';
+
+  @override
+  String homeNearbyBannerTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Personen in der Nähe',
+      one: '1 Person in der Nähe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeNearbyBannerSubtitle =>
+      'Über Bluetooth chatten — kein Internet erforderlich.';
+
+  @override
+  String get linkBackupTitle => 'Backup-Anmeldemethode hinzufügen';
+
+  @override
+  String get linkBackupSubtitle =>
+      'Google oder E-Mail verknüpfen, um sich auch ohne SIM anzumelden.';
+
+  @override
+  String get linkGoogleTitle => 'Google-Konto verknüpfen';
+
+  @override
+  String get linkGoogleSubtitleLinked => 'Verknüpft ✓';
+
+  @override
+  String get linkGoogleSubtitleUnlinked => 'One-Tap-Anmeldung ohne SIM';
+
+  @override
+  String get linkGoogleAction => 'Verknüpfen';
+
+  @override
+  String get linkGoogleSuccess => 'Google-Konto erfolgreich verknüpft!';
+
+  @override
+  String get linkGoogleAlreadyUsed =>
+      'Dieses Google-Konto ist bereits registriert.';
+
+  @override
+  String get linkGoogleFailed =>
+      'Verknüpfung fehlgeschlagen. Bitte erneut versuchen.';
+
+  @override
+  String get linkSessionExpired => 'Sitzung abgelaufen. Bitte erneut anmelden.';
+
+  @override
+  String get linkEmailTitle => 'E-Mail & Passwort verknüpfen';
+
+  @override
+  String get linkEmailSubtitleLinked => 'Verknüpft ✓';
+
+  @override
+  String get linkEmailSubtitleUnlinked =>
+      'Mit E-Mail anmelden ohne SIM oder Google';
+
+  @override
+  String get linkEmailActionAdd => 'Hinzufügen';
+
+  @override
+  String get linkEmailActionCancel => 'Abbrechen';
+
+  @override
+  String get linkEmailFieldLabel => 'E-Mail';
+
+  @override
+  String get linkPasswordFieldLabel => 'Passwort erstellen';
+
+  @override
+  String get linkPasswordHelper => 'Mindestens 6 Zeichen';
+
+  @override
+  String get linkEmailButton => 'E-Mail verknüpfen';
+
+  @override
+  String get linkEmailSuccess => 'E-Mail erfolgreich verknüpft!';
+
+  @override
+  String get linkEmailInvalid => 'Gültige E-Mail-Adresse eingeben.';
+
+  @override
+  String get linkPasswordTooShort =>
+      'Passwort muss mindestens 6 Zeichen lang sein.';
+
+  @override
+  String get linkEmailAlreadyInUse => 'Diese E-Mail ist bereits registriert.';
+
+  @override
+  String get linkEmailAlreadyLinked => 'Ein Konto ist bereits verknüpft.';
+
+  @override
+  String get linkEmailFailed => 'E-Mail-Verknüpfung fehlgeschlagen.';
+
+  @override
+  String get linkContinueToApp => 'Weiter zur App';
+
+  @override
+  String get linkSkipForNow => 'Vorläufig überspringen';
+
+  @override
+  String get linkSkip => 'Überspringen';
+
+  @override
+  String get phoneAuthTitleEntry => 'Mit Handynummer anmelden.';
+
+  @override
+  String get phoneAuthTitleOtp => 'Code eingeben.';
+
+  @override
+  String get phoneAuthNameHint => 'Ihr Name';
+
+  @override
+  String get phoneAuthPhoneHint => 'Telefonnummer';
+
+  @override
+  String get phoneAuthUseSim => 'SIM nutzen';
+
+  @override
+  String get phoneAuthSendOtp => 'Code senden';
+
+  @override
+  String phoneAuthOtpPrompt(String phone) {
+    return '6-stelligen Code eingeben, der an $phone gesendet wurde';
+  }
+
+  @override
+  String get phoneAuthOtpPromptGeneric => 'Geben Sie den 6-stelligen Code ein';
+
+  @override
+  String get phoneAuthOtpHint => 'Code eingeben';
+
+  @override
+  String get phoneAuthVerify => 'Bestätigen';
+
+  @override
+  String get phoneAuthGoBack => 'Zurück';
+
+  @override
+  String get phoneAuthResendCode => 'Code erneut senden';
+
+  @override
+  String get phoneAuthEnterName => 'Bitte Namen eingeben';
+
+  @override
+  String get phoneAuthEnterValidPhone => 'Bitte gültige Telefonnummer eingeben';
+
+  @override
+  String get phoneAuthEnterCode => 'Bitte Code eingeben';
+
+  @override
+  String get phoneAuthRequestNewCode => 'Bitte neuen Code anfordern.';
+
+  @override
+  String get phoneAuthCodeIncorrect => 'Falscher Code. Bitte erneut versuchen.';
+
+  @override
+  String get phoneAuthErrCodeIncorrect => 'Code ist falsch. Bitte überprüfen.';
+
+  @override
+  String get phoneAuthErrCodeExpired => 'Code abgelaufen. Neuen anfordern.';
+
+  @override
+  String get phoneAuthErrTooManyRequests => 'Zu viele Versuche. Bitte warten.';
+
+  @override
+  String get phoneAuthErrInvalidPhone => 'Ungültige Telefonnummer.';
+
+  @override
+  String get phoneAuthErrQuotaExceeded => 'SMS-Limit erreicht.';
+
+  @override
+  String get phoneAuthErrFailed => 'Verifizierung fehlgeschlagen.';
+
+  @override
+  String get usernameSetupAppBarTitle => 'Benutzernamen wählen';
+
+  @override
+  String get usernameSetupHeaderTitle => 'Identität sichern';
+
+  @override
+  String get usernameSetupHeaderDesc =>
+      'Ihr @handle ist Ihr eindeutiger Schlüssel auf GupShupGo. Andere können Sie ohne Telefonnummer oder E-Mail finden.';
+
+  @override
+  String get usernameSetupInputHint => 'dein_name';
+
+  @override
+  String get usernameSetupChecking => 'Verfügbarkeit wird geprüft...';
+
+  @override
+  String usernameSetupAvailable(String handle) {
+    return '@$handle ist verfügbar!';
+  }
+
+  @override
+  String usernameSetupTaken(String handle) {
+    return '@$handle ist bereits vergeben.';
+  }
+
+  @override
+  String get usernameSetupCharRules => '3–20 Zeichen (a-z, 0-9, _)';
+
+  @override
+  String get usernameSetupTooShort => 'Mindestens 3 Zeichen erforderlich.';
+
+  @override
+  String get usernameSetupTooLong => 'Maximal 20 Zeichen erlaubt.';
+
+  @override
+  String get usernameSetupInvalidChars =>
+      'Nur Buchstaben, Zahlen und Unterstriche erlaubt.';
+
+  @override
+  String get usernameSetupRecommended => 'FÜR DICH EMPFOHLEN';
+
+  @override
+  String get usernameSetupSaveBtn => 'Speichern & Weiter';
+
+  @override
+  String get usernameSetupSkipBtn => 'Vorläufig überspringen';
+
+  @override
+  String usernameSetupFailed(String error) {
+    return 'Fehler beim Festlegen des Benutzernamens: $error';
+  }
+
+  @override
+  String get vaultProtectTitle => 'Tresor schützen';
+
+  @override
+  String get vaultUnlockTitle => 'Tresor entsperren';
+
+  @override
+  String get vaultSetupDesc =>
+      'Wählen Sie eine PIN, um Ihren Nachrichtenverlauf zu verschlüsseln.';
+
+  @override
+  String get vaultUnlockDescBio => 'PIN eingeben oder Fingerabdruck scannen.';
+
+  @override
+  String get vaultUnlockDescPin => 'PIN eingeben, um Verlauf zu entschlüsseln.';
+
+  @override
+  String get vaultReinstallHint =>
+      'PIN eingeben, um Verlauf wiederherzustellen.';
+
+  @override
+  String get vaultUnlockWithFingerprint => 'Mit Fingerabdruck entsperren';
+
+  @override
+  String get vaultOrDivider => 'ODER';
+
+  @override
+  String get vaultNewPin => 'Neue PIN';
+
+  @override
+  String get vaultConfirmPin => 'PIN bestätigen';
+
+  @override
+  String get vaultEnterPin => 'PIN eingeben';
+
+  @override
+  String get vaultKeyboardUseLetters => 'Buchstaben verwenden';
+
+  @override
+  String get vaultKeyboardUseNumbers => 'Zahlen verwenden';
+
+  @override
+  String get vaultRestoreLater => 'Später wiederherstellen';
+
+  @override
+  String get vaultForgotPin => 'PIN vergessen?';
+
+  @override
+  String get vaultSetPinBtn => 'PIN festlegen';
+
+  @override
+  String get vaultDecryptBtn => 'Entschlüsseln';
+
+  @override
+  String get vaultPinMinLength => 'PIN muss mindestens 6 Zeichen lang sein.';
+
+  @override
+  String get vaultPinsDoNotMatch => 'PINs stimmen nicht überein.';
+
+  @override
+  String get vaultSetupFailed => 'Einrichtung fehlgeschlagen.';
+
+  @override
+  String get vaultIncorrectPin => 'Falsche PIN. Erneut versuchen.';
+
+  @override
+  String get vaultFingerprintOutOfDate =>
+      'Fingerabdruck veraltet. PIN eingeben.';
+
+  @override
+  String get vaultBiometricError => 'Biometriefehler. PIN manuell eingeben.';
+
+  @override
+  String get vaultBioReasonUnlock => 'Mit Biometrie Tresor entsperren';
+
+  @override
+  String get vaultBioReasonEnrol =>
+      'Fingerabdruck bestätigen für Schnellzugriff';
+
+  @override
+  String get vaultAskBioTitle => 'Mit Fingerabdruck entsperren?';
+
+  @override
+  String get vaultAskBioDesc =>
+      'PIN-Eingabe auf diesem Gerät überspringen. PIN für Neugeräte sicher aufbewahren.';
+
+  @override
+  String get vaultAskBioNotNow => 'Nicht jetzt';
+
+  @override
+  String get vaultAskBioEnable => 'Aktivieren';
+
+  @override
+  String get vaultDeleteMessagesTitle => 'Alle Nachrichten löschen?';
+
+  @override
+  String get vaultDeleteMessagesDesc =>
+      'Ohne PIN kann der Verlauf nicht entschlüsselt werden. Beim Zurücksetzen wird alles gelöscht.';
+
+  @override
+  String get vaultDeleteMessagesCancel => 'Abbrechen';
+
+  @override
+  String get vaultDeleteMessagesConfirm => 'Alles löschen';
+
+  @override
+  String get vaultCustodyConfirmTitle => 'Tresor-PIN bestätigen';
+
+  @override
+  String get vaultCustodyChooseTitle => 'PIN wählen';
+
+  @override
+  String get vaultCustodyConfirmDesc =>
+      'Ihr Verlauf ist mit einer PIN geschützt. Einmal bestätigen.';
+
+  @override
+  String get vaultCustodyChooseDesc =>
+      'Merken Sie sich die PIN gut. Alle Nachrichten werden neu verschlüsselt.';
+
+  @override
+  String get vaultCustodyDontKnow => 'Ich kenne meine PIN nicht';
+
+  @override
+  String get vaultCustodyConfirmBtn => 'Bestätigen';
+
+  @override
+  String get vaultCustodySaveBtn => 'PIN speichern';
+
+  @override
+  String get vaultCustodyMismatchError => 'PIN stimmt nicht überein.';
+
+  @override
+  String get vaultCustodyAutoUpdateFailed =>
+      'Automatische Aktualisierung fehlgeschlagen.';
+
+  @override
+  String vaultCustodyReencrypting(int done, int total) {
+    return '$done von $total werden neu verschlüsselt… App geöffnet lassen.';
+  }
+
+  @override
+  String get vaultCustodyPreparing => 'Vorbereitung… App geöffnet lassen.';
+
+  @override
+  String get vaultSettingsTitle => 'Tresor';
+
+  @override
+  String get vaultSettingsAboutTitle => 'Über den Tresor';
+
+  @override
+  String get vaultSettingsAboutDesc =>
+      'Privates Backup Ihrer Chats, mit PIN gesichert. Nur Ihre PIN kann es öffnen.';
+
+  @override
+  String get vaultSettingsBulletMessages => 'Ihre Nachrichten';
+
+  @override
+  String get vaultSettingsBulletStatuses => 'Sichtbare Statusmeldungen';
+
+  @override
+  String get vaultSettingsNeverKept =>
+      'Wird nie gespeichert: Anrufverlauf, Kontakte oder geteilte Fotos.';
+
+  @override
+  String get vaultSettingsSectionPrivacy => 'DATENSCHUTZ';
+
+  @override
+  String get vaultSettingsAutoDelete => 'Alte Nachrichten automatisch löschen';
+
+  @override
+  String get vaultSettingsKeepForever => 'Für immer behalten';
+
+  @override
+  String vaultSettingsDeleteAfter(String label) {
+    return 'Löschen nach $label';
+  }
+
+  @override
+  String get vaultSettingsSectionPin => 'PIN';
+
+  @override
+  String get vaultSettingsChangePin => 'PIN ändern';
+
+  @override
+  String get vaultSettingsChangePinSubtitle =>
+      'Verschlüsselt alle Einträge neu';
+
+  @override
+  String get vaultSettingsBioTitle => 'Mit Fingerabdruck entsperren';
+
+  @override
+  String get vaultSettingsBioSubOn => 'Auf diesem Gerät aktiviert';
+
+  @override
+  String get vaultSettingsBioSubOff =>
+      'PIN-Eingabe auf diesem Gerät überspringen';
+
+  @override
+  String get vaultSettingsSectionDanger => 'GEFAHRENZONE';
+
+  @override
+  String get vaultSettingsDeleteData => 'Tresordaten löschen';
+
+  @override
+  String get vaultSettingsDeleteDataSubtitle => 'Löscht Verlauf, behält PIN';
+
+  @override
+  String get vaultSettingsResetVault => 'Tresor zurücksetzen';
+
+  @override
+  String get vaultSettingsResetVaultSubtitle => 'Vergisst PIN und löscht alles';
+
+  @override
+  String get vaultSettingsPinChanged => 'PIN geändert.';
+
+  @override
+  String get vaultSettingsBioTurnedOff => 'Fingerabdruck deaktiviert.';
+
+  @override
+  String get vaultSettingsBioTurnedOn => 'Fingerabdruck aktiviert.';
+
+  @override
+  String get vaultSettingsClearDataTitle => 'Tresordaten löschen?';
+
+  @override
+  String get vaultSettingsClearDataDesc =>
+      'Löscht verschlüsselte Nachrichten aus der Cloud. PIN bleibt erhalten.';
+
+  @override
+  String get vaultSettingsClearDataCancel => 'Abbrechen';
+
+  @override
+  String get vaultSettingsClearDataConfirm => 'Daten löschen';
+
+  @override
+  String get vaultSettingsDataDeleted => 'Tresordaten gelöscht.';
+
+  @override
+  String get vaultSettingsResetTitle => 'Tresor zurücksetzen?';
+
+  @override
+  String get vaultSettingsResetDesc =>
+      'Löscht PIN und alle Daten unwiderruflich.';
+
+  @override
+  String get vaultSettingsResetConfirm => 'Zurücksetzen';
+
+  @override
+  String get vaultSettingsChangeDialogDesc =>
+      'Alle Einträge werden neu verschlüsselt.';
+
+  @override
+  String get vaultSettingsCurrentPin => 'Aktuelle PIN';
+
+  @override
+  String get vaultSettingsNewPin => 'Neue PIN';
+
+  @override
+  String get vaultSettingsConfirmNewPin => 'Neue PIN bestätigen';
+
+  @override
+  String get vaultSettingsEnterCurrentPin => 'Aktuelle PIN eingeben.';
+
+  @override
+  String get vaultSettingsNewPinMinLength =>
+      'Mindestens 6 Zeichen erforderlich.';
+
+  @override
+  String get vaultSettingsNewPinMismatch => 'Neue PINs stimmen nicht überein.';
+
+  @override
+  String get vaultSettingsCurrentPinIncorrect => 'Aktuelle PIN ist falsch.';
+
+  @override
+  String vaultSettingsReencryptingCount(int done, int total) {
+    return '$done von $total werden neu verschlüsselt…';
+  }
+
+  @override
+  String get vaultSettingsChangeBtn => 'Ändern';
+
+  @override
+  String get vaultSettingsBioPinDialogTitle => 'PIN eingeben';
+
+  @override
+  String get vaultSettingsBioPinDialogDesc =>
+      'PIN wird benötigt, um Fingerabdruck zu aktivieren.';
+
+  @override
+  String get vaultSettingsContinueBtn => 'Weiter';
+
+  @override
+  String get premiumTitle => 'GupShupGo Pro';
+
+  @override
+  String get premiumSubtitleMember => 'Du bist Pro-Mitglied! 🎉';
+
+  @override
+  String get premiumSubtitleUnlock => 'Das volle Erlebnis freischalten';
+
+  @override
+  String premiumActiveDaysRemaining(int days) {
+    return '$days Tage verbleibend';
+  }
+
+  @override
+  String get premiumFeaturesHeader => 'Deine Pro-Vorteile';
+
+  @override
+  String get premiumPlansHeader => 'Wähle deinen Tarif';
+
+  @override
+  String get premiumSubscribeBtn => 'Jetzt abonnieren';
+
+  @override
+  String get premiumCancelAnytime => 'Jederzeit über Google Play kündbar.';
+
+  @override
+  String get premiumRestoreBtn => 'Kauf wiederherstellen';
+
+  @override
+  String get premiumRestoring => 'Wiederherstellung…';
+
+  @override
+  String get premiumRestoredSuccess => 'Pro-Abo wiederhergestellt! 🎉';
+
+  @override
+  String get premiumNoActiveSub => 'Kein aktives Abo gefunden.';
+
+  @override
+  String get premiumProductUnavailable => 'Produkt nicht verfügbar.';
+
+  @override
+  String get premiumFeatureMediaTitle => 'Medien-Momente';
+
+  @override
+  String get premiumFeatureMediaDesc => 'Fotos und Videos als Status teilen';
+
+  @override
+  String get premiumFeatureMediaFree => 'Nur Text';
+
+  @override
+  String get premiumFeatureMediaPro => 'Fotos + Videos';
+
+  @override
+  String get premiumFeatureScreenShareTitle => 'Bildschirmfreigabe';
+
+  @override
+  String get premiumFeatureScreenShareDesc => 'Bildschirm live im Chat teilen';
+
+  @override
+  String get premiumFeatureScreenShareFree => 'Gesperrt';
+
+  @override
+  String get premiumFeatureScreenSharePro => 'Voller Zugriff';
+
+  @override
+  String get premiumFeatureThemesTitle => 'Chat-Designs';
+
+  @override
+  String get premiumFeatureThemesDesc => 'Muster und Verläufe pro Chat';
+
+  @override
+  String get premiumFeatureThemesFree => '6 Designs';
+
+  @override
+  String get premiumFeatureThemesPro => 'Alle 12 + eigenes Foto';
+
+  @override
+  String get premiumFeatureVoiceTitle => 'Längere Sprachnachrichten';
+
+  @override
+  String get premiumFeatureVoiceDesc => 'Längere Sprachnotizen aufnehmen';
+
+  @override
+  String get premiumFeatureVoiceFree => '2 Minuten';
+
+  @override
+  String get premiumFeatureVoicePro => 'Unbegrenzt';
+
+  @override
+  String get premiumFeatureQualityTitle => 'Höhere Medienqualität';
+
+  @override
+  String get premiumFeatureQualityDesc => 'Schärfere Fotos & 90s Statusvideos';
+
+  @override
+  String get premiumFeatureQualityFree => 'Standardqualität';
+
+  @override
+  String get premiumFeatureQualityPro => 'Hohe Qualität + 90s Videos';
+
+  @override
+  String get premiumFeatureBondTitle => 'Band wiederherstellen';
+
+  @override
+  String get premiumFeatureBondDesc => 'Verlorene Bänder kostenlos retten';
+
+  @override
+  String get premiumFeatureBondFree => 'Punkte oder Werbung';
+
+  @override
+  String get premiumFeatureBondPro => '1 Gratis-Rettung/Woche';
+
+  @override
+  String get premiumFeatureBadgeTitle => 'Pro-Abzeichen';
+
+  @override
+  String get premiumFeatureBadgeDesc => 'Zeige deinen Pro-Status';
+
+  @override
+  String get premiumFeatureBadgeFree => 'Kein Abzeichen';
+
+  @override
+  String get premiumFeatureBadgePro => 'Exklusives Pro-Abzeichen';
+
+  @override
+  String get premiumFeatureExportTitle => 'Chat-Export';
+
+  @override
+  String get premiumFeatureExportDesc =>
+      'Chats als PDF oder Textdatei speichern';
+
+  @override
+  String get premiumFeatureExportFree => 'Nicht verfügbar';
+
+  @override
+  String get premiumFeatureExportPro => 'PDF- & TXT-Export';
+
+  @override
+  String get premiumFeatureAdFreeTitle => 'Werbefreiheit';
+
+  @override
+  String get premiumFeatureAdFreeDesc => 'Keine Bannerwerbung in der App';
+
+  @override
+  String get premiumFeatureAdFreeFree => 'Banner enthalten';
+
+  @override
+  String get premiumFeatureAdFreePro => 'Keine Banner';
+
+  @override
+  String get premiumPlanMonthly => 'Monatlich';
+
+  @override
+  String get premiumPlanYearly => 'Jährlich';
+
+  @override
+  String get premiumPlanSavings => '~33% sparen';
+
+  @override
+  String get premiumPeriodMonth => '/Monat';
+
+  @override
+  String get premiumPeriodYear => '/Jahr';
+
+  @override
+  String get nearbyOfflineChatTitle => 'Offline-Chat';
+
+  @override
+  String get nearbySearchingDevices => 'Suche nach Geräten in der Nähe…';
+
+  @override
+  String get nearbyTooltipStop => 'Offline-Chat beenden';
+
+  @override
+  String get nearbyTooltipStart => 'Offline-Chat starten';
+
+  @override
+  String get nearbyDevicesSection => 'Geräte in der Nähe';
+
+  @override
+  String get nearbyDiscoveryOn => 'SUCHE AN';
+
+  @override
+  String get nearbyDiscoveryOff => 'SUCHE AUS';
+
+  @override
+  String get nearbyHeroTitle => 'Offline-Modus';
+
+  @override
+  String nearbyHeroNearbyCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count in der Nähe',
+      one: '1 in der Nähe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get nearbyHeroOff => 'Offline-Chat ist aus';
+
+  @override
+  String get nearbyHeroDesc =>
+      'Sucht im Umkreis von 100 m. Verschlüsselt von Gerät zu Gerät.';
+
+  @override
+  String get nearbyYourNameHint => 'Dein Name';
+
+  @override
+  String get nearbyEmptySearching => 'Suche nach Geräten in der Nähe…';
+
+  @override
+  String get nearbyEmptyOff => 'Offline-Chat ist deaktiviert';
+
+  @override
+  String get nearbyEmptySearchingDesc =>
+      'GupShupGo mit aktivem Bluetooth auf anderen Geräten öffnen.';
+
+  @override
+  String get nearbyEmptyOffDesc => 'Auf das Start-Symbol oben rechts tippen.';
+
+  @override
+  String get nearbyPeerConnected => 'Verbunden · Tippen zum Chatten';
+
+  @override
+  String get nearbyPeerConnecting => 'Verbinde…';
+
+  @override
+  String get nearbyPeerTapToConnect => 'Tippen zum Verbinden';
+
+  @override
+  String get nearbyActionChat => 'Chat';
+
+  @override
+  String get nearbyActionConnecting => 'Verbinde';
+
+  @override
+  String get nearbyActionConnect => 'Verbinden';
+
+  @override
+  String get nearbyPermNeededTitle => 'Berechtigungen erforderlich';
+
+  @override
+  String get nearbyPermNeededDesc =>
+      'Benötigt Bluetooth- und Gerätezugriff in der Nähe.';
+
+  @override
+  String get nearbyTryAgainBtn => 'Erneut versuchen';
+
+  @override
+  String get nearbySettingsBtn => 'Einstellungen';
+
+  @override
+  String get nearbyHelpTip =>
+      'Freund nicht sichtbar? Bluetooth auf beiden Geräten prüfen.';
+
+  @override
+  String get anonLobbyTitle => 'Anonymer Chat';
+
+  @override
+  String get anonLobbyFinding => 'Suche Gesprächspartner…';
+
+  @override
+  String get anonLobbyHangTight =>
+      'Einen Moment — Verbindung mit Fremden wird hergestellt.';
+
+  @override
+  String get anonLobbyCancelBtn => 'Suche abbrechen';
+
+  @override
+  String get anonLobbyPrivacyNote => 'Deine Identität bleibt geheim.';
+
+  @override
+  String get anonLobbyConnecting => 'Verbinde…';
+
+  @override
+  String get anonLobbyWaitingOthers => 'Warte auf andere Online-Nutzer…';
+
+  @override
+  String anonLobbyOnlineCount(int count) {
+    return '$count gerade online';
+  }
+
+  @override
+  String get anonChatNotEncrypted =>
+      'Nachrichten sind nicht Ende-zu-Ende verschlüsselt';
+
+  @override
+  String get anonChatRequestSentTooltip => 'Anfrage gesendet';
+
+  @override
+  String get anonChatAddFriendTooltip => 'Freund hinzufügen';
+
+  @override
+  String get anonChatNextStrangerTooltip => 'Nächster Fremder';
+
+  @override
+  String get anonChatReportTooltip => 'Melden';
+
+  @override
+  String get anonChatSayHi => 'Sag Hallo! 👋';
+
+  @override
+  String get anonChatFriendsTransition =>
+      'Ihr seid jetzt befreundet! Sicherer Chat öffnet sich…';
+
+  @override
+  String get anonChatStrangerDisconnected =>
+      'Gesprächspartner hat den Chat verlassen 👋';
+
+  @override
+  String get anonChatFindNextBtn => 'Nächsten Fremden suchen';
+
+  @override
+  String get anonChatFriendReqTitle =>
+      'Gesprächspartner möchte sich verbinden!';
+
+  @override
+  String get anonChatFriendReqDesc =>
+      'Bei Annahme wird das echte Profil geteilt und ein sicherer Chat gestartet.';
+
+  @override
+  String get anonChatDecline => 'Ablehnen';
+
+  @override
+  String get anonChatAccept => 'Annehmen';
+
+  @override
+  String get anonChatWaitingReqTitle => 'Freundschaftsanfrage gesendet';
+
+  @override
+  String get anonChatWaitingReqDesc => 'Warte auf Antwort…';
+
+  @override
+  String get anonChatReportTitle => 'Nutzer melden';
+
+  @override
+  String get anonChatReportQuestion => 'Warum meldest du diesen Nutzer?';
+
+  @override
+  String get anonChatReportReasonInappropriate => 'Unangemessener Inhalt';
+
+  @override
+  String get anonChatReportReasonHarassment => 'Belästigung';
+
+  @override
+  String get anonChatReportReasonSpam => 'Spam oder Betrug';
+
+  @override
+  String get anonChatReportReasonThreatening => 'Bedrohliches Verhalten';
+
+  @override
+  String get anonChatReportReasonOther => 'Sonstiges';
+
+  @override
+  String get anonChatReportCancel => 'Abbrechen';
+
+  @override
+  String get anonChatReportSubmit => 'Melden & Verlassen';
+
+  @override
+  String get anonChatReportSubmitted =>
+      'Meldung gesendet. Danke für deine Mithilfe.';
+
+  @override
+  String get anonChatViewOnceVideoTitle => 'Einmal abspielen?';
+
+  @override
+  String get anonChatViewOncePhotoTitle => 'Einmal ansehen?';
+
+  @override
+  String get anonChatViewOnceVideoDesc =>
+      'Dieses Video kann nur einmal geöffnet werden.';
+
+  @override
+  String get anonChatViewOncePhotoDesc =>
+      'Dieses Foto kann nur einmal geöffnet werden.';
+
+  @override
+  String get anonChatViewOnceCancel => 'Abbrechen';
+
+  @override
+  String get anonChatViewOnceOpen => 'Öffnen';
+
+  @override
+  String get unsupportedVersionTitle => 'GupShupGo aktualisieren';
+
+  @override
+  String get unsupportedVersionDesc =>
+      'Diese Version wird nicht mehr unterstützt. Bitte aktualisieren.';
+
+  @override
+  String get unsupportedVersionUpdateNow => 'Jetzt aktualisieren';
+
+  @override
+  String get unsupportedVersionOpenPlayStore => 'Play Store öffnen';
+
+  @override
+  String publicProfileNotFound(String username) {
+    return '@$username nicht gefunden';
+  }
+
+  @override
+  String get publicProfileUserNotFound => 'Benutzer nicht gefunden';
+
+  @override
+  String get publicProfileNotFoundDesc =>
+      'Dieser Benutzername existiert nicht.';
+
+  @override
+  String get publicProfileTitle => 'Profil';
+
+  @override
+  String get publicProfileOnline => 'Online';
+
+  @override
+  String publicProfileLastSeen(String time) {
+    return 'Zuletzt online $time';
+  }
+
+  @override
+  String get publicProfileJustNow => 'gerade eben';
+
+  @override
+  String publicProfileMinutesAgo(int minutes) {
+    return 'vor $minutes Min.';
+  }
+
+  @override
+  String publicProfileHoursAgo(int hours) {
+    return 'vor $hours Std.';
+  }
+
+  @override
+  String publicProfileDaysAgo(int days) {
+    return 'vor $days Tg.';
+  }
+
+  @override
+  String publicProfileJoined(String date) {
+    return 'Dabei seit $date';
+  }
+
+  @override
+  String get publicProfileOwnLink => 'Das ist dein eigener Profillink.';
+
+  @override
+  String publicProfileGupPoints(int points) {
+    return '$points Gup-Punkte';
+  }
+
+  @override
+  String publicProfileLevel(int level) {
+    return 'Level $level';
+  }
+
+  @override
+  String get publicProfileStatPoints => 'Punkte';
+
+  @override
+  String get publicProfileStatBadges => 'Abzeichen';
+
+  @override
+  String get publicProfileStatBestBond => 'Bester Streak';
+
+  @override
+  String get publicProfileBadges => 'ABZEICHEN';
+
+  @override
+  String get qrScannerTitle => 'QR-Code scannen';
+
+  @override
+  String get qrScannerFlashOnTooltip => 'Blitz ein';
+
+  @override
+  String get qrScannerFlashOffTooltip => 'Blitz aus';
+
+  @override
+  String get qrScannerPrompt => 'Kamera auf einen GupShupGo QR-Code richten';
+
+  @override
+  String get qrScannerNotProfileCode => 'Kein gültiger GupShupGo-Code.';
+
+  @override
+  String get qrScannerCameraErrorTitle =>
+      'Kamera konnte nicht gestartet werden.';
+
+  @override
+  String get qrScannerCameraErrorRetry => 'Bitte erneut versuchen.';
+
+  @override
+  String get qrScannerPermissionMsg =>
+      'Kamerazugriff zum Scannen erforderlich.';
+
+  @override
+  String get qrScannerPermissionAllow => 'Kamera erlauben';
+
+  @override
+  String get qrScannerBlockedMsg =>
+      'Kamera ist blockiert. In den Einstellungen aktivieren.';
+
+  @override
+  String get qrScannerBlockedSettings => 'Einstellungen öffnen';
+
+  @override
+  String get screenShareIncomingTitle => 'Eingehende Bildschirmfreigabe';
+
+  @override
+  String get screenShareWantsToShare => 'möchte den Bildschirm teilen';
+
+  @override
+  String get screenShareReject => 'Ablehnen';
+
+  @override
+  String get screenShareAccept => 'Annehmen';
+
+  @override
+  String get screenShareCantAccept =>
+      'Annahme fehlgeschlagen. Verbindung prüfen.';
+
+  @override
+  String screenShareDeclined(String name) {
+    return '$name hat abgelehnt';
+  }
+
+  @override
+  String get screenShareNoAnswer => 'Keine Antwort';
+
+  @override
+  String get screenShareStartError => 'Freigabe konnte nicht gestartet werden';
+
+  @override
+  String get screenShareStatusRequesting => 'Frage Erlaubnis an';
+
+  @override
+  String get screenShareStatusInitializing => 'Übertragung startet';
+
+  @override
+  String get screenShareStatusWaitingParticipant => 'Warte auf Teilnehmer';
+
+  @override
+  String get screenShareStatusActive => 'Bildschirmfreigabe aktiv';
+
+  @override
+  String screenShareSubWaitingAccept(String name) {
+    return 'Warte auf Bestätigung von $name…';
+  }
+
+  @override
+  String get screenShareSubEstablishing =>
+      'Verschlüsselte Verbindung wird aufgebaut...';
+
+  @override
+  String screenShareSubWaitingJoin(String name) {
+    return 'Warte auf Beitritt von $name...';
+  }
+
+  @override
+  String get screenShareSubActive => 'Dein kompletter Bildschirm wird geteilt.';
+
+  @override
+  String get screenShareBadgeRequesting => 'ANFRAGE';
+
+  @override
+  String get screenShareBadgeConnecting => 'VERBINDE';
+
+  @override
+  String get screenShareSharedWith => 'Geteilt mit ';
+
+  @override
+  String get screenShareRequestingFrom => 'Anfrage an ';
+
+  @override
+  String get screenShareMinimizeTip => 'Du kannst dieses Fenster minimieren.';
+
+  @override
+  String get screenShareStop => 'Freigabe beenden';
+
+  @override
+  String get screenShareCancelRequest => 'Anfrage abbrechen';
+
+  @override
+  String screenShareViewerTitle(String name) {
+    return '$name teilt den Bildschirm';
+  }
+
+  @override
+  String get screenShareViewerLive => 'LIVE';
+
+  @override
+  String get screenShareViewerMinimize => 'Minimieren';
+
+  @override
+  String get screenShareViewerLeave => 'Verlassen';
+
+  @override
+  String screenShareViewerWaitingStream(String name) {
+    return 'Warte auf Übertragung von $name...';
+  }
+
+  @override
+  String get screenShareViewerConnecting => 'Verbinde mit Stream...';
+
+  @override
+  String get viewOnceVideoTitle => 'Video · Einmalige Ansicht';
+
+  @override
+  String get viewOncePhotoTitle => 'Foto · Einmalige Ansicht';
+
+  @override
+  String get viewOnceCantOpen => 'Medium konnte nicht geöffnet werden.';
+
+  @override
+  String get viewOnceUnavailable => 'Nicht mehr verfügbar.';
+
+  @override
+  String get viewOnceBlockedFooter => 'Screenshots blockiert.';
+
+  @override
+  String get viewOnceUnblockedFooter => 'Nur einmaliges Öffnen möglich.';
 }

@@ -201,7 +201,7 @@
   "@loginErrorTooManyRequests": {
     "description": "Firebase auth: too-many-requests."
   },
-  "homeNavChats": "Gup",
+  "homeNavChats": "Messages",
   "@homeNavChats": {
     "description": "Bottom nav: Chats tab."
   },
@@ -507,6 +507,14 @@
   "attachmentLocationSubtitle": "Share your current location",
   "@attachmentLocationSubtitle": {
     "description": "Subtitle for Location attachment."
+  },
+  "attachmentScreenShare": "Share screen",
+  "@attachmentScreenShare": {
+    "description": "Attachment option: start a live screen-share session (Pro)."
+  },
+  "attachmentScreenShareSubtitle": "Show your screen live during the chat",
+  "@attachmentScreenShareSubtitle": {
+    "description": "Subtitle for the Share screen attachment option."
   },
   "attachmentViewOnce": "View once",
   "@attachmentViewOnce": {
@@ -1492,5 +1500,1628 @@
   "aiAskHint": "Ask GupAI anything…",
   "@aiAskHint": {
     "description": "Hint text for AI composer input field."
+  },
+  "settingsNotificationsTile": "Notifications",
+  "@settingsNotificationsTile": {
+    "description": "Settings row to manage push notification permission."
+  },
+  "settingsNotificationsStatusOn": "On",
+  "@settingsNotificationsStatusOn": {
+    "description": "Trailing status when notifications are enabled."
+  },
+  "settingsNotificationsStatusOff": "Off",
+  "@settingsNotificationsStatusOff": {
+    "description": "Trailing status when notifications are disabled."
+  },
+  "settingsNotificationsEnabledToast": "Notifications are on.",
+  "@settingsNotificationsEnabledToast": {
+    "description": "Snackbar shown when notifications are already/now enabled."
+  },
+  "settingsEnableNotificationsTitle": "Enable notifications",
+  "@settingsEnableNotificationsTitle": {
+    "description": "Title of the dialog offering to open system settings for notifications."
+  },
+  "settingsEnableNotificationsBody": "Notifications are turned off. Open system settings to let GupShupGo notify you about new messages and calls.",
+  "@settingsEnableNotificationsBody": {
+    "description": "Body of the enable-notifications dialog, shown when the OS permission is denied."
+  },
+  "settingsOpenSystemSettings": "Open settings",
+  "@settingsOpenSystemSettings": {
+    "description": "Button that opens the OS app-settings page."
+  },
+  "loginTagline": "Private messaging that works even without the internet.",
+  "@loginTagline": {
+    "description": "One-line value proposition under the app name on the login screen (offline Bluetooth chat is the differentiator)."
+  },
+  "settingsPrivacyPolicy": "Privacy Policy",
+  "@settingsPrivacyPolicy": {
+    "description": "Settings row opening the privacy policy web page."
+  },
+  "settingsTerms": "Terms of Service",
+  "@settingsTerms": {
+    "description": "Settings row opening the terms of service web page."
+  },
+  "settingsDeleteAccount": "Delete account",
+  "@settingsDeleteAccount": {
+    "description": "Settings row opening the account-deletion web page."
+  },
+  "inviteSheetTitle": "Invite friends",
+  "@inviteSheetTitle": {
+    "description": "Title of the invite / share sheet."
+  },
+  "inviteSheetSubtitle": "Spread the word — share GupShupGo",
+  "@inviteSheetSubtitle": {
+    "description": "Subtitle under the invite sheet title."
+  },
+  "inviteShareImageBtn": "Share image",
+  "@inviteShareImageBtn": {
+    "description": "Button that shares the ready-made story image."
+  },
+  "inviteShareLinkBtn": "Share link",
+  "@inviteShareLinkBtn": {
+    "description": "Button that shares the invite link via the system sheet."
+  },
+  "inviteCopyLinkBtn": "Copy link",
+  "@inviteCopyLinkBtn": {
+    "description": "Button that copies the invite link to the clipboard."
+  },
+  "inviteLinkCopied": "Invite link copied",
+  "@inviteLinkCopied": {
+    "description": "Snackbar shown after the invite link is copied."
+  },
+  "inviteMessage": "Chat with me on GupShupGo — it even works without the internet 👋 {link}",
+  "@inviteMessage": {
+    "description": "The text shared when inviting a friend; link is the profile or Play Store URL.",
+    "placeholders": {
+      "link": {
+        "type": "String"
+      }
+    }
+  },
+  "inviteCardTagline": "Private chat that works even offline",
+  "@inviteCardTagline": {
+    "description": "Tagline on the shareable story card."
+  },
+  "inviteCardScan": "Scan to download",
+  "@inviteCardScan": {
+    "description": "Call to action under the QR on the story card when the user has no handle."
+  },
+  "inviteCardDownload": "Download on Google Play",
+  "@inviteCardDownload": {
+    "description": "Footer on the story card."
+  },
+  "homeMenuInvite": "Invite friends",
+  "@homeMenuInvite": {
+    "description": "Home overflow-menu item that opens the invite sheet."
+  },
+  "invitePromptTitle": "Enjoying GupShupGo?",
+  "@invitePromptTitle": {
+    "description": "Title of the one-time post-signup invite prompt."
+  },
+  "invitePromptBody": "It's better with friends — and it works even without internet. Invite someone?",
+  "@invitePromptBody": {
+    "description": "Body of the one-time post-signup invite prompt."
+  },
+  "invitePromptInvite": "Invite friends",
+  "@invitePromptInvite": {
+    "description": "Confirm button on the invite prompt."
+  },
+  "invitePromptLater": "Maybe later",
+  "@invitePromptLater": {
+    "description": "Dismiss button on the invite prompt."
+  },
+  "homeOfflineBannerTitle": "No internet? No problem",
+  "@homeOfflineBannerTitle": {
+    "description": "Title of the home banner shown when the device has no internet connection, inviting the user into offline mesh chat."
+  },
+  "homeOfflineBannerSubtitle": "You can still message people nearby over Bluetooth.",
+  "@homeOfflineBannerSubtitle": {
+    "description": "Subtitle of the offline home banner explaining the offline Bluetooth mesh capability."
+  },
+  "homeNearbyBannerTitle": "{count, plural, =1{1 person nearby} other{{count} people nearby}}",
+  "@homeNearbyBannerTitle": {
+    "description": "Title of the home banner shown when GupShupGo peers are detected nearby over mesh; count is the number of peers.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeNearbyBannerSubtitle": "Chat over Bluetooth — no internet needed.",
+  "@homeNearbyBannerSubtitle": {
+    "description": "Subtitle of the nearby-peers home banner."
+  },
+  "linkBackupTitle": "Add a backup sign-in method",
+  "@linkBackupTitle": {
+    "description": "Title on the link-accounts screen."
+  },
+  "linkBackupSubtitle": "Link Google or email so you can sign back in\neven if your SIM is unavailable.",
+  "@linkBackupSubtitle": {
+    "description": "Subtitle on the link-accounts screen."
+  },
+  "linkGoogleTitle": "Link Google Account",
+  "@linkGoogleTitle": {
+    "description": "Label for linking Google account."
+  },
+  "linkGoogleSubtitleLinked": "Linked ✓",
+  "@linkGoogleSubtitleLinked": {
+    "description": "Status when Google is linked."
+  },
+  "linkGoogleSubtitleUnlinked": "One-tap sign-in without SIM",
+  "@linkGoogleSubtitleUnlinked": {
+    "description": "Description for Google linking."
+  },
+  "linkGoogleAction": "Link",
+  "@linkGoogleAction": {
+    "description": "Action button to link Google."
+  },
+  "linkGoogleSuccess": "Google account linked successfully!",
+  "@linkGoogleSuccess": {
+    "description": "Snackbar when Google is linked."
+  },
+  "linkGoogleAlreadyUsed": "This Google account is already registered as a separate GupShupGo account. To merge, sign out and sign in with Google, then link your phone number from settings.",
+  "@linkGoogleAlreadyUsed": {
+    "description": "Error when Google account belongs to another user."
+  },
+  "linkGoogleFailed": "Google linking failed. Try again.",
+  "@linkGoogleFailed": {
+    "description": "Generic Google linking error."
+  },
+  "linkSessionExpired": "Session expired. Please sign in again.",
+  "@linkSessionExpired": {
+    "description": "Error when session expired."
+  },
+  "linkEmailTitle": "Link Email & Password",
+  "@linkEmailTitle": {
+    "description": "Label for linking Email & password."
+  },
+  "linkEmailSubtitleLinked": "Linked ✓",
+  "@linkEmailSubtitleLinked": {
+    "description": "Status when email is linked."
+  },
+  "linkEmailSubtitleUnlinked": "Sign in with email if no SIM or Google",
+  "@linkEmailSubtitleUnlinked": {
+    "description": "Description for email linking."
+  },
+  "linkEmailActionAdd": "Add",
+  "@linkEmailActionAdd": {
+    "description": "Button to open email link form."
+  },
+  "linkEmailActionCancel": "Cancel",
+  "@linkEmailActionCancel": {
+    "description": "Button to cancel email link form."
+  },
+  "linkEmailFieldLabel": "Email",
+  "@linkEmailFieldLabel": {
+    "description": "Email textfield label."
+  },
+  "linkPasswordFieldLabel": "Create a password",
+  "@linkPasswordFieldLabel": {
+    "description": "Password textfield label."
+  },
+  "linkPasswordHelper": "Minimum 6 characters",
+  "@linkPasswordHelper": {
+    "description": "Password minimum length helper."
+  },
+  "linkEmailButton": "Link Email",
+  "@linkEmailButton": {
+    "description": "Button to submit email linking."
+  },
+  "linkEmailSuccess": "Email linked successfully!",
+  "@linkEmailSuccess": {
+    "description": "Snackbar when email is linked."
+  },
+  "linkEmailInvalid": "Enter a valid email address.",
+  "@linkEmailInvalid": {
+    "description": "Validation error for invalid email."
+  },
+  "linkPasswordTooShort": "Password must be at least 6 characters.",
+  "@linkPasswordTooShort": {
+    "description": "Validation error for short password."
+  },
+  "linkEmailAlreadyInUse": "This email is already registered separately on GupShupGo. Sign in with email first, then link your phone from settings.",
+  "@linkEmailAlreadyInUse": {
+    "description": "Error when email is already in use."
+  },
+  "linkEmailAlreadyLinked": "An email is already linked to your account.",
+  "@linkEmailAlreadyLinked": {
+    "description": "Error when email is already linked."
+  },
+  "linkEmailFailed": "Email linking failed. Try again.",
+  "@linkEmailFailed": {
+    "description": "Generic email linking error."
+  },
+  "linkContinueToApp": "Continue to App",
+  "@linkContinueToApp": {
+    "description": "Button to continue to app when providers are linked."
+  },
+  "linkSkipForNow": "Skip for Now",
+  "@linkSkipForNow": {
+    "description": "Button to skip linking backup account."
+  },
+  "linkSkip": "Skip",
+  "@linkSkip": {
+    "description": "Top bar skip button."
+  },
+  "phoneAuthTitleEntry": "Sign in with your phone number.",
+  "@phoneAuthTitleEntry": {
+    "description": "Title on phone number entry stage."
+  },
+  "phoneAuthTitleOtp": "Enter the code we sent you.",
+  "@phoneAuthTitleOtp": {
+    "description": "Title on OTP entry stage."
+  },
+  "phoneAuthNameHint": "Your Name",
+  "@phoneAuthNameHint": {
+    "description": "Hint for name input."
+  },
+  "phoneAuthPhoneHint": "Phone Number",
+  "@phoneAuthPhoneHint": {
+    "description": "Hint for phone number input."
+  },
+  "phoneAuthUseSim": "Use SIM",
+  "@phoneAuthUseSim": {
+    "description": "Button to auto-fill SIM phone number."
+  },
+  "phoneAuthSendOtp": "Send OTP",
+  "@phoneAuthSendOtp": {
+    "description": "Button to send SMS verification code."
+  },
+  "phoneAuthOtpPrompt": "Enter the 6-digit code sent to {phone}",
+  "@phoneAuthOtpPrompt": {
+    "description": "Prompt showing which phone number received the OTP.",
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneAuthOtpPromptGeneric": "Enter the 6-digit code we sent you",
+  "@phoneAuthOtpPromptGeneric": {
+    "description": "Generic prompt for OTP."
+  },
+  "phoneAuthOtpHint": "Enter code",
+  "@phoneAuthOtpHint": {
+    "description": "Hint for OTP input field."
+  },
+  "phoneAuthVerify": "Verify",
+  "@phoneAuthVerify": {
+    "description": "Button to verify the OTP."
+  },
+  "phoneAuthGoBack": "Go Back",
+  "@phoneAuthGoBack": {
+    "description": "Button to return to phone entry."
+  },
+  "phoneAuthResendCode": "Resend code",
+  "@phoneAuthResendCode": {
+    "description": "Button to resend OTP code."
+  },
+  "phoneAuthEnterName": "Please enter your name",
+  "@phoneAuthEnterName": {
+    "description": "Error when name is empty."
+  },
+  "phoneAuthEnterValidPhone": "Please enter a valid phone number",
+  "@phoneAuthEnterValidPhone": {
+    "description": "Error when phone number is invalid."
+  },
+  "phoneAuthEnterCode": "Please enter the code",
+  "@phoneAuthEnterCode": {
+    "description": "Error when OTP code is empty."
+  },
+  "phoneAuthRequestNewCode": "Please request a new code.",
+  "@phoneAuthRequestNewCode": {
+    "description": "Error when verification session is missing."
+  },
+  "phoneAuthCodeIncorrect": "That code is incorrect. Please try again.",
+  "@phoneAuthCodeIncorrect": {
+    "description": "Error when OTP is wrong."
+  },
+  "phoneAuthErrCodeIncorrect": "That code is incorrect. Please check and try again.",
+  "@phoneAuthErrCodeIncorrect": {
+    "description": "FirebaseAuth error for invalid verification code."
+  },
+  "phoneAuthErrCodeExpired": "The code expired. Tap \"Resend code\" to get a new one.",
+  "@phoneAuthErrCodeExpired": {
+    "description": "FirebaseAuth error for expired code."
+  },
+  "phoneAuthErrTooManyRequests": "Too many attempts. Please wait a while and try again.",
+  "@phoneAuthErrTooManyRequests": {
+    "description": "FirebaseAuth error for too many attempts."
+  },
+  "phoneAuthErrInvalidPhone": "That phone number looks invalid. Please check it.",
+  "@phoneAuthErrInvalidPhone": {
+    "description": "FirebaseAuth error for invalid phone number."
+  },
+  "phoneAuthErrQuotaExceeded": "SMS limit reached. Please try again later.",
+  "@phoneAuthErrQuotaExceeded": {
+    "description": "FirebaseAuth error for SMS quota exceeded."
+  },
+  "phoneAuthErrFailed": "Verification failed. Please try again.",
+  "@phoneAuthErrFailed": {
+    "description": "Generic auth failure error."
+  },
+  "usernameSetupAppBarTitle": "Choose Your Handle",
+  "@usernameSetupAppBarTitle": {
+    "description": "AppBar title on username setup screen."
+  },
+  "usernameSetupHeaderTitle": "Secure Your Identity",
+  "@usernameSetupHeaderTitle": {
+    "description": "Header title on username setup screen."
+  },
+  "usernameSetupHeaderDesc": "Your @handle is your unique key on GupShupGo. Others can search and add you securely without sharing your phone or email.",
+  "@usernameSetupHeaderDesc": {
+    "description": "Description of what a username/handle does."
+  },
+  "usernameSetupInputHint": "your_handle",
+  "@usernameSetupInputHint": {
+    "description": "Placeholder hint for handle input."
+  },
+  "usernameSetupChecking": "Checking availability...",
+  "@usernameSetupChecking": {
+    "description": "Status when checking handle availability."
+  },
+  "usernameSetupAvailable": "@{handle} is available!",
+  "@usernameSetupAvailable": {
+    "description": "Status when handle is available.",
+    "placeholders": {
+      "handle": {
+        "type": "String"
+      }
+    }
+  },
+  "usernameSetupTaken": "@{handle} is already taken by another user.",
+  "@usernameSetupTaken": {
+    "description": "Status when handle is already taken.",
+    "placeholders": {
+      "handle": {
+        "type": "String"
+      }
+    }
+  },
+  "usernameSetupCharRules": "3–20 characters (a-z, 0-9, _)",
+  "@usernameSetupCharRules": {
+    "description": "Character rule guidance text."
+  },
+  "usernameSetupTooShort": "Username must be at least 3 characters long.",
+  "@usernameSetupTooShort": {
+    "description": "Error when handle is under 3 chars."
+  },
+  "usernameSetupTooLong": "Username must be at most 20 characters long.",
+  "@usernameSetupTooLong": {
+    "description": "Error when handle is over 20 chars."
+  },
+  "usernameSetupInvalidChars": "Only letters, numbers, and underscores allowed.",
+  "@usernameSetupInvalidChars": {
+    "description": "Error when handle contains illegal characters."
+  },
+  "usernameSetupRecommended": "RECOMMENDED FOR YOU",
+  "@usernameSetupRecommended": {
+    "description": "Header for suggested handles."
+  },
+  "usernameSetupSaveBtn": "Save & Continue",
+  "@usernameSetupSaveBtn": {
+    "description": "Button to save handle and proceed."
+  },
+  "usernameSetupSkipBtn": "Skip for now",
+  "@usernameSetupSkipBtn": {
+    "description": "Button to skip handle setup for now."
+  },
+  "usernameSetupFailed": "Failed to set username: {error}",
+  "@usernameSetupFailed": {
+    "description": "Error when setting username fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "vaultProtectTitle": "Protect Vault",
+  "@vaultProtectTitle": {
+    "description": "Header title when setting up vault PIN."
+  },
+  "vaultUnlockTitle": "Unlock Vault",
+  "@vaultUnlockTitle": {
+    "description": "Header title when unlocking vault."
+  },
+  "vaultSetupDesc": "Choose a PIN to encrypt your message history. You will need it to read your messages on a new phone, so pick something you can remember.",
+  "@vaultSetupDesc": {
+    "description": "Description when setting up vault PIN."
+  },
+  "vaultUnlockDescBio": "Enter your PIN or tap fingerprint to decrypt history.",
+  "@vaultUnlockDescBio": {
+    "description": "Description when unlocking with PIN or biometrics."
+  },
+  "vaultUnlockDescPin": "Enter your PIN to decrypt your history.",
+  "@vaultUnlockDescPin": {
+    "description": "Description when unlocking with PIN."
+  },
+  "vaultReinstallHint": "Enter your PIN to restore your history on this device. You can turn fingerprint unlock back on afterwards.",
+  "@vaultReinstallHint": {
+    "description": "Hint shown after reinstalling when biometrics is not yet enrolled."
+  },
+  "vaultUnlockWithFingerprint": "Unlock with Fingerprint",
+  "@vaultUnlockWithFingerprint": {
+    "description": "Button to unlock using fingerprint."
+  },
+  "vaultOrDivider": "OR",
+  "@vaultOrDivider": {
+    "description": "Divider between biometric unlock and PIN."
+  },
+  "vaultNewPin": "New PIN",
+  "@vaultNewPin": {
+    "description": "Label for new PIN field."
+  },
+  "vaultConfirmPin": "Confirm PIN",
+  "@vaultConfirmPin": {
+    "description": "Label for confirm PIN field."
+  },
+  "vaultEnterPin": "Enter PIN",
+  "@vaultEnterPin": {
+    "description": "Label for enter PIN field."
+  },
+  "vaultKeyboardUseLetters": "Use letters instead",
+  "@vaultKeyboardUseLetters": {
+    "description": "Toggle to switch PIN keyboard to letters."
+  },
+  "vaultKeyboardUseNumbers": "Use numbers instead",
+  "@vaultKeyboardUseNumbers": {
+    "description": "Toggle to switch PIN keyboard to numbers."
+  },
+  "vaultRestoreLater": "Restore later",
+  "@vaultRestoreLater": {
+    "description": "Button to postpone vault unlock."
+  },
+  "vaultForgotPin": "Forgot PIN?",
+  "@vaultForgotPin": {
+    "description": "Button when user forgot their PIN."
+  },
+  "vaultSetPinBtn": "Set PIN",
+  "@vaultSetPinBtn": {
+    "description": "Button to set new PIN."
+  },
+  "vaultDecryptBtn": "Decrypt",
+  "@vaultDecryptBtn": {
+    "description": "Button to decrypt vault."
+  },
+  "vaultPinMinLength": "PIN must be at least 6 characters.",
+  "@vaultPinMinLength": {
+    "description": "Validation error when PIN is under 6 characters."
+  },
+  "vaultPinsDoNotMatch": "PINs do not match.",
+  "@vaultPinsDoNotMatch": {
+    "description": "Validation error when PINs do not match."
+  },
+  "vaultSetupFailed": "Setup failed. Check connection.",
+  "@vaultSetupFailed": {
+    "description": "Error when vault setup fails."
+  },
+  "vaultIncorrectPin": "Incorrect PIN. Try again.",
+  "@vaultIncorrectPin": {
+    "description": "Error when PIN is incorrect."
+  },
+  "vaultFingerprintOutOfDate": "Fingerprint unlock is out of date. Enter your PIN.",
+  "@vaultFingerprintOutOfDate": {
+    "description": "Error when biometric stored PIN is out of date."
+  },
+  "vaultBiometricError": "Biometric error. Enter PIN manually.",
+  "@vaultBiometricError": {
+    "description": "Generic biometric error message."
+  },
+  "vaultBioReasonUnlock": "Authenticate using biometrics to unlock your vault",
+  "@vaultBioReasonUnlock": {
+    "description": "Biometric system prompt reason for unlock."
+  },
+  "vaultBioReasonEnrol": "Confirm your fingerprint to enable quick unlock",
+  "@vaultBioReasonEnrol": {
+    "description": "Biometric system prompt reason for enrolment."
+  },
+  "vaultAskBioTitle": "Unlock with fingerprint?",
+  "@vaultAskBioTitle": {
+    "description": "Dialog title asking to enable fingerprint."
+  },
+  "vaultAskBioDesc": "Skip typing your PIN on this phone. Your PIN is still what protects the vault — keep it somewhere safe, because you will need it on a new phone or after reinstalling.",
+  "@vaultAskBioDesc": {
+    "description": "Dialog description explaining fingerprint unlock."
+  },
+  "vaultAskBioNotNow": "Not now",
+  "@vaultAskBioNotNow": {
+    "description": "Button declining fingerprint unlock for now."
+  },
+  "vaultAskBioEnable": "Enable",
+  "@vaultAskBioEnable": {
+    "description": "Button enabling fingerprint unlock."
+  },
+  "vaultDeleteMessagesTitle": "Delete all messages?",
+  "@vaultDeleteMessagesTitle": {
+    "description": "Dialog title confirming deletion of all messages on vault reset."
+  },
+  "vaultDeleteMessagesDesc": "Without your PIN your history cannot be decrypted, so resetting deletes all of it — the encrypted cloud copy and the copy on this phone. Your chats will be empty.\n\nYour account and contacts are not affected, and you can keep messaging normally afterwards. This cannot be undone.",
+  "@vaultDeleteMessagesDesc": {
+    "description": "Dialog description explaining vault reset consequences."
+  },
+  "vaultDeleteMessagesCancel": "Cancel",
+  "@vaultDeleteMessagesCancel": {
+    "description": "Cancel button in vault reset dialog."
+  },
+  "vaultDeleteMessagesConfirm": "Delete everything",
+  "@vaultDeleteMessagesConfirm": {
+    "description": "Confirm button to delete everything in vault reset dialog."
+  },
+  "vaultCustodyConfirmTitle": "Confirm your vault PIN",
+  "@vaultCustodyConfirmTitle": {
+    "description": "Dialog title for vault PIN confirmation."
+  },
+  "vaultCustodyChooseTitle": "Choose a PIN",
+  "@vaultCustodyChooseTitle": {
+    "description": "Dialog title for choosing a new vault PIN."
+  },
+  "vaultCustodyConfirmDesc": "Your message history is encrypted with a PIN. Confirm it once so you can restore your messages on a new phone or after reinstalling.\n\nIf your vault was set up with just your fingerprint, you may never have been shown a PIN.",
+  "@vaultCustodyConfirmDesc": {
+    "description": "Description for confirming current vault PIN."
+  },
+  "vaultCustodyChooseDesc": "Pick a PIN you will remember. Every message you already have is kept — it is re-encrypted under the new PIN, nothing is deleted.",
+  "@vaultCustodyChooseDesc": {
+    "description": "Description for re-keying vault with a new PIN."
+  },
+  "vaultCustodyDontKnow": "I don't know my PIN",
+  "@vaultCustodyDontKnow": {
+    "description": "Button when user doesn't know their current PIN."
+  },
+  "vaultCustodyConfirmBtn": "Confirm",
+  "@vaultCustodyConfirmBtn": {
+    "description": "Confirm button in custody dialog."
+  },
+  "vaultCustodySaveBtn": "Save PIN",
+  "@vaultCustodySaveBtn": {
+    "description": "Save button in custody dialog."
+  },
+  "vaultCustodyMismatchError": "That PIN does not match. If you never chose one, tap \"I don't know my PIN\".",
+  "@vaultCustodyMismatchError": {
+    "description": "Error when custody confirmation PIN does not match."
+  },
+  "vaultCustodyAutoUpdateFailed": "Could not update the PIN automatically. Please enter your current PIN.",
+  "@vaultCustodyAutoUpdateFailed": {
+    "description": "Error when re-keying failed."
+  },
+  "vaultCustodyReencrypting": "Re-encrypting {done} of {total}… keep the app open.",
+  "@vaultCustodyReencrypting": {
+    "description": "Progress text while re-encrypting vault entries.",
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "vaultCustodyPreparing": "Preparing… keep the app open.",
+  "@vaultCustodyPreparing": {
+    "description": "Progress text while preparing vault re-encryption."
+  },
+  "vaultSettingsTitle": "Vault",
+  "@vaultSettingsTitle": {
+    "description": "AppBar title for vault settings."
+  },
+  "vaultSettingsAboutTitle": "About the vault",
+  "@vaultSettingsAboutTitle": {
+    "description": "Title for about vault card."
+  },
+  "vaultSettingsAboutDesc": "A private backup of your chat history, locked with your PIN. It brings your messages back when you reinstall the app or switch to a new phone. Only your PIN can open it — nobody else can read what is inside, not even us.",
+  "@vaultSettingsAboutDesc": {
+    "description": "Description of how vault works."
+  },
+  "vaultSettingsBulletMessages": "Your messages",
+  "@vaultSettingsBulletMessages": {
+    "description": "Bullet list item for your messages."
+  },
+  "vaultSettingsBulletStatuses": "Statuses you can see",
+  "@vaultSettingsBulletStatuses": {
+    "description": "Bullet list item for statuses you can see."
+  },
+  "vaultSettingsNeverKept": "Never kept here: your call history, contacts, photos shared in chats, or anyone else's private messages.",
+  "@vaultSettingsNeverKept": {
+    "description": "Footnote about what is never kept in the vault."
+  },
+  "vaultSettingsSectionPrivacy": "PRIVACY",
+  "@vaultSettingsSectionPrivacy": {
+    "description": "Privacy section header in vault settings."
+  },
+  "vaultSettingsAutoDelete": "Auto-delete old messages",
+  "@vaultSettingsAutoDelete": {
+    "description": "Label for auto-delete old messages setting."
+  },
+  "vaultSettingsKeepForever": "Keep forever",
+  "@vaultSettingsKeepForever": {
+    "description": "Retention option to keep forever."
+  },
+  "vaultSettingsDeleteAfter": "Delete after {label}",
+  "@vaultSettingsDeleteAfter": {
+    "description": "Retention subtitle showing expiry window.",
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "vaultSettingsSectionPin": "PIN",
+  "@vaultSettingsSectionPin": {
+    "description": "PIN section header in vault settings."
+  },
+  "vaultSettingsChangePin": "Change PIN",
+  "@vaultSettingsChangePin": {
+    "description": "Title for change PIN row."
+  },
+  "vaultSettingsChangePinSubtitle": "Re-encrypts every vault entry",
+  "@vaultSettingsChangePinSubtitle": {
+    "description": "Subtitle for change PIN row."
+  },
+  "vaultSettingsBioTitle": "Unlock with fingerprint",
+  "@vaultSettingsBioTitle": {
+    "description": "Title for fingerprint unlock toggle."
+  },
+  "vaultSettingsBioSubOn": "On for this device",
+  "@vaultSettingsBioSubOn": {
+    "description": "Subtitle when fingerprint is enabled."
+  },
+  "vaultSettingsBioSubOff": "Skip typing your PIN on this device",
+  "@vaultSettingsBioSubOff": {
+    "description": "Subtitle when fingerprint is disabled."
+  },
+  "vaultSettingsSectionDanger": "DANGER ZONE",
+  "@vaultSettingsSectionDanger": {
+    "description": "Danger zone section header."
+  },
+  "vaultSettingsDeleteData": "Delete vault data",
+  "@vaultSettingsDeleteData": {
+    "description": "Title for delete vault data row."
+  },
+  "vaultSettingsDeleteDataSubtitle": "Wipes encrypted history, keeps PIN",
+  "@vaultSettingsDeleteDataSubtitle": {
+    "description": "Subtitle for delete vault data row."
+  },
+  "vaultSettingsResetVault": "Reset vault",
+  "@vaultSettingsResetVault": {
+    "description": "Title for reset vault row."
+  },
+  "vaultSettingsResetVaultSubtitle": "Forgets PIN and deletes everything",
+  "@vaultSettingsResetVaultSubtitle": {
+    "description": "Subtitle for reset vault row."
+  },
+  "vaultSettingsPinChanged": "PIN changed.",
+  "@vaultSettingsPinChanged": {
+    "description": "Snackbar when PIN is changed."
+  },
+  "vaultSettingsBioTurnedOff": "Fingerprint unlock turned off. Your PIN still works.",
+  "@vaultSettingsBioTurnedOff": {
+    "description": "Snackbar when fingerprint unlock is turned off."
+  },
+  "vaultSettingsBioTurnedOn": "Fingerprint unlock enabled on this device.",
+  "@vaultSettingsBioTurnedOn": {
+    "description": "Snackbar when fingerprint unlock is turned on."
+  },
+  "vaultSettingsClearDataTitle": "Delete vault data?",
+  "@vaultSettingsClearDataTitle": {
+    "description": "Dialog title for delete vault data."
+  },
+  "vaultSettingsClearDataDesc": "Removes every encrypted message and status from the cloud vault. Your PIN stays the same — new messages will encrypt under it as before. Cannot be undone.",
+  "@vaultSettingsClearDataDesc": {
+    "description": "Dialog description for delete vault data."
+  },
+  "vaultSettingsClearDataCancel": "Cancel",
+  "@vaultSettingsClearDataCancel": {
+    "description": "Cancel button in clear vault data dialog."
+  },
+  "vaultSettingsClearDataConfirm": "Delete data",
+  "@vaultSettingsClearDataConfirm": {
+    "description": "Confirm button to delete vault data."
+  },
+  "vaultSettingsDataDeleted": "Vault data deleted.",
+  "@vaultSettingsDataDeleted": {
+    "description": "Snackbar when vault data is deleted."
+  },
+  "vaultSettingsResetTitle": "Reset vault?",
+  "@vaultSettingsResetTitle": {
+    "description": "Dialog title for reset vault."
+  },
+  "vaultSettingsResetDesc": "Removes your PIN, deletes every encrypted entry, and clears the local cache. You will be asked to set a fresh PIN. Cannot be undone.",
+  "@vaultSettingsResetDesc": {
+    "description": "Dialog description for reset vault."
+  },
+  "vaultSettingsResetConfirm": "Reset",
+  "@vaultSettingsResetConfirm": {
+    "description": "Confirm button in reset vault dialog."
+  },
+  "vaultSettingsChangeDialogDesc": "Every encrypted entry will be re-encrypted under the new PIN. Keep the app open until this finishes.",
+  "@vaultSettingsChangeDialogDesc": {
+    "description": "Description in change PIN dialog."
+  },
+  "vaultSettingsCurrentPin": "Current PIN",
+  "@vaultSettingsCurrentPin": {
+    "description": "Hint for current PIN field."
+  },
+  "vaultSettingsNewPin": "New PIN",
+  "@vaultSettingsNewPin": {
+    "description": "Hint for new PIN field."
+  },
+  "vaultSettingsConfirmNewPin": "Confirm new PIN",
+  "@vaultSettingsConfirmNewPin": {
+    "description": "Hint for confirm new PIN field."
+  },
+  "vaultSettingsEnterCurrentPin": "Enter your current PIN.",
+  "@vaultSettingsEnterCurrentPin": {
+    "description": "Validation error when current PIN is empty."
+  },
+  "vaultSettingsNewPinMinLength": "New PIN must be at least 6 characters.",
+  "@vaultSettingsNewPinMinLength": {
+    "description": "Validation error when new PIN is too short."
+  },
+  "vaultSettingsNewPinMismatch": "New PINs do not match.",
+  "@vaultSettingsNewPinMismatch": {
+    "description": "Validation error when new PINs do not match."
+  },
+  "vaultSettingsCurrentPinIncorrect": "Current PIN is incorrect.",
+  "@vaultSettingsCurrentPinIncorrect": {
+    "description": "Error when current PIN is wrong."
+  },
+  "vaultSettingsReencryptingCount": "Re-encrypting {done} of {total}…",
+  "@vaultSettingsReencryptingCount": {
+    "description": "Progress label in change PIN dialog.",
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "vaultSettingsChangeBtn": "Change",
+  "@vaultSettingsChangeBtn": {
+    "description": "Submit button in change PIN dialog."
+  },
+  "vaultSettingsBioPinDialogTitle": "Enter your PIN",
+  "@vaultSettingsBioPinDialogTitle": {
+    "description": "Dialog title asking for PIN to enable fingerprint."
+  },
+  "vaultSettingsBioPinDialogDesc": "Your PIN is stored on this device so your fingerprint can unlock the vault. You will still need the PIN itself on a new phone or after reinstalling, so keep it somewhere safe.",
+  "@vaultSettingsBioPinDialogDesc": {
+    "description": "Dialog description explaining why PIN is needed for fingerprint."
+  },
+  "vaultSettingsContinueBtn": "Continue",
+  "@vaultSettingsContinueBtn": {
+    "description": "Continue button in fingerprint PIN dialog."
+  },
+  "premiumTitle": "GupShupGo Pro",
+  "@premiumTitle": {
+    "description": "Title for Pro upgrade screen."
+  },
+  "premiumSubtitleMember": "You're a Pro member! 🎉",
+  "@premiumSubtitleMember": {
+    "description": "Subtitle when user is a Pro member."
+  },
+  "premiumSubtitleUnlock": "Unlock the full experience",
+  "@premiumSubtitleUnlock": {
+    "description": "Subtitle when user is not Pro."
+  },
+  "premiumActiveDaysRemaining": "{days} days remaining",
+  "@premiumActiveDaysRemaining": {
+    "description": "Banner showing remaining Pro subscription days.",
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "premiumFeaturesHeader": "What you get with Pro",
+  "@premiumFeaturesHeader": {
+    "description": "Section header for Pro features list."
+  },
+  "premiumPlansHeader": "Choose your plan",
+  "@premiumPlansHeader": {
+    "description": "Section header for pricing plans."
+  },
+  "premiumSubscribeBtn": "Subscribe Now",
+  "@premiumSubscribeBtn": {
+    "description": "Primary subscribe button on Pro screen."
+  },
+  "premiumCancelAnytime": "Cancel anytime from Google Play subscriptions.",
+  "@premiumCancelAnytime": {
+    "description": "Footnote about canceling Google Play subscription."
+  },
+  "premiumRestoreBtn": "Restore previous purchase",
+  "@premiumRestoreBtn": {
+    "description": "Button to restore previous purchase."
+  },
+  "premiumRestoring": "Restoring…",
+  "@premiumRestoring": {
+    "description": "Status text while restoring purchase."
+  },
+  "premiumRestoredSuccess": "Pro subscription restored! 🎉",
+  "@premiumRestoredSuccess": {
+    "description": "Snackbar when Pro subscription is restored."
+  },
+  "premiumNoActiveSub": "No active subscription found.",
+  "@premiumNoActiveSub": {
+    "description": "Snackbar when no active subscription was found."
+  },
+  "premiumProductUnavailable": "Product not available. Make sure you have an active internet connection and the app is downloaded from the Play Store.",
+  "@premiumProductUnavailable": {
+    "description": "Error when in-app purchase product is not found."
+  },
+  "premiumFeatureMediaTitle": "Media Moments",
+  "@premiumFeatureMediaTitle": {
+    "description": "Feature title for Media Moments."
+  },
+  "premiumFeatureMediaDesc": "Share photos & videos as status updates",
+  "@premiumFeatureMediaDesc": {
+    "description": "Feature description for Media Moments."
+  },
+  "premiumFeatureMediaFree": "Text only",
+  "@premiumFeatureMediaFree": {
+    "description": "Free tier badge for Media Moments."
+  },
+  "premiumFeatureMediaPro": "Photos + Videos",
+  "@premiumFeatureMediaPro": {
+    "description": "Pro tier badge for Media Moments."
+  },
+  "premiumFeatureScreenShareTitle": "Screen Sharing",
+  "@premiumFeatureScreenShareTitle": {
+    "description": "Feature title for Screen Sharing."
+  },
+  "premiumFeatureScreenShareDesc": "Share your screen live during chats",
+  "@premiumFeatureScreenShareDesc": {
+    "description": "Feature description for Screen Sharing."
+  },
+  "premiumFeatureScreenShareFree": "Locked",
+  "@premiumFeatureScreenShareFree": {
+    "description": "Free tier badge for Screen Sharing."
+  },
+  "premiumFeatureScreenSharePro": "Full access",
+  "@premiumFeatureScreenSharePro": {
+    "description": "Pro tier badge for Screen Sharing."
+  },
+  "premiumFeatureThemesTitle": "Chat Themes",
+  "@premiumFeatureThemesTitle": {
+    "description": "Feature title for Chat Themes."
+  },
+  "premiumFeatureThemesDesc": "Patterned backgrounds & gradient bubbles, per chat",
+  "@premiumFeatureThemesDesc": {
+    "description": "Feature description for Chat Themes."
+  },
+  "premiumFeatureThemesFree": "6 themes",
+  "@premiumFeatureThemesFree": {
+    "description": "Free tier badge for Chat Themes."
+  },
+  "premiumFeatureThemesPro": "All 12 + your own photo",
+  "@premiumFeatureThemesPro": {
+    "description": "Pro tier badge for Chat Themes."
+  },
+  "premiumFeatureVoiceTitle": "Longer Voice Messages",
+  "@premiumFeatureVoiceTitle": {
+    "description": "Feature title for Voice Notes duration."
+  },
+  "premiumFeatureVoiceDesc": "Record longer voice notes",
+  "@premiumFeatureVoiceDesc": {
+    "description": "Feature description for Voice Notes duration."
+  },
+  "premiumFeatureVoiceFree": "2 minutes",
+  "@premiumFeatureVoiceFree": {
+    "description": "Free tier badge for Voice Notes."
+  },
+  "premiumFeatureVoicePro": "Unlimited",
+  "@premiumFeatureVoicePro": {
+    "description": "Pro tier badge for Voice Notes."
+  },
+  "premiumFeatureQualityTitle": "Higher Quality Media",
+  "@premiumFeatureQualityTitle": {
+    "description": "Feature title for Higher Quality Media."
+  },
+  "premiumFeatureQualityDesc": "Sharper photos and longer status videos",
+  "@premiumFeatureQualityDesc": {
+    "description": "Feature description for Higher Quality Media."
+  },
+  "premiumFeatureQualityFree": "Standard quality",
+  "@premiumFeatureQualityFree": {
+    "description": "Free tier badge for Media Quality."
+  },
+  "premiumFeatureQualityPro": "High quality + 90s videos",
+  "@premiumFeatureQualityPro": {
+    "description": "Pro tier badge for Media Quality."
+  },
+  "premiumFeatureBondTitle": "Bond Restore",
+  "@premiumFeatureBondTitle": {
+    "description": "Feature title for Bond Restore."
+  },
+  "premiumFeatureBondDesc": "Restore broken bonds for free",
+  "@premiumFeatureBondDesc": {
+    "description": "Feature description for Bond Restore."
+  },
+  "premiumFeatureBondFree": "Points or watch an ad",
+  "@premiumFeatureBondFree": {
+    "description": "Free tier badge for Bond Restore."
+  },
+  "premiumFeatureBondPro": "1 free restore/week",
+  "@premiumFeatureBondPro": {
+    "description": "Pro tier badge for Bond Restore."
+  },
+  "premiumFeatureBadgeTitle": "Pro Badge",
+  "@premiumFeatureBadgeTitle": {
+    "description": "Feature title for Pro Badge."
+  },
+  "premiumFeatureBadgeDesc": "Show off your Pro status",
+  "@premiumFeatureBadgeDesc": {
+    "description": "Feature description for Pro Badge."
+  },
+  "premiumFeatureBadgeFree": "No badge",
+  "@premiumFeatureBadgeFree": {
+    "description": "Free tier badge for Pro Badge."
+  },
+  "premiumFeatureBadgePro": "Exclusive Pro badge",
+  "@premiumFeatureBadgePro": {
+    "description": "Pro tier badge for Pro Badge."
+  },
+  "premiumFeatureExportTitle": "Chat Export",
+  "@premiumFeatureExportTitle": {
+    "description": "Feature title for Chat Export."
+  },
+  "premiumFeatureExportDesc": "Save a chat as a PDF you can print, or as plain text",
+  "@premiumFeatureExportDesc": {
+    "description": "Feature description for Chat Export."
+  },
+  "premiumFeatureExportFree": "Not available",
+  "@premiumFeatureExportFree": {
+    "description": "Free tier badge for Chat Export."
+  },
+  "premiumFeatureExportPro": "PDF & TXT export",
+  "@premiumFeatureExportPro": {
+    "description": "Pro tier badge for Chat Export."
+  },
+  "premiumFeatureAdFreeTitle": "Ad-Free Experience",
+  "@premiumFeatureAdFreeTitle": {
+    "description": "Feature title for Ad-Free Experience."
+  },
+  "premiumFeatureAdFreeDesc": "No banner ads anywhere in the app",
+  "@premiumFeatureAdFreeDesc": {
+    "description": "Feature description for Ad-Free Experience."
+  },
+  "premiumFeatureAdFreeFree": "Banner ads shown",
+  "@premiumFeatureAdFreeFree": {
+    "description": "Free tier badge for Ads."
+  },
+  "premiumFeatureAdFreePro": "No banners (reward ads stay optional)",
+  "@premiumFeatureAdFreePro": {
+    "description": "Pro tier badge for Ads."
+  },
+  "premiumPlanMonthly": "Monthly",
+  "@premiumPlanMonthly": {
+    "description": "Label for monthly subscription plan."
+  },
+  "premiumPlanYearly": "Yearly",
+  "@premiumPlanYearly": {
+    "description": "Label for yearly subscription plan."
+  },
+  "premiumPlanSavings": "Save ~33%",
+  "@premiumPlanSavings": {
+    "description": "Badge showing percentage saved on yearly plan."
+  },
+  "premiumPeriodMonth": "/month",
+  "@premiumPeriodMonth": {
+    "description": "Period suffix for monthly plan."
+  },
+  "premiumPeriodYear": "/year",
+  "@premiumPeriodYear": {
+    "description": "Period suffix for yearly plan."
+  },
+  "nearbyOfflineChatTitle": "Offline Chat",
+  "@nearbyOfflineChatTitle": {
+    "description": "AppBar title for offline mesh chat screen."
+  },
+  "nearbySearchingDevices": "Searching nearby devices…",
+  "@nearbySearchingDevices": {
+    "description": "Snackbar when searching nearby devices."
+  },
+  "nearbyTooltipStop": "Stop offline chat",
+  "@nearbyTooltipStop": {
+    "description": "Tooltip to stop offline chat."
+  },
+  "nearbyTooltipStart": "Start offline chat",
+  "@nearbyTooltipStart": {
+    "description": "Tooltip to start offline chat."
+  },
+  "nearbyDevicesSection": "Devices Nearby",
+  "@nearbyDevicesSection": {
+    "description": "Section header for nearby discovered devices."
+  },
+  "nearbyDiscoveryOn": "DISCOVERY ON",
+  "@nearbyDiscoveryOn": {
+    "description": "Status tag when discovery is running."
+  },
+  "nearbyDiscoveryOff": "DISCOVERY OFF",
+  "@nearbyDiscoveryOff": {
+    "description": "Status tag when discovery is off."
+  },
+  "nearbyHeroTitle": "Offline Mode",
+  "@nearbyHeroTitle": {
+    "description": "Hero card title on offline mesh screen."
+  },
+  "nearbyHeroNearbyCount": "{count, plural, =1{1 nearby} other{{count} nearby}}",
+  "@nearbyHeroNearbyCount": {
+    "description": "Hero card subtitle with count of nearby peers.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "nearbyHeroOff": "Offline Chat Off",
+  "@nearbyHeroOff": {
+    "description": "Hero card status when mesh is disabled."
+  },
+  "nearbyHeroDesc": "Scanning for devices within 100 meters. Connections are encrypted and peer-to-peer.",
+  "@nearbyHeroDesc": {
+    "description": "Hero card explanation of offline peer-to-peer mesh."
+  },
+  "nearbyYourNameHint": "Your name",
+  "@nearbyYourNameHint": {
+    "description": "Hint in display name editor."
+  },
+  "nearbyEmptySearching": "Searching for devices nearby…",
+  "@nearbyEmptySearching": {
+    "description": "Empty state title when scanning."
+  },
+  "nearbyEmptyOff": "Offline Chat is Off",
+  "@nearbyEmptyOff": {
+    "description": "Empty state title when offline chat is off."
+  },
+  "nearbyEmptySearchingDesc": "Ensure GupShupGo is open on nearby devices with Bluetooth active.",
+  "@nearbyEmptySearchingDesc": {
+    "description": "Empty state guidance when searching."
+  },
+  "nearbyEmptyOffDesc": "Tap the start icon top right to begin scanning.",
+  "@nearbyEmptyOffDesc": {
+    "description": "Empty state guidance when mesh is off."
+  },
+  "nearbyPeerConnected": "Connected · Tap to chat",
+  "@nearbyPeerConnected": {
+    "description": "Peer status when connected."
+  },
+  "nearbyPeerConnecting": "Connecting…",
+  "@nearbyPeerConnecting": {
+    "description": "Peer status while connecting."
+  },
+  "nearbyPeerTapToConnect": "Tap to connect",
+  "@nearbyPeerTapToConnect": {
+    "description": "Peer status when discovered but not connected."
+  },
+  "nearbyActionChat": "Chat",
+  "@nearbyActionChat": {
+    "description": "Button to open chat with connected peer."
+  },
+  "nearbyActionConnecting": "Connecting",
+  "@nearbyActionConnecting": {
+    "description": "Disabled button while connection is in progress."
+  },
+  "nearbyActionConnect": "Connect",
+  "@nearbyActionConnect": {
+    "description": "Button to connect to a discovered peer."
+  },
+  "nearbyPermNeededTitle": "Permissions Needed",
+  "@nearbyPermNeededTitle": {
+    "description": "Card title when Bluetooth permissions are denied."
+  },
+  "nearbyPermNeededDesc": "Offline chat requires nearby-device and Bluetooth access to discover devices without internet.",
+  "@nearbyPermNeededDesc": {
+    "description": "Card description explaining Bluetooth permission requirement."
+  },
+  "nearbyTryAgainBtn": "Try Again",
+  "@nearbyTryAgainBtn": {
+    "description": "Button to retry mesh initialization."
+  },
+  "nearbySettingsBtn": "Settings",
+  "@nearbySettingsBtn": {
+    "description": "Button opening device app settings."
+  },
+  "nearbyHelpTip": "Don't see your friend? Ensure Bluetooth is enabled on both devices.",
+  "@nearbyHelpTip": {
+    "description": "Helpful tip card for nearby device discovery."
+  },
+  "anonLobbyTitle": "Anonymous Chat",
+  "@anonLobbyTitle": {
+    "description": "AppBar title on anonymous lobby screen."
+  },
+  "anonLobbyFinding": "Finding someone for you…",
+  "@anonLobbyFinding": {
+    "description": "Hero status text while searching for a stranger."
+  },
+  "anonLobbyHangTight": "Hang tight — you'll be paired with a random stranger.",
+  "@anonLobbyHangTight": {
+    "description": "Subtitle while matchmaking."
+  },
+  "anonLobbyCancelBtn": "Cancel Search",
+  "@anonLobbyCancelBtn": {
+    "description": "Button to cancel searching and exit lobby."
+  },
+  "anonLobbyPrivacyNote": "Your identity stays hidden. Chat as a stranger.",
+  "@anonLobbyPrivacyNote": {
+    "description": "Footer note on anonymity."
+  },
+  "anonLobbyConnecting": "Connecting…",
+  "@anonLobbyConnecting": {
+    "description": "Live online pill label before count loads."
+  },
+  "anonLobbyWaitingOthers": "Waiting for others to come online…",
+  "@anonLobbyWaitingOthers": {
+    "description": "Live online pill label when 0 users online."
+  },
+  "anonLobbyOnlineCount": "{count} online now",
+  "@anonLobbyOnlineCount": {
+    "description": "Live online pill label showing active count.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "anonChatNotEncrypted": "Messages are not end-to-end encrypted",
+  "@anonChatNotEncrypted": {
+    "description": "Top banner noting messages are unencrypted."
+  },
+  "anonChatRequestSentTooltip": "Request sent",
+  "@anonChatRequestSentTooltip": {
+    "description": "Tooltip on friend request icon after sending."
+  },
+  "anonChatAddFriendTooltip": "Add friend",
+  "@anonChatAddFriendTooltip": {
+    "description": "Tooltip on friend request icon."
+  },
+  "anonChatNextStrangerTooltip": "Next stranger",
+  "@anonChatNextStrangerTooltip": {
+    "description": "Tooltip on next stranger button."
+  },
+  "anonChatReportTooltip": "Report",
+  "@anonChatReportTooltip": {
+    "description": "Tooltip on report button."
+  },
+  "anonChatSayHi": "Say hi to the stranger! 👋",
+  "@anonChatSayHi": {
+    "description": "Empty chat placeholder message."
+  },
+  "anonChatFriendsTransition": "You are now friends! Opening secure chat…",
+  "@anonChatFriendsTransition": {
+    "description": "Banner when friend request accepted, moving to E2EE chat."
+  },
+  "anonChatStrangerDisconnected": "Stranger has disconnected 👋",
+  "@anonChatStrangerDisconnected": {
+    "description": "Banner when stranger left the room."
+  },
+  "anonChatFindNextBtn": "Find Next Stranger",
+  "@anonChatFindNextBtn": {
+    "description": "Button to search for the next stranger."
+  },
+  "anonChatFriendReqTitle": "Stranger wants to connect!",
+  "@anonChatFriendReqTitle": {
+    "description": "Banner title when stranger sent a friend request."
+  },
+  "anonChatFriendReqDesc": "Accepting reveals your real profile and starts an encrypted chat.",
+  "@anonChatFriendReqDesc": {
+    "description": "Banner description explaining consequence of friend request."
+  },
+  "anonChatDecline": "Decline",
+  "@anonChatDecline": {
+    "description": "Button to decline stranger's friend request."
+  },
+  "anonChatAccept": "Accept",
+  "@anonChatAccept": {
+    "description": "Button to accept stranger's friend request."
+  },
+  "anonChatWaitingReqTitle": "Friend request sent",
+  "@anonChatWaitingReqTitle": {
+    "description": "Banner title while waiting for friend request response."
+  },
+  "anonChatWaitingReqDesc": "Waiting for stranger to respond…",
+  "@anonChatWaitingReqDesc": {
+    "description": "Banner subtitle while waiting for friend request response."
+  },
+  "anonChatReportTitle": "Report Stranger",
+  "@anonChatReportTitle": {
+    "description": "Dialog title for reporting a stranger."
+  },
+  "anonChatReportQuestion": "Why are you reporting this user?",
+  "@anonChatReportQuestion": {
+    "description": "Question in stranger reporting dialog."
+  },
+  "anonChatReportReasonInappropriate": "Inappropriate content",
+  "@anonChatReportReasonInappropriate": {
+    "description": "Report reason: inappropriate content."
+  },
+  "anonChatReportReasonHarassment": "Harassment or bullying",
+  "@anonChatReportReasonHarassment": {
+    "description": "Report reason: harassment."
+  },
+  "anonChatReportReasonSpam": "Spam or scam",
+  "@anonChatReportReasonSpam": {
+    "description": "Report reason: spam or scam."
+  },
+  "anonChatReportReasonThreatening": "Threatening behaviour",
+  "@anonChatReportReasonThreatening": {
+    "description": "Report reason: threatening behaviour."
+  },
+  "anonChatReportReasonOther": "Other",
+  "@anonChatReportReasonOther": {
+    "description": "Report reason: other."
+  },
+  "anonChatReportCancel": "Cancel",
+  "@anonChatReportCancel": {
+    "description": "Cancel button in report dialog."
+  },
+  "anonChatReportSubmit": "Report & Leave",
+  "@anonChatReportSubmit": {
+    "description": "Submit button in report dialog."
+  },
+  "anonChatReportSubmitted": "Report submitted. Thank you for keeping GupShupGo safe.",
+  "@anonChatReportSubmitted": {
+    "description": "Snackbar shown after submitting report."
+  },
+  "anonChatViewOnceVideoTitle": "Play once?",
+  "@anonChatViewOnceVideoTitle": {
+    "description": "Dialog title when opening a view-once video."
+  },
+  "anonChatViewOncePhotoTitle": "Open once?",
+  "@anonChatViewOncePhotoTitle": {
+    "description": "Dialog title when opening a view-once photo."
+  },
+  "anonChatViewOnceVideoDesc": "You can only open this video one time. Once you close it, it's gone.",
+  "@anonChatViewOnceVideoDesc": {
+    "description": "Dialog explanation when opening a view-once video."
+  },
+  "anonChatViewOncePhotoDesc": "You can only open this photo one time. Once you close it, it's gone.",
+  "@anonChatViewOncePhotoDesc": {
+    "description": "Dialog explanation when opening a view-once photo."
+  },
+  "anonChatViewOnceCancel": "Cancel",
+  "@anonChatViewOnceCancel": {
+    "description": "Cancel button in view-once confirmation dialog."
+  },
+  "anonChatViewOnceOpen": "Open",
+  "@anonChatViewOnceOpen": {
+    "description": "Open button in view-once confirmation dialog."
+  },
+  "unsupportedVersionTitle": "Update GupShupGo",
+  "@unsupportedVersionTitle": {
+    "description": "Title on retired build block screen."
+  },
+  "unsupportedVersionDesc": "This version of GupShupGo is no longer supported. Update to the latest version to keep chatting — your messages and chats are safe and will be there when you come back.",
+  "@unsupportedVersionDesc": {
+    "description": "Body text on retired build block screen."
+  },
+  "unsupportedVersionUpdateNow": "Update now",
+  "@unsupportedVersionUpdateNow": {
+    "description": "Primary button to trigger immediate update."
+  },
+  "unsupportedVersionOpenPlayStore": "Open Play Store",
+  "@unsupportedVersionOpenPlayStore": {
+    "description": "Fallback button to open Google Play Store."
+  },
+  "publicProfileNotFound": "@{username} not found",
+  "@publicProfileNotFound": {
+    "description": "Error title when username handle is not found.",
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "publicProfileUserNotFound": "User not found",
+  "@publicProfileUserNotFound": {
+    "description": "Generic error title when user is not found."
+  },
+  "publicProfileNotFoundDesc": "This handle doesn't exist or the link is broken.",
+  "@publicProfileNotFoundDesc": {
+    "description": "Explanation when profile link is broken."
+  },
+  "publicProfileTitle": "Profile",
+  "@publicProfileTitle": {
+    "description": "AppBar title on public profile screen."
+  },
+  "publicProfileOnline": "Online",
+  "@publicProfileOnline": {
+    "description": "Online status indicator."
+  },
+  "publicProfileLastSeen": "Last seen {time}",
+  "@publicProfileLastSeen": {
+    "description": "Last seen indicator.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "publicProfileJustNow": "just now",
+  "@publicProfileJustNow": {
+    "description": "Relative time: just now."
+  },
+  "publicProfileMinutesAgo": "{minutes}m ago",
+  "@publicProfileMinutesAgo": {
+    "description": "Relative time in minutes.",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "publicProfileHoursAgo": "{hours}h ago",
+  "@publicProfileHoursAgo": {
+    "description": "Relative time in hours.",
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "publicProfileDaysAgo": "{days}d ago",
+  "@publicProfileDaysAgo": {
+    "description": "Relative time in days.",
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "publicProfileJoined": "Joined {date}",
+  "@publicProfileJoined": {
+    "description": "User join date format.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "publicProfileOwnLink": "This is your own profile link.",
+  "@publicProfileOwnLink": {
+    "description": "Notice when viewing one's own public profile link."
+  },
+  "publicProfileGupPoints": "{points} Gup Points",
+  "@publicProfileGupPoints": {
+    "description": "User Gup points display.",
+    "placeholders": {
+      "points": {
+        "type": "int"
+      }
+    }
+  },
+  "publicProfileLevel": "Level {level}",
+  "@publicProfileLevel": {
+    "description": "User gamification level.",
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "publicProfileStatPoints": "Points",
+  "@publicProfileStatPoints": {
+    "description": "Label for Points mini stat."
+  },
+  "publicProfileStatBadges": "Badges",
+  "@publicProfileStatBadges": {
+    "description": "Label for Badges mini stat."
+  },
+  "publicProfileStatBestBond": "Best Bond",
+  "@publicProfileStatBestBond": {
+    "description": "Label for Best Bond mini stat."
+  },
+  "publicProfileBadges": "BADGES",
+  "@publicProfileBadges": {
+    "description": "Section header for earned badges."
+  },
+  "qrScannerTitle": "Scan QR Code",
+  "@qrScannerTitle": {
+    "description": "AppBar title for QR code scanner."
+  },
+  "qrScannerFlashOnTooltip": "Turn on flash",
+  "@qrScannerFlashOnTooltip": {
+    "description": "Tooltip to turn on flash."
+  },
+  "qrScannerFlashOffTooltip": "Turn off flash",
+  "@qrScannerFlashOffTooltip": {
+    "description": "Tooltip to turn off flash."
+  },
+  "qrScannerPrompt": "Point your camera at a GupShupGo profile QR code",
+  "@qrScannerPrompt": {
+    "description": "Camera viewfinder prompt."
+  },
+  "qrScannerNotProfileCode": "That's not a GupShupGo profile code.",
+  "@qrScannerNotProfileCode": {
+    "description": "Error banner when scanned QR is not a GupShupGo profile."
+  },
+  "qrScannerCameraErrorTitle": "Couldn't start the camera.",
+  "@qrScannerCameraErrorTitle": {
+    "description": "Error title when camera fails to start."
+  },
+  "qrScannerCameraErrorRetry": "Please try again.",
+  "@qrScannerCameraErrorRetry": {
+    "description": "Error subtitle prompting retry."
+  },
+  "qrScannerPermissionMsg": "Camera access is needed to scan QR codes.",
+  "@qrScannerPermissionMsg": {
+    "description": "Message explaining camera permission requirement."
+  },
+  "qrScannerPermissionAllow": "Allow camera",
+  "@qrScannerPermissionAllow": {
+    "description": "Button to request camera permission."
+  },
+  "qrScannerBlockedMsg": "Camera access is blocked. Enable it in Settings to scan QR codes.",
+  "@qrScannerBlockedMsg": {
+    "description": "Message when camera permission is permanently blocked."
+  },
+  "qrScannerBlockedSettings": "Open settings",
+  "@qrScannerBlockedSettings": {
+    "description": "Button to open app settings for camera permission."
+  },
+  "screenShareIncomingTitle": "Incoming Screen Share",
+  "@screenShareIncomingTitle": {
+    "description": "Screen header for incoming screen share request."
+  },
+  "screenShareWantsToShare": "wants to share their screen",
+  "@screenShareWantsToShare": {
+    "description": "Subtitle under caller name in incoming screen share."
+  },
+  "screenShareReject": "Reject",
+  "@screenShareReject": {
+    "description": "Button to reject incoming screen share."
+  },
+  "screenShareAccept": "Accept",
+  "@screenShareAccept": {
+    "description": "Button to accept incoming screen share."
+  },
+  "screenShareCantAccept": "Couldn't accept the screen share — check your connection and try again.",
+  "@screenShareCantAccept": {
+    "description": "Snackbar when accepting screen share fails."
+  },
+  "screenShareDeclined": "{name} declined your screen share",
+  "@screenShareDeclined": {
+    "description": "Snackbar when screen share was declined.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "screenShareNoAnswer": "No answer",
+  "@screenShareNoAnswer": {
+    "description": "Snackbar when screen share request timed out without answer."
+  },
+  "screenShareStartError": "Couldn't start screen sharing",
+  "@screenShareStartError": {
+    "description": "Snackbar when starting screen share failed."
+  },
+  "screenShareStatusRequesting": "Requesting Permission",
+  "@screenShareStatusRequesting": {
+    "description": "Sharer view status when awaiting acceptance."
+  },
+  "screenShareStatusInitializing": "Initializing Broadcast",
+  "@screenShareStatusInitializing": {
+    "description": "Sharer view status while connecting."
+  },
+  "screenShareStatusWaitingParticipant": "Waiting for Participant",
+  "@screenShareStatusWaitingParticipant": {
+    "description": "Sharer view status while waiting for viewer."
+  },
+  "screenShareStatusActive": "Screen Sharing Active",
+  "@screenShareStatusActive": {
+    "description": "Sharer view status when live."
+  },
+  "screenShareSubWaitingAccept": "Waiting for {name} to accept…",
+  "@screenShareSubWaitingAccept": {
+    "description": "Sharer view subtitle while waiting for acceptance.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "screenShareSubEstablishing": "Establishing encrypted stream...",
+  "@screenShareSubEstablishing": {
+    "description": "Sharer view subtitle while initializing stream."
+  },
+  "screenShareSubWaitingJoin": "Waiting for {name} to join...",
+  "@screenShareSubWaitingJoin": {
+    "description": "Sharer view subtitle while waiting for peer to join.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "screenShareSubActive": "Your entire screen is visible in high definition.",
+  "@screenShareSubActive": {
+    "description": "Sharer view subtitle when streaming."
+  },
+  "screenShareBadgeRequesting": "REQUESTING",
+  "@screenShareBadgeRequesting": {
+    "description": "Badge pill when requesting."
+  },
+  "screenShareBadgeConnecting": "CONNECTING",
+  "@screenShareBadgeConnecting": {
+    "description": "Badge pill when connecting."
+  },
+  "screenShareSharedWith": "Shared with ",
+  "@screenShareSharedWith": {
+    "description": "Label prefix before participant name."
+  },
+  "screenShareRequestingFrom": "Requesting ",
+  "@screenShareRequestingFrom": {
+    "description": "Label prefix when requesting from participant."
+  },
+  "screenShareMinimizeTip": "You can minimize this screen to keep using GupShupGo.",
+  "@screenShareMinimizeTip": {
+    "description": "Helpful tip for minimizing screen share."
+  },
+  "screenShareStop": "Stop sharing",
+  "@screenShareStop": {
+    "description": "Button to stop screen sharing."
+  },
+  "screenShareCancelRequest": "Cancel request",
+  "@screenShareCancelRequest": {
+    "description": "Button to cancel pending screen share request."
+  },
+  "screenShareViewerTitle": "{name} is sharing",
+  "@screenShareViewerTitle": {
+    "description": "Header in viewer screen showing who is sharing.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "screenShareViewerLive": "LIVE STREAM",
+  "@screenShareViewerLive": {
+    "description": "Badge in viewer screen indicating live stream."
+  },
+  "screenShareViewerMinimize": "Minimize",
+  "@screenShareViewerMinimize": {
+    "description": "Button in viewer screen to minimize."
+  },
+  "screenShareViewerLeave": "Leave",
+  "@screenShareViewerLeave": {
+    "description": "Button in viewer screen to leave stream."
+  },
+  "screenShareViewerWaitingStream": "Waiting for {name} to stream screen...",
+  "@screenShareViewerWaitingStream": {
+    "description": "Placeholder text while waiting for peer's video feed.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "screenShareViewerConnecting": "Connecting to encrypted stream...",
+  "@screenShareViewerConnecting": {
+    "description": "Placeholder text while connecting to stream."
+  },
+  "viewOnceVideoTitle": "Video · View once",
+  "@viewOnceVideoTitle": {
+    "description": "AppBar title for view-once video."
+  },
+  "viewOncePhotoTitle": "Photo · View once",
+  "@viewOncePhotoTitle": {
+    "description": "AppBar title for view-once photo."
+  },
+  "viewOnceCantOpen": "Couldn't open this media.",
+  "@viewOnceCantOpen": {
+    "description": "Error message when media fails to open."
+  },
+  "viewOnceUnavailable": "This media is no longer available.",
+  "@viewOnceUnavailable": {
+    "description": "Error message when view-once media key is consumed or missing."
+  },
+  "viewOnceBlockedFooter": "Screenshots are blocked. You can't open this again.",
+  "@viewOnceBlockedFooter": {
+    "description": "Footer note on Android where screenshots are blocked."
+  },
+  "viewOnceUnblockedFooter": "You can't open this again. Screenshots can't be blocked on iOS.",
+  "@viewOnceUnblockedFooter": {
+    "description": "Footer note on iOS where screenshots cannot be blocked."
   }
 }

@@ -22,6 +22,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
@@ -102,7 +104,16 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   static const _minLen = 6;
 
   @override
+  void initState() {
+    super.initState();
+    // See VaultPinDialog: hide the Home banner's platform-view AdWidget while
+    // this PIN modal is open so it can't dismiss the keyboard mid-entry.
+    AdsService.instance.suppressBanner();
+  }
+
+  @override
   void dispose() {
+    AdsService.instance.releaseBannerSuppression();
     _pinCtrl.dispose();
     _newCtrl.dispose();
     _confirmCtrl.dispose();
@@ -126,9 +137,10 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   /// anything on a mismatch, so a wrong guess here cannot disturb a vault that
   /// is already open.
   Future<void> _confirmExisting() async {
+    final l10n = AppLocalizations.of(context);
     final pin = _pinCtrl.text;
     if (pin.isEmpty) {
-      setState(() => _error = 'Enter your PIN.');
+      setState(() => _error = l10n.vaultEnterPin);
       return;
     }
     setState(() {
@@ -140,8 +152,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
     if (!ok) {
       setState(() {
         _busy = false;
-        _error = 'That PIN does not match. If you never chose one, '
-            'tap "I don\'t know my PIN".';
+        _error = l10n.vaultCustodyMismatchError;
         _pinCtrl.clear();
       });
       return;
@@ -154,12 +165,13 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   /// chooses. changePin flips the verifier last, so an interruption leaves the
   /// old PIN valid and the run can simply be repeated.
   Future<void> _rekey() async {
+    final l10n = AppLocalizations.of(context);
     if (_newCtrl.text.length < _minLen) {
-      setState(() => _error = 'PIN must be at least $_minLen characters.');
+      setState(() => _error = l10n.vaultPinMinLength);
       return;
     }
     if (_newCtrl.text != _confirmCtrl.text) {
-      setState(() => _error = 'PINs do not match.');
+      setState(() => _error = l10n.vaultPinsDoNotMatch);
       return;
     }
     setState(() {
@@ -189,8 +201,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
         _step = _Step.confirm;
         // Back to recalling an existing PIN, so back to the hint's keyboard.
         _numeric = widget.numericPinHint;
-        _error = 'Could not update the PIN automatically. '
-            'Please enter your current PIN.';
+        _error = l10n.vaultCustodyAutoUpdateFailed;
       });
       return;
     }
@@ -200,6 +211,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final isConfirm = _step == _Step.confirm;
     return PopScope(
@@ -243,7 +255,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        isConfirm ? 'Confirm your vault PIN' : 'Choose a PIN',
+                        isConfirm ? l10n.vaultCustodyConfirmTitle : l10n.vaultCustodyChooseTitle,
                         style: GoogleFonts.poppins(
                           color: c.textHigh,
                           fontSize: 17.5,
@@ -257,14 +269,8 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                 const SizedBox(height: 10),
                 Text(
                   isConfirm
-                      ? 'Your message history is encrypted with a PIN. Confirm '
-                          'it once so you can restore your messages on a new '
-                          'phone or after reinstalling.\n\n'
-                          'If your vault was set up with just your '
-                          'fingerprint, you may never have been shown a PIN.'
-                      : 'Pick a PIN you will remember. Every message you '
-                          'already have is kept — it is re-encrypted under the '
-                          'new PIN, nothing is deleted.',
+                      ? l10n.vaultCustodyConfirmDesc
+                      : l10n.vaultCustodyChooseDesc,
                   style: GoogleFonts.poppins(
                     color: c.textMid,
                     fontSize: 12.5,
@@ -273,13 +279,13 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                 ),
                 const SizedBox(height: 14),
                 if (isConfirm)
-                  _field(c, _pinCtrl, 'Enter PIN',
+                  _field(c, _pinCtrl, l10n.vaultEnterPin,
                       focusNode: _pinFocus, autofocus: true)
                 else ...[
-                  _field(c, _newCtrl, 'New PIN',
+                  _field(c, _newCtrl, l10n.vaultNewPin,
                       focusNode: _newFocus, autofocus: true),
                   const SizedBox(height: 10),
-                  _field(c, _confirmCtrl, 'Confirm PIN',
+                  _field(c, _confirmCtrl, l10n.vaultConfirmPin,
                       focusNode: _confirmFocus),
                 ],
                 // Escape hatch from a wrong keyboard default, and load-bearing
@@ -335,8 +341,8 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                   const SizedBox(height: 6),
                   Text(
                     _total > 0
-                        ? 'Re-encrypting $_done of $_total… keep the app open.'
-                        : 'Preparing… keep the app open.',
+                        ? l10n.vaultCustodyReencrypting(_done, _total)
+                        : l10n.vaultCustodyPreparing,
                     style: GoogleFonts.poppins(color: c.textLow, fontSize: 11),
                   ),
                 ],
@@ -366,7 +372,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       child: Text(
-                        "I don't know my PIN",
+                        l10n.vaultCustodyDontKnow,
                         style: GoogleFonts.poppins(
                           color: c.primary,
                           fontSize: 12,
@@ -400,7 +406,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                             ),
                           )
                         : Text(
-                            isConfirm ? 'Confirm' : 'Save PIN',
+                            isConfirm ? l10n.vaultCustodyConfirmBtn : l10n.vaultCustodySaveBtn,
                             style: GoogleFonts.poppins(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,

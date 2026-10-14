@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/models/user_model.dart';
-import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/screens/connecting_call_screen.dart';
 import 'package:video_chat_app/screens/chat_screen.dart';
 import 'package:video_chat_app/screens/contacts_screen.dart' show UserDiscoverTile;
-import 'package:video_chat_app/services/call_signaling_service.dart';
-import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
@@ -49,7 +47,6 @@ class PublicProfileScreen extends StatefulWidget {
 
 class _PublicProfileScreenState extends State<PublicProfileScreen> {
   final UserService _userService = UserService();
-  final FCMService _fcmService = FCMService();
 
   UserModel? _user;
   bool _isLoading = true;
@@ -123,19 +120,20 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: c.surface,
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(title: Text(l10n.publicProfileTitle)),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: c.primary))
           : _notFound
-              ? _buildNotFound(c)
-              : _buildProfile(c),
+              ? _buildNotFound(c, l10n)
+              : _buildProfile(c, l10n),
     );
   }
 
-  Widget _buildNotFound(AppThemeColors c) {
+  Widget _buildNotFound(AppThemeColors c, AppLocalizations l10n) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -148,8 +146,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               // _notFound is only reachable via the handle lookup, but don't
               // rely on that to avoid printing "@null".
               widget.username != null
-                  ? '@${widget.username} not found'
-                  : 'User not found',
+                  ? l10n.publicProfileNotFound(widget.username!)
+                  : l10n.publicProfileUserNotFound,
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -158,7 +156,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'This handle doesn\'t exist or the link is broken.',
+              l10n.publicProfileNotFoundDesc,
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: c.textMid),
             ),
@@ -168,7 +166,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  Widget _buildProfile(AppThemeColors c) {
+  Widget _buildProfile(AppThemeColors c, AppLocalizations l10n) {
     final user = _user!;
     final hasHandle = user.username != null && user.username!.isNotEmpty;
     // isOnline alone can be stale if a disconnect was never recorded, so it is
@@ -244,8 +242,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 const SizedBox(width: 6),
                 Text(
                   isOnline
-                      ? 'Online'
-                      : 'Last seen ${_formatLastSeen(user.lastSeen!)}',
+                      ? l10n.publicProfileOnline
+                      : l10n.publicProfileLastSeen(_formatLastSeen(user.lastSeen!, l10n)),
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
@@ -264,19 +262,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             ),
           ],
           const SizedBox(height: 22),
-          _buildStatsCard(c, user),
-          _buildBadges(c, user),
+          _buildStatsCard(c, user, l10n),
+          _buildBadges(c, user, l10n),
           if (user.createdAt != null) ...[
             const SizedBox(height: 16),
             Text(
-              'Joined ${_formatJoined(user.createdAt!)}',
+              l10n.publicProfileJoined(_formatJoined(user.createdAt!)),
               style: GoogleFonts.poppins(fontSize: 11.5, color: c.textLow),
             ),
           ],
           const SizedBox(height: 24),
           if (user.id == widget.currentUserId)
             Text(
-              'This is your own profile link.',
+              l10n.publicProfileOwnLink,
               style: TextStyle(fontSize: 13, color: c.textMid),
             )
           else
@@ -303,7 +301,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   /// Level, progress to the next one, and the same three stats the user sees
   /// on their own profile ([profile_screen.dart]'s stats row).
-  Widget _buildStatsCard(AppThemeColors c, UserModel user) {
+  Widget _buildStatsCard(AppThemeColors c, UserModel user, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -317,7 +315,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Row(
             children: [
               Text(
-                'Level ${user.level}',
+                l10n.publicProfileLevel(user.level),
                 style: GoogleFonts.poppins(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -326,7 +324,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               ),
               const Spacer(),
               Text(
-                '${user.gupPoints} Gup Points',
+                l10n.publicProfileGupPoints(user.gupPoints),
                 style: GoogleFonts.poppins(fontSize: 11.5, color: c.textMid),
               ),
             ],
@@ -344,11 +342,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           const SizedBox(height: 14),
           Row(
             children: [
-              _miniStat(c, '⚡', '${user.gupPoints}', 'Points'),
+              _miniStat(c, '⚡', '${user.gupPoints}', l10n.publicProfileStatPoints),
               _miniStatDivider(c),
-              _miniStat(c, '🏅', '${user.badges.length}', 'Badges'),
+              _miniStat(c, '🏅', '${user.badges.length}', l10n.publicProfileStatBadges),
               _miniStatDivider(c),
-              _miniStat(c, '🔥', '${user.longestStreak}', 'Best Bond'),
+              _miniStat(c, '🔥', '${user.longestStreak}', l10n.publicProfileStatBestBond),
             ],
           ),
         ],
@@ -358,7 +356,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   /// Earned badges, resolved through the shared catalog. Ids with no
   /// definition are skipped so a badge added server-side cannot break this.
-  Widget _buildBadges(AppThemeColors c, UserModel user) {
+  Widget _buildBadges(AppThemeColors c, UserModel user, AppLocalizations l10n) {
     final earned = user.badges
         .map(BadgeDefinition.fromId)
         .whereType<BadgeDefinition>()
@@ -370,7 +368,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       child: Column(
         children: [
           Text(
-            'BADGES',
+            l10n.publicProfileBadges,
             style: GoogleFonts.poppins(
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
@@ -456,12 +454,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  String _formatLastSeen(DateTime lastSeen) {
+  String _formatLastSeen(DateTime lastSeen, AppLocalizations l10n) {
     final diff = DateTime.now().difference(lastSeen);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    if (diff.inMinutes < 1) return l10n.publicProfileJustNow;
+    if (diff.inMinutes < 60) return l10n.publicProfileMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.publicProfileHoursAgo(diff.inHours);
+    if (diff.inDays < 7) return l10n.publicProfileDaysAgo(diff.inDays);
     return '${lastSeen.day}/${lastSeen.month}/${lastSeen.year}';
   }
 

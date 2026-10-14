@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -656,26 +657,26 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     required String mediaUrl,
     String? thumbnailBase64,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          isVideo ? 'Play once?' : 'Open once?',
+          isVideo ? l10n.anonChatViewOnceVideoTitle : l10n.anonChatViewOncePhotoTitle,
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
         ),
         content: Text(
-          "You can only open this ${isVideo ? 'video' : 'photo'} one time. "
-          "Once you close it, it's gone.",
+          isVideo ? l10n.anonChatViewOnceVideoDesc : l10n.anonChatViewOncePhotoDesc,
           style: GoogleFonts.poppins(fontSize: 13.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
+            child: Text(l10n.anonChatViewOnceCancel, style: GoogleFonts.poppins()),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Open',
+            child: Text(l10n.anonChatViewOnceOpen,
                 style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
           ),
         ],
@@ -885,14 +886,15 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     if (_room == null) return;
     final partnerId = _room!.getPartnerId(widget.currentUserId);
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     String? selectedReason;
     final reasons = [
-      'Inappropriate content',
-      'Harassment or bullying',
-      'Spam or scam',
-      'Threatening behaviour',
-      'Other',
+      l10n.anonChatReportReasonInappropriate,
+      l10n.anonChatReportReasonHarassment,
+      l10n.anonChatReportReasonSpam,
+      l10n.anonChatReportReasonThreatening,
+      l10n.anonChatReportReasonOther,
     ];
 
     final confirmed = await showDialog<bool>(
@@ -903,7 +905,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(
-            'Report Stranger',
+            l10n.anonChatReportTitle,
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w600,
               color: c.textHigh,
@@ -914,7 +916,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Why are you reporting this user?',
+                l10n.anonChatReportQuestion,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
                   color: c.textMid,
@@ -943,7 +945,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: Text(
-                'Cancel',
+                l10n.anonChatReportCancel,
                 style: GoogleFonts.poppins(color: c.textMid),
               ),
             ),
@@ -952,7 +954,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   ? () => Navigator.pop(ctx, true)
                   : null,
               child: Text(
-                'Report & Leave',
+                l10n.anonChatReportSubmit,
                 style: GoogleFonts.poppins(
                   color: selectedReason != null ? c.error : c.textLow,
                   fontWeight: FontWeight.w600,
@@ -975,7 +977,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Report submitted. Thank you for keeping GupShupGo safe.',
+              l10n.anonChatReportSubmitted,
               style: GoogleFonts.poppins(fontSize: 13),
             ),
           ),
@@ -988,6 +990,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     if (_room == null) {
       return Scaffold(
@@ -1027,7 +1030,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
               ),
             ),
             Text(
-              'Anonymous Chat',
+              l10n.anonLobbyTitle,
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 color: c.textMid,
@@ -1044,7 +1047,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   : Icons.person_add_alt_1_rounded,
               color: canSendRequest ? c.primary : c.textLow,
             ),
-            tooltip: iSentRequest ? 'Request sent' : 'Add friend',
+            tooltip: iSentRequest ? l10n.anonChatRequestSentTooltip : l10n.anonChatAddFriendTooltip,
             onPressed: (canSendRequest && !_sendingFriendRequest)
                 ? _sendFriendRequest
                 : null,
@@ -1052,13 +1055,13 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           // Next stranger
           IconButton(
             icon: Icon(Icons.skip_next_rounded, color: c.primary),
-            tooltip: 'Next stranger',
+            tooltip: l10n.anonChatNextStrangerTooltip,
             onPressed: _nextStranger,
           ),
           // Report
           IconButton(
             icon: Icon(Icons.flag_outlined, color: c.error),
-            tooltip: 'Report',
+            tooltip: l10n.anonChatReportTooltip,
             onPressed: _showReportDialog,
           ),
         ],
@@ -1076,7 +1079,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 Icon(Icons.lock_open_rounded, size: 14, color: c.textLow),
                 const SizedBox(width: 4),
                 Text(
-                  'Messages are not end-to-end encrypted',
+                  l10n.anonChatNotEncrypted,
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: c.textLow,
@@ -1087,10 +1090,10 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
 
           // ── Friend Request: Receiver banner (Accept / Decline) ─
-          if (shouldRespond) _buildFriendRequestBanner(c),
+          if (shouldRespond) _buildFriendRequestBanner(c, l10n),
 
           // ── Friend Request: Sender waiting banner ──────────────
-          if (iSentRequest) _buildWaitingBanner(c),
+          if (iSentRequest) _buildWaitingBanner(c, l10n),
 
           // ── Messages ─────────────────────────────────────────
           Expanded(
@@ -1100,7 +1103,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 if (!snapshot.hasData) {
                   return Center(
                     child: Text(
-                      'Say hi to the stranger! 👋',
+                      l10n.anonChatSayHi,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.textMid,
@@ -1114,7 +1117,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 if (messages.isEmpty) {
                   return Center(
                     child: Text(
-                      'Say hi to the stranger! 👋',
+                      l10n.anonChatSayHi,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.textMid,
@@ -1206,7 +1209,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'You are now friends! Opening secure chat…',
+                    l10n.anonChatFriendsTransition,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -1231,7 +1234,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
               child: Column(
                 children: [
                   Text(
-                    'Stranger has disconnected 👋',
+                    l10n.anonChatStrangerDisconnected,
                     style: GoogleFonts.poppins(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -1243,7 +1246,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                     onPressed: _nextStranger,
                     icon: const Icon(Icons.shuffle_rounded, size: 18),
                     label: Text(
-                      'Find Next Stranger',
+                      l10n.anonChatFindNextBtn,
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -1287,7 +1290,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   // ── Receiver banner: "Stranger wants to connect!" ───────────────────
-  Widget _buildFriendRequestBanner(AppThemeColors c) {
+  Widget _buildFriendRequestBanner(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1305,7 +1308,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Stranger wants to connect!',
+                  l10n.anonChatFriendReqTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -1317,7 +1320,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Accepting reveals your real profile and starts an encrypted chat.',
+            l10n.anonChatFriendReqDesc,
             style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
           ),
           const SizedBox(height: 10),
@@ -1335,7 +1338,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                     ),
                   ),
                   child: Text(
-                    'Decline',
+                    l10n.anonChatDecline,
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
                       color: c.error,
@@ -1365,7 +1368,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                           ),
                         )
                       : Text(
-                          'Accept',
+                          l10n.anonChatAccept,
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w600,
                           ),
@@ -1380,7 +1383,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   // ── Sender waiting banner ───────────────────────────────────────────
-  Widget _buildWaitingBanner(AppThemeColors c) {
+  Widget _buildWaitingBanner(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1396,7 +1399,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Friend request sent! Waiting for response…',
+              l10n.anonChatWaitingReqDesc,
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 color: c.textMid,

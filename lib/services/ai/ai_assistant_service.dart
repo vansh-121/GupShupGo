@@ -450,8 +450,7 @@ class AiAssistantService {
   /// Splits a `smart_reply` reply (one suggestion per line) into at most three
   /// clean options. Strips any leading bullet or numbering the model adds despite
   /// the instruction, and drops blanks — so each chip renders exactly what the
-  /// user would send. Pure/[visibleForTesting].
-  @visibleForTesting
+  /// user would send. Pure (also unit-tested); used by the in-chat smart-reply UI.
   static List<String> parseSuggestions(String reply) {
     final out = <String>[];
     for (final raw in reply.split('\n')) {

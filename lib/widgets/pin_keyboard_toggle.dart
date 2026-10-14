@@ -17,6 +17,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Re-opens the soft keyboard so a changed `keyboardType` takes effect.
@@ -50,6 +51,7 @@ class PinKeyboardToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Padding(
       // Breathing room on both sides, owned here rather than at the call sites.
@@ -88,7 +90,9 @@ class PinKeyboardToggle extends StatelessWidget {
           // states the current mode reads as a status and gets ignored by
           // exactly the user who needs to press it.
           label: Text(
-            numeric ? 'Use letters instead' : 'Use numbers instead',
+            numeric
+                ? l10n.vaultKeyboardUseLetters
+                : l10n.vaultKeyboardUseNumbers,
             style: GoogleFonts.poppins(
               color: c.textMid,
               fontSize: 11.5,

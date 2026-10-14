@@ -158,7 +158,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get loginErrorTooManyRequests => '尝试次数过多，请稍后再试。';
 
   @override
-  String get homeNavChats => '聊天';
+  String get homeNavChats => '消息';
 
   @override
   String get homeNavMoments => '动态';
@@ -382,6 +382,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get attachmentLocationSubtitle => '分享您的当前位置';
+
+  @override
+  String get attachmentScreenShare => '屏幕共享';
+
+  @override
+  String get attachmentScreenShareSubtitle => '在聊天期间实时展示您的屏幕';
 
   @override
   String get attachmentViewOnce => '阅后即焚';
@@ -1070,4 +1076,1190 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aiAskHint => '向 GupAI 询问任何问题…';
+
+  @override
+  String get settingsNotificationsTile => '通知';
+
+  @override
+  String get settingsNotificationsStatusOn => '开启';
+
+  @override
+  String get settingsNotificationsStatusOff => '关闭';
+
+  @override
+  String get settingsNotificationsEnabledToast => '通知已开启。';
+
+  @override
+  String get settingsEnableNotificationsTitle => '启用通知';
+
+  @override
+  String get settingsEnableNotificationsBody =>
+      '通知已关闭。打开系统设置以允许 GupShupGo 提醒您新消息和来电。';
+
+  @override
+  String get settingsOpenSystemSettings => '打开设置';
+
+  @override
+  String get loginTagline => '无需网络也可使用的私密通讯。';
+
+  @override
+  String get settingsPrivacyPolicy => '隐私政策';
+
+  @override
+  String get settingsTerms => '服务条款';
+
+  @override
+  String get settingsDeleteAccount => '注销账号';
+
+  @override
+  String get inviteSheetTitle => '邀请好友';
+
+  @override
+  String get inviteSheetSubtitle => '分享给更多人 — 推荐 GupShupGo';
+
+  @override
+  String get inviteShareImageBtn => '分享图片';
+
+  @override
+  String get inviteShareLinkBtn => '分享链接';
+
+  @override
+  String get inviteCopyLinkBtn => '复制链接';
+
+  @override
+  String get inviteLinkCopied => '邀请链接已复制';
+
+  @override
+  String inviteMessage(String link) {
+    return '在 GupShupGo 上和我聊天吧 — 无需网络也可使用 👋 $link';
+  }
+
+  @override
+  String get inviteCardTagline => '离线也能使用的私密聊天';
+
+  @override
+  String get inviteCardScan => '扫码下载';
+
+  @override
+  String get inviteCardDownload => '在 Google Play 下载';
+
+  @override
+  String get homeMenuInvite => '邀请好友';
+
+  @override
+  String get invitePromptTitle => '喜欢 GupShupGo 吗？';
+
+  @override
+  String get invitePromptBody => '与朋友一起体验更佳 — 且无需网络也能使用。邀请好友加入？';
+
+  @override
+  String get invitePromptInvite => '邀请好友';
+
+  @override
+  String get invitePromptLater => '稍后再说';
+
+  @override
+  String get homeOfflineBannerTitle => '没有网络？没问题';
+
+  @override
+  String get homeOfflineBannerSubtitle => '您仍可通过蓝牙与附近的人收发消息。';
+
+  @override
+  String homeNearbyBannerTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '附近有 $count 人',
+      one: '附近有 1 人',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get homeNearbyBannerSubtitle => '蓝牙聊天 — 无需网络。';
+
+  @override
+  String get linkBackupTitle => '添加备用登录方式';
+
+  @override
+  String get linkBackupSubtitle => '关联 Google 或电子邮箱，即使 SIM 卡不可用\n也能轻松重新登录。';
+
+  @override
+  String get linkGoogleTitle => '关联 Google 账号';
+
+  @override
+  String get linkGoogleSubtitleLinked => '已关联 ✓';
+
+  @override
+  String get linkGoogleSubtitleUnlinked => '无需 SIM 卡即可一键登录';
+
+  @override
+  String get linkGoogleAction => '关联';
+
+  @override
+  String get linkGoogleSuccess => 'Google 账号关联成功！';
+
+  @override
+  String get linkGoogleAlreadyUsed =>
+      '该 Google 账号已注册为另一个 GupShupGo 账号。如需合并，请退出并使用 Google 登录，然后在设置中关联您的手机号。';
+
+  @override
+  String get linkGoogleFailed => 'Google 关联失败，请重试。';
+
+  @override
+  String get linkSessionExpired => '登录会话已过期，请重新登录。';
+
+  @override
+  String get linkEmailTitle => '关联电子邮箱与密码';
+
+  @override
+  String get linkEmailSubtitleLinked => '已关联 ✓';
+
+  @override
+  String get linkEmailSubtitleUnlinked => '在没有 SIM 卡或 Google 时使用邮箱登录';
+
+  @override
+  String get linkEmailActionAdd => '添加';
+
+  @override
+  String get linkEmailActionCancel => '取消';
+
+  @override
+  String get linkEmailFieldLabel => '电子邮箱';
+
+  @override
+  String get linkPasswordFieldLabel => '创建密码';
+
+  @override
+  String get linkPasswordHelper => '至少 6 个字符';
+
+  @override
+  String get linkEmailButton => '关联邮箱';
+
+  @override
+  String get linkEmailSuccess => '邮箱关联成功！';
+
+  @override
+  String get linkEmailInvalid => '请输入有效的电子邮箱地址。';
+
+  @override
+  String get linkPasswordTooShort => '密码长度至少需要 6 个字符。';
+
+  @override
+  String get linkEmailAlreadyInUse => '该邮箱已在 GupShupGo 注册。请先用邮箱登录，然后在设置中关联手机号。';
+
+  @override
+  String get linkEmailAlreadyLinked => '您的账号已关联电子邮箱。';
+
+  @override
+  String get linkEmailFailed => '邮箱关联失败，请重试。';
+
+  @override
+  String get linkContinueToApp => '继续进入应用';
+
+  @override
+  String get linkSkipForNow => '暂且跳过';
+
+  @override
+  String get linkSkip => '跳过';
+
+  @override
+  String get phoneAuthTitleEntry => '使用手机号码登录。';
+
+  @override
+  String get phoneAuthTitleOtp => '输入发送给您的验证码。';
+
+  @override
+  String get phoneAuthNameHint => '您的姓名';
+
+  @override
+  String get phoneAuthPhoneHint => '手机号码';
+
+  @override
+  String get phoneAuthUseSim => '使用 SIM 卡';
+
+  @override
+  String get phoneAuthSendOtp => '发送验证码';
+
+  @override
+  String phoneAuthOtpPrompt(String phone) {
+    return '输入发送至 $phone 的 6 位验证码';
+  }
+
+  @override
+  String get phoneAuthOtpPromptGeneric => '输入我们发送给您的 6 位验证码';
+
+  @override
+  String get phoneAuthOtpHint => '输入验证码';
+
+  @override
+  String get phoneAuthVerify => '验证';
+
+  @override
+  String get phoneAuthGoBack => '返回';
+
+  @override
+  String get phoneAuthResendCode => '重新发送验证码';
+
+  @override
+  String get phoneAuthEnterName => '请输入您的姓名';
+
+  @override
+  String get phoneAuthEnterValidPhone => '请输入有效的手机号码';
+
+  @override
+  String get phoneAuthEnterCode => '请输入验证码';
+
+  @override
+  String get phoneAuthRequestNewCode => '请重新获取验证码。';
+
+  @override
+  String get phoneAuthCodeIncorrect => '验证码不正确，请重试。';
+
+  @override
+  String get phoneAuthErrCodeIncorrect => '验证码错误，请重试。';
+
+  @override
+  String get phoneAuthErrCodeExpired => '验证码已过期，请获取新验证码。';
+
+  @override
+  String get phoneAuthErrTooManyRequests => '请求过于频繁，请等待 1 分钟后再试。';
+
+  @override
+  String get phoneAuthErrInvalidPhone => '手机号码格式无效。';
+
+  @override
+  String get phoneAuthErrQuotaExceeded => '已超出短信发送配额，请稍后重试。';
+
+  @override
+  String get phoneAuthErrFailed => '验证码发送失败，请重试。';
+
+  @override
+  String get usernameSetupAppBarTitle => '设置用户名';
+
+  @override
+  String get usernameSetupHeaderTitle => '选择您的用户名';
+
+  @override
+  String get usernameSetupHeaderDesc => '设置一个独一无二的用户名，方便其他人在 GupShupGo 上找到您。';
+
+  @override
+  String get usernameSetupInputHint => '用户名';
+
+  @override
+  String get usernameSetupChecking => '正在检查可用性…';
+
+  @override
+  String usernameSetupAvailable(String handle) {
+    return '@$handle 可用！';
+  }
+
+  @override
+  String usernameSetupTaken(String handle) {
+    return '@$handle 已被占用。';
+  }
+
+  @override
+  String get usernameSetupCharRules => '允许字符：a-z、0-9、下划线(_)和点(.)';
+
+  @override
+  String get usernameSetupTooShort => '用户名至少需要 3 个字符';
+
+  @override
+  String get usernameSetupTooLong => '用户名最多不能超过 20 个字符';
+
+  @override
+  String get usernameSetupInvalidChars => '仅支持小写字母、数字、下划线和点';
+
+  @override
+  String get usernameSetupRecommended => '推荐：';
+
+  @override
+  String get usernameSetupSaveBtn => '保存用户名';
+
+  @override
+  String get usernameSetupSkipBtn => '暂且跳过';
+
+  @override
+  String usernameSetupFailed(String error) {
+    return '设置用户名失败：$error';
+  }
+
+  @override
+  String get vaultProtectTitle => '保护私密聊天';
+
+  @override
+  String get vaultUnlockTitle => '解锁私密保险库';
+
+  @override
+  String get vaultSetupDesc => '设置保险库 PIN 码或密码短语以加密您的保险库对话。';
+
+  @override
+  String get vaultUnlockDescBio => '使用生物识别或输入 PIN 码即可访问。';
+
+  @override
+  String get vaultUnlockDescPin => '输入您的保险库 PIN 码以解密私密消息。';
+
+  @override
+  String get vaultReinstallHint => '重新安装？请输入之前创建的 PIN 码。';
+
+  @override
+  String get vaultUnlockWithFingerprint => '使用指纹解锁';
+
+  @override
+  String get vaultOrDivider => '或';
+
+  @override
+  String get vaultNewPin => '设置新的保险库 PIN 码';
+
+  @override
+  String get vaultConfirmPin => '确认新的 PIN 码';
+
+  @override
+  String get vaultEnterPin => '输入保险库 PIN 码';
+
+  @override
+  String get vaultKeyboardUseLetters => '使用字母键盘（密码短语）';
+
+  @override
+  String get vaultKeyboardUseNumbers => '使用数字键盘（PIN 码）';
+
+  @override
+  String get vaultRestoreLater => '稍后恢复';
+
+  @override
+  String get vaultForgotPin => '忘记 PIN 码？';
+
+  @override
+  String get vaultSetPinBtn => '设置 PIN 码并加密';
+
+  @override
+  String get vaultDecryptBtn => '解密并解锁';
+
+  @override
+  String get vaultPinMinLength => 'PIN 码至少需要 4 位';
+
+  @override
+  String get vaultPinsDoNotMatch => '两次输入的 PIN 码不匹配';
+
+  @override
+  String get vaultSetupFailed => '保险库设置失败，请重试。';
+
+  @override
+  String get vaultIncorrectPin => 'PIN 码不正确';
+
+  @override
+  String get vaultFingerprintOutOfDate => '指纹已更改，请使用 PIN 码解锁。';
+
+  @override
+  String get vaultBiometricError => '生物识别不可用';
+
+  @override
+  String get vaultBioReasonUnlock => '验证身份以解锁您的保险库聊天';
+
+  @override
+  String get vaultBioReasonEnrol => '验证身份以启用生物识别快速解锁';
+
+  @override
+  String get vaultAskBioTitle => '启用生物识别解锁？';
+
+  @override
+  String get vaultAskBioDesc => '使用指纹或面容快速安全地解锁您的保险库。';
+
+  @override
+  String get vaultAskBioNotNow => '以后再说';
+
+  @override
+  String get vaultAskBioEnable => '启用';
+
+  @override
+  String get vaultDeleteMessagesTitle => '删除保险库消息？';
+
+  @override
+  String get vaultDeleteMessagesDesc =>
+      '如果您忘记了 PIN 码，加密消息将无法恢复。重置 PIN 码将清除当前保险库的所有内容。';
+
+  @override
+  String get vaultDeleteMessagesCancel => '取消';
+
+  @override
+  String get vaultDeleteMessagesConfirm => '删除消息并重置 PIN 码';
+
+  @override
+  String get vaultCustodyConfirmTitle => '确认保险库托管模式';
+
+  @override
+  String get vaultCustodyChooseTitle => '保险库密钥托管模式';
+
+  @override
+  String get vaultCustodyConfirmDesc => '请确认您偏好的加密密钥存储模式。';
+
+  @override
+  String get vaultCustodyChooseDesc => '选择保险库加密密钥的存储与保护方式。';
+
+  @override
+  String get vaultCustodyDontKnow => '不确定？稍后可随时在保险库设置中更改。';
+
+  @override
+  String get vaultCustodyConfirmBtn => '确认并继续';
+
+  @override
+  String get vaultCustodySaveBtn => '保存并继续';
+
+  @override
+  String get vaultCustodyMismatchError => '加密元数据不匹配，请重试。';
+
+  @override
+  String get vaultCustodyAutoUpdateFailed => '自动更新托管模式失败。';
+
+  @override
+  String vaultCustodyReencrypting(int done, int total) {
+    return '正在重新加密 $done / $total… 请保持应用开启。';
+  }
+
+  @override
+  String get vaultCustodyPreparing => '正在准备重新加密…';
+
+  @override
+  String get vaultSettingsTitle => '保险库设置';
+
+  @override
+  String get vaultSettingsAboutTitle => '关于私密保险库';
+
+  @override
+  String get vaultSettingsAboutDesc =>
+      '保险库是一个独立且安全的聊天空间，受专属 PIN 码保护，专为极度隐私的对话设计。';
+
+  @override
+  String get vaultSettingsBulletMessages => '端到端加密所有保险库内的消息与文件。';
+
+  @override
+  String get vaultSettingsBulletStatuses => '完全隔离的私密状态与聊天，不会出现在系统通知中。';
+
+  @override
+  String get vaultSettingsNeverKept => '绝不在服务器保留明文解密密钥。';
+
+  @override
+  String get vaultSettingsSectionPrivacy => '隐私与自动销毁';
+
+  @override
+  String get vaultSettingsAutoDelete => '自动销毁保险库消息';
+
+  @override
+  String get vaultSettingsKeepForever => '永久保留';
+
+  @override
+  String vaultSettingsDeleteAfter(String label) {
+    return '$label 后销毁';
+  }
+
+  @override
+  String get vaultSettingsSectionPin => 'PIN 码与生物识别';
+
+  @override
+  String get vaultSettingsChangePin => '更改保险库 PIN 码';
+
+  @override
+  String get vaultSettingsChangePinSubtitle => '更新您的保险库 PIN 码或密码短语';
+
+  @override
+  String get vaultSettingsBioTitle => '生物识别解锁';
+
+  @override
+  String get vaultSettingsBioSubOn => '使用指纹或面容快速解锁保险库';
+
+  @override
+  String get vaultSettingsBioSubOff => '已关闭生物识别';
+
+  @override
+  String get vaultSettingsSectionDanger => '危险区域';
+
+  @override
+  String get vaultSettingsDeleteData => '清空保险库数据';
+
+  @override
+  String get vaultSettingsDeleteDataSubtitle => '从此设备中永久删除所有加密消息和媒体';
+
+  @override
+  String get vaultSettingsResetVault => '重置整个保险库';
+
+  @override
+  String get vaultSettingsResetVaultSubtitle => '移除保险库 PIN 码并删除所有保险库数据';
+
+  @override
+  String get vaultSettingsPinChanged => '保险库 PIN 码修改成功！';
+
+  @override
+  String get vaultSettingsBioTurnedOff => '已停用生物识别解锁。';
+
+  @override
+  String get vaultSettingsBioTurnedOn => '已启用生物识别解锁。';
+
+  @override
+  String get vaultSettingsClearDataTitle => '清空所有保险库数据？';
+
+  @override
+  String get vaultSettingsClearDataDesc => '这将从此设备中彻底删除所有保险库消息与媒体文件，且无法找回。';
+
+  @override
+  String get vaultSettingsClearDataCancel => '取消';
+
+  @override
+  String get vaultSettingsClearDataConfirm => '清空数据';
+
+  @override
+  String get vaultSettingsDataDeleted => '保险库数据已清空。';
+
+  @override
+  String get vaultSettingsResetTitle => '彻底重置保险库？';
+
+  @override
+  String get vaultSettingsResetDesc => '所有加密内容将被永久删除，且 PIN 码将被重置。您需要重新设置保险库。';
+
+  @override
+  String get vaultSettingsResetConfirm => '重置并清除';
+
+  @override
+  String get vaultSettingsChangeDialogDesc => '输入当前 PIN 码并设置新的 PIN 码。';
+
+  @override
+  String get vaultSettingsCurrentPin => '当前 PIN 码';
+
+  @override
+  String get vaultSettingsNewPin => '新 PIN 码';
+
+  @override
+  String get vaultSettingsConfirmNewPin => '确认新 PIN 码';
+
+  @override
+  String get vaultSettingsEnterCurrentPin => '请输入当前 PIN 码';
+
+  @override
+  String get vaultSettingsNewPinMinLength => '新 PIN 码至少需要 4 位';
+
+  @override
+  String get vaultSettingsNewPinMismatch => '新 PIN 码两次输入不一致';
+
+  @override
+  String get vaultSettingsCurrentPinIncorrect => '当前 PIN 码错误';
+
+  @override
+  String vaultSettingsReencryptingCount(int done, int total) {
+    return '正在重新加密 $done / $total…';
+  }
+
+  @override
+  String get vaultSettingsChangeBtn => '更改 PIN 码';
+
+  @override
+  String get vaultSettingsBioPinDialogTitle => '验证保险库 PIN 码';
+
+  @override
+  String get vaultSettingsBioPinDialogDesc => '请输入您的保险库 PIN 码以修改生物识别设置。';
+
+  @override
+  String get vaultSettingsContinueBtn => '继续';
+
+  @override
+  String get premiumTitle => 'GupShupGo 高级版';
+
+  @override
+  String get premiumSubtitleMember => '您已是高级版尊贵会员';
+
+  @override
+  String get premiumSubtitleUnlock => '解锁极致特权与无缝隐私体验';
+
+  @override
+  String premiumActiveDaysRemaining(int days) {
+    return '剩余 $days 天';
+  }
+
+  @override
+  String get premiumFeaturesHeader => '包含的所有特权';
+
+  @override
+  String get premiumPlansHeader => '选择订阅计划';
+
+  @override
+  String get premiumSubscribeBtn => '立即升级';
+
+  @override
+  String get premiumCancelAnytime => '可随时在应用商店中取消订阅';
+
+  @override
+  String get premiumRestoreBtn => '恢复购买';
+
+  @override
+  String get premiumRestoring => '正在恢复购买…';
+
+  @override
+  String get premiumRestoredSuccess => '已成功恢复您的购买！';
+
+  @override
+  String get premiumNoActiveSub => '未找到有效的订阅。';
+
+  @override
+  String get premiumProductUnavailable => '订阅项目暂时不可用，请稍后重试。';
+
+  @override
+  String get premiumFeatureMediaTitle => '无损原画质媒体';
+
+  @override
+  String get premiumFeatureMediaDesc => '以未经压缩的最高质量发送高清照片与视频';
+
+  @override
+  String get premiumFeatureMediaFree => '标准压缩媒体';
+
+  @override
+  String get premiumFeatureMediaPro => '原图画质，零压缩';
+
+  @override
+  String get premiumFeatureScreenShareTitle => '超高清屏幕共享';
+
+  @override
+  String get premiumFeatureScreenShareDesc => '支持高达 1080p 60fps 的超清晰实时屏幕串流';
+
+  @override
+  String get premiumFeatureScreenShareFree => '标准 720p 串流';
+
+  @override
+  String get premiumFeatureScreenSharePro => '超清 1080p 60fps 串流';
+
+  @override
+  String get premiumFeatureThemesTitle => '尊贵个性化主题';
+
+  @override
+  String get premiumFeatureThemesDesc => '解锁所有专属深色主题、强调色与聊天气泡外观';
+
+  @override
+  String get premiumFeatureThemesFree => '仅限默认主题';
+
+  @override
+  String get premiumFeatureThemesPro => '无限制使用所有高级主题';
+
+  @override
+  String get premiumFeatureVoiceTitle => '超长语音备忘录';
+
+  @override
+  String get premiumFeatureVoiceDesc => '录制并发送长达 30 分钟的高音质语音留言';
+
+  @override
+  String get premiumFeatureVoiceFree => '最长 2 分钟';
+
+  @override
+  String get premiumFeatureVoicePro => '单条长达 30 分钟';
+
+  @override
+  String get premiumFeatureQualityTitle => '极速优先传输';
+
+  @override
+  String get premiumFeatureQualityDesc => '专享极速通道，上传与下载快人一步';
+
+  @override
+  String get premiumFeatureQualityFree => '标准网络带宽';
+
+  @override
+  String get premiumFeatureQualityPro => '独享高优先级专属通道';
+
+  @override
+  String get premiumFeatureBondTitle => '亲密度专属徽章';
+
+  @override
+  String get premiumFeatureBondDesc => '与密友聊天时展示独特亲密度动态特效与标识';
+
+  @override
+  String get premiumFeatureBondFree => '基础亲密度等级';
+
+  @override
+  String get premiumFeatureBondPro => '专属光效与特别徽章';
+
+  @override
+  String get premiumFeatureBadgeTitle => 'PRO 专属身份标识';
+
+  @override
+  String get premiumFeatureBadgeDesc => '在个人资料与群组中展示高贵 PRO 徽标';
+
+  @override
+  String get premiumFeatureBadgeFree => '无专属标识';
+
+  @override
+  String get premiumFeatureBadgePro => '尊贵 PRO 金色徽章';
+
+  @override
+  String get premiumFeatureExportTitle => '聊天记录完整导出';
+
+  @override
+  String get premiumFeatureExportDesc => '一键导出聊天记录与多媒体文件为 PDF 或 ZIP';
+
+  @override
+  String get premiumFeatureExportFree => '不可导出';
+
+  @override
+  String get premiumFeatureExportPro => '一键完整备份导出';
+
+  @override
+  String get premiumFeatureAdFreeTitle => '纯净清爽体验';
+
+  @override
+  String get premiumFeatureAdFreeDesc => '享受彻底无广告的纯净通讯空间';
+
+  @override
+  String get premiumFeatureAdFreeFree => '含应用支持广告';
+
+  @override
+  String get premiumFeatureAdFreePro => '100% 纯净无广告';
+
+  @override
+  String get premiumPlanMonthly => '按月订阅';
+
+  @override
+  String get premiumPlanYearly => '按年订阅';
+
+  @override
+  String get premiumPlanSavings => '立省 40%';
+
+  @override
+  String get premiumPeriodMonth => '每月';
+
+  @override
+  String get premiumPeriodYear => '每年';
+
+  @override
+  String get nearbyOfflineChatTitle => '离线本地快传';
+
+  @override
+  String get nearbySearchingDevices => '正在搜索周边设备…';
+
+  @override
+  String get nearbyTooltipStop => '停止搜索';
+
+  @override
+  String get nearbyTooltipStart => '开始搜索';
+
+  @override
+  String get nearbyDevicesSection => '发现的周边设备';
+
+  @override
+  String get nearbyDiscoveryOn => '广播搜索已开启';
+
+  @override
+  String get nearbyDiscoveryOff => '广播搜索已关闭';
+
+  @override
+  String get nearbyHeroTitle => '随时随地面对面畅聊';
+
+  @override
+  String nearbyHeroNearbyCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '附近 $count 台设备',
+      one: '附近 1 台设备',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get nearbyHeroOff => '离线雷达已关闭';
+
+  @override
+  String get nearbyHeroDesc => '无需网络连接，利用 Wi-Fi 与蓝牙即刻与周围好友离线聊天传图。';
+
+  @override
+  String get nearbyYourNameHint => '向他人显示的设备昵称';
+
+  @override
+  String get nearbyEmptySearching => '正在搜寻周围设备…';
+
+  @override
+  String get nearbyEmptyOff => '雷达发现已关闭';
+
+  @override
+  String get nearbyEmptySearchingDesc => '请确保附近的设备也打开了此屏幕。';
+
+  @override
+  String get nearbyEmptyOffDesc => '点击右上角播放按钮开启周边设备扫描。';
+
+  @override
+  String get nearbyPeerConnected => '已连接';
+
+  @override
+  String get nearbyPeerConnecting => '正在连接…';
+
+  @override
+  String get nearbyPeerTapToConnect => '点击即可连接';
+
+  @override
+  String get nearbyActionChat => '聊天';
+
+  @override
+  String get nearbyActionConnecting => '连接中…';
+
+  @override
+  String get nearbyActionConnect => '连接';
+
+  @override
+  String get nearbyPermNeededTitle => '需要必要权限';
+
+  @override
+  String get nearbyPermNeededDesc => '离线搜索需要位置信息以及蓝牙周边设备访问权限。';
+
+  @override
+  String get nearbyTryAgainBtn => '重试';
+
+  @override
+  String get nearbySettingsBtn => '前往设置';
+
+  @override
+  String get nearbyHelpTip => '提示：请确保双方设备均已开启 Wi-Fi 和蓝牙开关。';
+
+  @override
+  String get anonLobbyTitle => '匿名漂流聊天';
+
+  @override
+  String get anonLobbyFinding => '正在为您寻找聊天对象…';
+
+  @override
+  String get anonLobbyHangTight => '请稍候，系统正在为您匹配在线的陌生人。';
+
+  @override
+  String get anonLobbyCancelBtn => '取消匹配';
+
+  @override
+  String get anonLobbyPrivacyNote => '您的身份完全保密。对方无法看到您的真实姓名、电话或头像。';
+
+  @override
+  String get anonLobbyConnecting => '正在建立连接…';
+
+  @override
+  String get anonLobbyWaitingOthers => '正在等待更多用户加入…';
+
+  @override
+  String anonLobbyOnlineCount(int count) {
+    return '当前 $count 人在线';
+  }
+
+  @override
+  String get anonChatNotEncrypted => '注意：为便于举报不良行为，匿名随机聊天不使用端到端加密。';
+
+  @override
+  String get anonChatRequestSentTooltip => '好友申请已发送';
+
+  @override
+  String get anonChatAddFriendTooltip => '添加为好友';
+
+  @override
+  String get anonChatNextStrangerTooltip => '换下一位';
+
+  @override
+  String get anonChatReportTooltip => '举报违规';
+
+  @override
+  String get anonChatSayHi => '打个招呼吧！您已连接上一位匿名用户。';
+
+  @override
+  String get anonChatFriendsTransition => '你们已成为好友！会话已迁移至主聊天列表。';
+
+  @override
+  String get anonChatStrangerDisconnected => '对方已离开聊天。';
+
+  @override
+  String get anonChatFindNextBtn => '寻找下一位';
+
+  @override
+  String get anonChatFriendReqTitle => '好友申请';
+
+  @override
+  String get anonChatFriendReqDesc => '对方希望添加您为好友并公开彼此的个人资料。';
+
+  @override
+  String get anonChatDecline => '婉拒';
+
+  @override
+  String get anonChatAccept => '接受';
+
+  @override
+  String get anonChatWaitingReqTitle => '已发送好友申请';
+
+  @override
+  String get anonChatWaitingReqDesc => '正在等待对方接受您的身份公开请求…';
+
+  @override
+  String get anonChatReportTitle => '举报匿名用户';
+
+  @override
+  String get anonChatReportQuestion => '您为何举报该用户？';
+
+  @override
+  String get anonChatReportReasonInappropriate => '不当或色情内容';
+
+  @override
+  String get anonChatReportReasonHarassment => '骚扰或侮辱行为';
+
+  @override
+  String get anonChatReportReasonSpam => '垃圾营销或诈骗';
+
+  @override
+  String get anonChatReportReasonThreatening => '威胁或危险行为';
+
+  @override
+  String get anonChatReportReasonOther => '其他原因';
+
+  @override
+  String get anonChatReportCancel => '取消';
+
+  @override
+  String get anonChatReportSubmit => '提交举报';
+
+  @override
+  String get anonChatReportSubmitted => '感谢您的反馈，我们已收到您的举报并将进行核实处理。';
+
+  @override
+  String get anonChatViewOnceVideoTitle => '阅后即焚视频';
+
+  @override
+  String get anonChatViewOncePhotoTitle => '阅后即焚照片';
+
+  @override
+  String get anonChatViewOnceVideoDesc => '该视频只能播放一次，播放结束后将被自动销毁。';
+
+  @override
+  String get anonChatViewOncePhotoDesc => '该照片只能查看一次，关闭后将无法再次打开。';
+
+  @override
+  String get anonChatViewOnceCancel => '取消';
+
+  @override
+  String get anonChatViewOnceOpen => '立即查看';
+
+  @override
+  String get unsupportedVersionTitle => '需要更新应用';
+
+  @override
+  String get unsupportedVersionDesc =>
+      '当前 GupShupGo 版本已停止支持。请更新至最新版本以继续享受安全稳定的聊天和通话服务。';
+
+  @override
+  String get unsupportedVersionUpdateNow => '立即更新';
+
+  @override
+  String get unsupportedVersionOpenPlayStore => '打开应用商店';
+
+  @override
+  String publicProfileNotFound(String username) {
+    return '未找到 @$username';
+  }
+
+  @override
+  String get publicProfileUserNotFound => '未找到该用户';
+
+  @override
+  String get publicProfileNotFoundDesc => '该用户名可能已更改，或者该账号已不再活跃。';
+
+  @override
+  String get publicProfileTitle => '个人资料';
+
+  @override
+  String get publicProfileOnline => '在线';
+
+  @override
+  String publicProfileLastSeen(String time) {
+    return '最后在线于 $time';
+  }
+
+  @override
+  String get publicProfileJustNow => '刚刚';
+
+  @override
+  String publicProfileMinutesAgo(int minutes) {
+    return '$minutes 分钟前';
+  }
+
+  @override
+  String publicProfileHoursAgo(int hours) {
+    return '$hours 小时前';
+  }
+
+  @override
+  String publicProfileDaysAgo(int days) {
+    return '$days 天前';
+  }
+
+  @override
+  String publicProfileJoined(String date) {
+    return '注册于 $date';
+  }
+
+  @override
+  String get publicProfileOwnLink => '这是您的公开个人资料';
+
+  @override
+  String publicProfileGupPoints(int points) {
+    return '$points Gup 积分';
+  }
+
+  @override
+  String publicProfileLevel(int level) {
+    return '等级 $level';
+  }
+
+  @override
+  String get publicProfileStatPoints => '积分';
+
+  @override
+  String get publicProfileStatBadges => '徽章';
+
+  @override
+  String get publicProfileStatBestBond => '最佳羁绊';
+
+  @override
+  String get publicProfileBadges => '获得的徽章';
+
+  @override
+  String get qrScannerTitle => '扫一扫';
+
+  @override
+  String get qrScannerFlashOnTooltip => '开启手电筒';
+
+  @override
+  String get qrScannerFlashOffTooltip => '关闭手电筒';
+
+  @override
+  String get qrScannerPrompt => '将摄像头对准二维码以添加好友或连接设备';
+
+  @override
+  String get qrScannerNotProfileCode => '该二维码不是有效的 GupShupGo 个人资料码。';
+
+  @override
+  String get qrScannerCameraErrorTitle => '相机发生错误';
+
+  @override
+  String get qrScannerCameraErrorRetry => '重试';
+
+  @override
+  String get qrScannerPermissionMsg => '需要相机权限方能扫描二维码。';
+
+  @override
+  String get qrScannerPermissionAllow => '授权允许';
+
+  @override
+  String get qrScannerBlockedMsg => '相机权限已被禁用。请在系统设置中允许相机访问。';
+
+  @override
+  String get qrScannerBlockedSettings => '打开系统设置';
+
+  @override
+  String get screenShareIncomingTitle => '收到屏幕共享邀请';
+
+  @override
+  String get screenShareWantsToShare => '希望与您共享其屏幕画面。';
+
+  @override
+  String get screenShareReject => '拒绝';
+
+  @override
+  String get screenShareAccept => '接受';
+
+  @override
+  String get screenShareCantAccept => '当前无法接受屏幕共享邀请。';
+
+  @override
+  String screenShareDeclined(String name) {
+    return '$name 拒绝了屏幕共享';
+  }
+
+  @override
+  String get screenShareNoAnswer => '对方未应答。';
+
+  @override
+  String get screenShareStartError => '无法开启屏幕共享，请稍后再试。';
+
+  @override
+  String get screenShareStatusRequesting => '正在发起请求…';
+
+  @override
+  String get screenShareStatusInitializing => '正在初始化…';
+
+  @override
+  String get screenShareStatusWaitingParticipant => '正在等待参与者加入…';
+
+  @override
+  String get screenShareStatusActive => '您正在共享屏幕';
+
+  @override
+  String screenShareSubWaitingAccept(String name) {
+    return '正在等待 $name 接受…';
+  }
+
+  @override
+  String get screenShareSubEstablishing => '正在建立安全直连通道…';
+
+  @override
+  String screenShareSubWaitingJoin(String name) {
+    return '正在等待 $name 加入...';
+  }
+
+  @override
+  String get screenShareSubActive => '您的屏幕画面正在实时串流给对方';
+
+  @override
+  String get screenShareBadgeRequesting => '发起请求中';
+
+  @override
+  String get screenShareBadgeConnecting => '连接中';
+
+  @override
+  String get screenShareSharedWith => '共享对象：';
+
+  @override
+  String get screenShareRequestingFrom => '邀请人：';
+
+  @override
+  String get screenShareMinimizeTip => '共享进行时您可以最小化此面板';
+
+  @override
+  String get screenShareStop => '停止共享';
+
+  @override
+  String get screenShareCancelRequest => '取消请求';
+
+  @override
+  String screenShareViewerTitle(String name) {
+    return '$name 的屏幕画面';
+  }
+
+  @override
+  String get screenShareViewerLive => '直播中';
+
+  @override
+  String get screenShareViewerMinimize => '最小化窗口';
+
+  @override
+  String get screenShareViewerLeave => '退出共享';
+
+  @override
+  String screenShareViewerWaitingStream(String name) {
+    return '正在等待 $name 开启屏幕串流...';
+  }
+
+  @override
+  String get screenShareViewerConnecting => '正在连接视频画面…';
+
+  @override
+  String get viewOnceVideoTitle => '阅后即焚视频';
+
+  @override
+  String get viewOncePhotoTitle => '阅后即焚照片';
+
+  @override
+  String get viewOnceCantOpen => '已过期的媒体文件无法再次打开。';
+
+  @override
+  String get viewOnceUnavailable => '该媒体不可用或已查看销毁。';
+
+  @override
+  String get viewOnceBlockedFooter => '为保障隐私，已禁止截屏与录屏。';
+
+  @override
+  String get viewOnceUnblockedFooter => '关闭此窗口后媒体内容将立刻销毁。';
 }

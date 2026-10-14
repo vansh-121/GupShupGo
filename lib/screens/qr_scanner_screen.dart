@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -140,7 +141,8 @@ class _QrScannerScreenState extends State<QrScannerScreen>
       if (username == null) {
         // Wrong kind of QR code (a URL, wifi config, plain text...). Keep
         // scanning rather than closing the screen.
-        _showReject('That\'s not a GupShupGo profile code.');
+        final l10n = AppLocalizations.of(context);
+        _showReject(l10n.qrScannerNotProfileCode);
         return;
       }
 
@@ -168,6 +170,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -176,7 +179,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'Scan QR Code',
+          l10n.qrScannerTitle,
           style: GoogleFonts.poppins(
             fontWeight: FontWeight.w600,
             fontSize: 18,
@@ -193,7 +196,9 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                 }
                 final on = state.torchState == TorchState.on;
                 return IconButton(
-                  tooltip: on ? 'Turn off flash' : 'Turn on flash',
+                  tooltip: on
+                      ? l10n.qrScannerFlashOffTooltip
+                      : l10n.qrScannerFlashOnTooltip,
                   icon: Icon(
                     on ? Icons.flash_on_rounded : Icons.flash_off_rounded,
                     color: on ? c.primary : Colors.white,
@@ -208,32 +213,32 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         _PermissionPhase.checking => const Center(
             child: CircularProgressIndicator(color: Colors.white),
           ),
-        _PermissionPhase.granted => _buildScanner(c),
+        _PermissionPhase.granted => _buildScanner(c, l10n),
         _PermissionPhase.denied => _buildPermissionState(
             c,
-            message: 'Camera access is needed to scan QR codes.',
-            actionLabel: 'Allow camera',
+            message: l10n.qrScannerPermissionMsg,
+            actionLabel: l10n.qrScannerPermissionAllow,
             onAction: _resolvePermission,
           ),
         _PermissionPhase.permanentlyDenied => _buildPermissionState(
             c,
-            message:
-                'Camera access is blocked. Enable it in Settings to scan QR codes.',
-            actionLabel: 'Open settings',
+            message: l10n.qrScannerBlockedMsg,
+            actionLabel: l10n.qrScannerBlockedSettings,
             onAction: () => unawaited(ph.openAppSettings()),
           ),
       },
     );
   }
 
-  Widget _buildScanner(AppThemeColors c) {
+  Widget _buildScanner(AppThemeColors c, AppLocalizations l10n) {
     return Stack(
       fit: StackFit.expand,
       children: [
         MobileScanner(
           controller: _controller,
           onDetect: _onDetect,
-          errorBuilder: (context, error, child) => _buildCameraError(c, error),
+          errorBuilder: (context, error, child) =>
+              _buildCameraError(c, error, l10n),
           fit: BoxFit.cover,
         ),
         _buildReticle(c),
@@ -263,7 +268,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                   ),
                 ),
               Text(
-                'Point your camera at a GupShupGo profile QR code',
+                l10n.qrScannerPrompt,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   color: Colors.white.withValues(alpha: 0.9),
@@ -291,7 +296,11 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     );
   }
 
-  Widget _buildCameraError(AppThemeColors c, MobileScannerException error) {
+  Widget _buildCameraError(
+    AppThemeColors c,
+    MobileScannerException error,
+    AppLocalizations l10n,
+  ) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -302,7 +311,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                 size: 48, color: Colors.white70),
             const SizedBox(height: 16),
             Text(
-              'Couldn\'t start the camera.',
+              l10n.qrScannerCameraErrorTitle,
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                 color: Colors.white,
@@ -312,7 +321,8 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              error.errorDetails?.message ?? 'Please try again.',
+              error.errorDetails?.message ??
+                  l10n.qrScannerCameraErrorRetry,
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                 color: Colors.white70,

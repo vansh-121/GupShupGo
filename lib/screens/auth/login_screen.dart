@@ -325,35 +325,68 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const Spacer(flex: 2),
 
-              // ── GupShupGo App Icon & Title ─────────────────────────────
-              ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    boxShadow: [
-                      BoxShadow(
-                        color: c.primary.withOpacity(0.3),
-                        blurRadius: 24,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: Image.asset(
-                    'assets/icon/app_icon.png',
-                    fit: BoxFit.cover,
+              // ── GupShupGo icon, title & tagline — gentle entrance ──────
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 650),
+                curve: Curves.easeOutCubic,
+                builder: (context, v, child) => Opacity(
+                  opacity: v.clamp(0.0, 1.0),
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - v) * 18),
+                    child: child,
                   ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'GupShupGo',
-                style: GoogleFonts.poppins(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  color: c.textHigh,
-                  letterSpacing: -0.6,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          boxShadow: [
+                            BoxShadow(
+                              color: c.primary.withOpacity(0.3),
+                              blurRadius: 24,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          'assets/icon/app_icon.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'GupShupGo',
+                      style: GoogleFonts.poppins(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        color: c.textHigh,
+                        letterSpacing: -0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Differentiator: lead with the one thing no mainstream
+                    // messenger does — chatting with no internet at all.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        t.loginTagline,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w500,
+                          color: c.textMid,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 

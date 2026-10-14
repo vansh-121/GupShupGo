@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/crypto/encrypted_media_service.dart';
@@ -52,11 +53,13 @@ class ViewOnceViewerScreen extends StatefulWidget {
   State<ViewOnceViewerScreen> createState() => _ViewOnceViewerScreenState();
 }
 
+enum _ViewOnceErrorType { unavailable, cantOpen }
+
 class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
   Uint8List? _imageBytes;
   VideoPlayerController? _videoController;
   File? _tempVideoFile;
-  String? _error;
+  _ViewOnceErrorType? _error;
   bool _loading = true;
 
   bool get _isVideo => widget.message.type == MessageType.video;
@@ -91,7 +94,7 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
     if (keyMap == null || keyMap.isEmpty) {
       setState(() {
         _loading = false;
-        _error = 'This media is no longer available.';
+        _error = _ViewOnceErrorType.unavailable;
       });
       return;
     }
@@ -142,13 +145,15 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = "Couldn't open this media.";
+        _error = _ViewOnceErrorType.cantOpen;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -156,26 +161,35 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          _isVideo ? 'Video · View once' : 'Photo · View once',
+          _isVideo
+              ? l10n.viewOnceVideoTitle
+              : l10n.viewOncePhotoTitle,
           style: GoogleFonts.poppins(fontSize: 15, color: Colors.white),
         ),
       ),
       body: SafeArea(
         child: Column(
           children: [
-            Expanded(child: Center(child: _buildContent())),
-            _buildFooter(),
+            Expanded(child: Center(child: _buildContent(l10n))),
+            _buildFooter(l10n),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(AppLocalizations l10n) {
     if (_loading) {
       return const CircularProgressIndicator(color: Colors.white);
     }
     if (_error != null) {
+      final errorText = switch (_error!) {
+        _ViewOnceErrorType.unavailable =>
+          l10n.viewOnceUnavailable,
+        _ViewOnceErrorType.cantOpen =>
+          l10n.viewOnceCantOpen,
+      };
+
       return Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
@@ -185,7 +199,7 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
                 color: Colors.white54, size: 48),
             const SizedBox(height: 16),
             Text(
-              _error!,
+              errorText,
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
             ),
@@ -235,7 +249,7 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
   /// The honest caveat. On Android the flag genuinely blocks capture; on iOS
   /// there is no API that can, so the copy promises only what holds everywhere:
   /// this is the one time it can be opened.
-  Widget _buildFooter() {
+  Widget _buildFooter(AppLocalizations l10n) {
     final enforceable = SecureScreenService.instance.isEnforceable;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
@@ -251,8 +265,8 @@ class _ViewOnceViewerScreenState extends State<ViewOnceViewerScreen> {
           Flexible(
             child: Text(
               enforceable
-                  ? "Screenshots are blocked. You can't open this again."
-                  : "You can't open this again. Screenshots can't be blocked on iOS.",
+                  ? l10n.viewOnceBlockedFooter
+                  : l10n.viewOnceUnblockedFooter,
               style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11.5),
             ),
           ),
