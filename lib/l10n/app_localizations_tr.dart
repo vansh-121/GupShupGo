@@ -192,6 +192,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get homeMenuProfile => 'Profil';
 
   @override
+  String get homeMenuPrivateVault => 'Özel Kasa';
+
+  @override
   String get homeMenuSettings => 'Ayarlar';
 
   @override

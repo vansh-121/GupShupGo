@@ -194,6 +194,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get homeMenuProfile => 'الملف الشخصي';
 
   @override
+  String get homeMenuPrivateVault => 'الخزنة الخاصة';
+
+  @override
   String get homeMenuSettings => 'الإعدادات';
 
   @override

@@ -229,6 +229,10 @@
   "@homeMenuProfile": {
     "description": "Overflow menu item: Profile."
   },
+  "homeMenuPrivateVault": "Private Vault",
+  "@homeMenuPrivateVault": {
+    "description": "Overflow menu shortcut to the private chat-history vault."
+  },
   "homeMenuSettings": "Settings",
   "@homeMenuSettings": {
     "description": "Overflow menu item: Settings."
@@ -3121,7 +3125,7 @@
     "description": "Footer note on Android where screenshots are blocked."
   },
   "anonRestoreBanner": "Show Anonymous Chat banner",
-  "@anonRestoreBanner": {"description": "Home menu action to restore the dismissed Anonymous Chat banner."},
+  "@anonRestoreBanner": {"description": "Settings switch controlling visibility of the Anonymous Chat banner on the home screen."},
   "contactsInviteFriends": "Invite Friends to GupShupGo",
   "@contactsInviteFriends": {"description": "Invite action in Contacts Discover and search."},
   "inviteImageShareFailed": "Couldn't share the image. Try again or share the link instead.",

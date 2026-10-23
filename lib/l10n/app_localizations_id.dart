@@ -190,6 +190,9 @@ class AppLocalizationsId extends AppLocalizations {
   String get homeMenuProfile => 'Profil';
 
   @override
+  String get homeMenuPrivateVault => 'Brankas Pribadi';
+
+  @override
   String get homeMenuSettings => 'Pengaturan';
 
   @override

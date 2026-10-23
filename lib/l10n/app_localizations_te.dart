@@ -195,6 +195,9 @@ class AppLocalizationsTe extends AppLocalizations {
   String get homeMenuProfile => 'ప్రొఫైల్';
 
   @override
+  String get homeMenuPrivateVault => 'వ్యక్తిగత వాల్ట్';
+
+  @override
   String get homeMenuSettings => 'సెట్టింగ్‌లు';
 
   @override

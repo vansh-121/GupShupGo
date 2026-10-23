@@ -179,6 +179,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeMenuProfile => '个人资料';
 
   @override
+  String get homeMenuPrivateVault => '私人保险库';
+
+  @override
   String get homeMenuSettings => '设置';
 
   @override

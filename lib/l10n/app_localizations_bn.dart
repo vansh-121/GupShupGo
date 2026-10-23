@@ -197,6 +197,9 @@ class AppLocalizationsBn extends AppLocalizations {
   String get homeMenuProfile => 'প্রোফাইল';
 
   @override
+  String get homeMenuPrivateVault => 'ব্যক্তিগত ভল্ট';
+
+  @override
   String get homeMenuSettings => 'সেটিংস';
 
   @override

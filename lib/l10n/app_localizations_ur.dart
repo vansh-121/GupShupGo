@@ -194,6 +194,9 @@ class AppLocalizationsUr extends AppLocalizations {
   String get homeMenuProfile => 'پروفائل';
 
   @override
+  String get homeMenuPrivateVault => 'نجی والٹ';
+
+  @override
   String get homeMenuSettings => 'ترتیبات';
 
   @override

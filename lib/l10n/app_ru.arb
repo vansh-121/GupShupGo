@@ -1,5 +1,6 @@
 {
   "@@locale": "ru",
+  "homeMenuPrivateVault": "Личное хранилище",
   "commonCancel": "Отмена",
   "commonOk": "ОК",
   "commonContinue": "Продолжить",

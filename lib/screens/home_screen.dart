@@ -21,6 +21,7 @@ import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
+import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/screens/ai/ai_assistant_screen.dart';
@@ -28,6 +29,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
+import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
@@ -52,7 +54,6 @@ import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
 import 'package:video_chat_app/widgets/feature_coach_marks.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
-import 'package:video_chat_app/widgets/report_problem_dialog.dart';
 import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
@@ -90,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
+  final SettingsService _settings = SettingsService();
 
   // Load budgets for the two native ad cards, owned here rather than by the
   // cards. Both live in lists whose indices shift when content arrives — a new
@@ -176,10 +178,6 @@ class _HomeScreenState extends State<HomeScreen>
   // needsSetup account — it has no older messages to restore.
   bool _vaultLockedWithHistory = false;
 
-  /// Whether the user dismissed the "Connect with a Stranger" banner. Persisted
-  /// so a feature that can't match anyone yet (small user base) doesn't nag on
-  /// every launch.
-  bool _anonBannerDismissed = false;
   bool _startupPromptsComplete = false;
   bool _homePromptRunning = false;
   bool _completedUsernameSetup = false;
@@ -189,8 +187,6 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     DeepLinkService.instance.setRoutingReady(false);
     unawaited(HomePromptPreferences(sharedPrefs).recordVisit());
-    _anonBannerDismissed =
-        sharedPrefs.getBool('anon_banner_dismissed_v1') ?? false;
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
@@ -1050,7 +1046,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Opens the offline (Bluetooth/Wi-Fi mesh) chat screen. Shared by the
-  /// app-bar sensors icon and the home offline/nearby banners. The Nearby
+  /// app-bar sensors icon, feature menu, and home offline/nearby banners. The Nearby
   /// screen itself requests mesh permissions and calls [MeshNetworkService.start],
   /// so this never prompts from the home surface.
   void _openOfflineChat() {
@@ -2518,13 +2514,7 @@ class _HomeScreenState extends State<HomeScreen>
             key: _meshIconKey,
             icon: const Icon(Icons.sensors_rounded),
             tooltip: AppLocalizations.of(context).homeTooltipOfflineChat,
-            onPressed: () {
-              markStarterMeshVisited();
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
-              );
-            },
+            onPressed: _openOfflineChat,
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
@@ -2564,16 +2554,16 @@ class _HomeScreenState extends State<HomeScreen>
                     child: Icon(Icons.more_vert),
                   ),
             onSelected: (value) async {
-              if (value == 'profile') {
-                if (_currentUser != null) {
-                  final updated = await Navigator.push<UserModel>(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            ProfileScreen(currentUser: _currentUser!)),
-                  );
-                  if (updated != null) setState(() => _currentUser = updated);
-                }
+              if (value == 'vault') {
+                if (_currentUserId == null) return;
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VaultSettingsScreen(uid: _currentUserId!),
+                  ),
+                );
+              } else if (value == 'offline') {
+                _openOfflineChat();
               } else if (value == 'settings') {
                 if (_currentUser != null) {
                   final updated = await Navigator.push<UserModel>(
@@ -2582,19 +2572,11 @@ class _HomeScreenState extends State<HomeScreen>
                         builder: (_) =>
                             SettingsScreen(currentUser: _currentUser!)),
                   );
-                  if (updated != null) setState(() => _currentUser = updated);
+                  if (!mounted) return;
+                  setState(() {
+                    if (updated != null) _currentUser = updated;
+                  });
                 }
-              } else if (value == 'rate') {
-                // openStoreListing, not the review sheet: Play's sheet is
-                // quota-limited and may show nothing at all, which is the wrong
-                // thing to hang a tap on.
-                unawaited(ReviewPromptService.instance
-                    .openStoreListing(context: context));
-              } else if (value == 'report') {
-                unawaited(
-                    ReportProblemDialog.show(context, user: _currentUser));
-              } else if (value == 'whatsnew') {
-                unawaited(showWhatsNewDialog(context));
               } else if (value == 'invite') {
                 await showInviteShareSheet(context,
                     handle: _currentUser?.username);
@@ -2608,24 +2590,52 @@ class _HomeScreenState extends State<HomeScreen>
                         currentUserName: _currentUser?.name ?? 'User',
                       ),
                     ));
-              } else if (value == 'restore_anonymous') {
-                await sharedPrefs.setBool('anon_banner_dismissed_v1', false);
-                if (mounted) setState(() => _anonBannerDismissed = false);
-              } else if (value == 'logout') {
-                _signOut();
               }
             },
             itemBuilder: (BuildContext context) {
               final l10n = AppLocalizations.of(context);
               return [
                 PopupMenuItem(
-                  value: 'profile',
+                  value: 'vault',
                   child: Row(
                     children: [
-                      Icon(Icons.person_outline_rounded,
+                      Icon(Icons.shield_outlined,
                           color: c.primary, size: 20),
                       const SizedBox(width: 12),
-                      Text(l10n.homeMenuProfile),
+                      Flexible(child: Text(l10n.homeMenuPrivateVault)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'offline',
+                  child: Row(
+                    children: [
+                      Icon(Icons.sensors_rounded, color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.nearbyOfflineChatTitle)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'anonymous',
+                  child: Row(
+                    children: [
+                      Icon(Icons.masks_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.anonLobbyTitle)),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'invite',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_add_alt_1_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.homeMenuInvite)),
                     ],
                   ),
                 ),
@@ -2635,73 +2645,8 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
-                      Text(l10n.homeMenuSettings),
+                      Flexible(child: Text(l10n.homeMenuSettings)),
                       const NewFeatureChip(featureId: NewFeature.chatThemes),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'invite',
-                  child: Row(
-                    children: [
-                      Icon(Icons.person_add_alt_1_rounded,
-                          color: c.primary, size: 20),
-                      const SizedBox(width: 12),
-                      Text(l10n.homeMenuInvite),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'anonymous',
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.masks_rounded, color: c.primary),
-                    title: Text(l10n.anonLobbyTitle),
-                  ),
-                ),
-                if (_anonBannerDismissed)
-                  PopupMenuItem(
-                    value: 'restore_anonymous',
-                    child: Text(l10n.anonRestoreBanner),
-                  ),
-                PopupMenuItem(
-                  value: 'rate',
-                  child: Row(
-                    children: [
-                      Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
-                      const SizedBox(width: 12),
-                      Text(l10n.homeMenuRateUs),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'report',
-                  child: Row(
-                    children: [
-                      Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
-                      const SizedBox(width: 12),
-                      Text(l10n.homeMenuReportIssue),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'whatsnew',
-                  child: Row(
-                    children: [
-                      Icon(Icons.auto_awesome_rounded,
-                          color: c.primary, size: 20),
-                      const SizedBox(width: 12),
-                      Text(l10n.homeMenuWhatsNew),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'logout',
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout_rounded, color: c.error, size: 20),
-                      const SizedBox(width: 12),
-                      Text(l10n.homeMenuLogOut, style: TextStyle(color: c.error)),
                     ],
                   ),
                 ),
@@ -2753,27 +2698,31 @@ class _HomeScreenState extends State<HomeScreen>
                 return const SizedBox.shrink();
               },
             ),
-          // ── Anonymous Match Banner — only on Gup tab, until dismissed ──────
-          if (_tabController.index == 0 &&
-              _currentUserId != null &&
-              !_anonBannerDismissed)
-            _AnonymousMatchBanner(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AnonymousLobbyScreen(
-                      currentUserId: _currentUserId!,
-                      currentUserName: _currentUser?.name,
+          // Anonymous Match Banner — visibility is shared with Settings.
+          ListenableBuilder(
+            listenable: _settings,
+            builder: (context, _) {
+              if (_tabController.index != 0 ||
+                  _currentUserId == null ||
+                  !_settings.showAnonymousChatBanner) {
+                return const SizedBox.shrink();
+              }
+              return _AnonymousMatchBanner(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnonymousLobbyScreen(
+                        currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name,
+                      ),
                     ),
-                  ),
-                );
-              },
-              onClose: () {
-                setState(() => _anonBannerDismissed = true);
-                sharedPrefs.setBool('anon_banner_dismissed_v1', true);
-              },
-            ),
+                  );
+                },
+                onClose: () => _settings.showAnonymousChatBanner = false,
+              );
+            },
+          ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -3381,7 +3330,6 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
           onTap: widget.onTap,
           child: Container(
             margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: c.isDark
@@ -3414,74 +3362,87 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                 ),
               ],
             ),
-            child: Row(
+            child: Stack(
               children: [
-                // ── Icon circle ──
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.shuffle_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // ── Text ──
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(16, 12, 44, 12),
+                  child: Row(
                     children: [
-                      Text(
-                        AppLocalizations.of(context).homeStrangerMatchTitle,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                      // ── Icon circle ──
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.shuffle_rounded,
                           color: Colors.white,
-                          height: 1.2,
+                          size: 20,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        AppLocalizations.of(context).homeStrangerMatchSubtitle,
-                        style: GoogleFonts.poppins(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w400,
-                          color: Colors.white.withOpacity(0.75),
+                      const SizedBox(width: 12),
+                      // ── Text ──
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              AppLocalizations.of(context).homeStrangerMatchTitle,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              AppLocalizations.of(context).homeStrangerMatchSubtitle,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.white.withOpacity(0.75),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // ── Arrow ──
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.20),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 18,
                         ),
                       ),
                     ],
                   ),
                 ),
-                // ── Arrow ──
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.20),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 2),
-                // ── Dismiss (opaque hit-test so it doesn't trigger onTap) ──
-                GestureDetector(
-                  onTap: widget.onClose,
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.close_rounded,
-                      color: Colors.white.withOpacity(0.85),
-                      size: 18,
+                // A separate dismiss target fits within the reserved end space.
+                PositionedDirectional(
+                  top: 0,
+                  bottom: 0,
+                  end: 0,
+                  width: 44,
+                  child: Center(
+                    child: IconButton(
+                      onPressed: widget.onClose,
+                      tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: Colors.white.withOpacity(0.85),
+                        size: 18,
+                      ),
                     ),
                   ),
                 ),

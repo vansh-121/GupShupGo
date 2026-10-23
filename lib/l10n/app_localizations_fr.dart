@@ -199,6 +199,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get homeMenuProfile => 'Profil';
 
   @override
+  String get homeMenuPrivateVault => 'Coffre privé';
+
+  @override
   String get homeMenuSettings => 'Paramètres';
 
   @override

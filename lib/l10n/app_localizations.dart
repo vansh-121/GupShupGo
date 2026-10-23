@@ -462,6 +462,12 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get homeMenuProfile;
 
+  /// Overflow menu shortcut to the private chat-history vault.
+  ///
+  /// In en, this message translates to:
+  /// **'Private Vault'**
+  String get homeMenuPrivateVault;
+
   /// Overflow menu item: Settings.
   ///
   /// In en, this message translates to:
@@ -4356,7 +4362,7 @@ abstract class AppLocalizations {
   /// **'Screenshots are blocked. You can\'t open this again.'**
   String get viewOnceBlockedFooter;
 
-  /// Home menu action to restore the dismissed Anonymous Chat banner.
+  /// Settings switch controlling visibility of the Anonymous Chat banner on the home screen.
   ///
   /// In en, this message translates to:
   /// **'Show Anonymous Chat banner'**

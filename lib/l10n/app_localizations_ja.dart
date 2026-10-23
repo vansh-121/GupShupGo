@@ -180,6 +180,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get homeMenuProfile => 'プロフィール';
 
   @override
+  String get homeMenuPrivateVault => 'プライベート保管庫';
+
+  @override
   String get homeMenuSettings => '設定';
 
   @override

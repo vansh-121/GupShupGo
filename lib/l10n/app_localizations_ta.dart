@@ -200,6 +200,9 @@ class AppLocalizationsTa extends AppLocalizations {
   String get homeMenuProfile => 'சுயவிவரம்';
 
   @override
+  String get homeMenuPrivateVault => 'தனிப்பட்ட பெட்டகம்';
+
+  @override
   String get homeMenuSettings => 'அமைப்புகள்';
 
   @override

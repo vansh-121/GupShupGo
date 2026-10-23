@@ -198,6 +198,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get homeMenuProfile => 'Профиль';
 
   @override
+  String get homeMenuPrivateVault => 'Личное хранилище';
+
+  @override
   String get homeMenuSettings => 'Настройки';
 
   @override

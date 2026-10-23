@@ -195,6 +195,9 @@ class AppLocalizationsHi extends AppLocalizations {
   String get homeMenuProfile => 'प्रोफ़ाइल';
 
   @override
+  String get homeMenuPrivateVault => 'निजी वॉल्ट';
+
+  @override
   String get homeMenuSettings => 'सेटिंग्स';
 
   @override

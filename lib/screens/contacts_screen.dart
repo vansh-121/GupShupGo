@@ -22,7 +22,6 @@ import 'package:video_chat_app/screens/settings_screen.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/widgets/invite_share_sheet.dart';
-import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   final String currentUserId;
@@ -1403,26 +1402,23 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
   }
 
   // TAB 3: Universal Search & Discover (Redesigned with Stitch Specs)
-  Widget _buildInviteAction({required bool compact}) {
+  Widget _buildInviteAction() {
     final c = AppThemeColors.of(context);
     final l10n = AppLocalizations.of(context);
     return Card(
-      margin: compact
-          ? const EdgeInsets.fromLTRB(16, 8, 16, 0)
-          : const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       color: c.primaryLt,
       child: ListTile(
-        dense: compact,
+        dense: true,
         leading: Icon(Icons.person_add_alt_1_rounded, color: c.primary),
         title: Text(
           l10n.contactsInviteFriends,
           style: GoogleFonts.poppins(
             color: c.textHigh,
-            fontSize: compact ? 12 : 14,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),
-        subtitle: compact ? null : Text(l10n.inviteSheetSubtitle),
         trailing: Icon(Icons.share_rounded, color: c.primary, size: 20),
         onTap: () =>
             showInviteShareSheet(context, handle: _currentUserModel?.username),
@@ -1436,7 +1432,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
 
     return Column(
       children: [
-        _buildInviteAction(compact: true),
+        _buildInviteAction(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: TextField(
@@ -1614,23 +1610,6 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildInviteAction(compact: false),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.masks_rounded, color: c.primary),
-            title: Text(l10n.anonLobbyTitle),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AnonymousLobbyScreen(
-                    currentUserId: widget.currentUserId,
-                    currentUserName:
-                        _currentUserModel?.name ?? widget.currentUserName,
-                  ),
-                )),
-          ),
-          const SizedBox(height: 12),
           // Hero Section (Stitch Design Pattern)
           Container(
             width: double.infinity,
