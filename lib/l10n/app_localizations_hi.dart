@@ -2391,7 +2391,7 @@ class AppLocalizationsHi extends AppLocalizations {
       'स्क्रीनशॉट ब्लॉक हैं। आप इसे दोबारा नहीं खोल सकते।';
 
   @override
-  String get anonRestoreBanner => 'अनाम चैट बैनर दिखाएँ';
+  String get anonRestoreBanner => 'अनाम बैनर';
 
   @override
   String get contactsInviteFriends => 'दोस्तों को GupShupGo पर आमंत्रित करें';

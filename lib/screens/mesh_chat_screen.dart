@@ -15,6 +15,7 @@ import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/screens/plaintext_view_once_viewer.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
 import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/document_bubble.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
@@ -39,7 +40,7 @@ class MeshChatScreen extends StatefulWidget {
 
 class _MeshChatScreenState extends State<MeshChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  final ChatScrollController _scrollController = ChatScrollController();
   final ChatCacheService _cache = ChatCacheService();
   final ImagePicker _imagePicker = ImagePicker();
   final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
@@ -57,7 +58,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   bool _isUploadingImage = false;
   bool _isUploadingVideo = false;
   bool _isUploadingDocument = false;
-  bool _hasText = false;
+  final ValueNotifier<bool> _hasText = ValueNotifier(false);
 
   /// View-once message ids the user has already opened this session. Local and
   /// State-scoped: mesh messages are peer-to-peer with no shared server to write
@@ -78,8 +79,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   void _loadPersistedMessages() {
     final pending = _cache.getPendingMeshMessages();
     final peerId = widget.peer.userId;
-    final mine = pending.where((m) =>
-        (m.senderId == peerId) || (m.receiverId == peerId));
+    final mine = pending
+        .where((m) => (m.senderId == peerId) || (m.receiverId == peerId));
     setState(() => _messages.addAll(mine));
     _scrollToBottom();
   }
@@ -88,8 +89,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     _meshSub = _mesh.meshMessageStream.listen((msg) {
       // Only show messages exchanged with this peer.
       final peerId = widget.peer.userId;
-      final isForThisPeer = (msg.senderId == peerId) ||
-          (msg.receiverId == peerId);
+      final isForThisPeer =
+          (msg.senderId == peerId) || (msg.receiverId == peerId);
       if (!isForThisPeer) return;
       if (_messages.any((m) => m.id == msg.id)) return;
       setState(() => _messages.add(msg));
@@ -98,8 +99,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   }
 
   void _onTextChanged() {
-    final has = _messageController.text.trim().isNotEmpty;
-    if (has != _hasText) setState(() => _hasText = has);
+    _hasText.value = _messageController.text.trim().isNotEmpty;
   }
 
   Future<void> _sendText() async {
@@ -331,15 +331,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
   }
 
   void _scrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 80), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    _scrollController.scrollToLatest();
   }
 
   void _showError(String msg) {
@@ -358,6 +350,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     _voiceRecorder.dispose();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
+    _hasText.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -483,9 +476,21 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return ListView.builder(
       controller: _scrollController,
+      reverse: true,
       padding: const EdgeInsets.symmetric(vertical: 10),
       itemCount: sorted.length,
-      itemBuilder: (context, i) => _buildBubble(sorted[i], c),
+      findChildIndexCallback: (key) {
+        if (key is! ValueKey<String>) return null;
+        final index = sorted.indexWhere((m) => m.id == key.value);
+        return index < 0 ? null : sorted.length - 1 - index;
+      },
+      itemBuilder: (context, i) {
+        final message = sorted[sorted.length - 1 - i];
+        return KeyedSubtree(
+          key: ValueKey(message.id),
+          child: _buildBubble(message, c),
+        );
+      },
     );
   }
 
@@ -530,8 +535,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                      maxWidth: 220, maxHeight: 280),
+                  constraints:
+                      const BoxConstraints(maxWidth: 220, maxHeight: 280),
                   child: Image.file(
                     File(msg.localFilePath!),
                     fit: BoxFit.cover,
@@ -656,8 +661,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 18, color: isMe ? Colors.white : c.primary),
+            Icon(icon, size: 18, color: isMe ? Colors.white : c.primary),
             const SizedBox(width: 8),
             Text(
               text,
@@ -681,7 +685,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
     if (path == null || path.isEmpty || !File(path).existsSync()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).meshMediaUnavailable)),
+        SnackBar(
+            content: Text(AppLocalizations.of(context).meshMediaUnavailable)),
       );
       return;
     }
@@ -780,8 +785,8 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
                 ),
               )
             : IconButton(
-                icon: Icon(Icons.attach_file_rounded,
-                    color: c.textMid, size: 22),
+                icon:
+                    Icon(Icons.attach_file_rounded, color: c.textMid, size: 22),
                 onPressed: _showAttachSheet,
               ),
         Expanded(
@@ -793,15 +798,15 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
             ),
             child: TextField(
               controller: _messageController,
+              onTap: _scrollToBottom,
               decoration: InputDecoration(
                 hintText: 'Message...',
-                hintStyle:
-                    GoogleFonts.poppins(color: c.textLow, fontSize: 14),
+                hintStyle: GoogleFonts.poppins(color: c.textLow, fontSize: 14),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
               style: GoogleFonts.poppins(fontSize: 14, color: c.textHigh),
               maxLines: 5,
@@ -812,42 +817,44 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
           ),
         ),
         const SizedBox(width: 8),
-        if (_hasText || _isSending)
-          GestureDetector(
-            onTap: _isSending ? null : _sendText,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _isSending ? c.textLow : c.primary,
-                shape: BoxShape.circle,
-              ),
-              child: _isSending
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.send_rounded,
-                      color: Colors.white, size: 20),
-            ),
-          )
-        else
-          GestureDetector(
-            onLongPressStart: (_) => _startVoiceRecording(),
-            onLongPressEnd: (_) => _stopVoiceRecording(),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.mic_rounded,
-                  color: Colors.white, size: 22),
-            ),
-          ),
+        ValueListenableBuilder<bool>(
+          valueListenable: _hasText,
+          builder: (_, hasText, __) => hasText || _isSending
+              ? GestureDetector(
+                  onTap: _isSending ? null : _sendText,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: _isSending ? c.textLow : c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: _isSending
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.send_rounded,
+                            color: Colors.white, size: 20),
+                  ),
+                )
+              : GestureDetector(
+                  onLongPressStart: (_) => _startVoiceRecording(),
+                  onLongPressEnd: (_) => _stopVoiceRecording(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.mic_rounded,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+        ),
       ],
     );
   }
@@ -858,8 +865,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
         Container(
           width: 10,
           height: 10,
-          decoration:
-              BoxDecoration(color: c.error, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: c.error, shape: BoxShape.circle),
         ),
         const SizedBox(width: 8),
         ListenableBuilder(
@@ -886,8 +892,7 @@ class _MeshChatScreenState extends State<MeshChatScreen> {
               color: c.error.withOpacity(0.12),
               shape: BoxShape.circle,
             ),
-            child:
-                Icon(Icons.delete_outline_rounded, color: c.error, size: 18),
+            child: Icon(Icons.delete_outline_rounded, color: c.error, size: 18),
           ),
         ),
         const SizedBox(width: 8),

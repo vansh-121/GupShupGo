@@ -47,6 +47,8 @@ import 'package:video_chat_app/theme/chat_theme.dart';
 import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
+import 'package:video_chat_app/utils/retained_stream.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
@@ -144,7 +146,7 @@ String _formatMb(int bytes) =>
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  final ChatScrollController _scrollController = ChatScrollController();
   final ChatService _chatService = ChatService();
   final StatusService _statusService = StatusService();
   final UserService _userService = UserService();
@@ -152,8 +154,6 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = true;
   final bool _isSending = false;
   int _lastMessageCount = 0;
-  double? _lastMessageViewportHeight;
-  bool _bottomScrollScheduled = false;
 
   // ─── Search state ─────────────────────────────────────────────────
   bool _isSearchMode = false;
@@ -260,6 +260,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Firestore-write + FCM + engine-init gap, so a second tap slipped through.
   bool _startingScreenShare = false;
   final ValueNotifier<bool> _hasText = ValueNotifier(false);
+  String _lastComposerText = '';
 
   // ─── GupAI in-chat ─────────────────────────────────────────────────
   /// Smart-reply suggestions shown as chips above the composer; empty when none.
@@ -328,7 +329,7 @@ class _ChatScreenState extends State<ChatScreen> {
   // otherwise spin up a fresh subscription whose initial frame is just the
   // outbox, causing the prior history to vanish for 2–3s until Firestore
   // re-emits and decryption completes. Initialized once in initState.
-  late final Stream<List<MessageModel>> _messagesStream;
+  late final RetainedStream<List<MessageModel>> _messageFeed;
   bool _isLoadingOlder = false;
   bool _hasMoreOlder = true;
   List<MessageModel> _currentMessages = [];
@@ -374,9 +375,9 @@ class _ChatScreenState extends State<ChatScreen> {
         _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     _chatRoomId = chatRoomId;
     _isMuted = _settingsService.isChatMuted(chatRoomId);
-    _messagesStream = _chatService
-        .getMessages(widget.currentUserId, widget.contact.id)
-        .asBroadcastStream();
+    _messageFeed = RetainedStream(
+      _chatService.getMessages(widget.currentUserId, widget.contact.id),
+    );
     // Suppress global mesh banners for this conversation while it's open.
     _meshService = Provider.of<MeshNetworkService>(context, listen: false);
     _meshService.setActiveConversation(widget.contact.id);
@@ -422,6 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _stopTyping();
+    unawaited(_messageFeed.close());
     _scrollController.removeListener(_onScroll);
     _onlineStatusSubscription?.cancel();
     _typingSubscription?.cancel();
@@ -534,7 +536,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initializeChat() async {
     // The chat screen now renders IMMEDIATELY — the StreamBuilder on
-    // _messagesStream surfaces cached/decrypted messages as soon as the
+    // _messageFeed surfaces cached/decrypted messages as soon as the
     // local Firestore snapshot lands (sub-second). Block-status checks,
     // markDelivered / markRead, and listener setup all run in the
     // background. Previously these were four sequential Firestore
@@ -840,6 +842,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Called every time the text field value changes.
   void _onTextChanged() {
+    // Taps, cursor moves and IME composing updates also notify the controller.
+    // They must not start typing writes or scan the draft for link previews.
+    final text = _messageController.text;
+    if (text == _lastComposerText) return;
+    _lastComposerText = text;
     final hasText = _messageController.text.trim().isNotEmpty;
 
     // Update the mic/send button toggle
@@ -1422,23 +1429,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToBottom() {
-    // The list is built with `reverse: true` (WhatsApp-style, anchored to
-    // the input). In a reversed list the visual bottom corresponds to
-    // offset 0.0, so "scroll to bottom" = "scroll to start of the scroll
-    // axis". Wait for layout without introducing a timer on every focus event.
-    if (_bottomScrollScheduled) return;
-    _bottomScrollScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _bottomScrollScheduled = false;
-      if (mounted && _scrollController.hasClients) {
-        _scrollController.animateTo(
-          0.0,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-    WidgetsBinding.instance.ensureVisualUpdate();
+    _scrollController.scrollToLatest();
   }
 
   void _onComposerFocusChanged() {
@@ -2346,60 +2337,47 @@ class _ChatScreenState extends State<ChatScreen> {
     // behaviour). ListView.builder with reverse:true indexes from the bottom,
     // so index 0 = last item in displayItems (the newest message / typing).
     final itemCount = displayItems.length;
-    return NotificationListener<ScrollMetricsNotification>(
-      onNotification: (notification) {
-        // IME resizing changes the viewport after focus is acquired. Scroll
-        // after that layout without rebuilding or re-sorting message history.
-        final height = notification.metrics.viewportDimension;
-        final resized = _lastMessageViewportHeight != height;
-        _lastMessageViewportHeight = height;
-        if (resized && _composerFocus.hasFocus &&
-            notification.metrics.axis == Axis.vertical &&
-            notification.metrics.pixels > 0) {
-          _scrollToBottom();
+    // The reversed viewport keeps the newest message above the composer as
+    // the keyboard changes height; it needs no per-inset scroll animation.
+    return ListView.builder(
+      controller: _scrollController,
+      reverse: true,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 0),
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        // reverse:true means index 0 = visual bottom = last display item.
+        final item = displayItems[itemCount - 1 - index];
+        switch (item.type) {
+          case _DisplayItemType.banner:
+            return E2EEBanner.chat(context);
+          case _DisplayItemType.dateDivider:
+            return _buildDateDivider(item.dateLabel!);
+          case _DisplayItemType.typing:
+            return _buildTypingBubble();
+          case _DisplayItemType.loadingOlder:
+            return _buildLoadingOlderIndicator();
+          case _DisplayItemType.nativeAd:
+            // Self-hiding: renders nothing at all unless native ads are on for
+            // chat, the user isn't Pro, and an ad actually filled. Never styled
+            // as a bubble — see [NativeAdCard].
+            return NativeAdCard(
+              key: const ValueKey('native-ad-chat'),
+              placement: 'chat',
+              inChat: true,
+              budget: _chatAdBudget,
+            );
+          case _DisplayItemType.message:
+            final bubble = _buildMessage(item.message!);
+            // RepaintBoundary isolates each message bubble into its own
+            // compositing layer so that scrolling / setState rebuilds on the
+            // parent chat screen don't repaint every bubble — only the ones
+            // whose content actually changed. Critical for smooth scrolling
+            // in chats with hundreds of messages on low-end devices.
+            return RepaintBoundary(
+              child: item.animate ? _animatedBubble(bubble) : bubble,
+            );
         }
-        return false;
       },
-      child: ListView.builder(
-        controller: _scrollController,
-        reverse: true,
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 0),
-        itemCount: itemCount,
-        itemBuilder: (context, index) {
-          // reverse:true means index 0 = visual bottom = last display item.
-          final item = displayItems[itemCount - 1 - index];
-          switch (item.type) {
-            case _DisplayItemType.banner:
-              return E2EEBanner.chat(context);
-            case _DisplayItemType.dateDivider:
-              return _buildDateDivider(item.dateLabel!);
-            case _DisplayItemType.typing:
-              return _buildTypingBubble();
-            case _DisplayItemType.loadingOlder:
-              return _buildLoadingOlderIndicator();
-            case _DisplayItemType.nativeAd:
-              // Self-hiding: renders nothing at all unless native ads are on for
-              // chat, the user isn't Pro, and an ad actually filled. Never styled
-              // as a bubble — see [NativeAdCard].
-              return NativeAdCard(
-                key: const ValueKey('native-ad-chat'),
-                placement: 'chat',
-                inChat: true,
-                budget: _chatAdBudget,
-              );
-            case _DisplayItemType.message:
-              final bubble = _buildMessage(item.message!);
-              // RepaintBoundary isolates each message bubble into its own
-              // compositing layer so that scrolling / setState rebuilds on the
-              // parent chat screen don't repaint every bubble — only the ones
-              // whose content actually changed. Critical for smooth scrolling
-              // in chats with hundreds of messages on low-end devices.
-              return RepaintBoundary(
-                child: item.animate ? _animatedBubble(bubble) : bubble,
-              );
-          }
-        },
-      ),
     );
   }
 
@@ -2725,7 +2703,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     theme: _chatTheme,
                     colors: c,
                     child: StreamBuilder<List<MessageModel>>(
-                      stream: _messagesStream,
+                      stream: _messageFeed.stream,
                       builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
@@ -5211,7 +5189,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // itself scrolls.
               ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(sheetContext).size.height * 0.5,
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.5,
                 ),
                 child: StreamBuilder<List<ChatRoom>>(
                   stream: _chatService.getChatRooms(widget.currentUserId),

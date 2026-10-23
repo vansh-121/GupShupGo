@@ -42,7 +42,7 @@ class ChatThemeSheet extends StatefulWidget {
       // it: thirteen presets is taller than a short phone, and a sheet that
       // fills the screen reads as a page that lost its app bar.
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.82,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.82,
       ),
       builder: (_) => ChatThemeSheet(
         chatRoomId: chatRoomId,

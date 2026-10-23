@@ -2358,7 +2358,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Ekran görüntüsü engellendi.';
 
   @override
-  String get anonRestoreBanner => 'Anonim Sohbet bannerını göster';
+  String get anonRestoreBanner => 'Anonim banner';
 
   @override
   String get contactsInviteFriends => 'Arkadaşlarını GupShupGo’ya davet et';

@@ -2372,7 +2372,7 @@ class AppLocalizationsBn extends AppLocalizations {
   String get viewOnceBlockedFooter => 'স্ক্রিনশট ব্লক করা হয়েছে।';
 
   @override
-  String get anonRestoreBanner => 'বেনামী চ্যাট ব্যানার দেখান';
+  String get anonRestoreBanner => 'বেনামী ব্যানার';
 
   @override
   String get contactsInviteFriends => 'বন্ধুদের GupShupGo-তে আমন্ত্রণ জানান';

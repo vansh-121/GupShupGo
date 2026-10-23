@@ -170,7 +170,7 @@ class _AiTopUpSheetState extends State<_AiTopUpSheet> {
         left: 20,
         right: 20,
         top: 20,
-        bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+        bottom: 20 + MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

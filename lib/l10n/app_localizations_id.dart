@@ -2397,7 +2397,7 @@ class AppLocalizationsId extends AppLocalizations {
       'Tangkapan layar diblokir untuk melindungi privasi.';
 
   @override
-  String get anonRestoreBanner => 'Tampilkan banner Obrolan Anonim';
+  String get anonRestoreBanner => 'Banner anonim';
 
   @override
   String get contactsInviteFriends => 'Undang Teman ke GupShupGo';

@@ -680,22 +680,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
               _buildStitchDivider(),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                secondary: Icon(Icons.masks_rounded, color: c.textMid, size: 22),
-                title: Text(
-                  l10n.anonRestoreBanner,
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: c.textHigh,
+              ListTileTheme.merge(
+                minLeadingWidth: 0,
+                horizontalTitleGap: 8,
+                child: SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  secondary: Icon(Icons.masks_rounded, color: c.textMid, size: 18),
+                  title: Text(
+                    l10n.anonRestoreBanner,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: c.textHigh,
+                    ),
                   ),
+                  activeTrackColor: c.primary,
+                  value: _settings.showAnonymousChatBanner,
+                  onChanged: (value) =>
+                      setState(() => _settings.showAnonymousChatBanner = value),
                 ),
-                activeTrackColor: c.primary,
-                value: _settings.showAnonymousChatBanner,
-                onChanged: (value) =>
-                    setState(() => _settings.showAnonymousChatBanner = value),
               ),
             ],
           ),

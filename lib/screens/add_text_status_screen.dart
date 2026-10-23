@@ -207,7 +207,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: MediaQuery.of(context).viewPadding.bottom + 24,
+            bottom: MediaQuery.viewPaddingOf(context).bottom + 24,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [

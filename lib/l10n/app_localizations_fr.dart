@@ -2400,7 +2400,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Captures d\'écran bloquées.';
 
   @override
-  String get anonRestoreBanner => 'Afficher la bannière du chat anonyme';
+  String get anonRestoreBanner => 'Bannière anonyme';
 
   @override
   String get contactsInviteFriends => 'Inviter des amis sur GupShupGo';

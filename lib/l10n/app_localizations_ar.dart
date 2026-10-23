@@ -2372,7 +2372,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'تم حظر لقطات الشاشة لحماية الخصوصية.';
 
   @override
-  String get anonRestoreBanner => 'إظهار بانر الدردشة المجهولة';
+  String get anonRestoreBanner => 'بانر الدردشة المجهولة';
 
   @override
   String get contactsInviteFriends => 'دعوة الأصدقاء إلى GupShupGo';

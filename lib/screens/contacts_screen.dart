@@ -326,8 +326,8 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           24,
           24,
           24 +
-              MediaQuery.of(context).viewPadding.bottom +
-              MediaQuery.of(context).viewInsets.bottom,
+              MediaQuery.viewPaddingOf(context).bottom +
+              MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -376,7 +376,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
               child: QrImageView(
                 data: qrData,
                 version: QrVersions.auto,
-                size: (MediaQuery.of(context).size.height * 0.24)
+                size: (MediaQuery.sizeOf(context).height * 0.24)
                     .clamp(150.0, 200.0),
                 eyeStyle: QrEyeStyle(
                   eyeShape: QrEyeShape.square,
@@ -584,7 +584,7 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
                 // last matched contact's action buttons sit under the system
                 // navigation bar and can't be tapped.
                 padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewPadding.bottom + 12,
+                  bottom: MediaQuery.viewPaddingOf(context).bottom + 12,
                 ),
                 itemCount: matches.length,
                 separatorBuilder: (_, __) =>

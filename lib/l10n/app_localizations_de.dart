@@ -2373,7 +2373,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Screenshots blockiert.';
 
   @override
-  String get anonRestoreBanner => 'Banner für anonymen Chat anzeigen';
+  String get anonRestoreBanner => 'Anonymes Banner';
 
   @override
   String get contactsInviteFriends => 'Freunde zu GupShupGo einladen';

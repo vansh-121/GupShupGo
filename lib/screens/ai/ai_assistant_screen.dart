@@ -32,6 +32,7 @@ import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
 import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
 
 /// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
@@ -52,8 +53,9 @@ class AiAssistantScreen extends StatefulWidget {
 class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final _service = AiAssistantService.instance;
   final _composer = TextEditingController();
-  final _scroll = ScrollController();
+  final _scroll = ChatScrollController();
   final _composerFocus = FocusNode();
+  late final Stream<List<MessageModel>> _transcriptStream;
 
   /// A reply is in flight — drives the typing-dots bubble and locks the sender.
   bool _sending = false;
@@ -76,6 +78,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   @override
   void initState() {
     super.initState();
+    _transcriptStream = _service.watchTranscript();
+    _composerFocus.addListener(_onComposerFocusChanged);
     // Warm a rewarded ad up front so the quota top-up — if the user hits the
     // cap — is an instant watch rather than a spinner. This is a full screen,
     // so (like the Arcade) it's a fair place to resolve ad consent too.
@@ -97,6 +101,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   void dispose() {
     _composer.dispose();
     _scroll.dispose();
+    _composerFocus.removeListener(_onComposerFocusChanged);
     _composerFocus.dispose();
     // Drop the warmed ad so an unwatched one doesn't go stale behind us.
     RewardedAdService.instance.disposeAd();
@@ -221,14 +226,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    });
+    _scroll.scrollToLatest();
+  }
+
+  void _onComposerFocusChanged() {
+    if (_composerFocus.hasFocus) _scrollToBottom();
   }
 
   // ── Quota top-up sheet ───────────────────────────────────────────────────────
@@ -279,10 +281,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final flags = FeatureFlagService.instance;
     final todayKey = StreakDay.fromInstant(ServerClock.now()).key;
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
+      final snap =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final data = snap.data();
       final base = isPro ? flags.aiProDailyCap : flags.aiFreeDailyCap;
       final topUps = aiRewardCountToday(data, todayKey);
@@ -503,7 +503,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<MessageModel>>(
-              stream: _service.watchTranscript(),
+              stream: _transcriptStream,
               builder: (context, snapshot) {
                 final messages = snapshot.data ?? const <MessageModel>[];
                 final itemCount = messages.length + (_sending ? 1 : 0);
@@ -527,17 +527,26 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
 
                 return ListView.builder(
                   controller: _scroll,
+                  reverse: true,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 16,
                   ),
                   itemCount: itemCount,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) return null;
+                    if (key.value == 'ai-typing') return _sending ? 0 : null;
+                    final index = messages.indexWhere((m) => m.id == key.value);
+                    return index < 0 ? null : itemCount - 1 - index;
+                  },
                   itemBuilder: (context, i) {
-                    if (_sending && i == messages.length) {
-                      return const _TypingBubble();
+                    final index = itemCount - 1 - i;
+                    if (_sending && index == messages.length) {
+                      return const _TypingBubble(key: ValueKey('ai-typing'));
                     }
-                    final m = messages[i];
+                    final m = messages[index];
                     return _MessageBubble(
+                      key: ValueKey(m.id),
                       message: m,
                       isUser: m.senderId == _uid,
                     );
@@ -643,7 +652,8 @@ class _Composer extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.isUser});
+  const _MessageBubble(
+      {super.key, required this.message, required this.isUser});
 
   final MessageModel message;
   final bool isUser;
@@ -658,7 +668,7 @@ class _MessageBubble extends StatelessWidget {
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.82,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
         ),
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -745,7 +755,7 @@ List<InlineSpan> _inlineSpans(String text, TextStyle base) {
 
 /// The "AI is typing" bubble: three dots that fade in sequence.
 class _TypingBubble extends StatefulWidget {
-  const _TypingBubble();
+  const _TypingBubble({super.key});
 
   @override
   State<_TypingBubble> createState() => _TypingBubbleState();
@@ -789,7 +799,8 @@ class _TypingBubbleState extends State<_TypingBubble>
               children: List.generate(3, (i) {
                 // Stagger each dot a third of a cycle apart.
                 final t = (_ctrl.value + i * 0.33) % 1.0;
-                final opacity = 0.3 + 0.7 * (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0);
+                final opacity =
+                    0.3 + 0.7 * (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0);
                 return Padding(
                   padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
                   child: Opacity(

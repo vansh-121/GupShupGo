@@ -2364,7 +2364,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Скриншоты заблокированы.';
 
   @override
-  String get anonRestoreBanner => 'Показать баннер анонимного чата';
+  String get anonRestoreBanner => 'Анонимный баннер';
 
   @override
   String get contactsInviteFriends => 'Пригласить друзей в GupShupGo';

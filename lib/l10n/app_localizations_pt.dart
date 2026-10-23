@@ -2378,7 +2378,7 @@ class AppLocalizationsPt extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Capturas de tela bloqueadas.';
 
   @override
-  String get anonRestoreBanner => 'Mostrar banner de chat anônimo';
+  String get anonRestoreBanner => 'Banner anônimo';
 
   @override
   String get contactsInviteFriends => 'Convide amigos para o GupShupGo';

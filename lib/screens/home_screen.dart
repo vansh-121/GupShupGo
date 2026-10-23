@@ -1238,7 +1238,7 @@ class _HomeScreenState extends State<HomeScreen>
     final c = AppThemeColors.of(context);
 
     return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.sizeOf(context).height * 0.7,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(40),
@@ -2534,25 +2534,11 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
-            // The dot is placed inside each branch rather than around the pair,
-            // because the two hosts need different tucks: an avatar fills its
-            // box, while `more_vert` is a narrow column of dots the badge would
-            // otherwise sit on top of.
-            icon: (_currentUser?.photoUrl?.isNotEmpty ?? false)
-                ? NewFeatureDot(
-                    anchor: NewFeatureAnchor.homeOverflow,
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage:
-                          avatarImage(_currentUser!.photoUrl!, radius: 16),
-                      backgroundColor: c.primaryLt,
-                    ),
-                  )
-                : const NewFeatureDot(
-                    anchor: NewFeatureAnchor.homeOverflow,
-                    offset: NewFeatureDot.narrowGlyph,
-                    child: Icon(Icons.more_vert),
-                  ),
+            icon: const NewFeatureDot(
+              anchor: NewFeatureAnchor.homeOverflow,
+              offset: NewFeatureDot.narrowGlyph,
+              child: Icon(Icons.more_vert),
+            ),
             onSelected: (value) async {
               if (value == 'vault') {
                 if (_currentUserId == null) return;

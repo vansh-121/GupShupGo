@@ -2394,7 +2394,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get viewOnceBlockedFooter => 'ஸ்கிரீன்ஷாட்கள் தடுக்கப்பட்டுள்ளன.';
 
   @override
-  String get anonRestoreBanner => 'அநாமதேய அரட்டை பேனரைக் காட்டு';
+  String get anonRestoreBanner => 'அநாமதேய பேனர்';
 
   @override
   String get contactsInviteFriends => 'நண்பர்களை GupShupGo-க்கு அழைக்கவும்';

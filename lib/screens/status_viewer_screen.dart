@@ -362,13 +362,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   void _onTapUp(TapUpDetails details) {
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenHeight = MediaQuery.sizeOf(context).height;
     if (!widget.isMyStatus && details.globalPosition.dy > screenHeight - 96) {
       return;
     }
 
     _isPaused = false;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final tapX = details.globalPosition.dx;
 
     if (tapX < screenWidth / 3) {
@@ -707,7 +707,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               right: 0,
               child: Container(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).padding.top + 8,
+                  top: MediaQuery.paddingOf(context).top + 8,
                   left: 12,
                   right: 12,
                 ),
@@ -862,7 +862,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   padding: EdgeInsets.only(
                     left: 16,
                     right: 16,
-                    bottom: MediaQuery.of(context).padding.bottom + 16,
+                    bottom: MediaQuery.paddingOf(context).bottom + 16,
                     top: 16,
                   ),
                   decoration: BoxDecoration(
@@ -889,7 +889,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             // Bottom: viewers count for own status
             if (widget.isMyStatus)
               Positioned(
-                bottom: MediaQuery.of(context).padding.bottom + 16,
+                bottom: MediaQuery.paddingOf(context).bottom + 16,
                 left: 0,
                 right: 0,
                 child: GestureDetector(
@@ -921,7 +921,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               Positioned(
                 left: 12,
                 right: 12,
-                bottom: MediaQuery.of(context).padding.bottom + 10,
+                bottom: MediaQuery.paddingOf(context).bottom + 10,
                 child: _buildReplyBar(),
               ),
           ],
@@ -1116,8 +1116,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     // Console's bitmap check flags. fit: BoxFit.contain never paints wider
     // than the screen, so capping the decode at the physical screen width
     // costs nothing visually and bounds this at ~10 MB on a 1080p device.
-    final decodeWidth = (MediaQuery.of(context).size.width *
-            MediaQuery.of(context).devicePixelRatio)
+    final decodeWidth = (MediaQuery.sizeOf(context).width *
+            MediaQuery.devicePixelRatioOf(context))
         .round();
 
     return Container(

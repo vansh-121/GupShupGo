@@ -2370,7 +2370,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Screenshots are blocked. You can\'t open this again.';
 
   @override
-  String get anonRestoreBanner => 'Show Anonymous Chat banner';
+  String get anonRestoreBanner => 'Anonymous banner';
 
   @override
   String get contactsInviteFriends => 'Invite Friends to GupShupGo';

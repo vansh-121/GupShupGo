@@ -3124,8 +3124,8 @@
   "@viewOnceBlockedFooter": {
     "description": "Footer note on Android where screenshots are blocked."
   },
-  "anonRestoreBanner": "Show Anonymous Chat banner",
-  "@anonRestoreBanner": {"description": "Settings switch controlling visibility of the Anonymous Chat banner on the home screen."},
+  "anonRestoreBanner": "Anonymous banner",
+  "@anonRestoreBanner": {"description": "Compact Settings switch label for showing or hiding the Anonymous Chat banner."},
   "contactsInviteFriends": "Invite Friends to GupShupGo",
   "@contactsInviteFriends": {"description": "Invite action in Contacts Discover and search."},
   "inviteImageShareFailed": "Couldn't share the image. Try again or share the link instead.",

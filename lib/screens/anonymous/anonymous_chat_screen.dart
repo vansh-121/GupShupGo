@@ -23,6 +23,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/services/whats_new_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
 import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
@@ -57,12 +58,14 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   final _service = AnonymousChatService.instance;
   final _userService = UserService();
   final _messageController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _scrollController = ChatScrollController();
   final _imagePicker = ImagePicker();
   final _voiceRecorder = VoiceRecorderService();
 
   AnonymousRoomModel? _room;
   StreamSubscription<DocumentSnapshot>? _roomSub;
+  late final Stream<QuerySnapshot> _messagesStream;
+  int _lastMessageCount = 0;
   bool _strangerDisconnected = false;
   bool _isEnding = false;
   bool _sendingFriendRequest = false;
@@ -73,10 +76,8 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   /// time, and the paperclip is the only thing that reads it.
   bool _isUploadingMedia = false;
 
-  /// True while the text field holds something, so the trailing circle can swap
-  /// between send and mic. Kept as state rather than read off the controller in
-  /// `build` because the controller doesn't rebuild the tree on its own.
-  bool _hasText = false;
+  /// Only the send/mic control rebuilds when the draft becomes empty or nonempty.
+  final ValueNotifier<bool> _hasText = ValueNotifier(false);
 
   /// Message ids the user has chosen to un-blur, see [_StrangerMediaGate].
   ///
@@ -96,6 +97,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   @override
   void initState() {
     super.initState();
+    _messagesStream = _service.messagesStream(widget.roomId);
     _loadRoom();
     _messageController.addListener(_onTextChanged);
     // Only warms one when the next skip is the one that would show it, so the
@@ -108,14 +110,14 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     _roomSub?.cancel();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
+    _hasText.dispose();
     _scrollController.dispose();
     _voiceRecorder.dispose();
     super.dispose();
   }
 
   void _onTextChanged() {
-    final has = _messageController.text.trim().isNotEmpty;
-    if (has != _hasText) setState(() => _hasText = has);
+    _hasText.value = _messageController.text.trim().isNotEmpty;
   }
 
   Future<void> _loadRoom() async {
@@ -357,7 +359,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.75,
         ),
         decoration: BoxDecoration(
           color: isMe ? c.primary : c.surfaceAlt,
@@ -558,7 +560,8 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     } else if (isMe) {
       subtitle = 'View once · sent';
     } else {
-      subtitle = isVideo ? 'View once · tap to play' : 'View once · tap to view';
+      subtitle =
+          isVideo ? 'View once · tap to play' : 'View once · tap to view';
     }
 
     return Align(
@@ -595,8 +598,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   height: 38,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border:
-                        Border.all(color: glyphColor.withOpacity(0.55)),
+                    border: Border.all(color: glyphColor.withOpacity(0.55)),
                   ),
                   alignment: Alignment.center,
                   child: Icon(
@@ -633,8 +635,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            GoogleFonts.poppins(color: fgLow, fontSize: 11),
+                        style: GoogleFonts.poppins(color: fgLow, fontSize: 11),
                       ),
                     ],
                   ),
@@ -662,17 +663,22 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          isVideo ? l10n.anonChatViewOnceVideoTitle : l10n.anonChatViewOncePhotoTitle,
+          isVideo
+              ? l10n.anonChatViewOnceVideoTitle
+              : l10n.anonChatViewOncePhotoTitle,
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
         ),
         content: Text(
-          isVideo ? l10n.anonChatViewOnceVideoDesc : l10n.anonChatViewOncePhotoDesc,
+          isVideo
+              ? l10n.anonChatViewOnceVideoDesc
+              : l10n.anonChatViewOncePhotoDesc,
           style: GoogleFonts.poppins(fontSize: 13.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(l10n.anonChatViewOnceCancel, style: GoogleFonts.poppins()),
+            child:
+                Text(l10n.anonChatViewOnceCancel, style: GoogleFonts.poppins()),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -730,15 +736,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    _scrollController.scrollToLatest();
   }
 
   Future<void> _endAndLeave() async {
@@ -1047,7 +1045,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   : Icons.person_add_alt_1_rounded,
               color: canSendRequest ? c.primary : c.textLow,
             ),
-            tooltip: iSentRequest ? l10n.anonChatRequestSentTooltip : l10n.anonChatAddFriendTooltip,
+            tooltip: iSentRequest
+                ? l10n.anonChatRequestSentTooltip
+                : l10n.anonChatAddFriendTooltip,
             onPressed: (canSendRequest && !_sendingFriendRequest)
                 ? _sendFriendRequest
                 : null,
@@ -1098,7 +1098,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           // ── Messages ─────────────────────────────────────────
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _service.messagesStream(widget.roomId),
+              stream: _messagesStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return Center(
@@ -1113,6 +1113,8 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 }
 
                 final messages = snapshot.data!.docs;
+                if (messages.length > _lastMessageCount) _scrollToBottom();
+                _lastMessageCount = messages.length;
 
                 if (messages.isEmpty) {
                   return Center(
@@ -1126,59 +1128,69 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   );
                 }
 
-                _scrollToBottom();
-
                 return ListView.builder(
                   controller: _scrollController,
+                  reverse: true,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: messages.length,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) return null;
+                    final index = messages.indexWhere((m) => m.id == key.value);
+                    return index < 0 ? null : messages.length - 1 - index;
+                  },
                   itemBuilder: (context, index) {
-                    final msg = messages[index].data() as Map<String, dynamic>;
-                    final isMe = msg['senderId'] == widget.currentUserId;
-                    final text = msg['text'] as String? ?? '';
-                    final type = msg['type'] as String? ?? 'text';
+                    final doc = messages[messages.length - 1 - index];
+                    return Builder(
+                      key: ValueKey(doc.id),
+                      builder: (context) {
+                        final msg = doc.data() as Map<String, dynamic>;
+                        final isMe = msg['senderId'] == widget.currentUserId;
+                        final text = msg['text'] as String? ?? '';
+                        final type = msg['type'] as String? ?? 'text';
 
-                    // System messages (centered, muted)
-                    if (type == 'system') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: c.surfaceAlt,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              text,
-                              style: GoogleFonts.poppins(
-                                fontSize: 12,
-                                color: c.textMid,
-                                fontStyle: FontStyle.italic,
+                        // System messages (centered, muted)
+                        if (type == 'system') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: c.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  text,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: c.textMid,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
-                      );
-                    }
+                          );
+                        }
 
-                    // Media — photo, video, voice note.
-                    if (type == 'image' ||
-                        type == 'video' ||
-                        type == 'audio') {
-                      return _buildMediaBubble(
-                        c,
-                        docId: messages[index].id,
-                        msg: msg,
-                        type: type,
-                        isMe: isMe,
-                      );
-                    }
+                        // Media — photo, video, voice note.
+                        if (type == 'image' ||
+                            type == 'video' ||
+                            type == 'audio') {
+                          return _buildMediaBubble(
+                            c,
+                            docId: doc.id,
+                            msg: msg,
+                            type: type,
+                            isMe: isMe,
+                          );
+                        }
 
-                    // Regular text messages
-                    return _buildTextBubble(c, text, isMe);
+                        // Regular text messages
+                        return _buildTextBubble(c, text, isMe);
+                      },
+                    );
                   },
                 );
               },
@@ -1193,7 +1205,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 16,
                 16,
                 16,
-                MediaQuery.of(context).viewPadding.bottom + 16,
+                MediaQuery.viewPaddingOf(context).bottom + 16,
               ),
               color: c.primary.withOpacity(0.1),
               child: Row(
@@ -1228,7 +1240,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 16,
                 16,
                 16,
-                MediaQuery.of(context).viewPadding.bottom + 16,
+                MediaQuery.viewPaddingOf(context).bottom + 16,
               ),
               color: c.surfaceAlt,
               child: Column(
@@ -1272,7 +1284,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 left: 12,
                 right: 8,
                 top: 8,
-                bottom: MediaQuery.of(context).viewPadding.bottom + 8,
+                bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
               ),
               decoration: BoxDecoration(
                 color: c.surface,
@@ -1446,6 +1458,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         Expanded(
           child: TextField(
             controller: _messageController,
+            onTap: _scrollToBottom,
             style: GoogleFonts.poppins(fontSize: 15, color: c.textHigh),
             decoration: InputDecoration(
               hintText: 'Type a message…',
@@ -1467,35 +1480,37 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
         ),
         const SizedBox(width: 6),
-        if (_hasText)
-          GestureDetector(
-            onTap: _sendMessage,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
-            ),
-          )
-        else
-          GestureDetector(
-            onLongPressStart: (_) => _startVoiceRecording(),
-            onLongPressEnd: (_) => _stopVoiceRecording(),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child:
-                  const Icon(Icons.mic_rounded, color: Colors.white, size: 22),
-            ),
-          ),
+        ValueListenableBuilder<bool>(
+          valueListenable: _hasText,
+          builder: (_, hasText, __) => hasText
+              ? GestureDetector(
+                  onTap: _sendMessage,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.send_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                )
+              : GestureDetector(
+                  onLongPressStart: (_) => _startVoiceRecording(),
+                  onLongPressEnd: (_) => _stopVoiceRecording(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.mic_rounded,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+        ),
       ],
     );
   }

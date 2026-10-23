@@ -708,7 +708,7 @@
   "attachmentScreenShare": "Partager l'écran",
   "attachmentScreenShareSubtitle": "Affichez votre écran en direct pendant la discussion",
   "tabMessages": "Messages",
-  "anonRestoreBanner": "Afficher la bannière du chat anonyme",
+  "anonRestoreBanner": "Bannière anonyme",
   "contactsInviteFriends": "Inviter des amis sur GupShupGo",
   "inviteImageShareFailed": "Impossible de partager l’image. Réessayez ou partagez le lien."
 }

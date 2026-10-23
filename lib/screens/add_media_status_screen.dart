@@ -566,7 +566,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
             right: 0,
             child: Container(
               padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 8,
+                top: MediaQuery.paddingOf(context).top + 8,
                 left: 8,
                 right: 8,
                 bottom: 8,
@@ -616,7 +616,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               padding: EdgeInsets.only(
                 left: 12,
                 right: 12,
-                bottom: MediaQuery.of(context).padding.bottom + 12,
+                bottom: MediaQuery.paddingOf(context).bottom + 12,
                 top: 12,
               ),
               decoration: BoxDecoration(

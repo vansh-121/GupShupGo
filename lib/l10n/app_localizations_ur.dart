@@ -2360,7 +2360,7 @@ class AppLocalizationsUr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'اسکرین شاٹس بلاک ہیں۔';
 
   @override
-  String get anonRestoreBanner => 'گمنام چیٹ بینر دکھائیں';
+  String get anonRestoreBanner => 'گمنام بینر';
 
   @override
   String get contactsInviteFriends => 'دوستوں کو GupShupGo پر مدعو کریں';

@@ -4362,10 +4362,10 @@ abstract class AppLocalizations {
   /// **'Screenshots are blocked. You can\'t open this again.'**
   String get viewOnceBlockedFooter;
 
-  /// Settings switch controlling visibility of the Anonymous Chat banner on the home screen.
+  /// Compact Settings switch label for showing or hiding the Anonymous Chat banner.
   ///
   /// In en, this message translates to:
-  /// **'Show Anonymous Chat banner'**
+  /// **'Anonymous banner'**
   String get anonRestoreBanner;
 
   /// Invite action in Contacts Discover and search.

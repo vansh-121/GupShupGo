@@ -2283,7 +2283,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get viewOnceBlockedFooter => 'プライバシー保護のためスクリーンショットはブロックされています。';
 
   @override
-  String get anonRestoreBanner => '匿名チャットのバナーを表示';
+  String get anonRestoreBanner => '匿名チャットバナー';
 
   @override
   String get contactsInviteFriends => '友だちをGupShupGoに招待';

@@ -130,7 +130,7 @@ class _AiActionSheetState extends State<_AiActionSheet> {
         left: 20,
         right: 20,
         top: 16,
-        bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+        bottom: 20 + MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -194,7 +194,7 @@ class _AiActionSheetState extends State<_AiActionSheet> {
       children: [
         Container(
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.4,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.4,
           ),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
