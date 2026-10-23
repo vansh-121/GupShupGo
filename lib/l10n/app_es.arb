@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "Capturas de pantalla bloqueadas.",
   "viewOnceUnblockedFooter": "No se puede volver a abrir. En iOS no se pueden bloquear capturas.",
   "attachmentScreenShare": "Compartir pantalla",
-  "attachmentScreenShareSubtitle": "Muestra tu pantalla en vivo durante el chat"
+  "attachmentScreenShareSubtitle": "Muestra tu pantalla en vivo durante el chat",
+  "tabMessages": "Mensajes",
+  "anonRestoreBanner": "Mostrar el banner de chat anónimo",
+  "contactsInviteFriends": "Invita a tus amigos a GupShupGo",
+  "inviteImageShareFailed": "No se pudo compartir la imagen. Inténtalo de nuevo o comparte el enlace."
 }

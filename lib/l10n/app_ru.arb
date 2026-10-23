@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "Скриншоты заблокированы.",
   "viewOnceUnblockedFooter": "Доступно только для разового просмотра.",
   "attachmentScreenShare": "Демонстрация экрана",
-  "attachmentScreenShareSubtitle": "Показывайте свой экран в реальном времени во время чата"
+  "attachmentScreenShareSubtitle": "Показывайте свой экран в реальном времени во время чата",
+  "tabMessages": "Сообщения",
+  "anonRestoreBanner": "Показать баннер анонимного чата",
+  "contactsInviteFriends": "Пригласить друзей в GupShupGo",
+  "inviteImageShareFailed": "Не удалось поделиться изображением. Попробуйте ещё раз или отправьте ссылку."
 }

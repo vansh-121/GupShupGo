@@ -2388,6 +2388,19 @@ class AppLocalizationsHi extends AppLocalizations {
       'स्क्रीनशॉट ब्लॉक हैं। आप इसे दोबारा नहीं खोल सकते।';
 
   @override
+  String get anonRestoreBanner => 'अनाम चैट बैनर दिखाएँ';
+
+  @override
+  String get contactsInviteFriends => 'दोस्तों को GupShupGo पर आमंत्रित करें';
+
+  @override
+  String get inviteImageShareFailed =>
+      'चित्र साझा नहीं हो सका। फिर से कोशिश करें या लिंक साझा करें।';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'आप इसे दोबारा नहीं खोल सकते। iOS पर स्क्रीनशॉट ब्लॉक नहीं किए जा सकते।';
+
+  @override
+  String get tabMessages => 'संदेश';
 }

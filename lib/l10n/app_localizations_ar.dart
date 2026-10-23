@@ -2369,6 +2369,19 @@ class AppLocalizationsAr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'تم حظر لقطات الشاشة لحماية الخصوصية.';
 
   @override
+  String get anonRestoreBanner => 'إظهار بانر الدردشة المجهولة';
+
+  @override
+  String get contactsInviteFriends => 'دعوة الأصدقاء إلى GupShupGo';
+
+  @override
+  String get inviteImageShareFailed =>
+      'تعذرت مشاركة الصورة. حاول مرة أخرى أو شارك الرابط.';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'ستختفي الوسائط بمجرد إغلاق هذه النافذة.';
+
+  @override
+  String get tabMessages => 'الرسائل';
 }

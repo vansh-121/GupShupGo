@@ -177,7 +177,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _buildNavItem(
-                label: 'Gup',
+                label: AppLocalizations.of(context).tabMessages,
                 icon: Icons.chat_bubble_rounded,
                 isSelected: true,
                 c: c,
@@ -186,7 +186,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                 },
               ),
               _buildNavItem(
-                label: 'Moments',
+                label: AppLocalizations.of(context).homeNavMoments,
                 icon: Icons.camera_alt_outlined,
                 isSelected: false,
                 c: c,
@@ -195,7 +195,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                 },
               ),
               _buildNavItem(
-                label: 'Calls',
+                label: AppLocalizations.of(context).homeNavCalls,
                 icon: Icons.call_outlined,
                 isSelected: false,
                 c: c,

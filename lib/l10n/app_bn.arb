@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "স্ক্রিনশট ব্লক করা হয়েছে।",
   "viewOnceUnblockedFooter": "এটি আর খোলা যাবে না। iOS-এ স্ক্রিনশট ব্লক করা যায় না।",
   "attachmentScreenShare": "স্ক্রিন শেয়ার করুন",
-  "attachmentScreenShareSubtitle": "চ্যাটের সময় আপনার স্ক্রিন লাইভ দেখান"
+  "attachmentScreenShareSubtitle": "চ্যাটের সময় আপনার স্ক্রিন লাইভ দেখান",
+  "tabMessages": "বার্তা",
+  "anonRestoreBanner": "বেনামী চ্যাট ব্যানার দেখান",
+  "contactsInviteFriends": "বন্ধুদের GupShupGo-তে আমন্ত্রণ জানান",
+  "inviteImageShareFailed": "ছবি শেয়ার করা যায়নি। আবার চেষ্টা করুন বা লিঙ্ক শেয়ার করুন।"
 }

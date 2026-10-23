@@ -4356,11 +4356,35 @@ abstract class AppLocalizations {
   /// **'Screenshots are blocked. You can\'t open this again.'**
   String get viewOnceBlockedFooter;
 
+  /// Home menu action to restore the dismissed Anonymous Chat banner.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Anonymous Chat banner'**
+  String get anonRestoreBanner;
+
+  /// Invite action in Contacts Discover and search.
+  ///
+  /// In en, this message translates to:
+  /// **'Invite Friends to GupShupGo'**
+  String get contactsInviteFriends;
+
+  /// Visible error after invite image capture or sharing fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t share the image. Try again or share the link instead.'**
+  String get inviteImageShareFailed;
+
   /// Footer note on iOS where screenshots cannot be blocked.
   ///
   /// In en, this message translates to:
   /// **'You can\'t open this again. Screenshots can\'t be blocked on iOS.'**
   String get viewOnceUnblockedFooter;
+
+  /// No description provided for @tabMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages'**
+  String get tabMessages;
 }
 
 class _AppLocalizationsDelegate

@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "اسکرین شاٹس بلاک ہیں۔",
   "viewOnceUnblockedFooter": "اسے دوبارہ نہیں کھولا جا سکتا۔",
   "attachmentScreenShare": "اسکرین شیئر کریں",
-  "attachmentScreenShareSubtitle": "چیٹ کے دوران اپنی اسکرین لائیو دکھائیں"
+  "attachmentScreenShareSubtitle": "چیٹ کے دوران اپنی اسکرین لائیو دکھائیں",
+  "tabMessages": "پیغامات",
+  "anonRestoreBanner": "گمنام چیٹ بینر دکھائیں",
+  "contactsInviteFriends": "دوستوں کو GupShupGo پر مدعو کریں",
+  "inviteImageShareFailed": "تصویر شیئر نہیں ہو سکی۔ دوبارہ کوشش کریں یا لنک شیئر کریں۔"
 }

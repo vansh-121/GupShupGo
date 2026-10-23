@@ -2394,6 +2394,19 @@ class AppLocalizationsId extends AppLocalizations {
       'Tangkapan layar diblokir untuk melindungi privasi.';
 
   @override
+  String get anonRestoreBanner => 'Tampilkan banner Obrolan Anonim';
+
+  @override
+  String get contactsInviteFriends => 'Undang Teman ke GupShupGo';
+
+  @override
+  String get inviteImageShareFailed =>
+      'Gambar tidak dapat dibagikan. Coba lagi atau bagikan tautannya.';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'Media akan terhapus secara otomatis saat Anda menutup layar ini.';
+
+  @override
+  String get tabMessages => 'Pesan';
 }

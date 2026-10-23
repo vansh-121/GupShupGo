@@ -2280,5 +2280,17 @@ class AppLocalizationsJa extends AppLocalizations {
   String get viewOnceBlockedFooter => 'プライバシー保護のためスクリーンショットはブロックされています。';
 
   @override
+  String get anonRestoreBanner => '匿名チャットのバナーを表示';
+
+  @override
+  String get contactsInviteFriends => '友だちをGupShupGoに招待';
+
+  @override
+  String get inviteImageShareFailed => '画像を共有できませんでした。再試行するか、リンクを共有してください。';
+
+  @override
   String get viewOnceUnblockedFooter => 'この画面を閉じるとメディアは完全に消去されます。';
+
+  @override
+  String get tabMessages => 'メッセージ';
 }

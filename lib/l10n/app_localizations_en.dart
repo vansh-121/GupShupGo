@@ -2367,6 +2367,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'Screenshots are blocked. You can\'t open this again.';
 
   @override
+  String get anonRestoreBanner => 'Show Anonymous Chat banner';
+
+  @override
+  String get contactsInviteFriends => 'Invite Friends to GupShupGo';
+
+  @override
+  String get inviteImageShareFailed =>
+      'Couldn\'t share the image. Try again or share the link instead.';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'You can\'t open this again. Screenshots can\'t be blocked on iOS.';
+
+  @override
+  String get tabMessages => 'Messages';
 }

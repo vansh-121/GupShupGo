@@ -2397,6 +2397,19 @@ class AppLocalizationsFr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Captures d\'écran bloquées.';
 
   @override
+  String get anonRestoreBanner => 'Afficher la bannière du chat anonyme';
+
+  @override
+  String get contactsInviteFriends => 'Inviter des amis sur GupShupGo';
+
+  @override
+  String get inviteImageShareFailed =>
+      'Impossible de partager l’image. Réessayez ou partagez le lien.';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'Ouverture unique. Impossible de bloquer les captures sur iOS.';
+
+  @override
+  String get tabMessages => 'Messages';
 }

@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "プライバシー保護のためスクリーンショットはブロックされています。",
   "viewOnceUnblockedFooter": "この画面を閉じるとメディアは完全に消去されます。",
   "attachmentScreenShare": "画面共有",
-  "attachmentScreenShareSubtitle": "チャット中に画面をリアルタイムで共有"
+  "attachmentScreenShareSubtitle": "チャット中に画面をリアルタイムで共有",
+  "tabMessages": "メッセージ",
+  "anonRestoreBanner": "匿名チャットのバナーを表示",
+  "contactsInviteFriends": "友だちをGupShupGoに招待",
+  "inviteImageShareFailed": "画像を共有できませんでした。再試行するか、リンクを共有してください。"
 }

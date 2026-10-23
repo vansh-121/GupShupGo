@@ -2355,5 +2355,18 @@ class AppLocalizationsTr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Ekran görüntüsü engellendi.';
 
   @override
+  String get anonRestoreBanner => 'Anonim Sohbet bannerını göster';
+
+  @override
+  String get contactsInviteFriends => 'Arkadaşlarını GupShupGo’ya davet et';
+
+  @override
+  String get inviteImageShareFailed =>
+      'Resim paylaşılamadı. Tekrar deneyin veya bağlantıyı paylaşın.';
+
+  @override
   String get viewOnceUnblockedFooter => 'Yalnızca bir kez açılabilir.';
+
+  @override
+  String get tabMessages => 'Mesajlar';
 }

@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 
 /// Pref keys. Bump the version suffix to intentionally re-show a mark.
 const String kCoachMeshKey = 'coach_v1_mesh';
@@ -59,45 +60,53 @@ Future<void> showCoachMarks(
       marks.where((m) => !(sharedPrefs.getBool(m.prefKey) ?? false)).toList();
   if (pending.isEmpty) return;
 
-  for (var i = 0; i < pending.length; i++) {
-    final mark = pending[i];
-    if (!context.mounted) return;
+  // Native ad platform views can obscure overlay captions. Remove the banner
+  // for the walkthrough and remeasure targets after the dock has resized.
+  AdsService.instance.suppressBanner();
+  try {
+    await WidgetsBinding.instance.endOfFrame;
+    for (var i = 0; i < pending.length; i++) {
+      final mark = pending[i];
+      if (!context.mounted) return;
 
-    final rect = _targetRect(mark.targetKey);
-    // Target is not mounted / not laid out (e.g. the Arcade chip before
-    // _currentUserId resolves). Leave the flag unset so we try again next
-    // launch rather than burning the tip on nothing.
-    if (rect == null) continue;
+      final rect = _targetRect(mark.targetKey);
+      // Target is not mounted / not laid out (e.g. the Arcade chip before
+      // _currentUserId resolves). Leave the flag unset so we try again next
+      // launch rather than burning the tip on nothing.
+      if (rect == null) continue;
 
-    final keepGoing = await showGeneralDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      // The scrim is painted by _SpotlightScrim so it can punch a hole; the
-      // route's own barrier must stay clear or it would dim the cutout too.
-      barrierColor: Colors.transparent,
-      barrierLabel: mark.title,
-      transitionDuration: const Duration(milliseconds: 220),
-      transitionBuilder: (_, anim, __, child) => FadeTransition(
-        opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
-        child: child,
-      ),
-      pageBuilder: (_, __, ___) => _CoachMarkOverlay(
-        mark: mark,
-        targetRect: rect,
-        isLast: i == pending.length - 1,
-      ),
-    );
+      final keepGoing = await showGeneralDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        // The scrim is painted by _SpotlightScrim so it can punch a hole; the
+        // route's own barrier must stay clear or it would dim the cutout too.
+        barrierColor: Colors.transparent,
+        barrierLabel: mark.title,
+        transitionDuration: const Duration(milliseconds: 220),
+        transitionBuilder: (_, anim, __, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
+          child: child,
+        ),
+        pageBuilder: (_, __, ___) => _CoachMarkOverlay(
+          mark: mark,
+          targetRect: rect,
+          isLast: i == pending.length - 1,
+        ),
+      );
 
-    await sharedPrefs.setBool(mark.prefKey, true);
+      await sharedPrefs.setBool(mark.prefKey, true);
 
-    // "Skip tips" — retire the rest too, so declining once is respected
-    // instead of resurfacing the remainder on the next launch.
-    if (keepGoing == false) {
-      for (final rest in pending.skip(i + 1)) {
-        await sharedPrefs.setBool(rest.prefKey, true);
+      // "Skip tips" — retire the rest too, so declining once is respected
+      // instead of resurfacing the remainder on the next launch.
+      if (keepGoing == false) {
+        for (final rest in pending.skip(i + 1)) {
+          await sharedPrefs.setBool(rest.prefKey, true);
+        }
+        return;
       }
-      return;
     }
+  } finally {
+    AdsService.instance.releaseBannerSuppression();
   }
 }
 
@@ -146,7 +155,8 @@ class _CoachMarkOverlayState extends State<_CoachMarkOverlay>
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
-    final screen = MediaQuery.of(context).size;
+    final screen = MediaQuery.sizeOf(context);
+    final safePadding = MediaQuery.paddingOf(context);
 
     // Breathing room around the target so the widget is not flush with the
     // cutout edge.
@@ -188,13 +198,20 @@ class _CoachMarkOverlayState extends State<_CoachMarkOverlay>
           Positioned(
             left: 20,
             right: 20,
-            top: below ? hole.bottom + 18 : null,
-            bottom: below ? null : (screen.height - hole.top) + 18,
-            child: _CaptionCard(
-              mark: widget.mark,
-              isLast: widget.isLast,
-              onNext: _next,
-              onSkip: _skip,
+            top: below ? hole.bottom + 18 : safePadding.top + 12,
+            bottom: below
+                ? safePadding.bottom + 12
+                : (screen.height - hole.top) + 18,
+            child: Align(
+              alignment: below ? Alignment.topCenter : Alignment.bottomCenter,
+              child: SingleChildScrollView(
+                child: _CaptionCard(
+                  mark: widget.mark,
+                  isLast: widget.isLast,
+                  onNext: _next,
+                  onSkip: _skip,
+                ),
+              ),
             ),
           ),
         ],
@@ -225,10 +242,11 @@ class _CaptionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.surfaceAlt,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: c.primary.withOpacity(0.35), width: 1.5),
+        border:
+            Border.all(color: c.primary.withValues(alpha: 0.35), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 24,
             spreadRadius: 2,
             offset: const Offset(0, 6),
@@ -246,7 +264,7 @@ class _CaptionCard extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: c.primary.withOpacity(0.14),
+                  color: c.primary.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(mark.icon, color: c.primary, size: 19),
@@ -347,7 +365,8 @@ class _SpotlightScrim extends CustomPainter {
       Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height)),
       Path()..addRRect(rrect),
     );
-    canvas.drawPath(scrim, Paint()..color = Colors.black.withOpacity(0.72));
+    canvas.drawPath(
+        scrim, Paint()..color = Colors.black.withValues(alpha: 0.72));
 
     // Pulsing ring — the cutout alone can be hard to spot against a busy
     // app bar, and motion is what actually draws the eye.
@@ -356,7 +375,7 @@ class _SpotlightScrim extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0 + pulse
-        ..color = ringColor.withOpacity(0.85 - pulse * 0.45),
+        ..color = ringColor.withValues(alpha: 0.85 - pulse * 0.45),
     );
   }
 

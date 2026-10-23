@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "స్క్రీన్‌షాట్లు బ్లాక్ చేయబడ్డాయి.",
   "viewOnceUnblockedFooter": "మళ్లీ తెరవడం సాధ్యం కాదు.",
   "attachmentScreenShare": "స్క్రీన్ షేర్ చేయండి",
-  "attachmentScreenShareSubtitle": "చాట్ సమయంలో మీ స్క్రీన్‌ను లైవ్‌గా చూపించండి"
+  "attachmentScreenShareSubtitle": "చాట్ సమయంలో మీ స్క్రీన్‌ను లైవ్‌గా చూపించండి",
+  "tabMessages": "సందేశాలు",
+  "anonRestoreBanner": "అనామక చాట్ బ్యానర్ చూపించండి",
+  "contactsInviteFriends": "స్నేహితులను GupShupGoకి ఆహ్వానించండి",
+  "inviteImageShareFailed": "చిత్రాన్ని షేర్ చేయలేకపోయాము. మళ్లీ ప్రయత్నించండి లేదా లింక్ షేర్ చేయండి."
 }

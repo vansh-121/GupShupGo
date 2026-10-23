@@ -2357,5 +2357,18 @@ class AppLocalizationsUr extends AppLocalizations {
   String get viewOnceBlockedFooter => 'اسکرین شاٹس بلاک ہیں۔';
 
   @override
+  String get anonRestoreBanner => 'گمنام چیٹ بینر دکھائیں';
+
+  @override
+  String get contactsInviteFriends => 'دوستوں کو GupShupGo پر مدعو کریں';
+
+  @override
+  String get inviteImageShareFailed =>
+      'تصویر شیئر نہیں ہو سکی۔ دوبارہ کوشش کریں یا لنک شیئر کریں۔';
+
+  @override
   String get viewOnceUnblockedFooter => 'اسے دوبارہ نہیں کھولا جا سکتا۔';
+
+  @override
+  String get tabMessages => 'پیغامات';
 }

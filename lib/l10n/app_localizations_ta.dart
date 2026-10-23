@@ -2391,5 +2391,18 @@ class AppLocalizationsTa extends AppLocalizations {
   String get viewOnceBlockedFooter => 'ஸ்கிரீன்ஷாட்கள் தடுக்கப்பட்டுள்ளன.';
 
   @override
+  String get anonRestoreBanner => 'அநாமதேய அரட்டை பேனரைக் காட்டு';
+
+  @override
+  String get contactsInviteFriends => 'நண்பர்களை GupShupGo-க்கு அழைக்கவும்';
+
+  @override
+  String get inviteImageShareFailed =>
+      'படத்தைப் பகிர முடியவில்லை. மீண்டும் முயலவும் அல்லது இணைப்பைப் பகிரவும்.';
+
+  @override
   String get viewOnceUnblockedFooter => 'மீண்டும் திறக்க முடியாது.';
+
+  @override
+  String get tabMessages => 'செய்திகள்';
 }

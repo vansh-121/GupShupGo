@@ -3,44 +3,58 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/main.dart' show sharedPrefs;
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/services/home_prompt_preferences.dart';
 
-/// A one-time, contextual "turn on notifications?" soft-ask.
+/// Home's optional notification soft-ask, with a persistent deferral budget.
 ///
 /// Notifications used to be requested at sign-in, stacked with the other
 /// first-launch dialogs — a wall of OS prompts before the user knew what the
-/// app did. Instead this fires at a natural moment (first time a chat is
-/// opened), and as a *soft* pre-prompt: only a "Turn on" tap triggers the real
+/// app did. Instead this fires on a settled Home screen, and as a
+/// *soft* pre-prompt: only a "Turn on" tap triggers the real
 /// OS request. That matters on Android, where once the system dialog is denied
 /// it can't be shown again — the pre-prompt lets us ask without burning that
-/// one shot, and a decline just defers to Settings instead of nagging.
+/// one shot. A decline suppresses it for five further visits and seven days.
 class NotificationPermissionPrompt {
   NotificationPermissionPrompt._();
 
-  /// Persisted so the automatic ask happens at most once, ever.
-  static const _kHandledKey = 'notif_soft_ask_handled_v1';
+  static bool _asking = false;
 
-  /// Guards against two chats opening in the same frame both asking.
-  static bool _askedThisSession = false;
-
-  /// Shows the soft-ask if it hasn't been handled before and notifications
-  /// aren't already granted. No-op otherwise. Never throws.
+  /// Shows the soft-ask when its cooldown allows and permission is absent.
+  /// No-op otherwise. Never throws.
   static Future<void> maybeAsk(
     BuildContext context, {
     required String userId,
   }) async {
-    if (_askedThisSession) return;
-    if (sharedPrefs.getBool(_kHandledKey) == true) return;
-
-    final fcm = FCMService();
-    // Already granted (returning user, or granted elsewhere) — nothing to ask.
-    if (await fcm.hasNotificationPermission()) {
-      await sharedPrefs.setBool(_kHandledKey, true);
-      return;
+    if (_asking || !context.mounted) return;
+    final budget = HomePromptPreferences(sharedPrefs);
+    if (!budget.canAskNotifications(DateTime.now())) return;
+    _asking = true;
+    try {
+      final fcm = FCMService();
+      if (await fcm.hasNotificationPermission()) return;
+      // The old flag conflated granting permission with "Not now". Give users
+      // who declined that version a fresh cooldown instead of retiring access.
+      if (sharedPrefs.getBool('notif_soft_ask_handled_v1') == true &&
+          sharedPrefs.getInt(HomePromptPreferences.notificationTimeKey) ==
+              null) {
+        await budget.deferNotifications(DateTime.now());
+        return;
+      }
+      if (!context.mounted || ModalRoute.of(context)?.isCurrent != true) return;
+      await _show(context, userId: userId, fcm: fcm, budget: budget);
+    } catch (e) {
+      debugPrint('[Notifications] soft ask failed: $e');
+    } finally {
+      _asking = false;
     }
+  }
 
-    _askedThisSession = true;
-    if (!context.mounted) return;
-
+  static Future<void> _show(
+    BuildContext context, {
+    required String userId,
+    required FCMService fcm,
+    required HomePromptPreferences budget,
+  }) async {
     final c = AppThemeColors.of(context);
     final accepted = await showDialog<bool>(
       context: context,
@@ -52,7 +66,8 @@ class NotificationPermissionPrompt {
         ),
         title: Row(
           children: [
-            Icon(Icons.notifications_active_rounded, color: c.primary, size: 22),
+            Icon(Icons.notifications_active_rounded,
+                color: c.primary, size: 22),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -97,9 +112,8 @@ class NotificationPermissionPrompt {
       ),
     );
 
-    // Either way, don't auto-ask again — a decline defers to Settings rather
-    // than re-prompting on every chat open.
-    await sharedPrefs.setBool(_kHandledKey, true);
+    // Dismissal (including Back/barrier) and an OS denial both get a cooldown.
+    await budget.deferNotifications(DateTime.now());
 
     if (accepted == true) {
       // Now fire the real OS request, then re-register so the token mints

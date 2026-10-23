@@ -60,8 +60,9 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/widgets/invite_share_sheet.dart';
+import 'package:video_chat_app/widgets/notification_permission_prompt.dart';
+import 'package:video_chat_app/services/home_prompt_preferences.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
-import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
@@ -179,10 +180,15 @@ class _HomeScreenState extends State<HomeScreen>
   /// so a feature that can't match anyone yet (small user base) doesn't nag on
   /// every launch.
   bool _anonBannerDismissed = false;
+  bool _startupPromptsComplete = false;
+  bool _homePromptRunning = false;
+  bool _completedUsernameSetup = false;
 
   @override
   void initState() {
     super.initState();
+    DeepLinkService.instance.setRoutingReady(false);
+    unawaited(HomePromptPreferences(sharedPrefs).recordVisit());
     _anonBannerDismissed =
         sharedPrefs.getBool('anon_banner_dismissed_v1') ?? false;
     _tabController = TabController(length: 3, vsync: this);
@@ -218,6 +224,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    DeepLinkService.instance.setRoutingReady(false);
     _authSub?.cancel();
     _recentContactsSub?.cancel();
     _currentUserSubscription?.cancel();
@@ -244,6 +251,11 @@ class _HomeScreenState extends State<HomeScreen>
     switch (state) {
       case AppLifecycleState.resumed:
         _startPresenceDecayTimer();
+        if (_backgroundedAt != null &&
+            DateTime.now().difference(_backgroundedAt!) >=
+                const Duration(seconds: 30)) {
+          unawaited(HomePromptPreferences(sharedPrefs).recordVisit());
+        }
         _maybeRecheckUpdatesOnResume();
         break;
       case AppLifecycleState.paused:
@@ -285,25 +297,43 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// Re-runs the update prompts when the app comes back from a long absence.
+  /// Rechecks Home prompts on a real app revisit; update checks need four hours.
   ///
   /// This is what makes an update surface "on its own" rather than only on a
   /// cold start — most people never actually close this app, so a launch-only
   /// check can go days without running. Three guards keep it from becoming a
-  /// nuisance: it needs a real absence ([_minBackgroundForUpdateCheck]), Home
+  /// nuisance: it needs a real absence, Home
   /// has to be the visible route (resuming into a chat or a call is not the
   /// moment), and the prompts carry their own throttles on top.
   void _maybeRecheckUpdatesOnResume() {
     final since = _backgroundedAt;
     _backgroundedAt = null;
     if (since == null) return;
-    if (DateTime.now().difference(since) < _minBackgroundForUpdateCheck) return;
+    final absence = DateTime.now().difference(since);
+    if (absence < const Duration(seconds: 30)) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (ModalRoute.of(context)?.isCurrent != true) return;
-      unawaited(UpdateService.instance.runLaunchPrompts(context));
+      unawaited(_runResumePrompts(
+          checkUpdates: absence >= _minBackgroundForUpdateCheck));
     });
+  }
+
+  Future<void> _runResumePrompts({required bool checkUpdates}) async {
+    if (!_startupPromptsComplete || _homePromptRunning) return;
+    _homePromptRunning = true;
+    try {
+      if (checkUpdates) await UpdateService.instance.runLaunchPrompts(context);
+      if (mounted &&
+          ModalRoute.of(context)?.isCurrent == true &&
+          _currentUserId != null) {
+        await NotificationPermissionPrompt.maybeAsk(context,
+            userId: _currentUserId!);
+      }
+    } finally {
+      _homePromptRunning = false;
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -408,8 +438,8 @@ class _HomeScreenState extends State<HomeScreen>
           if (updated != null) {
             setState(() => _currentUser = updated);
           }
-          await _maybeShowInvitePrompt();
-          return;
+          _completedUsernameSetup = updated != null;
+          if (!mounted) return;
         }
 
         // ── Consume pending deep links from notification taps ──────────
@@ -430,26 +460,6 @@ class _HomeScreenState extends State<HomeScreen>
                 currentUserId: _currentUserId!,
                 currentUserName: _currentUser?.name,
                 initialTabIndex: pendingContactsTab,
-              ),
-            ),
-          );
-        }
-
-        // ── Profile deep link tapped before this user was signed in ──────
-        // (e.g. cold start via a QR scan / shared link). Open it now that
-        // we have an authenticated _currentUserId.
-        final pendingUsername = DeepLinkService.consumePendingUsername();
-        if (pendingUsername != null &&
-            pendingUsername.isNotEmpty &&
-            mounted &&
-            _currentUserId != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PublicProfileScreen(
-                username: pendingUsername,
-                currentUserId: _currentUserId!,
-                currentUserName: _currentUser?.name,
               ),
             ),
           );
@@ -493,7 +503,24 @@ class _HomeScreenState extends State<HomeScreen>
         // spotlight over a screen the user has already left is worse than no
         // spotlight. Deferring keeps the ordering rule in one place instead of
         // threading a "did anything navigate?" flag through every branch above.
-        await _maybeShowFeatureCoaching();
+        if (!DeepLinkService.instance.hasPendingLink) {
+          await _maybeShowFeatureCoaching();
+        }
+        if (!mounted) return;
+        _startupPromptsComplete = true;
+        if (ModalRoute.of(context)?.isCurrent == true &&
+            !DeepLinkService.instance.hasPendingLink) {
+          await NotificationPermissionPrompt.maybeAsk(context,
+              userId: _currentUserId!);
+          if (mounted && (_completedUsernameSetup ||
+              HomePromptPreferences(sharedPrefs).visits >= 2) &&
+              _currentUser?.username?.isNotEmpty == true) {
+            await _maybeShowInvitePrompt();
+          }
+        }
+        // Warm intents received during startup dialogs stay queued too.
+        if (!mounted) return;
+        DeepLinkService.instance.setRoutingReady(true);
 
         // ── Review nudge — after coaching, for the same reason ─────────
         // Covers users who never make calls (the call screen has its own
@@ -963,9 +990,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// prompt — not another wall — and only ever shown once. The invite flow is
   /// also always reachable from the home ⋮ menu.
   Future<void> _maybeShowInvitePrompt() async {
-    if (!mounted) return;
-    if (sharedPrefs.getBool('invite_prompt_shown_v1') == true) return;
-    await sharedPrefs.setBool('invite_prompt_shown_v1', true);
+    if (!mounted ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        DeepLinkService.instance.hasPendingLink) return;
+    final budget = HomePromptPreferences(sharedPrefs);
+    if (budget.hasShownInvite) return;
+    await budget.markInviteShown();
     if (!mounted) return;
     final c = AppThemeColors.of(context);
     final l10n = AppLocalizations.of(context);
@@ -2568,6 +2598,19 @@ class _HomeScreenState extends State<HomeScreen>
               } else if (value == 'invite') {
                 await showInviteShareSheet(context,
                     handle: _currentUser?.username);
+              } else if (value == 'anonymous') {
+                if (_currentUserId == null) return;
+                await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnonymousLobbyScreen(
+                        currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name ?? 'User',
+                      ),
+                    ));
+              } else if (value == 'restore_anonymous') {
+                await sharedPrefs.setBool('anon_banner_dismissed_v1', false);
+                if (mounted) setState(() => _anonBannerDismissed = false);
               } else if (value == 'logout') {
                 _signOut();
               }
@@ -2608,6 +2651,19 @@ class _HomeScreenState extends State<HomeScreen>
                     ],
                   ),
                 ),
+                PopupMenuItem(
+                  value: 'anonymous',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.masks_rounded, color: c.primary),
+                    title: Text(l10n.anonLobbyTitle),
+                  ),
+                ),
+                if (_anonBannerDismissed)
+                  PopupMenuItem(
+                    value: 'restore_anonymous',
+                    child: Text(l10n.anonRestoreBanner),
+                  ),
                 PopupMenuItem(
                   value: 'rate',
                   child: Row(
@@ -2783,7 +2839,7 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             _buildNavItem(
               index: 0,
-              label: AppLocalizations.of(context).homeNavChats,
+              label: AppLocalizations.of(context).tabMessages,
               icon: Icons.chat_bubble_rounded,
               selectedIcon: Icons.chat_bubble_rounded,
               isSelected: selectedIndex == 0,

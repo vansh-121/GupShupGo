@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "ஸ்கிரீன்ஷாட்கள் தடுக்கப்பட்டுள்ளன.",
   "viewOnceUnblockedFooter": "மீண்டும் திறக்க முடியாது.",
   "attachmentScreenShare": "திரையைப் பகிரவும்",
-  "attachmentScreenShareSubtitle": "அரட்டையின் போது உங்கள் திரையை நேரலையாகக் காட்டுங்கள்"
+  "attachmentScreenShareSubtitle": "அரட்டையின் போது உங்கள் திரையை நேரலையாகக் காட்டுங்கள்",
+  "tabMessages": "செய்திகள்",
+  "anonRestoreBanner": "அநாமதேய அரட்டை பேனரைக் காட்டு",
+  "contactsInviteFriends": "நண்பர்களை GupShupGo-க்கு அழைக்கவும்",
+  "inviteImageShareFailed": "படத்தைப் பகிர முடியவில்லை. மீண்டும் முயலவும் அல்லது இணைப்பைப் பகிரவும்."
 }

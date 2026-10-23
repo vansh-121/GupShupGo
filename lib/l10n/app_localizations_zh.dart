@@ -2261,5 +2261,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get viewOnceBlockedFooter => '为保障隐私，已禁止截屏与录屏。';
 
   @override
+  String get anonRestoreBanner => '显示匿名聊天横幅';
+
+  @override
+  String get contactsInviteFriends => '邀请好友加入GupShupGo';
+
+  @override
+  String get inviteImageShareFailed => '无法分享图片。请重试或分享链接。';
+
+  @override
   String get viewOnceUnblockedFooter => '关闭此窗口后媒体内容将立刻销毁。';
+
+  @override
+  String get tabMessages => '消息';
 }

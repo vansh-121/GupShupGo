@@ -101,6 +101,8 @@ Future<void> showAttachmentSheet({
 
   return showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: c.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -111,8 +113,12 @@ Future<void> showAttachmentSheet({
       bool armed = false;
       return StatefulBuilder(
         builder: (context, setSheetState) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              top: 20,
+              bottom: 20 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -156,14 +162,15 @@ Future<void> showAttachmentSheet({
                   const Divider(height: 20, indent: 16, endIndent: 16),
                   SwitchListTile(
                     value: armed,
-                    activeColor: c.primary,
+                    activeThumbColor: c.primary,
                     onChanged: (v) {
                       AppHaptics.tap();
                       // Turning it *on* is visiting it; turning it back off is
                       // not, and would clear the badge for a user who only
                       // brushed the switch.
                       if (v && viewOnce.newFeatureId != null) {
-                        WhatsNewService.instance.markSeen(viewOnce.newFeatureId!);
+                        WhatsNewService.instance
+                            .markSeen(viewOnce.newFeatureId!);
                       }
                       setSheetState(() => armed = v);
                     },
@@ -180,20 +187,21 @@ Future<void> showAttachmentSheet({
                     ),
                     title: Row(
                       children: [
-                        Text(l10n.attachmentViewOnce,
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                              color: c.textHigh,
-                            )),
+                        Flexible(
+                            child: Text(l10n.attachmentViewOnce,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                  color: c.textHigh,
+                                ))),
                         if (viewOnce.newFeatureId != null)
                           NewFeatureChip(featureId: viewOnce.newFeatureId!),
                       ],
                     ),
                     subtitle: Text(
                       armed ? viewOnce.subtitleOn : viewOnce.subtitleOff,
-                      style: GoogleFonts.poppins(
-                          fontSize: 12, color: c.textLow),
+                      style:
+                          GoogleFonts.poppins(fontSize: 12, color: c.textLow),
                     ),
                   ),
                 ],
@@ -276,7 +284,9 @@ class _AttachmentTile extends StatelessWidget {
       subtitle: Text(
         disabled
             ? 'Not available for view once'
-            : (showOnce ? _subtitleOnce(action.kind) : _subtitle(action.kind, l10n)),
+            : (showOnce
+                ? _subtitleOnce(action.kind)
+                : _subtitle(action.kind, l10n)),
         style: GoogleFonts.poppins(fontSize: 12, color: colors.textLow),
       ),
       onTap: disabled ? null : onSelected,

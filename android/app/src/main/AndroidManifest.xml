@@ -95,7 +95,9 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="gupshupgo.app" android:pathPrefix="/u/" />
+                <data android:scheme="https" android:host="www.gupshupgo.app" android:pathPrefix="/u/" />
                 <data android:scheme="http" android:host="gupshupgo.app" android:pathPrefix="/u/" />
+                <data android:scheme="http" android:host="www.gupshupgo.app" android:pathPrefix="/u/" />
             </intent-filter>
 
             <!-- app_links handles this manually via AppLinks().uriLinkStream —

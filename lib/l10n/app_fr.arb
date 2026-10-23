@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "Captures d'écran bloquées.",
   "viewOnceUnblockedFooter": "Ouverture unique. Impossible de bloquer les captures sur iOS.",
   "attachmentScreenShare": "Partager l'écran",
-  "attachmentScreenShareSubtitle": "Affichez votre écran en direct pendant la discussion"
+  "attachmentScreenShareSubtitle": "Affichez votre écran en direct pendant la discussion",
+  "tabMessages": "Messages",
+  "anonRestoreBanner": "Afficher la bannière du chat anonyme",
+  "contactsInviteFriends": "Inviter des amis sur GupShupGo",
+  "inviteImageShareFailed": "Impossible de partager l’image. Réessayez ou partagez le lien."
 }

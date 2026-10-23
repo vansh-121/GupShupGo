@@ -2369,6 +2369,19 @@ class AppLocalizationsBn extends AppLocalizations {
   String get viewOnceBlockedFooter => 'স্ক্রিনশট ব্লক করা হয়েছে।';
 
   @override
+  String get anonRestoreBanner => 'বেনামী চ্যাট ব্যানার দেখান';
+
+  @override
+  String get contactsInviteFriends => 'বন্ধুদের GupShupGo-তে আমন্ত্রণ জানান';
+
+  @override
+  String get inviteImageShareFailed =>
+      'ছবি শেয়ার করা যায়নি। আবার চেষ্টা করুন বা লিঙ্ক শেয়ার করুন।';
+
+  @override
   String get viewOnceUnblockedFooter =>
       'এটি আর খোলা যাবে না। iOS-এ স্ক্রিনশট ব্লক করা যায় না।';
+
+  @override
+  String get tabMessages => 'বার্তা';
 }

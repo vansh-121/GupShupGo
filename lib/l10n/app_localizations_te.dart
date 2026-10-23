@@ -2372,5 +2372,18 @@ class AppLocalizationsTe extends AppLocalizations {
   String get viewOnceBlockedFooter => 'స్క్రీన్‌షాట్లు బ్లాక్ చేయబడ్డాయి.';
 
   @override
+  String get anonRestoreBanner => 'అనామక చాట్ బ్యానర్ చూపించండి';
+
+  @override
+  String get contactsInviteFriends => 'స్నేహితులను GupShupGoకి ఆహ్వానించండి';
+
+  @override
+  String get inviteImageShareFailed =>
+      'చిత్రాన్ని షేర్ చేయలేకపోయాము. మళ్లీ ప్రయత్నించండి లేదా లింక్ షేర్ చేయండి.';
+
+  @override
   String get viewOnceUnblockedFooter => 'మళ్లీ తెరవడం సాధ్యం కాదు.';
+
+  @override
+  String get tabMessages => 'సందేశాలు';
 }

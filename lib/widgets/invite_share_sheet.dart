@@ -1,15 +1,14 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/services/invite_card_share_service.dart';
 
 const String _kPlayStoreUrl =
     'https://play.google.com/store/apps/details?id=com.gupshupgo.app';
@@ -18,7 +17,7 @@ const String _kPlayStoreUrl =
 /// handle (so a tap lands on *them*), otherwise the Play Store listing.
 String _inviteLink(String? handle) =>
     (handle != null && handle.trim().isNotEmpty)
-        ? 'https://gupshupgo.app/u/${handle.trim()}'
+        ? 'https://gupshupgo.app/u/${Uri.encodeComponent(handle.trim())}'
         : _kPlayStoreUrl;
 
 /// Opens the "Invite friends" sheet: share a link, copy it, or share a
@@ -72,23 +71,40 @@ class _InviteShareSheetState extends State<_InviteShareSheet> {
     setState(() => _busy = true);
     final t = AppLocalizations.of(context);
     try {
+      // setState invalidates the paint; capture after the busy frame paints.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       final boundary =
           _cardKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
+      if (boundary == null) throw StateError('Invite preview unavailable');
       // The card's own logical size is 1080×1920, so pixelRatio 1.0 yields a
       // native story-sized PNG even though it's previewed much smaller.
       final image = await boundary.toImage(pixelRatio: 1.0);
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (bytes == null) return;
-      final dir = await getTemporaryDirectory();
-      final file = await File('${dir.path}/gupshupgo_invite.png')
-          .writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
-        text: _message(t),
+      late final ByteData? bytes;
+      try {
+        bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      } finally {
+        image.dispose();
+      }
+      if (bytes == null) throw StateError('Invite PNG encoding failed');
+      final file = await InviteCardShareService.writePng(
+        bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
       );
-    } catch (_) {
-      // Best-effort: a capture/share failure just leaves the sheet open.
+      if (!mounted) return;
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [file],
+        text: _message(t),
+        sharePositionOrigin:
+            box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+      );
+    } catch (e) {
+      debugPrint('[Invite] image share failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t.inviteImageShareFailed)),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -116,113 +132,115 @@ class _InviteShareSheetState extends State<_InviteShareSheet> {
           top: 12,
           bottom: 16 + media.viewInsets.bottom,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 14),
-              decoration: BoxDecoration(
-                color: c.border,
-                borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            Text(
-              t.inviteSheetTitle,
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: c.textHigh,
+              Text(
+                t.inviteSheetTitle,
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: c.textHigh,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              t.inviteSheetSubtitle,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 12.5, color: c.textMid),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 4),
+              Text(
+                t.inviteSheetSubtitle,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(fontSize: 12.5, color: c.textMid),
+              ),
+              const SizedBox(height: 16),
 
-            // ── Story-card preview (also the rasterisation source) ──
-            SizedBox(
-              width: previewW,
-              height: previewW * 16 / 9,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: RepaintBoundary(
-                  key: _cardKey,
-                  child: _StoryCard(handle: widget.handle),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-
-            // ── Primary: share the ready-made image ──
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: c.primary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: _busy ? null : _shareImage,
-                icon: _busy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.ios_share_rounded, size: 18),
-                label: Text(
-                  t.inviteShareImageBtn,
-                  style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700, fontSize: 14),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: c.textHigh,
-                      side: BorderSide(color: c.border),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                    ),
-                    onPressed: _busy ? null : _shareLink,
-                    icon: const Icon(Icons.link_rounded, size: 18),
-                    label: Text(
-                      t.inviteShareLinkBtn,
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
+              // ── Story-card preview (also the rasterisation source) ──
+              SizedBox(
+                width: previewW,
+                height: previewW * 16 / 9,
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: RepaintBoundary(
+                    key: _cardKey,
+                    child: _StoryCard(handle: widget.handle),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: c.textHigh,
-                      side: BorderSide(color: c.border),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                    ),
-                    onPressed: _busy ? null : _copyLink,
-                    icon: const Icon(Icons.content_copy_rounded, size: 16),
-                    label: Text(
-                      t.inviteCopyLinkBtn,
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
+              ),
+              const SizedBox(height: 18),
+
+              // ── Primary: share the ready-made image ──
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: c.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: _busy ? null : _shareImage,
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.ios_share_rounded, size: 18),
+                  label: Text(
+                    t.inviteShareImageBtn,
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700, fontSize: 14),
                   ),
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: c.textHigh,
+                        side: BorderSide(color: c.border),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                      onPressed: _busy ? null : _shareLink,
+                      icon: const Icon(Icons.link_rounded, size: 18),
+                      label: Text(
+                        t.inviteShareLinkBtn,
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: c.textHigh,
+                        side: BorderSide(color: c.border),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                      onPressed: _busy ? null : _copyLink,
+                      icon: const Icon(Icons.content_copy_rounded, size: 16),
+                      label: Text(
+                        t.inviteCopyLinkBtn,
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -283,7 +301,7 @@ class _StoryCard extends StatelessWidget {
                 style: GoogleFonts.poppins(
                   fontSize: 44,
                   fontWeight: FontWeight.w500,
-                  color: Colors.white.withOpacity(0.92),
+                  color: Colors.white.withValues(alpha: 0.92),
                   height: 1.3,
                 ),
               ),
@@ -330,14 +348,16 @@ class _StoryCard extends StatelessWidget {
                   const Icon(Icons.play_arrow_rounded,
                       color: Colors.white, size: 56),
                   const SizedBox(width: 12),
-                  Text(
+                  Flexible(
+                      child: Text(
                     t.inviteCardDownload,
+                    textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
                       fontSize: 40,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
-                  ),
+                  )),
                 ],
               ),
             ],

@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "تم حظر لقطات الشاشة لحماية الخصوصية.",
   "viewOnceUnblockedFooter": "ستختفي الوسائط بمجرد إغلاق هذه النافذة.",
   "attachmentScreenShare": "مشاركة الشاشة",
-  "attachmentScreenShareSubtitle": "اعرض شاشتك مباشرة أثناء الدردشة"
+  "attachmentScreenShareSubtitle": "اعرض شاشتك مباشرة أثناء الدردشة",
+  "tabMessages": "الرسائل",
+  "anonRestoreBanner": "إظهار بانر الدردشة المجهولة",
+  "contactsInviteFriends": "دعوة الأصدقاء إلى GupShupGo",
+  "inviteImageShareFailed": "تعذرت مشاركة الصورة. حاول مرة أخرى أو شارك الرابط."
 }

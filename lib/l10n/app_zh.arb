@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "为保障隐私，已禁止截屏与录屏。",
   "viewOnceUnblockedFooter": "关闭此窗口后媒体内容将立刻销毁。",
   "attachmentScreenShare": "屏幕共享",
-  "attachmentScreenShareSubtitle": "在聊天期间实时展示您的屏幕"
+  "attachmentScreenShareSubtitle": "在聊天期间实时展示您的屏幕",
+  "tabMessages": "消息",
+  "anonRestoreBanner": "显示匿名聊天横幅",
+  "contactsInviteFriends": "邀请好友加入GupShupGo",
+  "inviteImageShareFailed": "无法分享图片。请重试或分享链接。"
 }

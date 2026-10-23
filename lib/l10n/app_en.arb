@@ -3120,8 +3120,15 @@
   "@viewOnceBlockedFooter": {
     "description": "Footer note on Android where screenshots are blocked."
   },
+  "anonRestoreBanner": "Show Anonymous Chat banner",
+  "@anonRestoreBanner": {"description": "Home menu action to restore the dismissed Anonymous Chat banner."},
+  "contactsInviteFriends": "Invite Friends to GupShupGo",
+  "@contactsInviteFriends": {"description": "Invite action in Contacts Discover and search."},
+  "inviteImageShareFailed": "Couldn't share the image. Try again or share the link instead.",
+  "@inviteImageShareFailed": {"description": "Visible error after invite image capture or sharing fails."},
   "viewOnceUnblockedFooter": "You can't open this again. Screenshots can't be blocked on iOS.",
   "@viewOnceUnblockedFooter": {
     "description": "Footer note on iOS where screenshots cannot be blocked."
-  }
+  },
+  "tabMessages": "Messages"
 }

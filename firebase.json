@@ -1,4 +1,24 @@
 {
+  "hosting": {
+    "public": "web/profile-links",
+    "ignore": ["README.md"],
+    "redirects": [
+      {
+        "source": "/u/**",
+        "destination": "https://play.google.com/store/apps/details?id=com.gupshupgo.app",
+        "type": 302
+      }
+    ],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Cache-Control", "value": "public, max-age=3600"}
+        ]
+      }
+    ]
+  },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"

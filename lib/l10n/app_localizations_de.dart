@@ -2370,5 +2370,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get viewOnceBlockedFooter => 'Screenshots blockiert.';
 
   @override
+  String get anonRestoreBanner => 'Banner für anonymen Chat anzeigen';
+
+  @override
+  String get contactsInviteFriends => 'Freunde zu GupShupGo einladen';
+
+  @override
+  String get inviteImageShareFailed =>
+      'Das Bild konnte nicht geteilt werden. Versuche es erneut oder teile den Link.';
+
+  @override
   String get viewOnceUnblockedFooter => 'Nur einmaliges Öffnen möglich.';
+
+  @override
+  String get tabMessages => 'Nachrichten';
 }

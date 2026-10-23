@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "Ekran görüntüsü engellendi.",
   "viewOnceUnblockedFooter": "Yalnızca bir kez açılabilir.",
   "attachmentScreenShare": "Ekran paylaş",
-  "attachmentScreenShareSubtitle": "Sohbet sırasında ekranınızı canlı gösterin"
+  "attachmentScreenShareSubtitle": "Sohbet sırasında ekranınızı canlı gösterin",
+  "tabMessages": "Mesajlar",
+  "anonRestoreBanner": "Anonim Sohbet bannerını göster",
+  "contactsInviteFriends": "Arkadaşlarını GupShupGo’ya davet et",
+  "inviteImageShareFailed": "Resim paylaşılamadı. Tekrar deneyin veya bağlantıyı paylaşın."
 }

@@ -705,5 +705,9 @@
   "viewOnceBlockedFooter": "Tangkapan layar diblokir untuk melindungi privasi.",
   "viewOnceUnblockedFooter": "Media akan terhapus secara otomatis saat Anda menutup layar ini.",
   "attachmentScreenShare": "Bagi layar",
-  "attachmentScreenShareSubtitle": "Tampilkan layar Anda secara langsung selama obrolan"
+  "attachmentScreenShareSubtitle": "Tampilkan layar Anda secara langsung selama obrolan",
+  "tabMessages": "Pesan",
+  "anonRestoreBanner": "Tampilkan banner Obrolan Anonim",
+  "contactsInviteFriends": "Undang Teman ke GupShupGo",
+  "inviteImageShareFailed": "Gambar tidak dapat dibagikan. Coba lagi atau bagikan tautannya."
 }
