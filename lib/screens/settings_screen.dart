@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
+import 'package:video_chat_app/widgets/anonymous_chat_icon.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/l10n/app_locales.dart';
@@ -95,6 +96,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final l10n = AppLocalizations.of(context);
 
     if (nowOn) {
+      // Full-screen incoming-call access is a separate Android 14+ setting.
+      // This explicit user action may retry even if Home already checked once.
+      fcm.requestFullScreenIntentPermission(force: true);
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(SnackBar(
@@ -686,7 +690,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  secondary: Icon(Icons.masks_rounded, color: c.textMid, size: 18),
+                  secondary: AnonymousChatIcon(color: c.textMid, size: 18),
                   title: Text(
                     l10n.anonRestoreBanner,
                     maxLines: 1,

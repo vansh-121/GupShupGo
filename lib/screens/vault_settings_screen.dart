@@ -8,15 +8,19 @@
 //
 // Reachable from SettingsScreen → "End-to-end encryption" → "Vault".
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
+import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultSettingsScreen extends StatefulWidget {
@@ -529,7 +533,16 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   late bool _numeric = widget.numericPinHint;
 
   @override
+  void initState() {
+    super.initState();
+    AdsService.instance.suppressBanner();
+    unawaited(focusInputWhenReady(context, _oldFocus,
+        shouldFocus: () => !_busy));
+  }
+
+  @override
   void dispose() {
+    AdsService.instance.releaseBannerSuppression();
     _old.dispose();
     _new.dispose();
     _confirm.dispose();
@@ -549,6 +562,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     final l10n = AppLocalizations.of(context);
     if (_old.text.isEmpty) {
       setState(() => _error = l10n.vaultSettingsEnterCurrentPin);
@@ -587,6 +601,8 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
         _error = l10n.vaultSettingsCurrentPinIncorrect;
         _old.clear();
       });
+      await focusInputWhenReady(context, _oldFocus,
+          shouldFocus: () => !_busy);
       return;
     }
     Navigator.of(context).pop(true);
@@ -600,6 +616,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
       canPop: !_busy,
       child: AlertDialog(
         backgroundColor: c.surface,
+        scrollable: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(l10n.vaultSettingsChangePin,
             style: TextStyle(
@@ -613,11 +630,19 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
             ),
             const SizedBox(height: 16),
             _field(c, _old, l10n.vaultSettingsCurrentPin,
-                focusNode: _oldFocus, autofocus: true),
+                focusNode: _oldFocus,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => _newFocus.requestFocus()),
             const SizedBox(height: 10),
-            _field(c, _new, l10n.vaultSettingsNewPin, focusNode: _newFocus),
+            _field(c, _new, l10n.vaultSettingsNewPin,
+                focusNode: _newFocus,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => _confirmFocus.requestFocus()),
             const SizedBox(height: 10),
-            _field(c, _confirm, l10n.vaultSettingsConfirmNewPin, focusNode: _confirmFocus),
+            _field(c, _confirm, l10n.vaultSettingsConfirmNewPin,
+                focusNode: _confirmFocus,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => unawaited(_submit())),
             PinKeyboardToggle(
               numeric: _numeric,
               onToggle: _toggleKeyboard,
@@ -663,12 +688,18 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   }
 
   Widget _field(AppThemeColors c, TextEditingController ctrl, String hint,
-      {required FocusNode focusNode, bool autofocus = false}) {
+      {required FocusNode focusNode,
+      required TextInputAction textInputAction,
+      required ValueChanged<String> onSubmitted}) {
     return TextField(
       controller: ctrl,
       focusNode: focusNode,
       obscureText: _obscure,
-      autofocus: autofocus,
+      enabled: !_busy,
+      textInputAction: textInputAction,
+      onSubmitted: onSubmitted,
+      autocorrect: false,
+      enableSuggestions: false,
       keyboardType:
           _numeric ? TextInputType.number : TextInputType.visiblePassword,
       // Length-limited only — no digitsOnly filter. The current-PIN field has
@@ -722,7 +753,16 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
   late bool _numeric = widget.numericPinHint;
 
   @override
+  void initState() {
+    super.initState();
+    AdsService.instance.suppressBanner();
+    unawaited(focusInputWhenReady(context, _pinFocus,
+        shouldFocus: () => !_busy));
+  }
+
+  @override
   void dispose() {
+    AdsService.instance.releaseBannerSuppression();
     _pin.dispose();
     _pinFocus.dispose();
     super.dispose();
@@ -734,6 +774,7 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     final l10n = AppLocalizations.of(context);
     if (_pin.text.isEmpty) {
       setState(() => _error = l10n.vaultSettingsEnterCurrentPin);
@@ -751,6 +792,8 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
         _error = l10n.vaultIncorrectPin;
         _pin.clear();
       });
+      await focusInputWhenReady(context, _pinFocus,
+          shouldFocus: () => !_busy);
       return;
     }
     // A typed PIN that verifies is proof of custody.
@@ -766,6 +809,7 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
       canPop: !_busy,
       child: AlertDialog(
         backgroundColor: c.surface,
+        scrollable: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(l10n.vaultSettingsBioPinDialogTitle,
             style: TextStyle(
@@ -782,7 +826,10 @@ class _FingerprintPinDialogState extends State<_FingerprintPinDialog> {
               controller: _pin,
               focusNode: _pinFocus,
               obscureText: _obscure,
-              autofocus: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => unawaited(_submit()),
+              autocorrect: false,
+              enableSuggestions: false,
               enabled: !_busy,
               keyboardType: _numeric
                   ? TextInputType.number

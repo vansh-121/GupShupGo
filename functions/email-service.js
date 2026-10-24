@@ -65,7 +65,7 @@ async function sendEmail(to, subject, html) {
     const info = await transporter.sendMail({
       from: {
         name: "GupShupGo",
-        address: "vansh.sethi98760@gmail.com",
+        address: "noreply@gupshupgo.app",
       },
       to,
       subject,

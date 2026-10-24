@@ -7,6 +7,9 @@ template-arb-file: app_en.arb
 output-localization-file: app_localizations.dart
 output-class: AppLocalizations
 output-dir: lib/l10n
+# Flutter falls back to the first supported locale when none of the device's
+# preferred languages match. Keep that default English rather than ARB order.
+preferred-supported-locales: [en]
 # Non-nullable getter: AppLocalizations.of(context) returns a non-null instance
 # (the delegates are always installed in MaterialApp), so call sites stay clean.
 nullable-getter: false

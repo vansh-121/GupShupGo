@@ -26,12 +26,17 @@ class NotificationPermissionPrompt {
     required String userId,
   }) async {
     if (_asking || !context.mounted) return;
-    final budget = HomePromptPreferences(sharedPrefs);
-    if (!budget.canAskNotifications(DateTime.now())) return;
     _asking = true;
     try {
       final fcm = FCMService();
-      if (await fcm.hasNotificationPermission()) return;
+      if (await fcm.hasNotificationPermission()) {
+        // Android 14+ controls full-screen incoming-call access separately
+        // from notifications, so an already-authorized user may still need it.
+        fcm.requestFullScreenIntentPermission();
+        return;
+      }
+      final budget = HomePromptPreferences(sharedPrefs);
+      if (!budget.canAskNotifications(DateTime.now())) return;
       // The old flag conflated granting permission with "Not now". Give users
       // who declined that version a fresh cooldown instead of retiring access.
       if (sharedPrefs.getBool('notif_soft_ask_handled_v1') == true &&

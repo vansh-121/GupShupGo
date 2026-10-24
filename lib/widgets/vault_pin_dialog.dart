@@ -9,6 +9,8 @@
 // the fingerprint button and never showed it, which made reinstall an
 // unrecoverable data loss; see lib/services/crypto/vault_pin_custody.dart.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -20,6 +22,7 @@ import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
 import 'package:video_chat_app/services/status_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultPinDialog extends StatefulWidget {
@@ -117,7 +120,11 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
     // Android platform view, and attaching/refreshing one while the PIN keyboard
     // is up dismisses the keyboard (the reported "keyboard keeps closing" bug).
     AdsService.instance.suppressBanner();
-    _checkBiometrics();
+    if (_isSetup) {
+      unawaited(focusInputWhenReady(context, _pinFocus,
+          shouldFocus: () => !_busy));
+    }
+    unawaited(_checkBiometrics());
   }
 
   @override
@@ -143,12 +150,18 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   }
 
   Future<void> _checkBiometrics() async {
+    String? storedPin;
     try {
-      final canCheck = await _auth.canCheckBiometrics;
-      final isSupported = await _auth.isDeviceSupported();
       // Read the stored PIN up front: whether one exists decides whether a
       // fingerprint affordance can do anything at all.
-      final storedPin = await _storage.read(key: _pinKey);
+      final results = await Future.wait<Object?>([
+        _auth.canCheckBiometrics,
+        _auth.isDeviceSupported(),
+        _storage.read(key: _pinKey),
+      ]);
+      final canCheck = results[0] as bool;
+      final isSupported = results[1] as bool;
+      storedPin = results[2] as String?;
       if (!mounted) return;
 
       setState(() {
@@ -162,13 +175,25 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
           _hint = l10n.vaultReinstallHint;
         }
       });
-
-      // Unlock mode with a stored PIN — go straight to the scanner.
-      if (!_isSetup && _biometricUnlockReady) {
-        _authenticateWithBiometrics(savedPin: storedPin);
-      }
     } catch (e) {
       debugPrint('[Biometrics] check failed: $e');
+    }
+
+    if (!mounted || _isSetup || _busy) return;
+    if (_biometricUnlockReady) {
+      // Choose the unlock method before requesting the IME. Do not interrupt
+      // someone who already tapped the PIN field while the check was running.
+      if (!await waitForInputRoute(context) ||
+          !mounted ||
+          _busy ||
+          _pinFocus.hasFocus ||
+          _pinCtrl.text.isNotEmpty) {
+        return;
+      }
+      await _authenticateWithBiometrics(savedPin: storedPin);
+    } else {
+      await focusInputWhenReady(context, _pinFocus,
+          shouldFocus: () => !_busy);
     }
   }
 
@@ -178,6 +203,13 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   /// created from a PIN the user typed, so there is nothing for a scan to
   /// unwrap yet.
   Future<void> _authenticateWithBiometrics({String? savedPin}) async {
+    if (_busy || !await waitForInputRoute(context) || !mounted || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    _pinFocus.unfocus();
+    var unlocked = false;
     try {
       final l10n = AppLocalizations.of(context);
       final authenticated = await _auth.authenticate(
@@ -190,27 +222,23 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
 
       if (!authenticated || !mounted) return;
 
-      setState(() {
-        _busy = true;
-        _error = null;
-      });
-
       final pinToUse = savedPin ?? await _storage.read(key: _pinKey);
       if (pinToUse != null && pinToUse.isNotEmpty) {
         final ok = await VaultCipher.instance.unlock(widget.uid, pinToUse);
         if (ok && mounted) {
+          unlocked = true;
           Navigator.of(context).pop(true);
           return;
         }
       }
       if (VaultCipher.instance.isReady && mounted) {
+        unlocked = true;
         Navigator.of(context).pop(true);
         return;
       }
       if (mounted) {
         final currentL10n = AppLocalizations.of(context);
         setState(() {
-          _busy = false;
           // The scan succeeded but the PIN behind it no longer opens the
           // vault — e.g. the PIN was changed on another device.
           _hasStoredPin = false;
@@ -222,22 +250,32 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
       if (mounted) {
         final currentL10n = AppLocalizations.of(context);
         setState(() {
-          _busy = false;
           _error = currentL10n.vaultBiometricError;
         });
+      }
+    } finally {
+      if (mounted && !unlocked) {
+        setState(() => _busy = false);
+        await focusInputWhenReady(context, _pinFocus,
+            shouldFocus: () => !_busy);
       }
     }
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     final l10n = AppLocalizations.of(context);
     final pin = _pinCtrl.text;
     if (pin.length < _minLen) {
       setState(() => _error = l10n.vaultPinMinLength);
+      await focusInputWhenReady(context, _pinFocus,
+          preserveUserFocus: false, shouldFocus: () => !_busy);
       return;
     }
     if (_isSetup && pin != _confirmCtrl.text) {
       setState(() => _error = l10n.vaultPinsDoNotMatch);
+      await focusInputWhenReady(context, _confirmFocus,
+          preserveUserFocus: false, shouldFocus: () => !_busy);
       return;
     }
     setState(() {
@@ -257,6 +295,8 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
         _pinCtrl.clear();
         if (_isSetup) _confirmCtrl.clear();
       });
+      await focusInputWhenReady(context, _pinFocus,
+          shouldFocus: () => !_busy);
       return;
     }
 
@@ -620,7 +660,16 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                   _pinCtrl,
                   _isSetup ? l10n.vaultNewPin : l10n.vaultEnterPin,
                   focusNode: _pinFocus,
-                  autofocus: !_biometricUnlockReady,
+                  textInputAction:
+                      _isSetup ? TextInputAction.next : TextInputAction.done,
+                  onSubmitted: (_) {
+                    if (_busy) return;
+                    if (_isSetup) {
+                      _confirmFocus.requestFocus();
+                    } else {
+                      unawaited(_submit());
+                    }
+                  },
                 ),
                 if (_isSetup) ...[
                   const SizedBox(height: 10),
@@ -629,6 +678,8 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
                     _confirmCtrl,
                     l10n.vaultConfirmPin,
                     focusNode: _confirmFocus,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => unawaited(_submit()),
                   ),
                 ],
 
@@ -760,7 +811,9 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
   }
 
   Widget _pinField(AppThemeColors c, TextEditingController ctrl, String hint,
-      {required FocusNode focusNode, bool autofocus = false}) {
+      {required FocusNode focusNode,
+      required TextInputAction textInputAction,
+      required ValueChanged<String> onSubmitted}) {
     return Container(
       decoration: BoxDecoration(
         color: c.surface,
@@ -771,7 +824,11 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
         controller: ctrl,
         focusNode: focusNode,
         obscureText: _obscure,
-        autofocus: autofocus,
+        enabled: !_busy,
+        textInputAction: textInputAction,
+        onSubmitted: onSubmitted,
+        autocorrect: false,
+        enableSuggestions: false,
         keyboardType:
             _numeric ? TextInputType.number : TextInputType.visiblePassword,
         // Length-limited only. Deliberately no digitsOnly filter even when the

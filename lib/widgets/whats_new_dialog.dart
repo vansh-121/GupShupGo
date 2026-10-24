@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.2.1';
+const String kCurrentVersion = '1.2.2';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,8 +193,18 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
+    Icons.language_rounded,
+    'Global Multi-Language Support',
+    'Experience GupShupGo in your native language with full localization across 16 world and regional languages.',
+  ),
+  _Feature(
+    Icons.badge_rounded,
+    'Personalized Invite Cards & Links',
+    'Share customized invite cards and direct profile links (gupshupgo.app/u/your_handle) to connect with friends instantly.',
+  ),
+  _Feature(
     Icons.auto_awesome_rounded,
-    'Meet GupAI',
-    'Your fast, intelligent in-app AI assistant. Ask questions, brainstorm ideas, draft messages, and get instant answers right from your chats.',
+    'Enhanced In-Chat GupAI',
+    'Supercharged AI assistant support directly inside your chats. Easily rewrite drafts, translate foreign messages, and trigger smart actions on the fly.',
   ),
 ];

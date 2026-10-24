@@ -7,6 +7,7 @@ import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_chat_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/anonymous_chat_icon.dart';
 
 /// Lobby screen with a radar ripple animation while searching for
 /// a random stranger to pair with. Shows a live "online now" count so the
@@ -300,7 +301,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
 }
 
 /// The centered radar: three expanding ripple rings behind a gradient puck
-/// carrying the search glyph. The gradient reuses the home "Connect with a
+/// carrying the incognito glyph. The gradient reuses the home "Connect with a
 /// Stranger" banner's brand colors so the two surfaces read as one feature.
 class _RadarHero extends StatelessWidget {
   final AnimationController rippleController;
@@ -350,8 +351,7 @@ class _RadarHero extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(
-              Icons.person_search_rounded,
+            child: const AnonymousChatIcon(
               size: 44,
               color: Colors.white,
             ),

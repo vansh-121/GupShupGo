@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
   final String userId;
@@ -25,6 +28,7 @@ class AddTextStatusScreen extends StatefulWidget {
 
 class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   final TextEditingController _textController = TextEditingController();
+  final _textFocus = FocusNode();
   final StatusService _statusService = StatusService();
   bool _isUploading = false;
 
@@ -38,6 +42,8 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   void initState() {
     super.initState();
     _viewersFuture = _statusService.defaultViewerUids(widget.userId);
+    unawaited(focusInputWhenReady(context, _textFocus,
+        shouldFocus: () => !_isUploading));
   }
 
   int _currentColorIndex = 0;
@@ -136,6 +142,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
@@ -178,7 +185,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: TextField(
                 controller: _textController,
-                autofocus: true,
+                focusNode: _textFocus,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   color: onBg,

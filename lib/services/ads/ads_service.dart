@@ -21,6 +21,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
@@ -50,11 +51,12 @@ class AdsService extends ChangeNotifier {
   bool _starting = false;
   bool _wired = false;
 
-  /// How many callers are currently asking the banner to stay hidden. A count,
+  /// How many callers are currently asking inline ads to stay hidden. A count,
   /// not a bool, so overlapping suppressors (e.g. a dialog shown over another)
-  /// compose correctly — the banner returns only when the last one releases.
+  /// compose correctly — ads return only when the last one releases.
   /// See [suppressBanner].
   int _bannerSuppressors = 0;
+  bool _visibilityNotificationScheduled = false;
 
   /// Whether the Mobile Ads SDK has been initialised and may be asked for ads.
   bool get isReady => _sdkReady;
@@ -184,13 +186,13 @@ class AdsService extends ChangeNotifier {
         _sdkReady;
   }
 
-  /// Hide the banner until the matching [releaseBannerSuppression] call. Pair
+  /// Hide inline platform-view ads until [releaseBannerSuppression]. Pair
   /// them exactly once (e.g. in a widget's `initState`/`dispose`). Toggling
-  /// notifies listeners, so a live [AdBanner] tears its platform view down at
-  /// once and rebuilds it only after the last suppressor releases.
+  /// notifies listeners, so banner/native cards remove their platform views
+  /// and rebuild them only after the last suppressor releases.
   void suppressBanner() {
     _bannerSuppressors++;
-    if (_bannerSuppressors == 1) notifyListeners();
+    if (_bannerSuppressors == 1) _notifyInlineAdVisibility();
   }
 
   /// Undo one [suppressBanner]. Clamped at zero so an extra release can never
@@ -198,7 +200,23 @@ class AdsService extends ChangeNotifier {
   void releaseBannerSuppression() {
     if (_bannerSuppressors == 0) return;
     _bannerSuppressors--;
-    if (_bannerSuppressors == 0) notifyListeners();
+    if (_bannerSuppressors == 0) _notifyInlineAdVisibility();
+  }
+
+  void _notifyInlineAdVisibility() {
+    // PIN dialogs acquire/release suppression in initState/dispose. Updating
+    // an ad behind the dialog synchronously would call setState during build.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_visibilityNotificationScheduled) return;
+      _visibilityNotificationScheduled = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _visibilityNotificationScheduled = false;
+        notifyListeners();
+      });
+    } else {
+      notifyListeners();
+    }
   }
 
   /// Whether a rewarded ad may be offered.
@@ -245,7 +263,8 @@ class AdsService extends ChangeNotifier {
     required CallState callState,
     bool inChat = false,
   }) {
-    return _flags.adsEnabled &&
+    return _bannerSuppressors == 0 &&
+        _flags.adsEnabled &&
         (inChat ? _flags.adsNativeChatEnabled : _flags.adsNativeEnabled) &&
         !hasProEntitlement &&
         callState == CallState.Idle &&

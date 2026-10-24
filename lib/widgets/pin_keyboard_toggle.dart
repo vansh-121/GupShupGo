@@ -19,18 +19,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
-/// Re-opens the soft keyboard so a changed `keyboardType` takes effect.
-///
-/// Android keeps showing the keyboard it already has until the field is
-/// re-focused, so flipping the type alone appears to do nothing until the user
-/// taps the field again. Dropping focus and restoring it forces the IME to be
-/// re-requested with the new type.
-Future<void> reopenKeyboardFor(BuildContext context, FocusNode node) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await Future<void>.delayed(const Duration(milliseconds: 60));
-  if (context.mounted) node.requestFocus();
-}
+/// Shows the updated keyboard after Flutter has applied `keyboardType` to the
+/// existing input connection. Keeping focus avoids a hide/show animation and
+/// preserves the user's cursor and composing text.
+Future<void> reopenKeyboardFor(BuildContext context, FocusNode node) =>
+    focusInputWhenReady(context, node);
 
 class PinKeyboardToggle extends StatelessWidget {
   const PinKeyboardToggle({

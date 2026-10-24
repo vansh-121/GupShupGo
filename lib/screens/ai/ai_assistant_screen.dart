@@ -33,6 +33,7 @@ import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 import 'package:video_chat_app/utils/chat_scroll_controller.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
 
 /// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
@@ -91,10 +92,15 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       _composer.text = widget.seedText!;
       _composer.selection =
           TextSelection.collapsed(offset: _composer.text.length);
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _composerFocus.requestFocus());
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowNotice());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _maybeShowNotice();
+      if (mounted && seed != null && seed.isNotEmpty) {
+        await focusInputWhenReady(context, _composerFocus,
+            shouldFocus: () => !_sending);
+      }
+    });
   }
 
   @override

@@ -19,6 +19,8 @@
 // Not dismissible: the rescue window closes permanently when an affected
 // install is removed, taking the only copy of the generated PIN with it.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -26,6 +28,7 @@ import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/widgets/pin_keyboard_toggle.dart';
 
 class VaultPinCustodyDialog extends StatefulWidget {
@@ -109,6 +112,8 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
     // See VaultPinDialog: hide the Home banner's platform-view AdWidget while
     // this PIN modal is open so it can't dismiss the keyboard mid-entry.
     AdsService.instance.suppressBanner();
+    unawaited(focusInputWhenReady(context, _pinFocus,
+        shouldFocus: () => !_busy && _step == _Step.confirm));
   }
 
   @override
@@ -137,6 +142,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   /// anything on a mismatch, so a wrong guess here cannot disturb a vault that
   /// is already open.
   Future<void> _confirmExisting() async {
+    if (_busy) return;
     final l10n = AppLocalizations.of(context);
     final pin = _pinCtrl.text;
     if (pin.isEmpty) {
@@ -165,6 +171,7 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   /// chooses. changePin flips the verifier last, so an interruption leaves the
   /// old PIN valid and the run can simply be repeated.
   Future<void> _rekey() async {
+    if (_busy) return;
     final l10n = AppLocalizations.of(context);
     if (_newCtrl.text.length < _minLen) {
       setState(() => _error = l10n.vaultPinMinLength);
@@ -280,13 +287,19 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                 const SizedBox(height: 14),
                 if (isConfirm)
                   _field(c, _pinCtrl, l10n.vaultEnterPin,
-                      focusNode: _pinFocus, autofocus: true)
+                      focusNode: _pinFocus,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => unawaited(_confirmExisting()))
                 else ...[
                   _field(c, _newCtrl, l10n.vaultNewPin,
-                      focusNode: _newFocus, autofocus: true),
+                      focusNode: _newFocus,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => _confirmFocus.requestFocus()),
                   const SizedBox(height: 10),
                   _field(c, _confirmCtrl, l10n.vaultConfirmPin,
-                      focusNode: _confirmFocus),
+                      focusNode: _confirmFocus,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => unawaited(_rekey())),
                 ],
                 // Escape hatch from a wrong keyboard default, and load-bearing
                 // on the confirm step: the number pad on some Android
@@ -356,7 +369,8 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                     child: TextButton(
                       onPressed: _busy
                           ? null
-                          : () => setState(() {
+                          : () {
+                              setState(() {
                                 _step = _Step.rekey;
                                 _error = null;
                                 _pinCtrl.clear();
@@ -365,7 +379,11 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
                                 // so the number-pad default applies again,
                                 // even if the hint above said otherwise.
                                 _numeric = true;
-                              }),
+                              });
+                              unawaited(focusInputWhenReady(context, _newFocus,
+                                  shouldFocus: () =>
+                                      !_busy && _step == _Step.rekey));
+                            },
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
                         minimumSize: Size.zero,
@@ -424,7 +442,9 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
   }
 
   Widget _field(AppThemeColors c, TextEditingController ctrl, String hint,
-      {required FocusNode focusNode, bool autofocus = false}) {
+      {required FocusNode focusNode,
+      required TextInputAction textInputAction,
+      required ValueChanged<String> onSubmitted}) {
     return Container(
       decoration: BoxDecoration(
         color: c.surface,
@@ -435,7 +455,10 @@ class _VaultPinCustodyDialogState extends State<VaultPinCustodyDialog> {
         controller: ctrl,
         focusNode: focusNode,
         obscureText: _obscure,
-        autofocus: autofocus,
+        textInputAction: textInputAction,
+        onSubmitted: onSubmitted,
+        autocorrect: false,
+        enableSuggestions: false,
         enabled: !_busy,
         keyboardType:
             _numeric ? TextInputType.number : TextInputType.visiblePassword,

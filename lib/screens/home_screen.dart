@@ -61,6 +61,7 @@ import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
 import 'package:video_chat_app/widgets/invite_share_sheet.dart';
+import 'package:video_chat_app/widgets/anonymous_chat_icon.dart';
 import 'package:video_chat_app/widgets/notification_permission_prompt.dart';
 import 'package:video_chat_app/services/home_prompt_preferences.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
@@ -2606,8 +2607,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: 'anonymous',
                   child: Row(
                     children: [
-                      Icon(Icons.masks_rounded,
-                          color: c.primary, size: 20),
+                      AnonymousChatIcon(color: c.primary, size: 20),
                       const SizedBox(width: 12),
                       Flexible(child: Text(l10n.anonLobbyTitle)),
                     ],
@@ -3362,8 +3362,7 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                           color: Colors.white.withOpacity(0.18),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
-                          Icons.shuffle_rounded,
+                        child: const AnonymousChatIcon(
                           color: Colors.white,
                           size: 20,
                         ),

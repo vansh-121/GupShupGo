@@ -6,6 +6,7 @@ import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
@@ -27,6 +28,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   final UserService _userService = UserService();
   final AuthService _authService = AuthService();
   final TextEditingController _usernameController = TextEditingController();
+  final _usernameFocus = FocusNode();
 
   Timer? _debounce;
   bool _isChecking = false;
@@ -39,6 +41,8 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(focusInputWhenReady(context, _usernameFocus,
+        shouldFocus: () => !_isSaving));
     // Fire-and-forget — updates the field once a suggestion resolves.
     // ignore: discarded_futures
     _suggestInitialUsername();
@@ -107,6 +111,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   void dispose() {
     _debounce?.cancel();
     _usernameController.dispose();
+    _usernameFocus.dispose();
     super.dispose();
   }
 
@@ -375,8 +380,8 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                           Expanded(
                             child: TextField(
                               controller: _usernameController,
+                              focusNode: _usernameFocus,
                               onChanged: _onUsernameChanged,
-                              autofocus: true,
                               style: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w600,

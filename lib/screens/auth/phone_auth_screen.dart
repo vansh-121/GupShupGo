@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +9,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/phone_verification_service.dart';
 import 'package:video_chat_app/screens/auth/link_accounts_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
 /// Two honest stages: collect name + phone, then verify the SMS code.
 /// Auto-retrieval can complete the sign-in from either stage and simply
@@ -27,6 +30,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _otpController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
+  final _nameFocus = FocusNode();
+  final _phoneFocus = FocusNode();
+  final _otpFocus = FocusNode();
 
   PhoneAuthStage _stage = PhoneAuthStage.entry;
   bool _busy = false; // a send/verify call is in flight (button spinner)
@@ -38,10 +44,20 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+    unawaited(focusInputWhenReady(context, _nameFocus,
+        shouldFocus: () => !_navigated && _stage == PhoneAuthStage.entry));
+  }
+
+  @override
   void dispose() {
     _phoneController.dispose();
     _otpController.dispose();
     _nameController.dispose();
+    _nameFocus.dispose();
+    _phoneFocus.dispose();
+    _otpFocus.dispose();
     super.dispose();
   }
 
@@ -109,6 +125,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   // ─── Send OTP ─────────────────────────────────────────────────────────────
   Future<void> _sendOTP() async {
+    if (_busy || _completing || _navigated) return;
     final l10n = AppLocalizations.of(context);
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -137,6 +154,10 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
           _stage = PhoneAuthStage.otpSent;
           _busy = false;
         });
+        unawaited(focusInputWhenReady(context, _otpFocus,
+            preserveUserFocus: false,
+            shouldFocus: () =>
+                !_busy && !_navigated && _stage == PhoneAuthStage.otpSent));
       },
       onAutoVerified: (user) {
         if (!mounted) return;
@@ -225,6 +246,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       _pendingPhone = null;
       _errorMessage = null;
     });
+    unawaited(focusInputWhenReady(context, _phoneFocus,
+        preserveUserFocus: false,
+        shouldFocus: () => !_navigated && _stage == PhoneAuthStage.entry));
   }
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -377,6 +401,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     return [
       TextField(
         controller: _nameController,
+        focusNode: _nameFocus,
+        textInputAction: TextInputAction.next,
+        onSubmitted: (_) => _phoneFocus.requestFocus(),
         style: TextStyle(color: c.textHigh),
         textCapitalization: TextCapitalization.words,
         decoration: _fieldDecoration(
@@ -388,6 +415,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       const SizedBox(height: 16),
       TextField(
         controller: _phoneController,
+        focusNode: _phoneFocus,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => unawaited(_sendOTP()),
         style: TextStyle(color: c.textHigh),
         keyboardType: TextInputType.phone,
         decoration: _fieldDecoration(
@@ -454,6 +484,12 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       const SizedBox(height: 20),
       TextField(
         controller: _otpController,
+        focusNode: _otpFocus,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) {
+          if (!_busy && !_navigated) unawaited(_verifyOTP());
+        },
+        autofillHints: const [AutofillHints.oneTimeCode],
         style: TextStyle(color: c.textHigh, letterSpacing: 4),
         keyboardType: TextInputType.number,
         maxLength: 6,

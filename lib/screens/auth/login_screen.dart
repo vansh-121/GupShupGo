@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,6 +10,7 @@ import 'package:video_chat_app/screens/home_screen.dart';
 import 'package:video_chat_app/screens/auth/phone_auth_screen.dart';
 import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -62,6 +65,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _nameFocus = FocusNode();
 
   bool _isLoading = false;
   bool _isSignUp = false;
@@ -74,6 +80,9 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    _nameFocus.dispose();
     super.dispose();
   }
 
@@ -81,6 +90,26 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
+  }
+
+  void _showEmailEntry({required bool signUp}) {
+    setState(() {
+      _showEmailForm = true;
+      _isSignUp = signUp;
+      _errorMessage = null;
+    });
+    unawaited(focusInputWhenReady(
+      context,
+      signUp ? _nameFocus : _emailFocus,
+      preserveUserFocus: false,
+      shouldFocus: () =>
+          _showEmailForm && _isSignUp == signUp && !_isLoading,
+    ));
+  }
+
+  void _submitEmail() {
+    if (_isLoading) return;
+    unawaited(_isSignUp ? _signUpWithEmail() : _signInWithEmail());
   }
 
   Future<void> _signInWithGoogle() async {
@@ -485,7 +514,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
-                    onPressed: () => setState(() => _showEmailForm = true),
+                    onPressed: () => _showEmailEntry(signUp: _isSignUp),
                     style: OutlinedButton.styleFrom(
                       backgroundColor: c.surfaceAlt,
                       elevation: 0,
@@ -521,19 +550,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     _ModeChip(
                       label: t.loginSignIn,
                       selected: !_isSignUp,
-                      onTap: () => setState(() {
-                        _isSignUp = false;
-                        _errorMessage = null;
-                      }),
+                      onTap: () => _showEmailEntry(signUp: false),
                     ),
                     const SizedBox(width: 12),
                     _ModeChip(
                       label: t.loginSignUp,
                       selected: _isSignUp,
-                      onTap: () => setState(() {
-                        _isSignUp = true;
-                        _errorMessage = null;
-                      }),
+                      onTap: () => _showEmailEntry(signUp: true),
                     ),
                   ],
                 ),
@@ -541,7 +564,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 if (_isSignUp) ...[
                   TextField(
+                    key: const ValueKey('login-name'),
                     controller: _nameController,
+                    focusNode: _nameFocus,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _emailFocus.requestFocus(),
                     style: TextStyle(color: c.textHigh),
                     textCapitalization: TextCapitalization.words,
                     decoration: InputDecoration(
@@ -570,7 +597,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
 
                 TextField(
+                  key: const ValueKey('login-email'),
                   controller: _emailController,
+                  focusNode: _emailFocus,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _passwordFocus.requestFocus(),
                   style: TextStyle(color: c.textHigh),
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
@@ -599,7 +630,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 12),
 
                 TextField(
+                  key: const ValueKey('login-password'),
                   controller: _passwordController,
+                  focusNode: _passwordFocus,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _submitEmail(),
                   style: TextStyle(color: c.textHigh),
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
