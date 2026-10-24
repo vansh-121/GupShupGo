@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/anonymous_chat_service.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_chat_screen.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/widgets/anonymous_chat_icon.dart';
 
 /// Lobby screen with a radar ripple animation while searching for
 /// a random stranger to pair with. Shows a live "online now" count so the
@@ -158,6 +160,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return PopScope(
       // We own the pop so that OS/gesture back also leaves the queue instead of
@@ -178,7 +181,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
             onPressed: _cancelSearch,
           ),
           title: Text(
-            'Anonymous Chat',
+            l10n.anonLobbyTitle,
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w600,
               fontSize: 18,
@@ -203,7 +206,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
 
               // ── Status text ───────────────────────────────────────────
               Text(
-                'Finding someone for you…',
+                l10n.anonLobbyFinding,
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
@@ -214,7 +217,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
                 child: Text(
-                  'Hang tight — you\'ll be paired with a random stranger.',
+                  l10n.anonLobbyHangTight,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.poppins(
                     fontSize: 13.5,
@@ -231,6 +234,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
                 count: _onlineCount,
                 pulseController: _pulseController,
                 colors: c,
+                l10n: l10n,
               ),
 
               const Spacer(flex: 3),
@@ -244,7 +248,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
                     onPressed: _cancelSearch,
                     icon: Icon(Icons.close_rounded, color: c.error, size: 18),
                     label: Text(
-                      'Cancel Search',
+                      l10n.anonLobbyCancelBtn,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
@@ -275,7 +279,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'Your identity stays hidden. Chat as a stranger.',
+                        l10n.anonLobbyPrivacyNote,
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           color: c.textLow,
@@ -297,7 +301,7 @@ class _AnonymousLobbyScreenState extends State<AnonymousLobbyScreen>
 }
 
 /// The centered radar: three expanding ripple rings behind a gradient puck
-/// carrying the search glyph. The gradient reuses the home "Connect with a
+/// carrying the incognito glyph. The gradient reuses the home "Connect with a
 /// Stranger" banner's brand colors so the two surfaces read as one feature.
 class _RadarHero extends StatelessWidget {
   final AnimationController rippleController;
@@ -347,8 +351,7 @@ class _RadarHero extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(
-              Icons.person_search_rounded,
+            child: const AnonymousChatIcon(
               size: 44,
               color: Colors.white,
             ),
@@ -366,11 +369,13 @@ class _LiveOnlinePill extends StatelessWidget {
   final int? count;
   final AnimationController pulseController;
   final AppThemeColors colors;
+  final AppLocalizations l10n;
 
   const _LiveOnlinePill({
     required this.count,
     required this.pulseController,
     required this.colors,
+    required this.l10n,
   });
 
   @override
@@ -381,13 +386,13 @@ class _LiveOnlinePill extends StatelessWidget {
     final String label;
     final bool live;
     if (n == null) {
-      label = 'Connecting…';
+      label = l10n.anonLobbyConnecting;
       live = false;
     } else if (n <= 0) {
-      label = 'Waiting for others to come online…';
+      label = l10n.anonLobbyWaitingOthers;
       live = false;
     } else {
-      label = '$n online now';
+      label = l10n.anonLobbyOnlineCount(n);
       live = true;
     }
 

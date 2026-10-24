@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -133,6 +134,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
         // constants: those are the *light* palette, so the icons below used to
         // render light-theme accents on a dark sheet.
         final c = AppThemeColors.of(context);
+        final l10n = AppLocalizations.of(context);
         return SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 20),
@@ -166,9 +168,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   child:
                       Icon(Icons.camera_alt_rounded, color: c.primary),
                 ),
-                title: const Text('Camera',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: const Text('Take a photo'),
+                title: Text(l10n.statusCamera,
+                    style: const TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: Text(l10n.statusTakePhoto),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.camera);
@@ -184,9 +186,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   child: Icon(Icons.photo_library_rounded,
                       color: c.online),
                 ),
-                title: const Text('Gallery Photo',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: const Text('Choose an image from gallery'),
+                title: Text(l10n.statusGalleryPhoto,
+                    style: const TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: Text(l10n.statusChooseImageGallery),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.gallery);
@@ -201,9 +203,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   ),
                   child: const Icon(Icons.videocam_rounded, color: Colors.orange),
                 ),
-                title: const Text('Record Video',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: const Text('Record a short video'),
+                title: Text(l10n.statusRecordVideo,
+                    style: const TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: Text(l10n.statusRecordShortVideo),
                 onTap: () {
                   Navigator.pop(context);
                   _pickVideo(ImageSource.camera);
@@ -219,9 +221,9 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
                   child: Icon(Icons.video_library_rounded,
                       color: c.primary),
                 ),
-                title: const Text('Gallery Video',
-                    style: TextStyle(fontWeight: FontWeight.w500)),
-                subtitle: const Text('Choose a video from gallery'),
+                title: Text(l10n.statusGalleryVideo,
+                    style: const TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: Text(l10n.statusChooseVideoGallery),
                 onTap: () {
                   Navigator.pop(context);
                   _pickVideo(ImageSource.gallery);
@@ -273,7 +275,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       _isPicking = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick image: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).statusFailedPickImage(e.toString()))),
         );
         if (_selectedFile == null) Navigator.pop(context);
       }
@@ -318,7 +320,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
       _isPicking = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick video: $e')),
+          SnackBar(content: Text(AppLocalizations.of(context).statusFailedPickVideo(e.toString()))),
         );
         if (_selectedFile == null) Navigator.pop(context);
       }
@@ -564,7 +566,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
             right: 0,
             child: Container(
               padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 8,
+                top: MediaQuery.paddingOf(context).top + 8,
                 left: 8,
                 right: 8,
                 bottom: 8,
@@ -614,7 +616,7 @@ class _AddMediaStatusScreenState extends State<AddMediaStatusScreen> {
               padding: EdgeInsets.only(
                 left: 12,
                 right: 12,
-                bottom: MediaQuery.of(context).padding.bottom + 12,
+                bottom: MediaQuery.paddingOf(context).bottom + 12,
                 top: 12,
               ),
               decoration: BoxDecoration(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/mesh_chat_screen.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
@@ -70,6 +71,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: c.surface,
       appBar: AppBar(
@@ -81,7 +83,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           onPressed: () => Navigator.maybePop(context),
         ),
         title: Text(
-          'Offline Chat',
+          l10n.nearbyOfflineChatTitle,
           style: GoogleFonts.poppins(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -93,13 +95,13 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
             icon: Icon(Icons.search_rounded, color: c.textMid, size: 22),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Searching nearby devices…')),
+                SnackBar(content: Text(l10n.nearbySearchingDevices)),
               );
             },
           ),
           Consumer<MeshNetworkService>(
             builder: (_, mesh, __) => IconButton(
-              tooltip: mesh.isActive ? 'Stop offline chat' : 'Start offline chat',
+              tooltip: mesh.isActive ? l10n.nearbyTooltipStop : l10n.nearbyTooltipStart,
               icon: Icon(
                 mesh.isActive
                     ? Icons.stop_circle_outlined
@@ -122,7 +124,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 1. Top Hero Scanner Card with Radar Circles Background
-                _buildStitchHeroCard(c, mesh),
+                _buildStitchHeroCard(c, mesh, l10n),
                 const SizedBox(height: 24),
 
                 // 2. Devices Nearby Section Header
@@ -132,7 +134,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Devices Nearby',
+                        l10n.nearbyDevicesSection,
                         style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -160,7 +162,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                             const SizedBox(width: 6),
                           ],
                           Text(
-                            mesh.isActive ? 'DISCOVERY ON' : 'DISCOVERY OFF',
+                            mesh.isActive ? l10n.nearbyDiscoveryOn : l10n.nearbyDiscoveryOff,
                             style: GoogleFonts.poppins(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -176,11 +178,11 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                 const SizedBox(height: 12),
 
                 // 3. Peers List / Discovered Cards
-                _buildPeerSection(c, mesh),
+                _buildPeerSection(c, mesh, l10n),
                 const SizedBox(height: 20),
 
                 // 4. Help Info Callout Card
-                _buildHelpTipCard(c),
+                _buildHelpTipCard(c, l10n),
                 const SizedBox(height: 24),
               ],
             ),
@@ -191,7 +193,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   }
 
   // ── 1. Hero Scanner Card (Stitch Radar Style) ──────────────────────────────
-  Widget _buildStitchHeroCard(AppThemeColors c, MeshNetworkService mesh) {
+  Widget _buildStitchHeroCard(AppThemeColors c, MeshNetworkService mesh, AppLocalizations l10n) {
     return AnimatedBuilder(
       animation: _pulseController,
       builder: (context, child) {
@@ -242,7 +244,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
 
                       // Title
                       Text(
-                        'Offline Mode',
+                        l10n.nearbyHeroTitle,
                         style: GoogleFonts.poppins(
                           fontSize: 20,
                           fontWeight: FontWeight.w700,
@@ -271,7 +273,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              mesh.isActive ? '${mesh.peers.length} nearby' : 'Offline Chat Off',
+                              mesh.isActive ? l10n.nearbyHeroNearbyCount(mesh.peers.length) : l10n.nearbyHeroOff,
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -287,7 +289,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: Text(
-                          'Scanning for devices within 100 meters. Connections are encrypted and peer-to-peer.',
+                          l10n.nearbyHeroDesc,
                           textAlign: TextAlign.center,
                           style: GoogleFonts.poppins(
                             fontSize: 12.5,
@@ -299,7 +301,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                       const SizedBox(height: 16),
 
                       // Display Name Editor Tag
-                      _buildNameTag(c),
+                      _buildNameTag(c, l10n),
                     ],
                   ),
                 ),
@@ -312,7 +314,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   }
 
   // ── Display Name Tag ───────────────────────────────────────────────────────
-  Widget _buildNameTag(AppThemeColors c) {
+  Widget _buildNameTag(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
@@ -336,11 +338,11 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
                       fontWeight: FontWeight.w600,
                       color: c.textHigh,
                     ),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       isDense: true,
                       contentPadding: EdgeInsets.zero,
                       border: InputBorder.none,
-                      hintText: 'Your name',
+                      hintText: l10n.nearbyYourNameHint,
                     ),
                     onSubmitted: (_) => _saveName(),
                   ),
@@ -378,11 +380,11 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   }
 
   // ── 2. Devices Nearby List ────────────────────────────────────────────────
-  Widget _buildPeerSection(AppThemeColors c, MeshNetworkService mesh) {
+  Widget _buildPeerSection(AppThemeColors c, MeshNetworkService mesh, AppLocalizations l10n) {
     final peers = mesh.peers;
 
     if (mesh.startError == MeshStartError.permissionsDenied) {
-      return _buildPermissionsDeniedState(c, mesh);
+      return _buildPermissionsDeniedState(c, mesh, l10n);
     }
 
     if (peers.isEmpty) {
@@ -399,7 +401,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
             Icon(Icons.radar_rounded, size: 38, color: c.textLow),
             const SizedBox(height: 10),
             Text(
-              mesh.isActive ? 'Searching for devices nearby…' : 'Offline Chat is Off',
+              mesh.isActive ? l10n.nearbyEmptySearching : l10n.nearbyEmptyOff,
               style: GoogleFonts.poppins(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -409,8 +411,8 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
             const SizedBox(height: 4),
             Text(
               mesh.isActive
-                  ? 'Ensure GupShupGo is open on nearby devices with Bluetooth active.'
-                  : 'Tap the start icon top right to begin scanning.',
+                  ? l10n.nearbyEmptySearchingDesc
+                  : l10n.nearbyEmptyOffDesc,
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(fontSize: 12, color: c.textMid),
             ),
@@ -420,20 +422,20 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
     }
 
     return Column(
-      children: peers.map((peer) => _buildStitchPeerCard(peer, c)).toList(),
+      children: peers.map((peer) => _buildStitchPeerCard(peer, c, l10n)).toList(),
     );
   }
 
   // ── Stitch Peer Card with Avatar Glowing Ring ────────────────────────────
-  Widget _buildStitchPeerCard(MeshPeer peer, AppThemeColors c) {
+  Widget _buildStitchPeerCard(MeshPeer peer, AppThemeColors c, AppLocalizations l10n) {
     final bool connected = peer.status == MeshPeerStatus.connected;
     final bool connecting = peer.status == MeshPeerStatus.connecting;
 
     final Color ringColor =
         connected ? c.online : (connecting ? c.primary : c.border);
     final String subtitle = connected
-        ? 'Connected · Tap to chat'
-        : (connecting ? 'Connecting…' : 'Tap to connect');
+        ? l10n.nearbyPeerConnected
+        : (connecting ? l10n.nearbyPeerConnecting : l10n.nearbyPeerTapToConnect);
     final Color subtitleColor =
         connected ? c.online : (connecting ? c.primary : c.textMid);
 
@@ -517,7 +519,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           const SizedBox(width: 10),
 
           // Action pill: Chat when connected, otherwise a real Connect button.
-          _buildPeerActionButton(peer, c, connected, connecting),
+          _buildPeerActionButton(peer, c, connected, connecting, l10n),
         ],
       ),
     );
@@ -527,9 +529,9 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   /// kicks off a real connection (the initiating side, or a nudge if we're the
   /// passive one); connecting → disabled while the handshake is in flight.
   Widget _buildPeerActionButton(
-      MeshPeer peer, AppThemeColors c, bool connected, bool connecting) {
+      MeshPeer peer, AppThemeColors c, bool connected, bool connecting, AppLocalizations l10n) {
     final String label =
-        connected ? 'Chat' : (connecting ? 'Connecting' : 'Connect');
+        connected ? l10n.nearbyActionChat : (connecting ? l10n.nearbyActionConnecting : l10n.nearbyActionConnect);
     final Color borderColor = connected ? c.primary : c.border;
     final Color textColor =
         connecting ? c.textMid : (connected ? c.primary : c.textHigh);
@@ -571,7 +573,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   }
 
   // ── Permissions Denied Card ────────────────────────────────────────────────
-  Widget _buildPermissionsDeniedState(AppThemeColors c, MeshNetworkService mesh) {
+  Widget _buildPermissionsDeniedState(AppThemeColors c, MeshNetworkService mesh, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -585,7 +587,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           Icon(Icons.lock_outline_rounded, size: 38, color: c.error),
           const SizedBox(height: 10),
           Text(
-            'Permissions Needed',
+            l10n.nearbyPermNeededTitle,
             style: GoogleFonts.poppins(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -594,7 +596,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           ),
           const SizedBox(height: 4),
           Text(
-            'Offline chat requires nearby-device and Bluetooth access to discover devices without internet.',
+            l10n.nearbyPermNeededDesc,
             textAlign: TextAlign.center,
             style: GoogleFonts.poppins(fontSize: 12, color: c.textMid),
           ),
@@ -605,7 +607,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
               ElevatedButton.icon(
                 onPressed: () => mesh.start(),
                 icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Try Again'),
+                label: Text(l10n.nearbyTryAgainBtn),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.primary,
                   foregroundColor: Colors.white,
@@ -618,7 +620,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
               OutlinedButton.icon(
                 onPressed: () => openAppSettings(),
                 icon: const Icon(Icons.settings_outlined, size: 16),
-                label: const Text('Settings'),
+                label: Text(l10n.nearbySettingsBtn),
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: c.border),
                   shape: RoundedRectangleBorder(
@@ -634,7 +636,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
   }
 
   // ── 3. Help Tip Callout Card ──────────────────────────────────────────────
-  Widget _buildHelpTipCard(AppThemeColors c) {
+  Widget _buildHelpTipCard(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
@@ -649,7 +651,7 @@ class _NearbyPeersScreenState extends State<NearbyPeersScreen>
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Don\'t see your friend? Ensure Bluetooth is enabled on both devices.',
+              l10n.nearbyHelpTip,
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,

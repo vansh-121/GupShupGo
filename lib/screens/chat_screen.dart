@@ -47,6 +47,8 @@ import 'package:video_chat_app/theme/chat_theme.dart';
 import 'package:video_chat_app/provider/chat_theme_provider.dart';
 import 'package:video_chat_app/widgets/chat_theme_sheet.dart';
 import 'package:video_chat_app/utils/link_extractor.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
+import 'package:video_chat_app/utils/retained_stream.dart';
 import 'package:video_chat_app/widgets/ads/native_ad_card.dart';
 import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
@@ -72,6 +74,13 @@ import 'package:video_chat_app/utils/haptics.dart';
 import 'package:video_chat_app/utils/upload_progress.dart';
 import 'package:video_chat_app/widgets/common/async_button.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/screens/ai/ai_assistant_screen.dart';
+import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
+import 'package:video_chat_app/services/feature_flag_service.dart';
+import 'package:video_chat_app/widgets/ai/ai_action_sheet.dart';
+import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class Contact {
   final String id;
@@ -137,7 +146,7 @@ String _formatMb(int bytes) =>
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  final ChatScrollController _scrollController = ChatScrollController();
   final ChatService _chatService = ChatService();
   final StatusService _statusService = StatusService();
   final UserService _userService = UserService();
@@ -250,7 +259,14 @@ class _ChatScreenState extends State<ChatScreen> {
   /// `ScreenShareSession.instance.active` check doesn't engage during the
   /// Firestore-write + FCM + engine-init gap, so a second tap slipped through.
   bool _startingScreenShare = false;
-  bool _hasText = false; // tracks if text field has content for mic/send toggle
+  final ValueNotifier<bool> _hasText = ValueNotifier(false);
+  String _lastComposerText = '';
+
+  // ─── GupAI in-chat ─────────────────────────────────────────────────
+  /// Smart-reply suggestions shown as chips above the composer; empty when none.
+  List<String> _aiSmartReplies = const [];
+  /// True while a smart-reply request is in flight (disables the ✨ button).
+  bool _aiSuggesting = false;
 
   // ─── Block state ──────────────────────────────────────────────────
   bool _isBlocked = false; // current user blocked the contact
@@ -313,7 +329,7 @@ class _ChatScreenState extends State<ChatScreen> {
   // otherwise spin up a fresh subscription whose initial frame is just the
   // outbox, causing the prior history to vanish for 2–3s until Firestore
   // re-emits and decryption completes. Initialized once in initState.
-  late final Stream<List<MessageModel>> _messagesStream;
+  late final RetainedStream<List<MessageModel>> _messageFeed;
   bool _isLoadingOlder = false;
   bool _hasMoreOlder = true;
   List<MessageModel> _currentMessages = [];
@@ -359,9 +375,9 @@ class _ChatScreenState extends State<ChatScreen> {
         _chatService.getChatRoomId(widget.currentUserId, widget.contact.id);
     _chatRoomId = chatRoomId;
     _isMuted = _settingsService.isChatMuted(chatRoomId);
-    _messagesStream = _chatService
-        .getMessages(widget.currentUserId, widget.contact.id)
-        .asBroadcastStream();
+    _messageFeed = RetainedStream(
+      _chatService.getMessages(widget.currentUserId, widget.contact.id),
+    );
     // Suppress global mesh banners for this conversation while it's open.
     _meshService = Provider.of<MeshNetworkService>(context, listen: false);
     _meshService.setActiveConversation(widget.contact.id);
@@ -369,6 +385,7 @@ class _ChatScreenState extends State<ChatScreen> {
     NotificationService.activeChatRoomId = chatRoomId;
     _initializeChat();
     _messageController.addListener(_onTextChanged);
+    _composerFocus.addListener(_onComposerFocusChanged);
 
     // Bond badge: one derived view per room, re-derived every minute by the
     // repository so the countdown ticks and a lapse shows up without a write.
@@ -406,6 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _stopTyping();
+    unawaited(_messageFeed.close());
     _scrollController.removeListener(_onScroll);
     _onlineStatusSubscription?.cancel();
     _typingSubscription?.cancel();
@@ -414,12 +432,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _videoUploadSub?.cancel();
     _voiceUploadSub?.cancel();
     _messageController.removeListener(_onTextChanged);
+    _composerFocus.removeListener(_onComposerFocusChanged);
     _typingTimer?.cancel();
     _previewDebounce?.cancel();
     _highlightTimer?.cancel();
     _voiceRecorder.dispose();
     _scrollController.dispose();
     _messageController.dispose();
+    _hasText.dispose();
     _composerFocus.dispose();
     _searchController.dispose();
     _searchQuery = '';
@@ -516,7 +536,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initializeChat() async {
     // The chat screen now renders IMMEDIATELY — the StreamBuilder on
-    // _messagesStream surfaces cached/decrypted messages as soon as the
+    // _messageFeed surfaces cached/decrypted messages as soon as the
     // local Firestore snapshot lands (sub-second). Block-status checks,
     // markDelivered / markRead, and listener setup all run in the
     // background. Previously these were four sequential Firestore
@@ -712,11 +732,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool get _hasBondBadge => _streakView?.hasBadge ?? false;
 
   Widget _buildSubtitleRow(AppThemeColors c) {
+    final l10n = AppLocalizations.of(context);
     // ── Typing ──────────────────────────────────────────────────────
     if (_isOtherUserTyping) {
       return Row(children: [
         Text(
-          'typing...',
+          l10n.chatStatusTyping,
           style: GoogleFonts.poppins(
             fontSize: 11,
             color: c.primary,
@@ -734,7 +755,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_isContactOnline) {
       return Row(children: [
         Text(
-          'Online',
+          l10n.chatStatusOnline,
           style: GoogleFonts.poppins(
             fontSize: 11,
             color: c.online,
@@ -755,8 +776,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // entering and exiting children collide during the transition.
     if (_hasBondBadge) {
       final lastSeenText = _contactLastSeen != null
-          ? 'Last seen ${_formatLastSeen(_contactLastSeen!)}'
-          : 'Offline';
+          ? l10n.chatStatusLastSeen(_formatLastSeen(_contactLastSeen!))
+          : l10n.chatStatusOffline;
       return SizedBox(
         height: 16,
         child: Stack(
@@ -794,7 +815,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // No bond badge — just show last seen
     if (_contactLastSeen != null) {
       return Text(
-        'Last seen ${_formatLastSeen(_contactLastSeen!)}',
+        l10n.chatStatusLastSeen(_formatLastSeen(_contactLastSeen!)),
         style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
       );
     }
@@ -821,12 +842,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Called every time the text field value changes.
   void _onTextChanged() {
+    // Taps, cursor moves and IME composing updates also notify the controller.
+    // They must not start typing writes or scan the draft for link previews.
+    final text = _messageController.text;
+    if (text == _lastComposerText) return;
+    _lastComposerText = text;
     final hasText = _messageController.text.trim().isNotEmpty;
 
     // Update the mic/send button toggle
-    if (hasText != _hasText) {
-      setState(() => _hasText = hasText);
-    }
+    _hasText.value = hasText;
 
     // User started typing — notify Firestore once
     if (hasText && !_isTyping) {
@@ -1405,19 +1429,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _scrollToBottom() {
-    // The list is built with `reverse: true` (WhatsApp-style, anchored to
-    // the input). In a reversed list the visual bottom corresponds to
-    // offset 0.0, so "scroll to bottom" = "scroll to start of the scroll
-    // axis". A small delay lets the new bubble lay out first.
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          0.0,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    _scrollController.scrollToLatest();
+  }
+
+  void _onComposerFocusChanged() {
+    if (_composerFocus.hasFocus) _scrollToBottom();
   }
 
   // Wraps a freshly-inserted message bubble in a one-shot fade+rise
@@ -1784,9 +1800,8 @@ class _ChatScreenState extends State<ChatScreen> {
       VaultCipher.isPlaceholderText(message.text);
 
   Widget _buildReplyQuote(MessageModel message, bool isMe) {
-    final previewWidth = (MediaQuery.of(context).size.width - 116)
-        .clamp(188.0, 246.0)
-        .toDouble();
+    final previewWidth =
+        (MediaQuery.sizeOf(context).width - 116).clamp(188.0, 246.0).toDouble();
 
     // "You" is resolved here rather than stored, so the same reply reads
     // correctly on both devices — see _replyDisplayName.
@@ -1820,9 +1835,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildLinkPreviewCard(MessageModel message, bool isMe) {
-    final previewWidth = (MediaQuery.of(context).size.width - 116)
-        .clamp(188.0, 246.0)
-        .toDouble();
+    final previewWidth =
+        (MediaQuery.sizeOf(context).width - 116).clamp(188.0, 246.0).toDouble();
 
     return LinkPreviewCard(
       url: message.linkPreviewUrl!,
@@ -1844,7 +1858,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// hundreds of MB of GPU texture memory on low-end devices.
   Widget _buildImageWidget(MessageModel message, dynamic c) {
     // 2× the maxWidth constraint for retina-quality without wasting memory.
-    final cacheW = (220 * MediaQuery.of(context).devicePixelRatio).round();
+    final cacheW = (220 * MediaQuery.devicePixelRatioOf(context)).round();
 
     // Prefer local file if available (mesh images)
     if (message.localFilePath != null &&
@@ -2010,9 +2024,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final type = message.statusReplyType;
     final mediaUrl = message.statusReplyMediaUrl;
     final previewText = _statusReplyPreviewText(message);
-    final previewWidth = (MediaQuery.of(context).size.width - 116)
-        .clamp(188.0, 246.0)
-        .toDouble();
+    final previewWidth =
+        (MediaQuery.sizeOf(context).width - 116).clamp(188.0, 246.0).toDouble();
 
     Widget thumbnail;
     if ((type == 'image' || type == 'video') && mediaUrl != null) {
@@ -2324,6 +2337,8 @@ class _ChatScreenState extends State<ChatScreen> {
     // behaviour). ListView.builder with reverse:true indexes from the bottom,
     // so index 0 = last item in displayItems (the newest message / typing).
     final itemCount = displayItems.length;
+    // The reversed viewport keeps the newest message above the composer as
+    // the keyboard changes height; it needs no per-inset scroll animation.
     return ListView.builder(
       controller: _scrollController,
       reverse: true,
@@ -2396,6 +2411,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
     return Scaffold(
       backgroundColor: _chatTheme.backgroundOf(c),
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         foregroundColor: c.textHigh,
         surfaceTintColor: Colors.transparent,
@@ -2482,7 +2498,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: _searchController,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'Search messages...',
+                    hintText: AppLocalizations.of(context).chatSearchHint,
                     hintStyle:
                         GoogleFonts.poppins(color: c.textLow, fontSize: 14),
                     border: InputBorder.none,
@@ -2510,14 +2526,14 @@ class _ChatScreenState extends State<ChatScreen> {
               color: c.isDark ? Colors.white : c.textHigh,
               iconSize: 22,
               onPressed: _initiateAudioCall,
-              tooltip: 'Audio Call',
+              tooltip: AppLocalizations.of(context).chatTooltipVoiceCall,
             ),
             AsyncIconButton(
               icon: const Icon(Icons.videocam_outlined),
               color: c.isDark ? Colors.white : c.textHigh,
               iconSize: 24,
               onPressed: _initiateVideoCall,
-              tooltip: 'Video Call',
+              tooltip: AppLocalizations.of(context).chatTooltipVideoCall,
             ),
             PopupMenuButton<String>(
               icon: const NewFeatureDot(
@@ -2527,16 +2543,17 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               onSelected: _onMenuItemSelected,
               itemBuilder: (BuildContext context) {
+                final l10n = AppLocalizations.of(context);
                 return [
                   PopupMenuItem(
                       value: 'contact info',
                       child:
-                          Text('Contact info', style: GoogleFonts.poppins())),
+                          Text(l10n.chatMenuContactInfo, style: GoogleFonts.poppins())),
                   PopupMenuItem(
                     value: 'search',
                     child: Row(
                       children: [
-                        Text('Search', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuSearch, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatSearch),
                       ],
                     ),
@@ -2545,7 +2562,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'chat theme',
                     child: Row(
                       children: [
-                        Text('Chat theme', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuChatTheme, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatThemes),
                       ],
                     ),
@@ -2554,7 +2571,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     value: 'export chat',
                     child: Row(
                       children: [
-                        Text('Export chat', style: GoogleFonts.poppins()),
+                        Text(l10n.chatMenuExportChat, style: GoogleFonts.poppins()),
                         const NewFeatureChip(featureId: NewFeature.chatExport),
                       ],
                     ),
@@ -2563,12 +2580,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       value: 'mute notifications',
                       child: Text(
                           _isMuted
-                              ? 'Unmute notifications'
-                              : 'Mute notifications',
+                              ? l10n.chatMenuUnmuteNotifications
+                              : l10n.chatMenuMuteNotifications,
                           style: GoogleFonts.poppins())),
                   PopupMenuItem(
                       value: 'block contact',
-                      child: Text('Block contact',
+                      child: Text(l10n.chatMenuBlockContact,
                           style: GoogleFonts.poppins(color: c.error))),
                 ];
               },
@@ -2605,7 +2622,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                       : c2.textLow),
                               const SizedBox(width: 6),
                               Text(
-                                'End-to-end encrypted',
+                                AppLocalizations.of(context).chatEndToEndEncrypted,
                                 style: GoogleFonts.poppins(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
@@ -2645,7 +2662,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               child: Text(
                                 mesh.isActive
                                     ? 'Offline Chat  ·  ${mesh.connectedPeers} device${mesh.connectedPeers == 1 ? '' : 's'} nearby'
-                                    : 'No internet?\nChat offline with nearby devices',
+                                    : AppLocalizations.of(context).chatNoInternetOfflineTitle,
                                 style: GoogleFonts.poppins(
                                   color: c3.isDark
                                       ? Colors.white
@@ -2666,7 +2683,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
-                                    'Enable',
+                                    AppLocalizations.of(context).chatEnableOfflineButton,
                                     style: GoogleFonts.poppins(
                                       color: Colors.black,
                                       fontSize: 11,
@@ -2686,7 +2703,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     theme: _chatTheme,
                     colors: c,
                     child: StreamBuilder<List<MessageModel>>(
-                      stream: _messagesStream,
+                      stream: _messageFeed.stream,
                       builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting &&
                           !snapshot.hasData) {
@@ -2962,6 +2979,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
           ),
+        if (_aiSmartReplies.isNotEmpty) _buildSmartReplyChips(c),
         _buildComposerRow(c, darkPillBg, darkPillBorder),
       ],
     );
@@ -2974,8 +2992,8 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Attachment Paperclip
-          // Attachment Paperclip. One button for photo, video *and* document —
+          // Attachment paperclip — stays outside, on the left. One button for
+          // photo, video, document, location *and* screen share —
           // tapping it opens a chooser sheet; while any of them is uploading it
           // becomes the shared progress ring. Only one can ever be in flight
           // (the sheet is unreachable behind the ring), so the composer reads
@@ -3038,10 +3056,39 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               child: Row(
                 children: [
+                  // GupAI compose-help, inside the field on the left — rewrite
+                  // the draft, or suggest replies to the last message. Gated
+                  // behind the in-chat flag.
+                  if (_aiInChatEnabled)
+                    Tooltip(
+                      message: 'GupAI',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _aiSuggesting ? null : _showComposeHelp,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 2),
+                          child: NewFeatureDot(
+                            anchor: NewFeatureAnchor.chatComposerAi,
+                            offset: NewFeatureDot.narrowGlyph,
+                            child: _aiSuggesting
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: c.primary),
+                                  )
+                                : Icon(Icons.auto_awesome_rounded,
+                                    color: c.primary, size: 22),
+                          ),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: TextField(
                       controller: _messageController,
                       focusNode: _composerFocus,
+                      onTap: _scrollToBottom,
+                      onEditingComplete: () {},
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.isDark ? Colors.white : c.textHigh,
@@ -3058,7 +3105,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       minLines: 1,
                       textCapitalization: TextCapitalization.sentences,
                       decoration: InputDecoration(
-                        hintText: 'Message...',
+                        hintText: AppLocalizations.of(context).chatInputHint,
                         hintStyle: GoogleFonts.poppins(
                           color: c.isDark ? Colors.white38 : c.textLow,
                           fontSize: 15,
@@ -3068,82 +3115,59 @@ class _ChatScreenState extends State<ChatScreen> {
                         focusedBorder: InputBorder.none,
                         fillColor: Colors.transparent,
                         filled: false,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 12),
+                        contentPadding: EdgeInsets.only(
+                          // Tighten the left gap when the ✨ prefix is present so
+                          // the hint sits just after it, not double-indented.
+                          left: _aiInChatEnabled ? 6 : 18,
+                          right: 16,
+                          top: 12,
+                          bottom: 12,
+                        ),
                       ),
                       onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
 
                   // Mic / Send Icon inside the Pill
-                  if (_hasText || _isSending)
-                    GestureDetector(
-                      onTap: _isSending ? null : _sendMessage,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 12.0),
-                        child: _isSending
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Icon(
-                                Icons.send_rounded,
-                                color: c.primary,
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _hasText,
+                    builder: (_, hasText, __) => hasText || _isSending
+                        ? GestureDetector(
+                            onTap: _isSending ? null : _sendMessage,
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 12.0),
+                              child: _isSending
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Icon(
+                                      Icons.send_rounded,
+                                      color: c.primary,
+                                      size: 22,
+                                    ),
+                            ),
+                          )
+                        : GestureDetector(
+                            onLongPressStart: (_) => _startVoiceRecording(),
+                            onLongPressEnd: (_) => _stopVoiceRecording(),
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 12.0),
+                              child: Icon(
+                                Icons.mic_none_rounded,
+                                color: c.isDark ? Colors.white70 : c.textMid,
                                 size: 22,
                               ),
-                      ),
-                    )
-                  else
-                    GestureDetector(
-                      onLongPressStart: (_) => _startVoiceRecording(),
-                      onLongPressEnd: (_) => _stopVoiceRecording(),
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 12.0),
-                        child: Icon(
-                          Icons.mic_none_rounded,
-                          color: c.isDark ? Colors.white70 : c.textMid,
-                          size: 22,
-                        ),
-                      ),
-                    ),
+                            ),
+                          ),
+                  ),
                 ],
               ),
             ),
-          ),
-
-          // Optional Screen Share shortcut
-          const SizedBox(width: 4),
-          IconButton(
-            icon: _startingScreenShare
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                          c.isDark ? Colors.white54 : c.textMid),
-                    ),
-                  )
-                : Icon(Icons.screen_share_rounded,
-                    color: c.isDark ? Colors.white54 : c.textMid, size: 20),
-            tooltip: 'Share screen',
-            onPressed: _startingScreenShare
-                ? null
-                : () {
-                    if (PremiumGate.checkAndPrompt(
-                      context,
-                      featureName: 'Screen Sharing',
-                      featureIcon: Icons.screen_share_rounded,
-                      description:
-                          'Share your screen live during chats with GupShupGo Pro.',
-                    )) {
-                      _initiateScreenShare();
-                    }
-                  },
           ),
         ],
       ),
@@ -3187,7 +3211,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Icon(Icons.chevron_left_rounded, color: c.textLow, size: 18),
             Text(
-              'Slide to cancel',
+              AppLocalizations.of(context).chatSlideToCancel,
               style: GoogleFonts.poppins(color: c.textLow, fontSize: 12),
             ),
           ],
@@ -3578,21 +3602,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ─── Block contact ─────────────────────────────────────────────────
   Future<void> _blockContact() async {
+    final l10n = AppLocalizations.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Block ${widget.contact.name}?'),
-        content: const Text(
-          'Blocked contacts cannot send you messages or call you. '
-          'You can unblock them from Settings → Privacy → Blocked contacts.',
-        ),
+        title: Text(l10n.chatBlockContactTitle(widget.contact.name)),
+        content: Text(l10n.chatBlockContactPrompt),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Block', style: TextStyle(color: Colors.red))),
+              child: Text(l10n.chatBlockButton, style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -3894,7 +3916,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showAttachmentSheet() {
     if (_isBlocked || _isBlockedByContact) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot send media to this contact')),
+        SnackBar(content: Text(AppLocalizations.of(context).chatCannotSendMediaBlocked)),
       );
       return;
     }
@@ -3923,6 +3945,23 @@ class _ChatScreenState extends State<ChatScreen> {
           kind: AttachmentKind.location,
           newFeatureId: NewFeature.locationShare,
           onTap: (_) => _pickAndSendLocation(),
+        ),
+        // Screen share lives here now (moved out of the composer row to
+        // declutter it). Still Pro-gated; the upgrade prompt and the session
+        // launch both fire after the sheet is dismissed.
+        AttachmentAction(
+          kind: AttachmentKind.screenShare,
+          onTap: (_) {
+            if (PremiumGate.checkAndPrompt(
+              context,
+              featureName: 'Screen Sharing',
+              featureIcon: Icons.screen_share_rounded,
+              description:
+                  'Share your screen live during chats with GupShupGo Pro.',
+            )) {
+              _initiateScreenShare();
+            }
+          },
         ),
       ],
       viewOnce: const AttachmentViewOnce(
@@ -4464,6 +4503,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       barrierColor: Colors.black.withOpacity(0.4),
       builder: (BuildContext dialogContext) {
+        final l10n = AppLocalizations.of(dialogContext);
         // Scrollable because the pill plus six tiles is taller than a short
         // screen in landscape, and a menu you cannot reach the bottom of is
         // worse than one that scrolls.
@@ -4499,7 +4539,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (hasContent)
                           _buildActionTile(
                             icon: Icons.reply_rounded,
-                            label: 'Reply',
+                            label: l10n.chatActionReply,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4509,7 +4549,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (canCopy)
                           _buildActionTile(
                             icon: Icons.content_copy_rounded,
-                            label: 'Copy',
+                            label: l10n.chatActionCopy,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4519,17 +4559,46 @@ class _ChatScreenState extends State<ChatScreen> {
                         if (hasContent)
                           _buildActionTile(
                             icon: Icons.forward_rounded,
-                            label: 'Forward',
+                            label: l10n.chatActionForward,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
                               _showForwardSheet(message);
                             },
                           ),
+                        if (hasContent && _aiInChatEnabled) ...[
+                          _buildActionTile(
+                            icon: Icons.translate_rounded,
+                            label: l10n.chatActionTranslate,
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiTranslateMessage(message);
+                            },
+                          ),
+                          _buildActionTile(
+                            icon: Icons.notes_rounded,
+                            label: l10n.chatActionSummarise,
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiSummariseMessage(message);
+                            },
+                          ),
+                          _buildActionTile(
+                            icon: Icons.auto_awesome_rounded,
+                            label: l10n.chatActionAskGupAi,
+                            colors: c,
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              _aiAskAbout(message);
+                            },
+                          ),
+                        ],
                         if (canEdit)
                           _buildActionTile(
                             icon: Icons.edit_rounded,
-                            label: 'Edit',
+                            label: l10n.chatActionEdit,
                             colors: c,
                             onTap: () {
                               Navigator.pop(dialogContext);
@@ -4538,7 +4607,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                         _buildActionTile(
                           icon: Icons.delete_outline_rounded,
-                          label: 'Delete',
+                          label: l10n.chatActionDelete,
                           colors: c,
                           destructive: true,
                           onTap: () {
@@ -4644,6 +4713,349 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  GupAI in-chat helpers (message actions + composer compose-help)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// In-chat GupAI surfaces appear only when BOTH the master switch and the
+  /// in-chat switch are on — so the whole feature can be rolled out (or pulled)
+  /// independently of the dedicated screen.
+  bool get _aiInChatEnabled =>
+      FeatureFlagService.instance.aiAssistantEnabled &&
+      FeatureFlagService.instance.aiInChatEnabled;
+
+  static const _kAiInChatNoticeKey = 'ai_in_chat_notice_seen_v1';
+
+  /// One-time disclosure before the first in-chat AI action: acting on a message
+  /// sends that text out of E2EE to GupAI (Google). Returns true to proceed.
+  /// Mirrors the dedicated screen's first-run notice.
+  Future<bool> _ensureAiConsent() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kAiInChatNoticeKey) == true) return true;
+    if (!mounted) return false;
+    final c = AppThemeColors.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: c.primary, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Use GupAI here?',
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w700, fontSize: 18, color: c.textHigh),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'When you translate, summarise, rewrite, or ask GupAI about a message, '
+          'that text is sent to GupAI (Google) to generate a result.\n\n'
+          'Your chats stay end-to-end encrypted — only the text you choose to act '
+          'on is shared, nothing else.',
+          style:
+              GoogleFonts.poppins(fontSize: 13.5, height: 1.5, color: c.textMid),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel',
+                style: GoogleFonts.poppins(
+                    color: c.textMid, fontWeight: FontWeight.w600)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c.primary),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Continue',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await prefs.setBool(_kAiInChatNoticeKey, true);
+      return true;
+    }
+    return false;
+  }
+
+  /// Drops AI-produced [text] into the composer and focuses it. Nothing is ever
+  /// auto-sent — the user reviews/edits first.
+  void _insertAiText(String text) {
+    _messageController.text = text;
+    _messageController.selection =
+        TextSelection.collapsed(offset: _messageController.text.length);
+    _composerFocus.requestFocus();
+  }
+
+  /// A readable language name for the device locale — the default translate
+  /// target, so a foreign message is read in the user's own language.
+  String _deviceLanguageName() {
+    final code = WidgetsBinding.instance.platformDispatcher.locale.languageCode
+        .toLowerCase();
+    const names = {
+      'en': 'English', 'hi': 'Hindi', 'es': 'Spanish', 'fr': 'French',
+      'de': 'German', 'pt': 'Portuguese', 'ar': 'Arabic', 'bn': 'Bengali',
+      'ru': 'Russian', 'ja': 'Japanese', 'zh': 'Chinese', 'ur': 'Urdu',
+      'ta': 'Tamil', 'te': 'Telugu', 'mr': 'Marathi', 'gu': 'Gujarati',
+      'kn': 'Kannada', 'ml': 'Malayalam', 'pa': 'Punjabi', 'it': 'Italian',
+      'ko': 'Korean', 'tr': 'Turkish', 'id': 'Indonesian', 'vi': 'Vietnamese',
+    };
+    return names[code] ?? 'English';
+  }
+
+  /// The most recent peer message with text, used as the smart-reply input.
+  /// Order-independent (picks the max timestamp) so it doesn't depend on how the
+  /// list happens to be sorted.
+  String? _lastIncomingText() {
+    MessageModel? best;
+    for (final m in _currentMessages) {
+      if (m.senderId != widget.currentUserId &&
+          m.type == MessageType.text &&
+          !m.deletedForEveryone &&
+          m.text.trim().isNotEmpty) {
+        if (best == null || m.timestamp.isAfter(best.timestamp)) best = m;
+      }
+    }
+    return best?.text.trim();
+  }
+
+  /// Message action → translate the message into the device language.
+  Future<void> _aiTranslateMessage(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Translate',
+      icon: Icons.translate_rounded,
+      mode: 'translate',
+      input: message.text,
+      params: {'targetLang': _deviceLanguageName()},
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Message action → summarise the message.
+  Future<void> _aiSummariseMessage(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Summary',
+      icon: Icons.notes_rounded,
+      mode: 'summarize',
+      input: message.text,
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Message action → open GupAI seeded with the message quoted, to ask about it
+  /// in a full (grounded) conversation.
+  Future<void> _aiAskAbout(MessageModel message) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    final quoted = message.text.trim();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AiAssistantScreen(seedText: 'About this message:\n"$quoted"\n\n'),
+      ),
+    );
+  }
+
+  /// Composer ✨ → a contextual menu of compose-help actions.
+  Future<void> _showComposeHelp() async {
+    // Tapping the ✨ counts as discovering GupAI's in-chat powers — clear the dot.
+    WhatsNewService.instance.markSeen(NewFeature.aiInChat);
+    final c = AppThemeColors.of(context);
+    final hasDraft = _messageController.text.trim().isNotEmpty;
+    final hasIncoming = _lastIncomingText() != null;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.auto_awesome_rounded, size: 18, color: c.primary),
+                  const SizedBox(width: 10),
+                  Text('GupAI',
+                      style: GoogleFonts.poppins(
+                          color: c.textHigh,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: c.border.withOpacity(0.4)),
+            if (hasIncoming)
+              _composeHelpTile(ctx, c, Icons.quickreply_rounded,
+                  'Suggest replies', 'reply'),
+            if (hasDraft) ...[
+              _composeHelpTile(ctx, c, Icons.auto_fix_high_rounded,
+                  'Rewrite — clearer', 'rewrite'),
+              _composeHelpTile(ctx, c, Icons.workspace_premium_outlined,
+                  'Rewrite — more formal', 'formal'),
+              _composeHelpTile(ctx, c, Icons.sentiment_satisfied_rounded,
+                  'Rewrite — friendlier', 'friendly'),
+            ],
+            if (!hasDraft && !hasIncoming)
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Type a message to rewrite it, or wait for a message to get '
+                  'reply ideas.',
+                  style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'reply':
+        await _aiSuggestReplies();
+      case 'rewrite':
+        await _aiRewriteDraft('clearer and more polished');
+      case 'formal':
+        await _aiRewriteDraft('more formal and professional');
+      case 'friendly':
+        await _aiRewriteDraft('warmer and friendlier');
+    }
+  }
+
+  Widget _composeHelpTile(BuildContext ctx, AppThemeColors c, IconData icon,
+      String label, String value) {
+    return InkWell(
+      onTap: () => Navigator.of(ctx).pop(value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: c.textHigh),
+            const SizedBox(width: 15),
+            Text(label,
+                style: GoogleFonts.poppins(
+                    color: c.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Rewrites the current draft in [tone] and offers to replace it.
+  Future<void> _aiRewriteDraft(String tone) async {
+    if (!await _ensureAiConsent() || !mounted) return;
+    await showAiActionSheet(
+      context: context,
+      title: 'Rewrite',
+      icon: Icons.auto_fix_high_rounded,
+      mode: 'rewrite',
+      input: _messageController.text,
+      params: {'tone': tone},
+      onInsert: _insertAiText,
+    );
+  }
+
+  /// Fetches smart replies to the last incoming message and shows them as chips.
+  Future<void> _aiSuggestReplies() async {
+    final incoming = _lastIncomingText();
+    if (incoming == null) return;
+    if (!await _ensureAiConsent() || !mounted) return;
+    setState(() => _aiSuggesting = true);
+    final result = await AiAssistantService.instance
+        .runAction(mode: 'smart_reply', input: incoming);
+    if (!mounted) return;
+    setState(() => _aiSuggesting = false);
+    switch (result) {
+      case AiActionReply(:final text):
+        final suggestions = AiAssistantService.parseSuggestions(text);
+        if (suggestions.isEmpty) {
+          _aiToast('No suggestions right now.');
+        } else {
+          setState(() => _aiSmartReplies = suggestions);
+        }
+      case AiActionQuota(:final isPro, :final canEarn):
+        await showAiQuotaTopUpSheet(
+          context: context,
+          isPro: isPro,
+          canEarn: canEarn,
+          onCredited: _aiSuggestReplies,
+        );
+      case AiActionBusy():
+        _aiToast('GupAI is busy right now. Try again in a moment.');
+      case AiActionFailed():
+        _aiToast("Couldn't reach GupAI. Check your connection.");
+    }
+  }
+
+  void _aiToast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(msg, style: GoogleFonts.poppins(fontSize: 13)),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// The smart-reply chip strip, shown above the composer when suggestions are
+  /// live. Tapping a chip drops it into the composer; the ✕ dismisses them.
+  Widget _buildSmartReplyChips(AppThemeColors c) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, right: 4, top: 6),
+      child: Row(
+        children: [
+          Icon(Icons.auto_awesome_rounded, size: 14, color: c.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final s in _aiSmartReplies)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        label: Text(s,
+                            style: GoogleFonts.poppins(
+                                fontSize: 12.5, color: c.textHigh)),
+                        backgroundColor: c.surfaceAlt,
+                        side: BorderSide(color: c.border),
+                        onPressed: () {
+                          _insertAiText(s);
+                          setState(() => _aiSmartReplies = const []);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.close_rounded, size: 16, color: c.textMid),
+            onPressed: () => setState(() => _aiSmartReplies = const []),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Asks which kind of delete, then performs it.
   ///
   /// A confirmation step rather than two tiles in the menu: "delete for
@@ -4653,6 +5065,7 @@ class _ChatScreenState extends State<ChatScreen> {
       {required bool forEveryone}) async {
     final c = AppThemeColors.of(context);
 
+    final l10n = AppLocalizations.of(context);
     final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -4660,7 +5073,7 @@ class _ChatScreenState extends State<ChatScreen> {
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          'Delete message?',
+          l10n.chatDeleteMessageTitle,
           style: GoogleFonts.poppins(
             color: c.textHigh,
             fontSize: 16.5,
@@ -4669,11 +5082,10 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         content: Text(
           forEveryone
-              ? 'Delete it just for you, or for everyone in this chat?'
+              ? l10n.chatDeleteMessageForEveryonePrompt
               // Shown when the 48h window has closed, or the message is not
               // ours. Saying why is better than an option that is simply absent.
-              : 'This removes it from your devices only. '
-                  '${widget.contact.name} will still see it.',
+              : l10n.chatDeleteMessageForMeOnlyPrompt(widget.contact.name),
           style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
         ),
         actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
@@ -4681,14 +5093,14 @@ class _ChatScreenState extends State<ChatScreen> {
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: Text(
-              'Cancel',
+              l10n.commonCancel,
               style: GoogleFonts.poppins(color: c.textMid, fontSize: 13.5),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, 'me'),
             child: Text(
-              'Delete for me',
+              l10n.chatDeleteForMe,
               style: GoogleFonts.poppins(
                 color: const Color(0xFFE5484D),
                 fontSize: 13.5,
@@ -4699,7 +5111,7 @@ class _ChatScreenState extends State<ChatScreen> {
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, 'everyone'),
               child: Text(
-                'Delete for everyone',
+                l10n.chatDeleteForEveryone,
                 style: GoogleFonts.poppins(
                   color: const Color(0xFFE5484D),
                   fontSize: 13.5,
@@ -4762,7 +5174,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     Icon(Icons.forward_rounded, size: 18, color: c.textMid),
                     const SizedBox(width: 10),
                     Text(
-                      'Forward to',
+                      AppLocalizations.of(context).chatForwardTo,
                       style: GoogleFonts.poppins(
                         color: c.textHigh,
                         fontSize: 15,
@@ -4777,7 +5189,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // itself scrolls.
               ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(sheetContext).size.height * 0.5,
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.5,
                 ),
                 child: StreamBuilder<List<ChatRoom>>(
                   stream: _chatService.getChatRooms(widget.currentUserId),
@@ -4803,7 +5215,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       return Padding(
                         padding: const EdgeInsets.all(28),
                         child: Text(
-                          'No other chats to forward to',
+                          AppLocalizations.of(context).chatNoForwardChats,
                           style: GoogleFonts.poppins(
                               color: c.textMid, fontSize: 13.5),
                         ),

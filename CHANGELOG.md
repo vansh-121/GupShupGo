@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Live location sharing and map-based pin picking
 
+## [1.2.2] - 2026-10-24
+
+### Added
+- 🌍 **Comprehensive 16-Language Localization** — Added full end-to-end multi-language support across all screens, dialogs, and setup flows for 16 languages: English, Hindi, Spanish, Arabic, French, Portuguese, Bengali, Russian, Indonesian, German, Japanese, Chinese Simplified, Urdu, Turkish, Tamil, and Telugu.
+- 🏷️ **Interactive Invite Cards & Deep Links** — Share customized, stylish invite cards and direct profile links (`https://gupshupgo.app/u/<handle>`) with automatic verification, routing, and QR code integration.
+- 🔔 **Contextual Notification Permission Prompts** — Non-intrusive, polite in-app notification permission management and home prompt preference controls.
+
+### Changed
+- Updated version to 1.2.2 (build code 60).
+- 📬 **Verified Domain Email Infrastructure** — Upgraded email dispatch and notification pipeline to use authenticated Brevo SMTP relay with official DKIM and DMARC verified sender domain (`noreply@gupshupgo.app`).
+- 🛡️ **Vault Security & PIN Custody Safeguards** — Enhanced Vault PIN dialogs, biometric unlock fallbacks, and tamper-resistant local preferences synchronization.
+- ⚡ **Chat UI Fluidity & Retained Streams** — Implemented `ChatScrollController` and `RetainedStream` utilities for smooth message list scrolling without jumps during active incoming streams.
+
 ## [1.2.1] - 2026-10-07
 
 ### Added
@@ -370,6 +383,8 @@ Documents, pins, view-once media and anonymous-room photos, videos and voice not
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.2 | October 2026 | 16-Language Localization, Profile Invite Cards & Deep Links, Verified Domain Email Delivery, Vault Security |
+| 1.2.1 | October 2026 | Meet GupAI (In-App Chat Assistant), Self-Healing Encrypted Statuses, High-Concurrency Backend |
 | 1.2.0 | September 2026 | Document & Location Sharing, View-Once Media, Anonymous Chat Media, Full History Search |
 | 1.1.9 | September 2026 | Chat Encryption Fixes, Self-Healing Message Recovery, Delivery Stability |
 | 1.1.8 | September 2026 | Video Messages in Chat, Instant Video Previews, Incoming Screen Share UI |

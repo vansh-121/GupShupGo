@@ -3,10 +3,10 @@
 /// A stunning, Telegram-Premium-inspired screen with animated header,
 /// feature comparison, pricing cards, and restore purchase.
 
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/subscription_model.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
@@ -53,24 +53,25 @@ class _PremiumScreenState extends State<PremiumScreen>
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
     final sub = context.watch<SubscriptionProvider>();
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: c.isDark ? const Color(0xFF0A0A14) : c.surface,
       body: CustomScrollView(
         slivers: [
           // ── Gradient hero header ──────────────────────────────────────
-          SliverToBoxAdapter(child: _buildHeroHeader(c, sub)),
+          SliverToBoxAdapter(child: _buildHeroHeader(c, sub, l10n)),
 
           // ── Already Pro banner ────────────────────────────────────────
           if (sub.isPro)
-            SliverToBoxAdapter(child: _buildActiveProBanner(c, sub)),
+            SliverToBoxAdapter(child: _buildActiveProBanner(c, sub, l10n)),
 
           // ── Features list ─────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
               child: Text(
-                'What you get with Pro',
+                l10n.premiumFeaturesHeader,
                 style: GoogleFonts.poppins(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -82,7 +83,7 @@ class _PremiumScreenState extends State<PremiumScreen>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
             sliver: SliverList(
-              delegate: SliverChildListDelegate(_buildFeatureCards(c)),
+              delegate: SliverChildListDelegate(_buildFeatureCards(c, l10n)),
             ),
           ),
 
@@ -92,7 +93,7 @@ class _PremiumScreenState extends State<PremiumScreen>
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
                 child: Text(
-                  'Choose your plan',
+                  l10n.premiumPlansHeader,
                   style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -101,9 +102,9 @@ class _PremiumScreenState extends State<PremiumScreen>
                 ),
               ),
             ),
-            SliverToBoxAdapter(child: _buildPricingCards(c, sub)),
-            SliverToBoxAdapter(child: _buildSubscribeButton(c, sub)),
-            SliverToBoxAdapter(child: _buildRestoreButton(c, sub)),
+            SliverToBoxAdapter(child: _buildPricingCards(c, sub, l10n)),
+            SliverToBoxAdapter(child: _buildSubscribeButton(c, sub, l10n)),
+            SliverToBoxAdapter(child: _buildRestoreButton(c, sub, l10n)),
           ],
 
           // ── Bottom padding ────────────────────────────────────────────
@@ -117,7 +118,7 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Hero header with animated Pro badge
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildHeroHeader(AppThemeColors c, SubscriptionProvider sub) {
+  Widget _buildHeroHeader(AppThemeColors c, SubscriptionProvider sub, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -195,7 +196,7 @@ class _PremiumScreenState extends State<PremiumScreen>
 
             // Title
             Text(
-              'GupShupGo Pro',
+              l10n.premiumTitle,
               style: GoogleFonts.poppins(
                 fontSize: 28,
                 fontWeight: FontWeight.w800,
@@ -206,8 +207,8 @@ class _PremiumScreenState extends State<PremiumScreen>
             const SizedBox(height: 6),
             Text(
               sub.isPro
-                  ? 'You\'re a Pro member! 🎉'
-                  : 'Unlock the full experience',
+                  ? l10n.premiumSubtitleMember
+                  : l10n.premiumSubtitleUnlock,
               style: GoogleFonts.poppins(
                 fontSize: 14,
                 color: Colors.white.withOpacity(0.8),
@@ -225,7 +226,7 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Active Pro banner
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildActiveProBanner(AppThemeColors c, SubscriptionProvider sub) {
+  Widget _buildActiveProBanner(AppThemeColors c, SubscriptionProvider sub, AppLocalizations l10n) {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       padding: const EdgeInsets.all(16),
@@ -261,7 +262,7 @@ class _PremiumScreenState extends State<PremiumScreen>
                   ),
                 ),
                 Text(
-                  '${sub.subscription.daysRemaining} days remaining',
+                  l10n.premiumActiveDaysRemaining(sub.subscription.daysRemaining),
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: c.textMid,
@@ -281,21 +282,21 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Feature comparison cards
   // ═══════════════════════════════════════════════════════════════════════════
 
-  List<Widget> _buildFeatureCards(AppThemeColors c) {
+  List<Widget> _buildFeatureCards(AppThemeColors c, AppLocalizations l10n) {
     final features = [
       _FeatureItem(
         icon: Icons.photo_camera_rounded,
-        title: 'Media Moments',
-        description: 'Share photos & videos as status updates',
-        freeLabel: 'Text only',
-        proLabel: 'Photos + Videos',
+        title: l10n.premiumFeatureMediaTitle,
+        description: l10n.premiumFeatureMediaDesc,
+        freeLabel: l10n.premiumFeatureMediaFree,
+        proLabel: l10n.premiumFeatureMediaPro,
       ),
       _FeatureItem(
         icon: Icons.screen_share_rounded,
-        title: 'Screen Sharing',
-        description: 'Share your screen live during chats',
-        freeLabel: 'Locked',
-        proLabel: 'Full access',
+        title: l10n.premiumFeatureScreenShareTitle,
+        description: l10n.premiumFeatureScreenShareDesc,
+        freeLabel: l10n.premiumFeatureScreenShareFree,
+        proLabel: l10n.premiumFeatureScreenSharePro,
       ),
       // Chat themes are per-conversation backgrounds and bubble colours, not app
       // light/dark — that stays free for everyone. The counts are the actual
@@ -304,19 +305,19 @@ class _PremiumScreenState extends State<PremiumScreen>
       // tiers fails the test until this copy is updated too.
       _FeatureItem(
         icon: Icons.palette_rounded,
-        title: 'Chat Themes',
-        description: 'Patterned backgrounds & gradient bubbles, per chat',
-        freeLabel: '6 themes',
-        proLabel: 'All 12 + your own photo',
+        title: l10n.premiumFeatureThemesTitle,
+        description: l10n.premiumFeatureThemesDesc,
+        freeLabel: l10n.premiumFeatureThemesFree,
+        proLabel: l10n.premiumFeatureThemesPro,
       ),
       // 2 minutes / unlimited. `PlanLimits.maxVoiceDurationSec` returns null for
       // Pro and 120 for free — keep these two labels in step with it.
       _FeatureItem(
         icon: Icons.mic_rounded,
-        title: 'Longer Voice Messages',
-        description: 'Record longer voice notes',
-        freeLabel: '2 minutes',
-        proLabel: 'Unlimited',
+        title: l10n.premiumFeatureVoiceTitle,
+        description: l10n.premiumFeatureVoiceDesc,
+        freeLabel: l10n.premiumFeatureVoiceFree,
+        proLabel: l10n.premiumFeatureVoicePro,
       ),
       // A quality tier, not a byte allowance. The old "10 MB / 50 MB" wording
       // described a limit the app never enforced — and the Storage rules capped
@@ -325,41 +326,41 @@ class _PremiumScreenState extends State<PremiumScreen>
       // images (2560px / q90 vs 1280-1600px / q70-75) and longer status video.
       _FeatureItem(
         icon: Icons.cloud_upload_rounded,
-        title: 'Higher Quality Media',
-        description: 'Sharper photos and longer status videos',
-        freeLabel: 'Standard quality',
-        proLabel: 'High quality + 90s videos',
+        title: l10n.premiumFeatureQualityTitle,
+        description: l10n.premiumFeatureQualityDesc,
+        freeLabel: l10n.premiumFeatureQualityFree,
+        proLabel: l10n.premiumFeatureQualityPro,
       ),
       _FeatureItem(
         icon: Icons.local_fire_department_rounded,
-        title: 'Bond Restore',
-        description: 'Restore broken bonds for free',
-        freeLabel: 'Points or watch an ad',
-        proLabel: '1 free restore/week',
+        title: l10n.premiumFeatureBondTitle,
+        description: l10n.premiumFeatureBondDesc,
+        freeLabel: l10n.premiumFeatureBondFree,
+        proLabel: l10n.premiumFeatureBondPro,
       ),
       _FeatureItem(
         icon: Icons.workspace_premium_rounded,
-        title: 'Pro Badge',
-        description: 'Show off your Pro status',
-        freeLabel: 'No badge',
-        proLabel: 'Exclusive Pro badge',
+        title: l10n.premiumFeatureBadgeTitle,
+        description: l10n.premiumFeatureBadgeDesc,
+        freeLabel: l10n.premiumFeatureBadgeFree,
+        proLabel: l10n.premiumFeatureBadgePro,
       ),
       _FeatureItem(
         icon: Icons.download_rounded,
-        title: 'Chat Export',
-        description: 'Save a chat as a PDF you can print, or as plain text',
-        freeLabel: 'Not available',
-        proLabel: 'PDF & TXT export',
+        title: l10n.premiumFeatureExportTitle,
+        description: l10n.premiumFeatureExportDesc,
+        freeLabel: l10n.premiumFeatureExportFree,
+        proLabel: l10n.premiumFeatureExportPro,
       ),
       // Worded to promise exactly what Pro does: banners go away. Rewarded ads
       // are opt-in and stay available to Pro members, so claiming a blanket
       // "no ads" here would be a promise the app then breaks in the Arcade.
       _FeatureItem(
         icon: Icons.block_rounded,
-        title: 'Ad-Free Experience',
-        description: 'No banner ads anywhere in the app',
-        freeLabel: 'Banner ads shown',
-        proLabel: 'No banners (reward ads stay optional)',
+        title: l10n.premiumFeatureAdFreeTitle,
+        description: l10n.premiumFeatureAdFreeDesc,
+        freeLabel: l10n.premiumFeatureAdFreeFree,
+        proLabel: l10n.premiumFeatureAdFreePro,
       ),
     ];
 
@@ -473,22 +474,22 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Pricing cards
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildPricingCards(AppThemeColors c, SubscriptionProvider sub) {
+  Widget _buildPricingCards(AppThemeColors c, SubscriptionProvider sub, AppLocalizations l10n) {
     // Define plans — prices shown are placeholders until products load
     final plans = [
       _PricingPlan(
-        title: 'Monthly',
+        title: l10n.premiumPlanMonthly,
         productId: ProProductIds.monthly,
         fallbackPrice: '₹99/mo',
-        period: '/month',
+        period: l10n.premiumPeriodMonth,
         savings: null,
       ),
       _PricingPlan(
-        title: 'Yearly',
+        title: l10n.premiumPlanYearly,
         productId: ProProductIds.yearly,
         fallbackPrice: '₹799/yr',
-        period: '/year',
-        savings: 'Save ~33%',
+        period: l10n.premiumPeriodYear,
+        savings: l10n.premiumPlanSavings,
       ),
     ];
 
@@ -623,7 +624,7 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Subscribe button
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildSubscribeButton(AppThemeColors c, SubscriptionProvider sub) {
+  Widget _buildSubscribeButton(AppThemeColors c, SubscriptionProvider sub, AppLocalizations l10n) {
     final plans = [ProProductIds.monthly, ProProductIds.yearly];
     final selectedProductId = plans[_selectedPlanIndex];
 
@@ -645,9 +646,7 @@ class _PremiumScreenState extends State<PremiumScreen>
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              'Product not available. Make sure you have an active '
-                              'internet connection and the app is downloaded '
-                              'from the Play Store.',
+                              l10n.premiumProductUnavailable,
                               style: GoogleFonts.poppins(fontSize: 12),
                             ),
                             backgroundColor: c.error,
@@ -678,7 +677,7 @@ class _PremiumScreenState extends State<PremiumScreen>
                         const Icon(Icons.workspace_premium_rounded, size: 22),
                         const SizedBox(width: 8),
                         Text(
-                          'Subscribe Now',
+                          l10n.premiumSubscribeBtn,
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w700,
                             fontSize: 16,
@@ -701,7 +700,7 @@ class _PremiumScreenState extends State<PremiumScreen>
           ],
           const SizedBox(height: 8),
           Text(
-            'Cancel anytime from Google Play subscriptions.',
+            l10n.premiumCancelAnytime,
             style: GoogleFonts.poppins(
               fontSize: 11,
               color: c.textLow,
@@ -717,7 +716,7 @@ class _PremiumScreenState extends State<PremiumScreen>
   //  Restore purchases button
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildRestoreButton(AppThemeColors c, SubscriptionProvider sub) {
+  Widget _buildRestoreButton(AppThemeColors c, SubscriptionProvider sub, AppLocalizations l10n) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: TextButton(
@@ -730,8 +729,8 @@ class _PremiumScreenState extends State<PremiumScreen>
                     SnackBar(
                       content: Text(
                         sub.isPro
-                            ? 'Pro subscription restored! 🎉'
-                            : 'No active subscription found.',
+                            ? l10n.premiumRestoredSuccess
+                            : l10n.premiumNoActiveSub,
                         style: GoogleFonts.poppins(fontSize: 13),
                       ),
                       backgroundColor: sub.isPro ? c.success : c.textMid,
@@ -751,7 +750,7 @@ class _PremiumScreenState extends State<PremiumScreen>
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    'Restoring…',
+                    l10n.premiumRestoring,
                     style: GoogleFonts.poppins(
                       color: c.primary,
                       fontSize: 13,
@@ -761,7 +760,7 @@ class _PremiumScreenState extends State<PremiumScreen>
                 ],
               )
             : Text(
-                'Restore previous purchase',
+                l10n.premiumRestoreBtn,
                 style: GoogleFonts.poppins(
                   color: c.primary,
                   fontSize: 13,

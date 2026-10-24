@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/secure_screen_service.dart';
 import 'package:video_chat_app/widgets/video_message_widgets.dart'
     show resolveVideoDisplayAspect;
@@ -126,6 +127,8 @@ class _PlaintextViewOnceViewerState extends State<PlaintextViewOnceViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -133,22 +136,24 @@ class _PlaintextViewOnceViewerState extends State<PlaintextViewOnceViewer> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          widget.isVideo ? 'Video · View once' : 'Photo · View once',
+          widget.isVideo
+              ? l10n.viewOnceVideoTitle
+              : l10n.viewOncePhotoTitle,
           style: GoogleFonts.poppins(fontSize: 15, color: Colors.white),
         ),
       ),
       body: SafeArea(
         child: Column(
           children: [
-            Expanded(child: Center(child: _buildContent())),
-            _buildFooter(),
+            Expanded(child: Center(child: _buildContent(l10n))),
+            _buildFooter(l10n),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(AppLocalizations l10n) {
     if (_loading) {
       return const CircularProgressIndicator(color: Colors.white);
     }
@@ -156,7 +161,7 @@ class _PlaintextViewOnceViewerState extends State<PlaintextViewOnceViewer> {
       return Padding(
         padding: const EdgeInsets.all(32),
         child: Text(
-          "Couldn't open this media.",
+          l10n.viewOnceCantOpen,
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
         ),
@@ -207,7 +212,7 @@ class _PlaintextViewOnceViewerState extends State<PlaintextViewOnceViewer> {
 
   /// Same honest caveat as the E2EE viewer: on Android the flag genuinely
   /// blocks capture; on iOS there is no API that can.
-  Widget _buildFooter() {
+  Widget _buildFooter(AppLocalizations l10n) {
     final enforceable = SecureScreenService.instance.isEnforceable;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
@@ -223,8 +228,8 @@ class _PlaintextViewOnceViewerState extends State<PlaintextViewOnceViewer> {
           Flexible(
             child: Text(
               enforceable
-                  ? "Screenshots are blocked. You can't open this again."
-                  : "You can't open this again. Screenshots can't be blocked on iOS.",
+                  ? l10n.viewOnceBlockedFooter
+                  : l10n.viewOnceUnblockedFooter,
               style: GoogleFonts.poppins(color: Colors.white38, fontSize: 11.5),
             ),
           ),

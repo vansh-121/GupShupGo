@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/services/status_service.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
 class AddTextStatusScreen extends StatefulWidget {
   final String userId;
@@ -24,6 +28,7 @@ class AddTextStatusScreen extends StatefulWidget {
 
 class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   final TextEditingController _textController = TextEditingController();
+  final _textFocus = FocusNode();
   final StatusService _statusService = StatusService();
   bool _isUploading = false;
 
@@ -37,6 +42,8 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   void initState() {
     super.initState();
     _viewersFuture = _statusService.defaultViewerUids(widget.userId);
+    unawaited(focusInputWhenReady(context, _textFocus,
+        shouldFocus: () => !_isUploading));
   }
 
   int _currentColorIndex = 0;
@@ -73,10 +80,11 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   }
 
   Future<void> _uploadStatus() async {
+    final l10n = AppLocalizations.of(context);
     final text = _textController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter some text')),
+        SnackBar(content: Text(l10n.statusEnterTextPrompt)),
       );
       return;
     }
@@ -93,9 +101,9 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
       if (viewers.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
                 content: Text(
-                    'No contacts yet — start a chat before posting a status.')),
+                    l10n.statusNoContactsNotice)),
           );
         }
         return;
@@ -123,7 +131,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to post status: $e')),
+          SnackBar(content: Text(l10n.statusPostFailed(e.toString()))),
         );
       }
     } finally {
@@ -134,6 +142,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
   @override
   void dispose() {
     _textController.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
@@ -165,7 +174,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           IconButton(
             icon: Icon(Icons.palette_rounded, color: onBg),
             onPressed: _cycleColor,
-            tooltip: 'Change background color',
+            tooltip: AppLocalizations.of(context).statusChangeBgColorTooltip,
           ),
         ],
       ),
@@ -176,7 +185,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: TextField(
                 controller: _textController,
-                autofocus: true,
+                focusNode: _textFocus,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   color: onBg,
@@ -185,7 +194,7 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
                 ),
                 decoration: InputDecoration(
                   filled: false,
-                  hintText: 'Type a status...',
+                  hintText: AppLocalizations.of(context).statusTypeHint,
                   hintStyle: GoogleFonts.poppins(
                     color: onBgMuted,
                     fontSize: 24,
@@ -205,14 +214,14 @@ class _AddTextStatusScreenState extends State<AddTextStatusScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: MediaQuery.of(context).viewPadding.bottom + 24,
+            bottom: MediaQuery.viewPaddingOf(context).bottom + 24,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(Icons.lock_outline_rounded, size: 12, color: onBgMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'End-to-end encrypted',
+                  AppLocalizations.of(context).callEndToEndEncrypted,
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: onBgMuted,

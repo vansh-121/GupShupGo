@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/anonymous_room_model.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
@@ -22,6 +23,7 @@ import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/voice_recorder_service.dart';
 import 'package:video_chat_app/services/whats_new_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
 import 'package:video_chat_app/widgets/attachment_sheet.dart';
 import 'package:video_chat_app/widgets/linkified_text.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
@@ -56,12 +58,14 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   final _service = AnonymousChatService.instance;
   final _userService = UserService();
   final _messageController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _scrollController = ChatScrollController();
   final _imagePicker = ImagePicker();
   final _voiceRecorder = VoiceRecorderService();
 
   AnonymousRoomModel? _room;
   StreamSubscription<DocumentSnapshot>? _roomSub;
+  late final Stream<QuerySnapshot> _messagesStream;
+  int _lastMessageCount = 0;
   bool _strangerDisconnected = false;
   bool _isEnding = false;
   bool _sendingFriendRequest = false;
@@ -72,10 +76,8 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   /// time, and the paperclip is the only thing that reads it.
   bool _isUploadingMedia = false;
 
-  /// True while the text field holds something, so the trailing circle can swap
-  /// between send and mic. Kept as state rather than read off the controller in
-  /// `build` because the controller doesn't rebuild the tree on its own.
-  bool _hasText = false;
+  /// Only the send/mic control rebuilds when the draft becomes empty or nonempty.
+  final ValueNotifier<bool> _hasText = ValueNotifier(false);
 
   /// Message ids the user has chosen to un-blur, see [_StrangerMediaGate].
   ///
@@ -95,6 +97,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   @override
   void initState() {
     super.initState();
+    _messagesStream = _service.messagesStream(widget.roomId);
     _loadRoom();
     _messageController.addListener(_onTextChanged);
     // Only warms one when the next skip is the one that would show it, so the
@@ -107,14 +110,14 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     _roomSub?.cancel();
     _messageController.removeListener(_onTextChanged);
     _messageController.dispose();
+    _hasText.dispose();
     _scrollController.dispose();
     _voiceRecorder.dispose();
     super.dispose();
   }
 
   void _onTextChanged() {
-    final has = _messageController.text.trim().isNotEmpty;
-    if (has != _hasText) setState(() => _hasText = has);
+    _hasText.value = _messageController.text.trim().isNotEmpty;
   }
 
   Future<void> _loadRoom() async {
@@ -356,7 +359,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.75,
         ),
         decoration: BoxDecoration(
           color: isMe ? c.primary : c.surfaceAlt,
@@ -557,7 +560,8 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     } else if (isMe) {
       subtitle = 'View once · sent';
     } else {
-      subtitle = isVideo ? 'View once · tap to play' : 'View once · tap to view';
+      subtitle =
+          isVideo ? 'View once · tap to play' : 'View once · tap to view';
     }
 
     return Align(
@@ -594,8 +598,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   height: 38,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border:
-                        Border.all(color: glyphColor.withOpacity(0.55)),
+                    border: Border.all(color: glyphColor.withOpacity(0.55)),
                   ),
                   alignment: Alignment.center,
                   child: Icon(
@@ -632,8 +635,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            GoogleFonts.poppins(color: fgLow, fontSize: 11),
+                        style: GoogleFonts.poppins(color: fgLow, fontSize: 11),
                       ),
                     ],
                   ),
@@ -656,26 +658,31 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     required String mediaUrl,
     String? thumbnailBase64,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          isVideo ? 'Play once?' : 'Open once?',
+          isVideo
+              ? l10n.anonChatViewOnceVideoTitle
+              : l10n.anonChatViewOncePhotoTitle,
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
         ),
         content: Text(
-          "You can only open this ${isVideo ? 'video' : 'photo'} one time. "
-          "Once you close it, it's gone.",
+          isVideo
+              ? l10n.anonChatViewOnceVideoDesc
+              : l10n.anonChatViewOncePhotoDesc,
           style: GoogleFonts.poppins(fontSize: 13.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: GoogleFonts.poppins()),
+            child:
+                Text(l10n.anonChatViewOnceCancel, style: GoogleFonts.poppins()),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Open',
+            child: Text(l10n.anonChatViewOnceOpen,
                 style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
           ),
         ],
@@ -729,15 +736,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    _scrollController.scrollToLatest();
   }
 
   Future<void> _endAndLeave() async {
@@ -885,14 +884,15 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
     if (_room == null) return;
     final partnerId = _room!.getPartnerId(widget.currentUserId);
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     String? selectedReason;
     final reasons = [
-      'Inappropriate content',
-      'Harassment or bullying',
-      'Spam or scam',
-      'Threatening behaviour',
-      'Other',
+      l10n.anonChatReportReasonInappropriate,
+      l10n.anonChatReportReasonHarassment,
+      l10n.anonChatReportReasonSpam,
+      l10n.anonChatReportReasonThreatening,
+      l10n.anonChatReportReasonOther,
     ];
 
     final confirmed = await showDialog<bool>(
@@ -903,7 +903,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(
-            'Report Stranger',
+            l10n.anonChatReportTitle,
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w600,
               color: c.textHigh,
@@ -914,7 +914,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Why are you reporting this user?',
+                l10n.anonChatReportQuestion,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
                   color: c.textMid,
@@ -943,7 +943,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: Text(
-                'Cancel',
+                l10n.anonChatReportCancel,
                 style: GoogleFonts.poppins(color: c.textMid),
               ),
             ),
@@ -952,7 +952,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   ? () => Navigator.pop(ctx, true)
                   : null,
               child: Text(
-                'Report & Leave',
+                l10n.anonChatReportSubmit,
                 style: GoogleFonts.poppins(
                   color: selectedReason != null ? c.error : c.textLow,
                   fontWeight: FontWeight.w600,
@@ -975,7 +975,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Report submitted. Thank you for keeping GupShupGo safe.',
+              l10n.anonChatReportSubmitted,
               style: GoogleFonts.poppins(fontSize: 13),
             ),
           ),
@@ -988,6 +988,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     if (_room == null) {
       return Scaffold(
@@ -1027,7 +1028,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
               ),
             ),
             Text(
-              'Anonymous Chat',
+              l10n.anonLobbyTitle,
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 color: c.textMid,
@@ -1044,7 +1045,9 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   : Icons.person_add_alt_1_rounded,
               color: canSendRequest ? c.primary : c.textLow,
             ),
-            tooltip: iSentRequest ? 'Request sent' : 'Add friend',
+            tooltip: iSentRequest
+                ? l10n.anonChatRequestSentTooltip
+                : l10n.anonChatAddFriendTooltip,
             onPressed: (canSendRequest && !_sendingFriendRequest)
                 ? _sendFriendRequest
                 : null,
@@ -1052,13 +1055,13 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           // Next stranger
           IconButton(
             icon: Icon(Icons.skip_next_rounded, color: c.primary),
-            tooltip: 'Next stranger',
+            tooltip: l10n.anonChatNextStrangerTooltip,
             onPressed: _nextStranger,
           ),
           // Report
           IconButton(
             icon: Icon(Icons.flag_outlined, color: c.error),
-            tooltip: 'Report',
+            tooltip: l10n.anonChatReportTooltip,
             onPressed: _showReportDialog,
           ),
         ],
@@ -1076,7 +1079,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 Icon(Icons.lock_open_rounded, size: 14, color: c.textLow),
                 const SizedBox(width: 4),
                 Text(
-                  'Messages are not end-to-end encrypted',
+                  l10n.anonChatNotEncrypted,
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: c.textLow,
@@ -1087,20 +1090,20 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
 
           // ── Friend Request: Receiver banner (Accept / Decline) ─
-          if (shouldRespond) _buildFriendRequestBanner(c),
+          if (shouldRespond) _buildFriendRequestBanner(c, l10n),
 
           // ── Friend Request: Sender waiting banner ──────────────
-          if (iSentRequest) _buildWaitingBanner(c),
+          if (iSentRequest) _buildWaitingBanner(c, l10n),
 
           // ── Messages ─────────────────────────────────────────
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _service.messagesStream(widget.roomId),
+              stream: _messagesStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return Center(
                     child: Text(
-                      'Say hi to the stranger! 👋',
+                      l10n.anonChatSayHi,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.textMid,
@@ -1110,11 +1113,13 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 }
 
                 final messages = snapshot.data!.docs;
+                if (messages.length > _lastMessageCount) _scrollToBottom();
+                _lastMessageCount = messages.length;
 
                 if (messages.isEmpty) {
                   return Center(
                     child: Text(
-                      'Say hi to the stranger! 👋',
+                      l10n.anonChatSayHi,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         color: c.textMid,
@@ -1123,59 +1128,69 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   );
                 }
 
-                _scrollToBottom();
-
                 return ListView.builder(
                   controller: _scrollController,
+                  reverse: true,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: messages.length,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) return null;
+                    final index = messages.indexWhere((m) => m.id == key.value);
+                    return index < 0 ? null : messages.length - 1 - index;
+                  },
                   itemBuilder: (context, index) {
-                    final msg = messages[index].data() as Map<String, dynamic>;
-                    final isMe = msg['senderId'] == widget.currentUserId;
-                    final text = msg['text'] as String? ?? '';
-                    final type = msg['type'] as String? ?? 'text';
+                    final doc = messages[messages.length - 1 - index];
+                    return Builder(
+                      key: ValueKey(doc.id),
+                      builder: (context) {
+                        final msg = doc.data() as Map<String, dynamic>;
+                        final isMe = msg['senderId'] == widget.currentUserId;
+                        final text = msg['text'] as String? ?? '';
+                        final type = msg['type'] as String? ?? 'text';
 
-                    // System messages (centered, muted)
-                    if (type == 'system') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: c.surfaceAlt,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              text,
-                              style: GoogleFonts.poppins(
-                                fontSize: 12,
-                                color: c.textMid,
-                                fontStyle: FontStyle.italic,
+                        // System messages (centered, muted)
+                        if (type == 'system') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: c.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  text,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: c.textMid,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
-                      );
-                    }
+                          );
+                        }
 
-                    // Media — photo, video, voice note.
-                    if (type == 'image' ||
-                        type == 'video' ||
-                        type == 'audio') {
-                      return _buildMediaBubble(
-                        c,
-                        docId: messages[index].id,
-                        msg: msg,
-                        type: type,
-                        isMe: isMe,
-                      );
-                    }
+                        // Media — photo, video, voice note.
+                        if (type == 'image' ||
+                            type == 'video' ||
+                            type == 'audio') {
+                          return _buildMediaBubble(
+                            c,
+                            docId: doc.id,
+                            msg: msg,
+                            type: type,
+                            isMe: isMe,
+                          );
+                        }
 
-                    // Regular text messages
-                    return _buildTextBubble(c, text, isMe);
+                        // Regular text messages
+                        return _buildTextBubble(c, text, isMe);
+                      },
+                    );
                   },
                 );
               },
@@ -1190,7 +1205,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 16,
                 16,
                 16,
-                MediaQuery.of(context).viewPadding.bottom + 16,
+                MediaQuery.viewPaddingOf(context).bottom + 16,
               ),
               color: c.primary.withOpacity(0.1),
               child: Row(
@@ -1206,7 +1221,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'You are now friends! Opening secure chat…',
+                    l10n.anonChatFriendsTransition,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -1225,13 +1240,13 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 16,
                 16,
                 16,
-                MediaQuery.of(context).viewPadding.bottom + 16,
+                MediaQuery.viewPaddingOf(context).bottom + 16,
               ),
               color: c.surfaceAlt,
               child: Column(
                 children: [
                   Text(
-                    'Stranger has disconnected 👋',
+                    l10n.anonChatStrangerDisconnected,
                     style: GoogleFonts.poppins(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -1243,7 +1258,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                     onPressed: _nextStranger,
                     icon: const Icon(Icons.shuffle_rounded, size: 18),
                     label: Text(
-                      'Find Next Stranger',
+                      l10n.anonChatFindNextBtn,
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -1269,7 +1284,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                 left: 12,
                 right: 8,
                 top: 8,
-                bottom: MediaQuery.of(context).viewPadding.bottom + 8,
+                bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
               ),
               decoration: BoxDecoration(
                 color: c.surface,
@@ -1287,7 +1302,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   // ── Receiver banner: "Stranger wants to connect!" ───────────────────
-  Widget _buildFriendRequestBanner(AppThemeColors c) {
+  Widget _buildFriendRequestBanner(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1305,7 +1320,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Stranger wants to connect!',
+                  l10n.anonChatFriendReqTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -1317,7 +1332,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Accepting reveals your real profile and starts an encrypted chat.',
+            l10n.anonChatFriendReqDesc,
             style: GoogleFonts.poppins(fontSize: 11, color: c.textMid),
           ),
           const SizedBox(height: 10),
@@ -1335,7 +1350,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                     ),
                   ),
                   child: Text(
-                    'Decline',
+                    l10n.anonChatDecline,
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
                       color: c.error,
@@ -1365,7 +1380,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
                           ),
                         )
                       : Text(
-                          'Accept',
+                          l10n.anonChatAccept,
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w600,
                           ),
@@ -1380,7 +1395,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
   }
 
   // ── Sender waiting banner ───────────────────────────────────────────
-  Widget _buildWaitingBanner(AppThemeColors c) {
+  Widget _buildWaitingBanner(AppThemeColors c, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1396,7 +1411,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Friend request sent! Waiting for response…',
+              l10n.anonChatWaitingReqDesc,
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 color: c.textMid,
@@ -1443,6 +1458,7 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
         Expanded(
           child: TextField(
             controller: _messageController,
+            onTap: _scrollToBottom,
             style: GoogleFonts.poppins(fontSize: 15, color: c.textHigh),
             decoration: InputDecoration(
               hintText: 'Type a message…',
@@ -1464,35 +1480,37 @@ class _AnonymousChatScreenState extends State<AnonymousChatScreen> {
           ),
         ),
         const SizedBox(width: 6),
-        if (_hasText)
-          GestureDetector(
-            onTap: _sendMessage,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
-            ),
-          )
-        else
-          GestureDetector(
-            onLongPressStart: (_) => _startVoiceRecording(),
-            onLongPressEnd: (_) => _stopVoiceRecording(),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.primary,
-                shape: BoxShape.circle,
-              ),
-              child:
-                  const Icon(Icons.mic_rounded, color: Colors.white, size: 22),
-            ),
-          ),
+        ValueListenableBuilder<bool>(
+          valueListenable: _hasText,
+          builder: (_, hasText, __) => hasText
+              ? GestureDetector(
+                  onTap: _sendMessage,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.send_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                )
+              : GestureDetector(
+                  onLongPressStart: (_) => _startVoiceRecording(),
+                  onLongPressEnd: (_) => _stopVoiceRecording(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: c.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.mic_rounded,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+        ),
       ],
     );
   }

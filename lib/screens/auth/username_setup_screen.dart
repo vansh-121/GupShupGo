@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/models/user_model.dart';
 import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 import 'package:video_chat_app/screens/home_screen.dart';
 
 class UsernameSetupScreen extends StatefulWidget {
@@ -26,6 +28,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   final UserService _userService = UserService();
   final AuthService _authService = AuthService();
   final TextEditingController _usernameController = TextEditingController();
+  final _usernameFocus = FocusNode();
 
   Timer? _debounce;
   bool _isChecking = false;
@@ -38,6 +41,8 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(focusInputWhenReady(context, _usernameFocus,
+        shouldFocus: () => !_isSaving));
     // Fire-and-forget — updates the field once a suggestion resolves.
     // ignore: discarded_futures
     _suggestInitialUsername();
@@ -106,11 +111,13 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   void dispose() {
     _debounce?.cancel();
     _usernameController.dispose();
+    _usernameFocus.dispose();
     super.dispose();
   }
 
   void _onUsernameChanged(String text) {
     _debounce?.cancel();
+    final l10n = AppLocalizations.of(context);
 
     String clean = text.trim().toLowerCase();
     if (clean.startsWith('@')) {
@@ -121,7 +128,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       setState(() {
         _isChecking = false;
         _isAvailable = false;
-        _errorMessage = 'Username must be at least 3 characters long.';
+        _errorMessage = l10n.usernameSetupTooShort;
       });
       return;
     }
@@ -130,7 +137,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       setState(() {
         _isChecking = false;
         _isAvailable = false;
-        _errorMessage = 'Username must be at most 20 characters long.';
+        _errorMessage = l10n.usernameSetupTooLong;
       });
       return;
     }
@@ -139,7 +146,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       setState(() {
         _isChecking = false;
         _isAvailable = false;
-        _errorMessage = 'Only letters, numbers, and underscores allowed.';
+        _errorMessage = l10n.usernameSetupInvalidChars;
       });
       return;
     }
@@ -158,17 +165,19 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
       if (!mounted) return;
 
+      final currentL10n = AppLocalizations.of(context);
       setState(() {
         _isChecking = false;
         _isAvailable = available;
         if (!available) {
-          _errorMessage = '@$clean is already taken by another user.';
+          _errorMessage = currentL10n.usernameSetupTaken(clean);
         }
       });
     });
   }
 
   Future<void> _saveUsername() async {
+    final l10n = AppLocalizations.of(context);
     String clean = _usernameController.text.trim().toLowerCase();
     if (clean.startsWith('@')) clean = clean.substring(1);
 
@@ -200,7 +209,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to set username: $e')),
+        SnackBar(content: Text(l10n.usernameSetupFailed(e.toString()))),
       );
       setState(() {
         _isSaving = false;
@@ -229,6 +238,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final c = AppThemeColors.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -250,7 +260,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
       backgroundColor: c.surface,
       appBar: AppBar(
         title: Text(
-          'Choose Your Handle',
+          l10n.usernameSetupAppBarTitle,
           style: TextStyle(
             color: c.textHigh,
             fontWeight: FontWeight.bold,
@@ -300,7 +310,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
 
                     // ── Title & Description ───────────────────────────
                     Text(
-                      'Secure Your Identity',
+                      l10n.usernameSetupHeaderTitle,
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 24,
@@ -313,7 +323,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Text(
-                        'Your @handle is your unique key on GupShupGo. Others can search and add you securely without sharing your phone or email.',
+                        l10n.usernameSetupHeaderDesc,
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 14,
@@ -370,15 +380,15 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                           Expanded(
                             child: TextField(
                               controller: _usernameController,
+                              focusNode: _usernameFocus,
                               onChanged: _onUsernameChanged,
-                              autofocus: true,
                               style: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w600,
                                 color: c.textHigh,
                               ),
                               decoration: InputDecoration(
-                                hintText: 'your_handle',
+                                hintText: l10n.usernameSetupInputHint,
                                 hintStyle: TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.normal,
@@ -440,7 +450,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
-                                        'Checking availability...',
+                                        l10n.usernameSetupChecking,
                                         style: TextStyle(
                                           color: c.textMid,
                                           fontSize: 12,
@@ -468,7 +478,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              '@$cleanHandle is available!',
+                                              l10n.usernameSetupAvailable(cleanHandle),
                                               style: const TextStyle(
                                                 color: Colors.green,
                                                 fontWeight: FontWeight.w600,
@@ -513,7 +523,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                                             ),
                                           )
                                         : Text(
-                                            '3–20 characters (a-z, 0-9, _)',
+                                            l10n.usernameSetupCharRules,
                                             style: TextStyle(
                                               color: c.textLow,
                                               fontSize: 12,
@@ -540,7 +550,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          'RECOMMENDED FOR YOU',
+                          l10n.usernameSetupRecommended,
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -626,7 +636,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                           ),
                         )
                       : Text(
-                          'Save & Continue',
+                          l10n.usernameSetupSaveBtn,
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -642,7 +652,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
               child: TextButton(
                 onPressed: _isSaving ? null : _skip,
                 child: Text(
-                  'Skip for now',
+                  l10n.usernameSetupSkipBtn,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,

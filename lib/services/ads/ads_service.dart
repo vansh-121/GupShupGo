@@ -21,6 +21,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
@@ -49,6 +50,13 @@ class AdsService extends ChangeNotifier {
   bool _sdkReady = false;
   bool _starting = false;
   bool _wired = false;
+
+  /// How many callers are currently asking inline ads to stay hidden. A count,
+  /// not a bool, so overlapping suppressors (e.g. a dialog shown over another)
+  /// compose correctly — ads return only when the last one releases.
+  /// See [suppressBanner].
+  int _bannerSuppressors = 0;
+  bool _visibilityNotificationScheduled = false;
 
   /// Whether the Mobile Ads SDK has been initialised and may be asked for ads.
   bool get isReady => _sdkReady;
@@ -159,6 +167,12 @@ class AdsService extends ChangeNotifier {
   /// call can arrive over any screen, so this is the belt to the placement
   /// rules' braces: it guarantees no banner is ever live under call UI, which
   /// would be both an obscured-ad policy problem and an accidental-click risk.
+  ///
+  /// A banner is also withheld while something has called [suppressBanner] —
+  /// used while a text-entry modal (e.g. the vault PIN dialog) is open. The
+  /// banner's `AdWidget` is an Android platform view, and attaching/refreshing
+  /// one while the soft keyboard is up dismisses the keyboard; a banner behind a
+  /// modal is "obscured" under AdMob policy anyway, so it should not be live.
   bool canShowBanner({
     required bool hasProEntitlement,
     required CallState callState,
@@ -167,8 +181,42 @@ class AdsService extends ChangeNotifier {
         _flags.adsBannerEnabled &&
         !hasProEntitlement &&
         callState == CallState.Idle &&
+        _bannerSuppressors == 0 &&
         _consent.canRequestAds &&
         _sdkReady;
+  }
+
+  /// Hide inline platform-view ads until [releaseBannerSuppression]. Pair
+  /// them exactly once (e.g. in a widget's `initState`/`dispose`). Toggling
+  /// notifies listeners, so banner/native cards remove their platform views
+  /// and rebuild them only after the last suppressor releases.
+  void suppressBanner() {
+    _bannerSuppressors++;
+    if (_bannerSuppressors == 1) _notifyInlineAdVisibility();
+  }
+
+  /// Undo one [suppressBanner]. Clamped at zero so an extra release can never
+  /// drive the count negative and strand the banner off.
+  void releaseBannerSuppression() {
+    if (_bannerSuppressors == 0) return;
+    _bannerSuppressors--;
+    if (_bannerSuppressors == 0) _notifyInlineAdVisibility();
+  }
+
+  void _notifyInlineAdVisibility() {
+    // PIN dialogs acquire/release suppression in initState/dispose. Updating
+    // an ad behind the dialog synchronously would call setState during build.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_visibilityNotificationScheduled) return;
+      _visibilityNotificationScheduled = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _visibilityNotificationScheduled = false;
+        notifyListeners();
+      });
+    } else {
+      notifyListeners();
+    }
   }
 
   /// Whether a rewarded ad may be offered.
@@ -215,7 +263,8 @@ class AdsService extends ChangeNotifier {
     required CallState callState,
     bool inChat = false,
   }) {
-    return _flags.adsEnabled &&
+    return _bannerSuppressors == 0 &&
+        _flags.adsEnabled &&
         (inChat ? _flags.adsNativeChatEnabled : _flags.adsNativeEnabled) &&
         !hasProEntitlement &&
         callState == CallState.Idle &&

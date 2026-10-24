@@ -78,6 +78,35 @@ void main() {
     });
   });
 
+  group('parseSuggestions', () {
+    test('splits non-empty lines and trims each', () {
+      expect(
+        AiAssistantService.parseSuggestions('Sure!\n  On my way  \nGive me 5'),
+        ['Sure!', 'On my way', 'Give me 5'],
+      );
+    });
+
+    test('strips leading bullets/numbering the model may add', () {
+      expect(
+        AiAssistantService.parseSuggestions(
+            '- Yes\n* No\n1. Maybe\n2) Later\n• Soon'),
+        ['Yes', 'No', 'Maybe'], // also capped at 3
+      );
+    });
+
+    test('caps at three suggestions', () {
+      expect(AiAssistantService.parseSuggestions('a\nb\nc\nd\ne').length, 3);
+    });
+
+    test('drops blank lines', () {
+      expect(AiAssistantService.parseSuggestions('\n\nHello\n\n'), ['Hello']);
+    });
+
+    test('a blank reply yields no suggestions', () {
+      expect(AiAssistantService.parseSuggestions('   '), isEmpty);
+    });
+  });
+
   group('classifyResponse', () {
     test('200 with a reply returns AiReplyReceived + the trimmed reply to save', () {
       final (result, reply) = AiAssistantService.classifyResponse(

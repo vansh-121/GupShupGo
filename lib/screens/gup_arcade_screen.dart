@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/models/gamification_data.dart';
 import 'package:video_chat_app/models/message_model.dart';
@@ -74,7 +75,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
             backgroundColor: c.surface,
             body: Center(
               child: Text(
-                'Failed to load reputation stats.',
+                AppLocalizations.of(context).arcadeFailedLoadStats,
                 style: GoogleFonts.poppins(color: c.textMid),
               ),
             ),
@@ -120,10 +121,10 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                       fontWeight: FontWeight.w500,
                       fontSize: 14,
                     ),
-                    tabs: const [
-                      Tab(text: 'Overview'),
-                      Tab(text: 'Challenges'),
-                      Tab(text: 'Leaderboard'),
+                    tabs: [
+                      Tab(text: AppLocalizations.of(context).arcadeTabOverview),
+                      Tab(text: AppLocalizations.of(context).arcadeTabChallenges),
+                      Tab(text: AppLocalizations.of(context).arcadeTabLeaderboard),
                     ],
                   ),
                 ),
@@ -176,7 +177,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _buildNavItem(
-                label: 'Gup',
+                label: AppLocalizations.of(context).tabMessages,
                 icon: Icons.chat_bubble_rounded,
                 isSelected: true,
                 c: c,
@@ -185,7 +186,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                 },
               ),
               _buildNavItem(
-                label: 'Moments',
+                label: AppLocalizations.of(context).homeNavMoments,
                 icon: Icons.camera_alt_outlined,
                 isSelected: false,
                 c: c,
@@ -194,7 +195,7 @@ class _GupArcadeScreenState extends State<GupArcadeScreen>
                 },
               ),
               _buildNavItem(
-                label: 'Calls',
+                label: AppLocalizations.of(context).homeNavCalls,
                 icon: Icons.call_outlined,
                 isSelected: false,
                 c: c,

@@ -86,6 +86,42 @@ class AiSendFailed extends AiSendResult {
   final String message;
 }
 
+/// Outcome of a one-shot [AiAssistantService.runAction] — an in-chat tool call
+/// (translate / summarise / rewrite / smart-reply) that, unlike [sendMessage],
+/// returns the reply **text** to the caller and persists nothing to the
+/// dedicated transcript. Mirrors [AiSendResult] but carries the text, since the
+/// in-chat surfaces render it inline instead of in the GupAI chat.
+sealed class AiActionResult {
+  const AiActionResult();
+}
+
+/// The model answered. [text] is the result to show/insert; [remaining] is the
+/// day's leftover allowance (the action still spent one message).
+class AiActionReply extends AiActionResult {
+  const AiActionReply(this.text, this.remaining);
+  final String text;
+  final int remaining;
+}
+
+/// Today's allowance is spent — the caller should offer the shared top-up sheet.
+class AiActionQuota extends AiActionResult {
+  const AiActionQuota({required this.isPro, required this.canEarn});
+  final bool isPro;
+  final bool canEarn;
+}
+
+/// Transient backend trouble (disabled / busy / empty / timeout / network).
+class AiActionBusy extends AiActionResult {
+  const AiActionBusy(this.reason);
+  final String reason;
+}
+
+/// Unrecoverable for the client (not signed in, no token, unparseable, 4xx).
+class AiActionFailed extends AiActionResult {
+  const AiActionFailed(this.message);
+  final String message;
+}
+
 class AiAssistantService {
   AiAssistantService._();
   static final AiAssistantService instance = AiAssistantService._();
@@ -226,6 +262,7 @@ class AiAssistantService {
             },
             body: jsonEncode({
               'message': message,
+              'mode': 'chat',
               'history': history,
             }),
           )
@@ -237,6 +274,71 @@ class AiAssistantService {
     }
 
     return _handleResponse(response, store, uid);
+  }
+
+  /// Runs a one-shot GupAI action for the in-chat surfaces (translate /
+  /// summarise / rewrite / smart-reply). Unlike [sendMessage] it sends no
+  /// history, persists nothing to the transcript, and hands the reply text back
+  /// to the caller to render inline — but it still spends one message from the
+  /// daily allowance (the server charges every mode equally).
+  ///
+  /// [mode] is one of the server's whitelisted modes; [input] is the text to act
+  /// on (a received message, the user's draft). [params] carries mode extras —
+  /// `targetLang` for translate, `tone` for rewrite.
+  Future<AiActionResult> runAction({
+    required String mode,
+    required String input,
+    Map<String, String>? params,
+  }) async {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return const AiActionFailed('empty-input');
+    if (FirebaseAuth.instance.currentUser == null) {
+      return const AiActionFailed('not-signed-in');
+    }
+    final idToken = await _getIdToken();
+    if (idToken == null) return const AiActionFailed('no-id-token');
+
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse(_endpoint),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode({
+              'message': trimmed,
+              'mode': mode,
+              if (params != null && params.isNotEmpty) 'params': params,
+              'history': const <Map<String, String>>[],
+            }),
+          )
+          .timeout(_httpTimeout);
+    } on TimeoutException {
+      return const AiActionBusy('timeout');
+    } catch (e) {
+      return AiActionBusy('network: $e');
+    }
+
+    Map<String, dynamic> body;
+    try {
+      body = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      body = const {};
+    }
+
+    // Reuse the pure classifier, then map onto the text-carrying action result.
+    final (result, replyText) = classifyResponse(response.statusCode, body);
+    return switch (result) {
+      AiReplyReceived(:final remaining) => replyText == null
+          ? const AiActionBusy('empty')
+          : AiActionReply(replyText, remaining),
+      AiQuotaExceeded(:final isPro, :final canEarn) =>
+        AiActionQuota(isPro: isPro, canEarn: canEarn),
+      AiBusy(:final reason) => AiActionBusy(reason),
+      AiSendFailed(:final message) => AiActionFailed(message),
+    };
   }
 
   Future<AiSendResult> _handleResponse(
@@ -343,6 +445,23 @@ class AiAssistantService {
       return turns.sublist(turns.length - _kMaxHistoryTurns);
     }
     return turns;
+  }
+
+  /// Splits a `smart_reply` reply (one suggestion per line) into at most three
+  /// clean options. Strips any leading bullet or numbering the model adds despite
+  /// the instruction, and drops blanks — so each chip renders exactly what the
+  /// user would send. Pure (also unit-tested); used by the in-chat smart-reply UI.
+  static List<String> parseSuggestions(String reply) {
+    final out = <String>[];
+    for (final raw in reply.split('\n')) {
+      final line = raw
+          .trim()
+          .replaceFirst(RegExp(r'^(?:[-*•]\s*|\d+[.)]\s*)'), '')
+          .trim();
+      if (line.isNotEmpty) out.add(line);
+      if (out.length == 3) break;
+    }
+    return out;
   }
 
   /// The current user's Firebase ID token, or null if not signed in. Mirrors

@@ -39,10 +39,9 @@ class FCMService {
   /// multiple times (e.g., hot restart, re-login, screen rebuild).
   static bool _listenersRegistered = false;
 
-  /// Guards the one-time CallKit permission prompts (notification +
-  /// full-screen intent). setupFCM runs on every app resume, so without this
-  /// the plugin channel would be pinged on each foregrounding.
-  static bool _callKitPermissionsRequested = false;
+  /// Avoids reopening Android's full-screen-intent settings on every Home
+  /// resume. The explicit Settings action can still force a retry.
+  static bool _fullScreenIntentPermissionRequested = false;
 
   /// Prevents stacking multiple IncomingCallScreens.
   static bool _isIncomingCallScreenShowing = false;
@@ -125,13 +124,14 @@ class FCMService {
     }
   }
 
-  Future<void> setupFCM({required String userId}) async {
-    print('Setting up FCM for user: $userId');
+  /// Requests the OS notification permissions messaging needs (iOS/FCM and
+  /// Android 13+ POST_NOTIFICATIONS). Deferred behind an explicit opt-in — see
+  /// [setupFCM]'s `requestPermissions` flag — so the notification dialog never
+  /// fires on the cold-start path. Every step is non-fatal.
+  Future<void> _requestMessagingPermissions() async {
     final FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1: Request notification permission (non-fatal if denied)
-    // ═══════════════════════════════════════════════════════════════════════
+    // iOS / FCM notification permission.
     try {
       final settings = await messaging.requestPermission(
         alert: true,
@@ -145,12 +145,8 @@ class FCMService {
       print('Permission request error (non-fatal): $e');
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1b: Android 13+ (API 33) runtime permission for POST_NOTIFICATIONS
-    // FirebaseMessaging.requestPermission() only handles iOS permission and
-    // FCM's internal state — it does NOT trigger the Android OS-level runtime
-    // permission dialog. Without this, notifications are silently blocked.
-    // ═══════════════════════════════════════════════════════════════════════
+    // Android 13+ (API 33) runtime POST_NOTIFICATIONS — requestPermission()
+    // above only handles iOS/FCM state, not the Android OS-level dialog.
     if (Platform.isAndroid) {
       try {
         final notifStatus = await Permission.notification.status;
@@ -165,28 +161,72 @@ class FCMService {
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1c: CallKit permissions for incoming-call UI (once per process)
-    // Requested here — after sign-in, when we wire up call receiving — rather
-    // than on the login screen, so we never prompt before the user is in.
-    //   • requestNotificationPermission → CallKit's heads-up notification
-    //     (shares Android 13+ POST_NOTIFICATIONS, already handled above)
-    //   • requestFullIntentPermission   → USE_FULL_SCREEN_INTENT (Android 14+),
-    //     needed to show the full-screen incoming-call screen over the lock UI
-    // ═══════════════════════════════════════════════════════════════════════
-    if (!_callKitPermissionsRequested) {
-      _callKitPermissionsRequested = true;
-      try {
-        await FlutterCallkitIncoming.requestNotificationPermission({
-          "rationaleMessagePermission":
-              "Notification permission is required to receive incoming calls.",
-          "postNotificationMessageRequired":
-              "Please allow notification permission from settings to receive calls.",
-        });
-        await FlutterCallkitIncoming.requestFullIntentPermission();
-      } catch (e) {
-        print('CallKit permission request error (non-fatal): $e');
+    // Full-screen call access is separate from notification permission.
+    requestFullScreenIntentPermission();
+  }
+
+  /// Requests Android 14+'s separate full-screen-intent access for incoming
+  /// calls. This is deliberately independent of notification permission:
+  /// users can have POST_NOTIFICATIONS enabled while this access is disabled.
+  ///
+  /// The plugin checks current access before opening system settings. Version
+  /// 2.5.2 calls its API-34 check before its own SDK guard, and its method-channel
+  /// call does not complete a result, so guard it here and launch without
+  /// blocking FCM setup.
+  void requestFullScreenIntentPermission({bool force = false}) {
+    if (!Platform.isAndroid ||
+        (_fullScreenIntentPermissionRequested && !force)) {
+      return;
+    }
+    _fullScreenIntentPermissionRequested = true;
+    unawaited(_launchFullScreenIntentPermissionRequest());
+  }
+
+  Future<void> _launchFullScreenIntentPermissionRequest() async {
+    try {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      if (androidInfo.version.sdkInt < 34) return;
+      await FlutterCallkitIncoming.requestFullIntentPermission();
+    } catch (error) {
+      _fullScreenIntentPermissionRequested = false;
+      debugPrint(
+          'Full-screen call permission request error (non-fatal): $error');
+    }
+  }
+
+  /// Whether the OS currently lets us show notifications. Lets the soft-ask skip
+  /// prompting when permission is already granted (e.g. a returning user).
+  Future<bool> hasNotificationPermission() async {
+    try {
+      if (Platform.isAndroid) {
+        return (await Permission.notification.status).isGranted;
       }
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      return s.authorizationStatus == AuthorizationStatus.authorized ||
+          s.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Registers this device for messaging: push token, topics, and the
+  /// foreground/background handlers. Safe to call repeatedly.
+  ///
+  /// It does NOT prompt for notification permission by default. Pass
+  /// [requestPermissions] true only from the contextual soft-ask
+  /// (NotificationPermissionPrompt); after the user grants, this is called
+  /// again so the token registers (iOS won't mint one until permission exists).
+  /// Android full-screen call access is checked independently by the Home and
+  /// Settings permission entry points.
+  Future<void> setupFCM({
+    required String userId,
+    bool requestPermissions = false,
+  }) async {
+    print('Setting up FCM for user: $userId');
+    final FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    if (requestPermissions) {
+      await _requestMessagingPermissions();
     }
 
     // ═══════════════════════════════════════════════════════════════════════

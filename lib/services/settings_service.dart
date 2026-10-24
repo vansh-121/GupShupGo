@@ -1,10 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:video_chat_app/main.dart';
 
 /// Persists all user-facing settings to SharedPreferences so they survive
 /// app restarts. Uses the globally initialised `sharedPrefs` instance from
 /// main.dart.
-class SettingsService {
+class SettingsService extends ChangeNotifier {
   // ── Singleton ──────────────────────────────────────────────────────────────
   static final SettingsService _instance = SettingsService._();
   factory SettingsService() => _instance;
@@ -18,6 +19,17 @@ class SettingsService {
   static const _kShowLastSeen = 'pref_show_last_seen';
   static const _kMutedChats = 'pref_muted_chats';
   static const _kEmailNotifications = 'pref_email_notifications';
+  static const _kAnonymousBannerDismissed = 'anon_banner_dismissed_v1';
+
+  /// Defaults to visible and preserves banner dismissals from older versions.
+  bool get showAnonymousChatBanner =>
+      !(sharedPrefs.getBool(_kAnonymousBannerDismissed) ?? false);
+
+  set showAnonymousChatBanner(bool value) {
+    if (showAnonymousChatBanner == value) return;
+    sharedPrefs.setBool(_kAnonymousBannerDismissed, !value);
+    notifyListeners();
+  }
 
   // ── Notification prefs ─────────────────────────────────────────────────────
 

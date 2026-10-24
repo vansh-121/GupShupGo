@@ -17,19 +17,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
 
-/// Re-opens the soft keyboard so a changed `keyboardType` takes effect.
-///
-/// Android keeps showing the keyboard it already has until the field is
-/// re-focused, so flipping the type alone appears to do nothing until the user
-/// taps the field again. Dropping focus and restoring it forces the IME to be
-/// re-requested with the new type.
-Future<void> reopenKeyboardFor(BuildContext context, FocusNode node) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await Future<void>.delayed(const Duration(milliseconds: 60));
-  if (context.mounted) node.requestFocus();
-}
+/// Shows the updated keyboard after Flutter has applied `keyboardType` to the
+/// existing input connection. Keeping focus avoids a hide/show animation and
+/// preserves the user's cursor and composing text.
+Future<void> reopenKeyboardFor(BuildContext context, FocusNode node) =>
+    focusInputWhenReady(context, node);
 
 class PinKeyboardToggle extends StatelessWidget {
   const PinKeyboardToggle({
@@ -50,6 +46,7 @@ class PinKeyboardToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Padding(
       // Breathing room on both sides, owned here rather than at the call sites.
@@ -88,7 +85,9 @@ class PinKeyboardToggle extends StatelessWidget {
           // states the current mode reads as a status and gets ignored by
           // exactly the user who needs to press it.
           label: Text(
-            numeric ? 'Use letters instead' : 'Use numbers instead',
+            numeric
+                ? l10n.vaultKeyboardUseLetters
+                : l10n.vaultKeyboardUseNumbers,
             style: GoogleFonts.poppins(
               color: c.textMid,
               fontSize: 11.5,

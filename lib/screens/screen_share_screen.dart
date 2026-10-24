@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/screen_share_session.dart';
 
 /// Redesigned full-screen sharer view with Obsidian Command glassmorphism,
@@ -41,11 +42,15 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
   /// screen popping) explaining why a pending request ended without going live.
   /// `normal` covers a user-initiated stop / cancel and stays silent.
   void _showEndReasonSnackBar(ScreenShareEndReason reason) {
+    final l10n = AppLocalizations.of(context);
     final name = _lastPeerName.isEmpty ? 'They' : _lastPeerName;
     final String? message = switch (reason) {
-      ScreenShareEndReason.declined => '$name declined your screen share',
-      ScreenShareEndReason.noAnswer => 'No answer',
-      ScreenShareEndReason.error => "Couldn't start screen sharing",
+      ScreenShareEndReason.declined =>
+        l10n.screenShareDeclined(name),
+      ScreenShareEndReason.noAnswer =>
+        l10n.screenShareNoAnswer,
+      ScreenShareEndReason.error =>
+        l10n.screenShareStartError,
       ScreenShareEndReason.normal => null,
     };
     if (message == null) return;
@@ -64,6 +69,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
   @override
   Widget build(BuildContext context) {
     final session = ScreenShareSession.instance;
+    final l10n = AppLocalizations.of(context);
 
     return PopScope(
       canPop: false,
@@ -95,20 +101,20 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
               session.peerName.isEmpty ? _lastPeerName : session.peerName;
 
           final statusTitle = awaiting
-              ? 'Requesting Permission'
+              ? l10n.screenShareStatusRequesting
               : !session.connected
-                  ? 'Initializing Broadcast'
+                  ? l10n.screenShareStatusInitializing
                   : !session.peerPresent
-                      ? 'Waiting for Participant'
-                      : 'Screen Sharing Active';
+                      ? l10n.screenShareStatusWaitingParticipant
+                      : l10n.screenShareStatusActive;
 
           final statusSubtitle = awaiting
-              ? 'Waiting for ${peerLabel.isEmpty ? 'them' : peerLabel} to accept…'
+              ? l10n.screenShareSubWaitingAccept(peerLabel.isEmpty ? 'them' : peerLabel)
               : !session.connected
-                  ? 'Establishing encrypted stream...'
+                  ? l10n.screenShareSubEstablishing
                   : !session.peerPresent
-                      ? 'Waiting for ${session.peerName.isEmpty ? 'participant' : session.peerName} to join...'
-                      : 'Your entire screen is visible in high definition.';
+                      ? l10n.screenShareSubWaitingJoin(session.peerName.isEmpty ? 'participant' : session.peerName)
+                      : l10n.screenShareSubActive;
 
           return Scaffold(
             backgroundColor: const Color(0xFF0F1318),
@@ -211,10 +217,10 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                       const SizedBox(width: 8),
                                       Text(
                                         awaiting
-                                            ? 'REQUESTING'
+                                            ? l10n.screenShareBadgeRequesting
                                             : isLive
                                                 ? 'HD • 60 FPS'
-                                                : 'CONNECTING',
+                                                : l10n.screenShareBadgeConnecting,
                                         style: GoogleFonts.poppins(
                                           color: Colors.white70,
                                           fontSize: 11,
@@ -417,7 +423,9 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        awaiting ? 'Requesting ' : 'Shared with ',
+                                        awaiting
+                                            ? l10n.screenShareRequestingFrom
+                                            : l10n.screenShareSharedWith,
                                         style: GoogleFonts.poppins(
                                           color: Colors.white54,
                                           fontSize: 12,
@@ -443,7 +451,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
 
                         // Tip text
                         Text(
-                          'You can minimize this screen to keep using GupShupGo.',
+                          l10n.screenShareMinimizeTip,
                           textAlign: TextAlign.center,
                           style: GoogleFonts.poppins(
                             color: Colors.white38,
@@ -504,7 +512,9 @@ class _ScreenShareScreenState extends State<ScreenShareScreen>
                                   ),
                                   const SizedBox(width: 10),
                                   Text(
-                                    awaiting ? 'Cancel request' : 'Stop sharing',
+                                    awaiting
+                                        ? l10n.screenShareCancelRequest
+                                        : l10n.screenShareStop,
                                     style: GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontSize: 16,

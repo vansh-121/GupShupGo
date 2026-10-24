@@ -6,6 +6,7 @@ import 'package:video_chat_app/screens/call_screen.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 /// A lightweight pre-call screen that shows a "connecting" animation while the
 /// signaling document and FCM push are set up. Once the async work finishes it
@@ -34,11 +35,13 @@ class ConnectingCallScreen extends StatefulWidget {
   State<ConnectingCallScreen> createState() => _ConnectingCallScreenState();
 }
 
+enum _PreCallStatus { connecting, settingUp, notifying, ringing, failed }
+
 class _ConnectingCallScreenState extends State<ConnectingCallScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  String _statusText = 'Connecting...';
+  _PreCallStatus _status = _PreCallStatus.connecting;
   bool _hasNavigated = false;
 
   /// Set when the user taps Cancel. [_runPreCallSetup] checks this after every
@@ -87,7 +90,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
             .updateState(CallState.Calling);
       }
 
-      if (mounted) setState(() => _statusText = 'Setting up call...');
+      if (mounted) setState(() => _status = _PreCallStatus.settingUp);
 
       // Create the Firestore signaling document
       await CallSignalingService.createCallDocument(
@@ -104,7 +107,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
       }
 
       if (mounted) {
-        setState(() => _statusText = 'Notifying ${widget.calleeName}...');
+        setState(() => _status = _PreCallStatus.notifying);
       }
 
       // Send the FCM push notification
@@ -124,7 +127,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
         return;
       }
 
-      if (mounted) setState(() => _statusText = 'Ringing...');
+      if (mounted) setState(() => _status = _PreCallStatus.ringing);
 
       // Small delay so the user sees "Ringing..." before the transition
       await Future.delayed(const Duration(milliseconds: 300));
@@ -139,9 +142,10 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
     } catch (e) {
       print('Error in pre-call setup: $e');
       if (mounted) {
-        setState(() => _statusText = 'Failed to connect');
+        final l10n = AppLocalizations.of(context);
+        setState(() => _status = _PreCallStatus.failed);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start call: $e')),
+          SnackBar(content: Text(l10n.callFailedToStart(e.toString()))),
         );
         // Go back after a short delay so the user can read the error
         Future.delayed(const Duration(seconds: 2), () {
@@ -197,6 +201,26 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
     final Color accentColor =
         isAudio ? const Color(0xFF00A884) : const Color(0xFF4FC3F7);
 
+    final l10n = AppLocalizations.of(context);
+    final String statusText;
+    switch (_status) {
+      case _PreCallStatus.settingUp:
+        statusText = l10n.callSettingUp;
+        break;
+      case _PreCallStatus.notifying:
+        statusText = l10n.callNotifying(widget.calleeName);
+        break;
+      case _PreCallStatus.ringing:
+        statusText = l10n.callRinging;
+        break;
+      case _PreCallStatus.failed:
+        statusText = l10n.callFailedToConnect;
+        break;
+      case _PreCallStatus.connecting:
+      default:
+        statusText = l10n.callConnecting;
+    }
+
     return PopScope(
       // Setup runs asynchronously (create signaling doc + send push), so a
       // system back — like the Cancel button — must route through _cancelCall
@@ -234,14 +258,14 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
               children: [
                 const SizedBox(height: 24),
                 // ── Encrypted label ──
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.lock, color: Colors.white60, size: 12),
-                    SizedBox(width: 4),
+                    const Icon(Icons.lock, color: Colors.white60, size: 12),
+                    const SizedBox(width: 4),
                     Text(
-                      'End-to-end encrypted',
-                      style: TextStyle(color: Colors.white60, fontSize: 12),
+                      l10n.callEndToEndEncrypted,
+                      style: const TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
@@ -259,7 +283,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
                 const SizedBox(height: 6),
                 // ── Call type label ──
                 Text(
-                  isAudio ? 'GupShup Audio' : 'GupShup Video',
+                  isAudio ? l10n.callVoiceCall : l10n.callVideoCall,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.5),
                     fontSize: 14,
@@ -310,8 +334,8 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
                   child: Text(
-                    _statusText,
-                    key: ValueKey(_statusText),
+                    statusText,
+                    key: ValueKey(statusText),
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 16,
@@ -352,7 +376,7 @@ class _ConnectingCallScreenState extends State<ConnectingCallScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Cancel',
+                  l10n.commonCancel,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.5),
                     fontSize: 13,

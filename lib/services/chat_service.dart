@@ -1875,6 +1875,7 @@ class ChatService {
 
     StreamSubscription<List<MessageModel>>? dbSub;
     StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? chatRoomSub;
+    bool cancelled = false;
 
     DateTime? clearedAt;
     List<MessageModel> latestMessages = const [];
@@ -1887,6 +1888,9 @@ class ChatService {
     controller.onListen = () async {
       try {
         final ps = await PlaintextStore.instance();
+        // The route can close while the database is still opening. Do not
+        // create subscriptions after its cancellation has already run.
+        if (cancelled) return;
         dbSub = ps.watchMessages(chatRoomId).listen(
           (data) {
             latestMessages = data;
@@ -1924,6 +1928,7 @@ class ChatService {
     };
 
     controller.onCancel = () async {
+      cancelled = true;
       await dbSub?.cancel();
       await chatRoomSub?.cancel();
     };

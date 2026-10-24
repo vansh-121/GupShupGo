@@ -15,8 +15,10 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/provider/call_state_provider.dart';
 import 'package:video_chat_app/provider/connectivity_provider.dart';
+import 'package:video_chat_app/provider/locale_provider.dart';
 import 'package:video_chat_app/provider/status_provider.dart';
 import 'package:video_chat_app/provider/theme_provider.dart';
 import 'package:video_chat_app/provider/chat_theme_provider.dart';
@@ -195,6 +197,7 @@ void main() async {
             ChangeNotifierProvider(create: (_) => CallStateNotifier()),
             ChangeNotifierProvider(create: (_) => StatusProvider()),
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider(create: (_) => LocaleProvider()),
             ChangeNotifierProvider(create: (_) => ChatThemeProvider()),
             ChangeNotifierProvider(create: (_) => SubscriptionProvider()..init()),
             ChangeNotifierProvider.value(value: connectivityProvider),
@@ -506,6 +509,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
+    final localeProvider = context.watch<LocaleProvider>();
 
     return MaterialApp(
       navigatorKey: navigatorKey, // Enables navigation from CallKit handler
@@ -513,6 +517,13 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
+      // Localization: delegates + supported locales come from the generated
+      // AppLocalizations. `locale` is the user's in-app override; null means
+      // follow the device language (MaterialApp resolves it against
+      // supportedLocales). See LocaleProvider + Settings → Language.
+      locale: localeProvider.locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       builder: (context, child) => ScreenShareOverlayHost(
         child: MeshNotificationListener(
             child: child ?? const SizedBox.shrink()),

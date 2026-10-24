@@ -20,6 +20,7 @@ import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
 import 'package:video_chat_app/utils/upload_progress.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 /// Full WhatsApp-style profile screen: edit name, about, and profile picture.
 class ProfileScreen extends StatefulWidget {
@@ -103,7 +104,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (mounted) setState(() => _photoUrl = url);
     } catch (e) {
-      _showError('Failed to upload photo: $e');
+      if (mounted) {
+        _showError(AppLocalizations.of(context).profileUploadPhotoFailed(e.toString()));
+      }
     } finally {
       // Reset to null (not a stale %) so failure, cancel, or leaving
       // mid-upload never strands the avatar at a partial percentage.
@@ -119,9 +122,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    final l10n = AppLocalizations.of(context);
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _showError('Name cannot be empty.');
+      _showError(l10n.profileNameEmpty);
       return;
     }
 
@@ -145,14 +149,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Profile updated'), backgroundColor: Colors.green),
+          SnackBar(
+              content: Text(l10n.profileUpdatedSuccess), backgroundColor: Colors.green),
         );
         Navigator.of(context).pop(updatedUser);
       }
     } catch (e) {
       setState(() => _isSaving = false);
-      _showError('Failed to save profile: $e');
+      _showError(l10n.profileSaveFailed(e.toString()));
     }
   }
 
@@ -163,13 +167,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
     final avatarUrl = _photoUrl ??
         'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_nameController.text.isNotEmpty ? _nameController.text : "U")}&background=4CAF50&color=fff&size=256';
 
     return Scaffold(
       backgroundColor: c.surface,
       appBar: AppBar(
-        title: const Text('Edit Profile'),
+        title: Text(l10n.profileEditTitle),
         actions: [
           TextButton(
             onPressed: _isSaving ? null : _saveProfile,
@@ -178,7 +183,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : Text('Save',
+                : Text(l10n.profileSaveButton,
                     style: TextStyle(
                         color: c.primary, fontWeight: FontWeight.w600)),
           ),
@@ -250,7 +255,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: EdgeInsets.only(bottom: 4),
                 child: PremiumBadge(size: PremiumBadgeSize.medium),
               ),
-            Text('Tap to change photo',
+            Text(l10n.profileTapToChangePhoto,
                 style: TextStyle(color: c.textMid, fontSize: 12)),
 
             // Upgrade to Pro button (only when flag is on and user is free)
@@ -265,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.workspace_premium_rounded,
                     size: 18, color: Color(0xFFFFD700)),
                 label: Text(
-                  'Upgrade to Pro',
+                  l10n.profileUpgradeToPro,
                   style: TextStyle(
                     color: c.textHigh,
                     fontWeight: FontWeight.w600,
@@ -401,11 +406,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             // Stats row
                             Row(
                               children: [
-                                _miniStat(c, '⚡', '${liveUser.gupPoints}', 'Points'),
+                                _miniStat(c, '⚡', '${liveUser.gupPoints}', l10n.profilePoints),
                                 _miniStatDivider(c),
-                                _miniStat(c, '🏅', '${liveUser.badges.length}', 'Badges'),
+                                _miniStat(c, '🏅', '${liveUser.badges.length}', l10n.profileBadges),
                                 _miniStatDivider(c),
-                                _miniStat(c, '🔥', '${liveUser.longestStreak}', 'Best Bond'),
+                                _miniStat(c, '🔥', '${liveUser.longestStreak}', l10n.profileBestBond),
                               ],
                             ),
                           ],
@@ -418,14 +423,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
 
             // ── Name ────────────────────────────────────────────────────
-            _buildSectionLabel('YOUR NAME'),
+            _buildSectionLabel(l10n.profileSectionName),
             const SizedBox(height: 8),
             TextField(
               controller: _nameController,
               maxLength: 25,
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
-                hintText: 'Enter your name',
+                hintText: l10n.profileNameHint,
                 counterStyle: TextStyle(color: c.textLow, fontSize: 12),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -438,7 +443,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 24),
 
             // ── Username Handle ──────────────────────────────────────────
-            _buildSectionLabel('UNIQUE HANDLE'),
+            _buildSectionLabel(l10n.profileSectionHandle),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -455,7 +460,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Text(
                       _username != null && _username!.isNotEmpty
                           ? '@$_username'
-                          : 'Not set yet',
+                          : l10n.profileHandleNotSet,
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -478,7 +483,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       }
                     },
                     icon: const Icon(Icons.edit_rounded, size: 16),
-                    label: const Text('Change'),
+                    label: Text(l10n.profileChangeHandle),
                   ),
                 ],
               ),
@@ -486,14 +491,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 24),
 
             // ── About ───────────────────────────────────────────────────
-            _buildSectionLabel('ABOUT'),
+            _buildSectionLabel(l10n.profileSectionAbout),
             const SizedBox(height: 8),
             TextField(
               controller: _aboutController,
               maxLength: 139,
               maxLines: 2,
               decoration: InputDecoration(
-                hintText: 'What\'s on your mind?',
+                hintText: l10n.profileAboutHint,
                 counterStyle: TextStyle(color: c.textLow, fontSize: 12),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -507,7 +512,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             // ── Read-only info ───────────────────────────────────────────
             if (widget.currentUser.phoneNumber != null) ...[
-              _buildSectionLabel('PHONE'),
+              _buildSectionLabel(l10n.profileSectionPhone),
               const SizedBox(height: 8),
               _ReadOnlyField(
                 icon: Icons.phone_outlined,
@@ -516,7 +521,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
             ],
             if (widget.currentUser.email != null) ...[
-              _buildSectionLabel('EMAIL'),
+              _buildSectionLabel(l10n.profileSectionEmail),
               const SizedBox(height: 8),
               _ReadOnlyField(
                 icon: Icons.email_outlined,
@@ -527,7 +532,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             // ── Linked providers ─────────────────────────────────────────
             const SizedBox(height: 8),
-            _buildSectionLabel('LINKED SIGN-IN METHODS'),
+            _buildSectionLabel(l10n.profileSectionLinkedMethods),
             const SizedBox(height: 8),
             _LinkedProvidersCard(authService: _authService),
 
@@ -679,7 +684,7 @@ class _LinkedProvidersCard extends StatelessWidget {
                 trailing: linked
                     ? const Icon(Icons.check_circle,
                         color: Colors.green, size: 20)
-                    : Text('Not linked',
+                    : Text(AppLocalizations.of(context).profileNotLinked,
                         style:
                             TextStyle(color: c.textLow, fontSize: 12)),
               ),

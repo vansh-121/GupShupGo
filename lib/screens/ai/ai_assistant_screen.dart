@@ -19,13 +19,12 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/models/message_model.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
-import 'package:video_chat_app/screens/premium_screen.dart';
-import 'package:video_chat_app/services/ads/ad_reward_waiter.dart';
 import 'package:video_chat_app/services/ads/ads_service.dart';
 import 'package:video_chat_app/services/ads/rewarded_ad_service.dart';
 import 'package:video_chat_app/services/ai/ai_assistant_service.dart';
@@ -33,13 +32,20 @@ import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
 import 'package:video_chat_app/services/streak/streak_day.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
+import 'package:video_chat_app/utils/chat_scroll_controller.dart';
+import 'package:video_chat_app/utils/input_focus.dart';
+import 'package:video_chat_app/widgets/ai/ai_quota_topup_sheet.dart';
 
 /// SharedPreferences flag for the one-time GupAI introduction notice. Versioned so
 /// the notice can be re-shown if the wording materially changes.
 const String _kAiNoticeSeenKey = 'ai_first_run_notice_seen_v2';
 
 class AiAssistantScreen extends StatefulWidget {
-  const AiAssistantScreen({super.key});
+  const AiAssistantScreen({super.key, this.seedText});
+
+  /// Optional text to pre-fill the composer with on open — used by the in-chat
+  /// "Ask GupAI" action to carry a quoted message into a fresh conversation.
+  final String? seedText;
 
   @override
   State<AiAssistantScreen> createState() => _AiAssistantScreenState();
@@ -48,8 +54,9 @@ class AiAssistantScreen extends StatefulWidget {
 class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final _service = AiAssistantService.instance;
   final _composer = TextEditingController();
-  final _scroll = ScrollController();
+  final _scroll = ChatScrollController();
   final _composerFocus = FocusNode();
+  late final Stream<List<MessageModel>> _transcriptStream;
 
   /// A reply is in flight — drives the typing-dots bubble and locks the sender.
   bool _sending = false;
@@ -72,19 +79,35 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   @override
   void initState() {
     super.initState();
+    _transcriptStream = _service.watchTranscript();
+    _composerFocus.addListener(_onComposerFocusChanged);
     // Warm a rewarded ad up front so the quota top-up — if the user hits the
     // cap — is an instant watch rather than a spinner. This is a full screen,
     // so (like the Arcade) it's a fair place to resolve ad consent too.
     unawaited(AdsService.instance.ensureConsent());
     unawaited(RewardedAdService.instance.preload());
     unawaited(_refreshQuota());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowNotice());
+    final seed = widget.seedText?.trim();
+    if (seed != null && seed.isNotEmpty) {
+      _composer.text = widget.seedText!;
+      _composer.selection =
+          TextSelection.collapsed(offset: _composer.text.length);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _maybeShowNotice();
+      if (mounted && seed != null && seed.isNotEmpty) {
+        await focusInputWhenReady(context, _composerFocus,
+            shouldFocus: () => !_sending);
+      }
+    });
   }
 
   @override
   void dispose() {
     _composer.dispose();
     _scroll.dispose();
+    _composerFocus.removeListener(_onComposerFocusChanged);
     _composerFocus.dispose();
     // Drop the warmed ad so an unwatched one doesn't go stale behind us.
     RewardedAdService.instance.disposeAd();
@@ -209,223 +232,24 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    });
+    _scroll.scrollToLatest();
+  }
+
+  void _onComposerFocusChanged() {
+    if (_composerFocus.hasFocus) _scrollToBottom();
   }
 
   // ── Quota top-up sheet ───────────────────────────────────────────────────────
 
   void _showQuotaSheet({required bool isPro, required bool canEarn}) {
-    final c = AppThemeColors.of(context);
-    final flags = FeatureFlagService.instance;
-    final reward = flags.aiRewardCredits;
-    final canWatch = canEarn && AdsService.instance.canShowRewarded;
-    // `isProFeatureVisible` is `pro_enabled`: with it off there is nothing to
-    // sell, so the upgrade affordance stays hidden rather than leading to a
-    // dead end. A genuine Pro holder who somehow hit this never sees it either.
-    final showUpgrade =
-        !isPro && context.read<SubscriptionProvider>().isProFeatureVisible;
-
-    showModalBottomSheet<void>(
+    // The ad-watch → credit-wait → resume flow is shared with the in-chat
+    // actions (see ai_quota_topup_sheet.dart). On a successful top-up it
+    // re-asks the pending turn via retryLast.
+    showAiQuotaTopUpSheet(
       context: context,
-      backgroundColor: c.cardBg,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) {
-        var adBusy = false;
-        var statusLine = isPro
-            ? 'You\'ve used all of today\'s messages. They reset tomorrow.'
-            : 'You\'ve used today\'s free messages.';
-
-        return StatefulBuilder(
-          builder: (sheetCtx, setSheet) {
-            Future<void> watchAd() async {
-              final uid = _uid;
-              if (uid == null || adBusy) return;
-              setSheet(() {
-                adBusy = true;
-                statusLine = 'Loading an ad…';
-              });
-
-              final todayKey = StreakDay.fromInstant(ServerClock.now()).key;
-              var baseline = 0;
-              try {
-                final snap = await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .get();
-                baseline = _aiRewardCountToday(snap.data(), todayKey);
-              } catch (_) {}
-
-              final outcome = await RewardedAdService.instance.show(
-                uid: uid,
-                type: AdRewardType.aiCredit,
-              );
-
-              if (outcome != RewardedAdOutcome.earned) {
-                setSheet(() {
-                  adBusy = false;
-                  statusLine = switch (outcome) {
-                    RewardedAdOutcome.dismissedEarly =>
-                      'Watch the full ad to unlock more messages.',
-                    RewardedAdOutcome.unavailable =>
-                      'Ads aren\'t available right now.',
-                    _ => 'Couldn\'t load an ad. Please try again shortly.',
-                  };
-                });
-                return;
-              }
-
-              setSheet(() => statusLine = 'Unlocking your messages…');
-              final credited = await AdRewardWaiter.awaitCredit(
-                uid: uid,
-                satisfied: (u) => _aiRewardCountToday(u, todayKey) > baseline,
-              );
-
-              if (!credited) {
-                setSheet(() {
-                  adBusy = false;
-                  statusLine =
-                      'Your reward is taking a moment — try again shortly.';
-                });
-                return;
-              }
-
-              // Credit landed. Close the sheet and answer the pending question
-              // automatically (retryLast re-asks it without a duplicate bubble).
-              if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-              await _retryAfterTopUp();
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: 20 + MediaQuery.of(sheetCtx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: c.border,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Text('🎯', style: GoogleFonts.poppins(fontSize: 26)),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Daily limit reached',
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: c.textHigh,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    statusLine,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      height: 1.45,
-                      color: c.textMid,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  if (canWatch)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: c.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: adBusy ? null : watchAd,
-                      icon: adBusy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.play_circle_outline_rounded),
-                      label: Text(
-                        adBusy ? 'Please wait…' : 'Watch an ad for +$reward',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  if (canWatch && showUpgrade) const SizedBox(height: 10),
-                  if (showUpgrade)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: c.primary,
-                        side: BorderSide(
-                          color: c.primary.withValues(alpha: 0.5),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: adBusy
-                          ? null
-                          : () {
-                              Navigator.of(sheetCtx).pop();
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const PremiumScreen(),
-                                ),
-                              );
-                            },
-                      icon: const Icon(Icons.workspace_premium_rounded),
-                      label: Text(
-                        'Upgrade to Pro for more',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  if (!canWatch && !showUpgrade) const SizedBox(height: 2),
-                  const SizedBox(height: 6),
-                  TextButton(
-                    onPressed:
-                        adBusy ? null : () => Navigator.of(sheetCtx).pop(),
-                    child: Text(
-                      'Maybe later',
-                      style: GoogleFonts.poppins(
-                        color: c.textMid,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      isPro: isPro,
+      canEarn: canEarn,
+      onCredited: _retryAfterTopUp,
     );
   }
 
@@ -463,13 +287,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final flags = FeatureFlagService.instance;
     final todayKey = StreakDay.fromInstant(ServerClock.now()).key;
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
+      final snap =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final data = snap.data();
       final base = isPro ? flags.aiProDailyCap : flags.aiFreeDailyCap;
-      final topUps = _aiRewardCountToday(data, todayKey);
+      final topUps = aiRewardCountToday(data, todayKey);
       final used = _aiDailyCountToday(data, todayKey);
       final allocated = base + topUps * flags.aiRewardCredits;
       final remaining = (allocated - used).clamp(0, allocated);
@@ -489,17 +311,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   /// another timezone doesn't disagree. A bucket from any other day reads as 0.
   int _aiDailyCountToday(Map<String, dynamic>? user, String todayKey) {
     final daily = user?['aiDaily'];
-    if (daily is! Map) return 0;
-    if (daily['dayKey'] != todayKey) return 0;
-    final count = daily['count'];
-    return count is num ? count.toInt() : 0;
-  }
-
-  /// Today's rewarded-AI top-up count from the server-written counter, read with
-  /// the same canonical day key `admobSsv` uses so a device in another timezone
-  /// doesn't disagree. A bucket from any other day reads as 0.
-  int _aiRewardCountToday(Map<String, dynamic>? user, String todayKey) {
-    final daily = user?['aiRewardDaily'];
     if (daily is! Map) return 0;
     if (daily['dayKey'] != todayKey) return 0;
     final count = daily['count'];
@@ -535,7 +346,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 Icon(Icons.bolt_rounded, size: 14, color: color),
                 const SizedBox(width: 3),
                 Text(
-                  '$remaining left',
+                  AppLocalizations.of(context).aiMessagesRemaining(remaining),
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -563,6 +374,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         : _allocated!;
     final used = (allocated - remaining).clamp(0, allocated);
     final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
 
     showDialog<void>(
       context: context,
@@ -574,7 +386,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             Icon(Icons.bolt_rounded, color: c.primary, size: 20),
             const SizedBox(width: 8),
             Text(
-              'GupAI messages',
+              l10n.aiQuotaDialogTitle,
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w700,
                 fontSize: 17,
@@ -588,7 +400,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '$remaining of $allocated left today',
+              l10n.aiQuotaRemainingOfTotal(remaining, allocated),
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -609,7 +421,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Used $used today · resets tomorrow. Watch an ad or go Pro for more.',
+              l10n.aiQuotaUsedResetNote(used),
               style: GoogleFonts.poppins(
                 fontSize: 12.5,
                 height: 1.4,
@@ -622,7 +434,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(
-              'Got it',
+              l10n.aiQuotaGotIt,
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w600,
                 color: c.primary,
@@ -697,7 +509,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<MessageModel>>(
-              stream: _service.watchTranscript(),
+              stream: _transcriptStream,
               builder: (context, snapshot) {
                 final messages = snapshot.data ?? const <MessageModel>[];
                 final itemCount = messages.length + (_sending ? 1 : 0);
@@ -721,17 +533,26 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
 
                 return ListView.builder(
                   controller: _scroll,
+                  reverse: true,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 16,
                   ),
                   itemCount: itemCount,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) return null;
+                    if (key.value == 'ai-typing') return _sending ? 0 : null;
+                    final index = messages.indexWhere((m) => m.id == key.value);
+                    return index < 0 ? null : itemCount - 1 - index;
+                  },
                   itemBuilder: (context, i) {
-                    if (_sending && i == messages.length) {
-                      return const _TypingBubble();
+                    final index = itemCount - 1 - i;
+                    if (_sending && index == messages.length) {
+                      return const _TypingBubble(key: ValueKey('ai-typing'));
                     }
-                    final m = messages[i];
+                    final m = messages[index];
                     return _MessageBubble(
+                      key: ValueKey(m.id),
                       message: m,
                       isUser: m.senderId == _uid,
                     );
@@ -803,7 +624,7 @@ class _Composer extends StatelessWidget {
                   decoration: InputDecoration(
                     isDense: true,
                     border: InputBorder.none,
-                    hintText: 'Ask GupAI anything…',
+                    hintText: AppLocalizations.of(context).aiAskHint,
                     hintStyle:
                         GoogleFonts.poppins(fontSize: 14, color: c.textLow),
                     contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -837,7 +658,8 @@ class _Composer extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.isUser});
+  const _MessageBubble(
+      {super.key, required this.message, required this.isUser});
 
   final MessageModel message;
   final bool isUser;
@@ -852,7 +674,7 @@ class _MessageBubble extends StatelessWidget {
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.82,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
         ),
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -939,7 +761,7 @@ List<InlineSpan> _inlineSpans(String text, TextStyle base) {
 
 /// The "AI is typing" bubble: three dots that fade in sequence.
 class _TypingBubble extends StatefulWidget {
-  const _TypingBubble();
+  const _TypingBubble({super.key});
 
   @override
   State<_TypingBubble> createState() => _TypingBubbleState();
@@ -983,7 +805,8 @@ class _TypingBubbleState extends State<_TypingBubble>
               children: List.generate(3, (i) {
                 // Stagger each dot a third of a cycle apart.
                 final t = (_ctrl.value + i * 0.33) % 1.0;
-                final opacity = 0.3 + 0.7 * (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0);
+                final opacity =
+                    0.3 + 0.7 * (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0);
                 return Padding(
                   padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
                   child: Opacity(
@@ -1051,7 +874,7 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         Text(
-          'How can I help?',
+          AppLocalizations.of(context).aiEmptyHelpTitle,
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(
             fontSize: 20,
@@ -1061,8 +884,7 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Draft replies, translate, summarise, brainstorm, or just ask a '
-          'question. Tap an idea to start.',
+          AppLocalizations.of(context).aiEmptyHelpSubtitle,
           textAlign: TextAlign.center,
           style: GoogleFonts.poppins(
             fontSize: 13,

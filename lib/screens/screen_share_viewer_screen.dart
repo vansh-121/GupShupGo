@@ -1,6 +1,7 @@
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_chat_app/services/screen_share_session.dart';
 
 /// The full-screen viewer view. A thin observer of [ScreenShareSession] — the
@@ -13,6 +14,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = ScreenShareSession.instance;
+    final l10n = AppLocalizations.of(context);
 
     return PopScope(
       canPop: false,
@@ -38,7 +40,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
               child: Stack(
                 children: [
                   // Remote Screen Video Feed
-                  Positioned.fill(child: _buildRemoteScreen(session)),
+                  Positioned.fill(child: _buildRemoteScreen(session, l10n)),
 
                   // Top Floating Glass Header Bar
                   Positioned(
@@ -108,7 +110,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  '$peerTitle is sharing',
+                                  l10n.screenShareViewerTitle(peerTitle),
                                   style: GoogleFonts.poppins(
                                     color: Colors.white,
                                     fontSize: 14,
@@ -128,7 +130,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      'LIVE STREAM',
+                                      l10n.screenShareViewerLive,
                                       style: GoogleFonts.poppins(
                                         color: Colors.white60,
                                         fontSize: 10,
@@ -212,7 +214,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      'Minimize',
+                                      l10n.screenShareViewerMinimize,
                                       style: GoogleFonts.poppins(
                                         color: Colors.white70,
                                         fontSize: 13,
@@ -255,7 +257,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      'Leave',
+                                      l10n.screenShareViewerLeave,
                                       style: GoogleFonts.poppins(
                                         color: Colors.white,
                                         fontSize: 13,
@@ -280,7 +282,7 @@ class ScreenShareViewerScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRemoteScreen(ScreenShareSession session) {
+  Widget _buildRemoteScreen(ScreenShareSession session, AppLocalizations l10n) {
     final engine = session.engine;
     final remoteUid = session.remoteUid;
     final channelId = session.channelId;
@@ -322,8 +324,11 @@ class ScreenShareViewerScreen extends StatelessWidget {
                 const SizedBox(height: 24),
                 Text(
                   session.connected
-                      ? 'Waiting for ${session.peerName.isEmpty ? 'participant' : session.peerName} to stream screen...'
-                      : 'Connecting to encrypted stream...',
+                      ? l10n.screenShareViewerWaitingStream(
+                          session.peerName.isEmpty
+                              ? 'participant'
+                              : session.peerName)
+                      : l10n.screenShareViewerConnecting,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.poppins(
                     color: Colors.white70,

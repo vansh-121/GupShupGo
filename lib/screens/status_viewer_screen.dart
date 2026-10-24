@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_chat_app/models/status_model.dart';
 import 'package:video_chat_app/models/user_model.dart';
@@ -361,13 +362,13 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   void _onTapUp(TapUpDetails details) {
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenHeight = MediaQuery.sizeOf(context).height;
     if (!widget.isMyStatus && details.globalPosition.dy > screenHeight - 96) {
       return;
     }
 
     _isPaused = false;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final tapX = details.globalPosition.dx;
 
     if (tapX < screenWidth / 3) {
@@ -416,6 +417,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       ),
       builder: (context) {
         final cs = Theme.of(context).colorScheme;
+        final l10n = AppLocalizations.of(context);
         return FutureBuilder<List<UserModel>>(
           future: _statusService.getStatusViewers(
             statusOwnerId: widget.statusModel.userId,
@@ -445,7 +447,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       Icon(Icons.visibility, color: cs.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Text(
-                        'Viewed by ${snapshot.data?.length ?? 0}',
+                        l10n.statusViewedByCount(snapshot.data?.length ?? 0),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -466,7 +468,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       padding: const EdgeInsets.all(20),
                       child: Center(
                         child: Text(
-                          'No views yet',
+                          l10n.statusNoViewsYet,
                           style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       ),
@@ -500,19 +502,20 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     if (!widget.isMyStatus) return;
 
     _progressController.stop();
+    final l10n = AppLocalizations.of(context);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Status'),
-        content: const Text('Are you sure you want to delete this status?'),
+        title: Text(l10n.statusDeleteTitle),
+        content: Text(l10n.statusDeleteConfirm),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context);
               _progressController.forward();
             },
-            child: const Text('Cancel'),
+            child: Text(l10n.commonCancel),
           ),
           TextButton(
             onPressed: () async {
@@ -533,7 +536,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 _startProgress();
               }
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: Text(l10n.statusDeleteButton, style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -618,14 +621,16 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       _replyController.clear();
       FocusScope.of(context).unfocus();
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Reply sent')),
+          SnackBar(content: Text(l10n.statusReplySent)),
         );
       }
     } catch (e) {
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send reply: $e')),
+          SnackBar(content: Text(l10n.statusReplyFailed(e.toString()))),
         );
       }
     } finally {
@@ -653,12 +658,12 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   Widget build(BuildContext context) {
     if (_activeItems.isEmpty) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
         body: Center(
           child: Text(
-            'No active status',
-            style: TextStyle(color: Colors.white),
+            AppLocalizations.of(context).statusNoActive,
+            style: const TextStyle(color: Colors.white),
           ),
         ),
       );
@@ -702,7 +707,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               right: 0,
               child: Container(
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).padding.top + 8,
+                  top: MediaQuery.paddingOf(context).top + 8,
                   left: 12,
                   right: 12,
                 ),
@@ -857,7 +862,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   padding: EdgeInsets.only(
                     left: 16,
                     right: 16,
-                    bottom: MediaQuery.of(context).padding.bottom + 16,
+                    bottom: MediaQuery.paddingOf(context).bottom + 16,
                     top: 16,
                   ),
                   decoration: BoxDecoration(
@@ -884,7 +889,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             // Bottom: viewers count for own status
             if (widget.isMyStatus)
               Positioned(
-                bottom: MediaQuery.of(context).padding.bottom + 16,
+                bottom: MediaQuery.paddingOf(context).bottom + 16,
                 left: 0,
                 right: 0,
                 child: GestureDetector(
@@ -899,7 +904,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                         builder: (context, snapshot) {
                           final count = snapshot.data ?? 0;
                           return Text(
-                            '$count view${count == 1 ? '' : 's'}',
+                            AppLocalizations.of(context).statusViewCount(count),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
@@ -916,7 +921,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
               Positioned(
                 left: 12,
                 right: 12,
-                bottom: MediaQuery.of(context).padding.bottom + 10,
+                bottom: MediaQuery.paddingOf(context).bottom + 10,
                 child: _buildReplyBar(),
               ),
           ],
@@ -951,7 +956,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 },
                 onSubmitted: (_) => _sendStatusReply(),
                 decoration: InputDecoration(
-                  hintText: 'Reply...',
+                  hintText: '${AppLocalizations.of(context).chatActionReply}...',
                   hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
                   border: InputBorder.none,
                   contentPadding:
@@ -1052,6 +1057,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   /// Shown when decryption was exhausted/blacklisted: a quiet lock glyph with a
   /// tap-to-retry, instead of a spinner that never resolves.
   Widget _buildDecryptFailed(StatusItem item) {
+    final l10n = AppLocalizations.of(context);
     return ColoredBox(
       color: Colors.black,
       child: Center(
@@ -1059,19 +1065,19 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           // Swallow the tap so it retries instead of advancing the story.
           onTap: () => _retryDecrypt(item),
           behavior: HitTestBehavior.opaque,
-          child: const Column(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_reset_rounded, color: Colors.white54, size: 48),
-              SizedBox(height: 12),
+              const Icon(Icons.lock_reset_rounded, color: Colors.white54, size: 48),
+              const SizedBox(height: 12),
               Text(
-                "Couldn't load this update",
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+                l10n.statusCouldNotLoad,
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
-              SizedBox(height: 4),
+              const SizedBox(height: 4),
               Text(
-                'Tap to retry',
-                style: TextStyle(
+                l10n.statusTapToRetry,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -1110,8 +1116,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     // Console's bitmap check flags. fit: BoxFit.contain never paints wider
     // than the screen, so capping the decode at the physical screen width
     // costs nothing visually and bounds this at ~10 MB on a 1080p device.
-    final decodeWidth = (MediaQuery.of(context).size.width *
-            MediaQuery.of(context).devicePixelRatio)
+    final decodeWidth = (MediaQuery.sizeOf(context).width *
+            MediaQuery.devicePixelRatioOf(context))
         .round();
 
     return Container(
@@ -1136,15 +1142,15 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 );
               },
               errorBuilder: (context, error, stackTrace) {
-                return const Center(
+                return Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.broken_image, color: Colors.white54, size: 64),
-                      SizedBox(height: 8),
+                      const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+                      const SizedBox(height: 8),
                       Text(
-                        'Failed to load image',
-                        style: TextStyle(color: Colors.white54),
+                        AppLocalizations.of(context).statusFailedToLoadImage,
+                        style: const TextStyle(color: Colors.white54),
                       ),
                     ],
                   ),
@@ -1168,11 +1174,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                 controller: _videoController!,
               ),
             )
-          : const Center(
+          : Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  SizedBox(
+                  const SizedBox(
                     width: 50,
                     height: 50,
                     child: CircularProgressIndicator(
@@ -1180,10 +1186,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                       strokeWidth: 3,
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
-                    'Loading video...',
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                    AppLocalizations.of(context).statusLoadingVideo,
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
                   ),
                 ],
               ),

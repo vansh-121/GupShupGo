@@ -21,6 +21,7 @@ import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/nearby_peers_screen.dart';
 import 'package:video_chat_app/screens/profile_screen.dart';
 import 'package:video_chat_app/screens/settings_screen.dart';
+import 'package:video_chat_app/screens/vault_settings_screen.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/screens/gup_arcade_screen.dart';
 import 'package:video_chat_app/screens/ai/ai_assistant_screen.dart';
@@ -28,6 +29,7 @@ import 'package:video_chat_app/services/auth_service.dart';
 import 'package:video_chat_app/services/user_service.dart';
 import 'package:video_chat_app/services/presence_service.dart';
 import 'package:video_chat_app/services/review_prompt_service.dart';
+import 'package:video_chat_app/services/settings_service.dart';
 import 'package:video_chat_app/services/chat_service.dart';
 import 'package:video_chat_app/services/sync_service.dart';
 import 'package:video_chat_app/services/chat_cache_service.dart';
@@ -38,6 +40,7 @@ import 'package:video_chat_app/services/update_service.dart';
 import 'package:video_chat_app/services/feature_flag_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
+import 'package:video_chat_app/provider/connectivity_provider.dart';
 import 'package:video_chat_app/services/crypto/plaintext_store.dart';
 import 'package:video_chat_app/services/crypto/vault_cipher.dart';
 import 'package:video_chat_app/services/crypto/vault_pin_custody.dart';
@@ -51,19 +54,22 @@ import 'package:video_chat_app/widgets/vault_pin_dialog.dart';
 import 'package:video_chat_app/widgets/vault_locked_banner.dart';
 import 'package:video_chat_app/widgets/feature_coach_marks.dart';
 import 'package:video_chat_app/widgets/new_feature_badge.dart';
-import 'package:video_chat_app/widgets/report_problem_dialog.dart';
 import 'package:video_chat_app/widgets/starter_checklist_card.dart';
 import 'package:video_chat_app/widgets/whats_new_dialog.dart';
 import 'package:video_chat_app/widgets/streak_badge.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
 import 'package:video_chat_app/widgets/premium_gate.dart';
 import 'package:video_chat_app/screens/anonymous/anonymous_lobby_screen.dart';
+import 'package:video_chat_app/widgets/invite_share_sheet.dart';
+import 'package:video_chat_app/widgets/anonymous_chat_icon.dart';
+import 'package:video_chat_app/widgets/notification_permission_prompt.dart';
+import 'package:video_chat_app/services/home_prompt_preferences.dart';
 import 'package:video_chat_app/screens/auth/username_setup_screen.dart';
-import 'package:video_chat_app/screens/public_profile_screen.dart';
 import 'package:video_chat_app/services/deep_link_service.dart';
 import 'package:video_chat_app/utils/avatar_image.dart';
 import 'package:video_chat_app/utils/haptics.dart';
 import 'package:video_chat_app/widgets/common/loading_overlay.dart';
+import 'package:video_chat_app/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -86,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen>
   final ChatCacheService _chatCacheService = ChatCacheService();
   final CallLogService _callLogService = CallLogService();
   final StatusService _statusService = StatusService();
+  final SettingsService _settings = SettingsService();
 
   // Load budgets for the two native ad cards, owned here rather than by the
   // cards. Both live in lists whose indices shift when content arrives — a new
@@ -172,9 +179,15 @@ class _HomeScreenState extends State<HomeScreen>
   // needsSetup account — it has no older messages to restore.
   bool _vaultLockedWithHistory = false;
 
+  bool _startupPromptsComplete = false;
+  bool _homePromptRunning = false;
+  bool _completedUsernameSetup = false;
+
   @override
   void initState() {
     super.initState();
+    DeepLinkService.instance.setRoutingReady(false);
+    unawaited(HomePromptPreferences(sharedPrefs).recordVisit());
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() {});
@@ -208,6 +221,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    DeepLinkService.instance.setRoutingReady(false);
     _authSub?.cancel();
     _recentContactsSub?.cancel();
     _currentUserSubscription?.cancel();
@@ -234,6 +248,11 @@ class _HomeScreenState extends State<HomeScreen>
     switch (state) {
       case AppLifecycleState.resumed:
         _startPresenceDecayTimer();
+        if (_backgroundedAt != null &&
+            DateTime.now().difference(_backgroundedAt!) >=
+                const Duration(seconds: 30)) {
+          unawaited(HomePromptPreferences(sharedPrefs).recordVisit());
+        }
         _maybeRecheckUpdatesOnResume();
         break;
       case AppLifecycleState.paused:
@@ -275,25 +294,43 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// Re-runs the update prompts when the app comes back from a long absence.
+  /// Rechecks Home prompts on a real app revisit; update checks need four hours.
   ///
   /// This is what makes an update surface "on its own" rather than only on a
   /// cold start — most people never actually close this app, so a launch-only
   /// check can go days without running. Three guards keep it from becoming a
-  /// nuisance: it needs a real absence ([_minBackgroundForUpdateCheck]), Home
+  /// nuisance: it needs a real absence, Home
   /// has to be the visible route (resuming into a chat or a call is not the
   /// moment), and the prompts carry their own throttles on top.
   void _maybeRecheckUpdatesOnResume() {
     final since = _backgroundedAt;
     _backgroundedAt = null;
     if (since == null) return;
-    if (DateTime.now().difference(since) < _minBackgroundForUpdateCheck) return;
+    final absence = DateTime.now().difference(since);
+    if (absence < const Duration(seconds: 30)) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (ModalRoute.of(context)?.isCurrent != true) return;
-      unawaited(UpdateService.instance.runLaunchPrompts(context));
+      unawaited(_runResumePrompts(
+          checkUpdates: absence >= _minBackgroundForUpdateCheck));
     });
+  }
+
+  Future<void> _runResumePrompts({required bool checkUpdates}) async {
+    if (!_startupPromptsComplete || _homePromptRunning) return;
+    _homePromptRunning = true;
+    try {
+      if (checkUpdates) await UpdateService.instance.runLaunchPrompts(context);
+      if (mounted &&
+          ModalRoute.of(context)?.isCurrent == true &&
+          _currentUserId != null) {
+        await NotificationPermissionPrompt.maybeAsk(context,
+            userId: _currentUserId!);
+      }
+    } finally {
+      _homePromptRunning = false;
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -398,7 +435,8 @@ class _HomeScreenState extends State<HomeScreen>
           if (updated != null) {
             setState(() => _currentUser = updated);
           }
-          return;
+          _completedUsernameSetup = updated != null;
+          if (!mounted) return;
         }
 
         // ── Consume pending deep links from notification taps ──────────
@@ -419,26 +457,6 @@ class _HomeScreenState extends State<HomeScreen>
                 currentUserId: _currentUserId!,
                 currentUserName: _currentUser?.name,
                 initialTabIndex: pendingContactsTab,
-              ),
-            ),
-          );
-        }
-
-        // ── Profile deep link tapped before this user was signed in ──────
-        // (e.g. cold start via a QR scan / shared link). Open it now that
-        // we have an authenticated _currentUserId.
-        final pendingUsername = DeepLinkService.consumePendingUsername();
-        if (pendingUsername != null &&
-            pendingUsername.isNotEmpty &&
-            mounted &&
-            _currentUserId != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PublicProfileScreen(
-                username: pendingUsername,
-                currentUserId: _currentUserId!,
-                currentUserName: _currentUser?.name,
               ),
             ),
           );
@@ -482,7 +500,24 @@ class _HomeScreenState extends State<HomeScreen>
         // spotlight over a screen the user has already left is worse than no
         // spotlight. Deferring keeps the ordering rule in one place instead of
         // threading a "did anything navigate?" flag through every branch above.
-        await _maybeShowFeatureCoaching();
+        if (!DeepLinkService.instance.hasPendingLink) {
+          await _maybeShowFeatureCoaching();
+        }
+        if (!mounted) return;
+        _startupPromptsComplete = true;
+        if (ModalRoute.of(context)?.isCurrent == true &&
+            !DeepLinkService.instance.hasPendingLink) {
+          await NotificationPermissionPrompt.maybeAsk(context,
+              userId: _currentUserId!);
+          if (mounted && (_completedUsernameSetup ||
+              HomePromptPreferences(sharedPrefs).visits >= 2) &&
+              _currentUser?.username?.isNotEmpty == true) {
+            await _maybeShowInvitePrompt();
+          }
+        }
+        // Warm intents received during startup dialogs stay queued too.
+        if (!mounted) return;
+        DeepLinkService.instance.setRoutingReady(true);
 
         // ── Review nudge — after coaching, for the same reason ─────────
         // Covers users who never make calls (the call screen has its own
@@ -947,6 +982,82 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  /// One-time, gentle "invite a friend" nudge shown right after onboarding
+  /// (new users, after username setup). Deliberately a single dismissible
+  /// prompt — not another wall — and only ever shown once. The invite flow is
+  /// also always reachable from the home ⋮ menu.
+  Future<void> _maybeShowInvitePrompt() async {
+    if (!mounted ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        DeepLinkService.instance.hasPendingLink) return;
+    final budget = HomePromptPreferences(sharedPrefs);
+    if (budget.hasShownInvite) return;
+    await budget.markInviteShown();
+    if (!mounted) return;
+    final c = AppThemeColors.of(context);
+    final l10n = AppLocalizations.of(context);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.person_add_alt_1_rounded, color: c.primary, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                l10n.invitePromptTitle,
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                    color: c.textHigh),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          l10n.invitePromptBody,
+          style: GoogleFonts.poppins(
+              fontSize: 13.5, height: 1.4, color: c.textMid),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              l10n.invitePromptLater,
+              style: GoogleFonts.poppins(
+                  color: c.textMid, fontWeight: FontWeight.w600),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c.primary),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              l10n.invitePromptInvite,
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      await showInviteShareSheet(context, handle: _currentUser?.username);
+    }
+  }
+
+  /// Opens the offline (Bluetooth/Wi-Fi mesh) chat screen. Shared by the
+  /// app-bar sensors icon, feature menu, and home offline/nearby banners. The Nearby
+  /// screen itself requests mesh permissions and calls [MeshNetworkService.start],
+  /// so this never prompts from the home surface.
+  void _openOfflineChat() {
+    markStarterMeshVisited();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
+    );
+  }
+
   Widget _buildContactItem(UserModel user) {
     final c = AppThemeColors.of(context);
     final contact = Contact(
@@ -1128,7 +1239,7 @@ class _HomeScreenState extends State<HomeScreen>
     final c = AppThemeColors.of(context);
 
     return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.sizeOf(context).height * 0.7,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(40),
@@ -1150,7 +1261,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               const SizedBox(height: 24),
               Text(
-                'No chats yet',
+                AppLocalizations.of(context).homeEmptyChatsTitle,
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
@@ -1159,7 +1270,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'Start a conversation by tapping the button below',
+                AppLocalizations.of(context).homeEmptyChatsSubtitle,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
@@ -1181,7 +1292,7 @@ class _HomeScreenState extends State<HomeScreen>
                   );
                 },
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('New chat'),
+                label: Text(AppLocalizations.of(context).homeNewChatButton),
               ),
             ],
           ),
@@ -1565,7 +1676,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Row(
                         children: [
                           Text(
-                            'GupAI',
+                            AppLocalizations.of(context).homeAiAssistantTitle,
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w700,
                               fontSize: 15,
@@ -1594,7 +1705,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Draft, translate, summarise & more',
+                        AppLocalizations.of(context).homeAiAssistantSubtitle,
                         style: GoogleFonts.poppins(
                           fontSize: 13,
                           color: c.textMid,
@@ -1837,7 +1948,7 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                'My Moment',
+                AppLocalizations.of(context).homeMyMoment,
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -1856,7 +1967,7 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                'Recent Moments',
+                AppLocalizations.of(context).homeRecentMoments,
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -1910,7 +2021,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        'No updates yet.',
+                        AppLocalizations.of(context).homeEmptyMomentsTitle,
                         style: GoogleFonts.poppins(
                           fontSize: 17,
                           fontWeight: FontWeight.w600,
@@ -1919,7 +2030,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Tap the camera to share.',
+                        AppLocalizations.of(context).homeEmptyMomentsSubtitle,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
                           color: c.textMid,
@@ -1988,7 +2099,7 @@ class _HomeScreenState extends State<HomeScreen>
       subtitle: Text(
         hasMyStatus
             ? '${myStatus!.activeStatusItems.length} update${myStatus.activeStatusItems.length > 1 ? "s" : ""} · Tap to view'
-            : 'Tap to add an update',
+            : AppLocalizations.of(context).homeTapToAddMoment,
         style: GoogleFonts.poppins(color: c.textMid, fontSize: 13),
       ),
       onTap: () {
@@ -2170,7 +2281,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'No call history',
+                  AppLocalizations.of(context).homeEmptyCallsTitle,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -2179,7 +2290,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Your recent calls will appear here',
+                  AppLocalizations.of(context).homeEmptyCallsSubtitle,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     color: c.textMid,
@@ -2403,17 +2514,12 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             key: _meshIconKey,
             icon: const Icon(Icons.sensors_rounded),
-            tooltip: 'Offline Chat — talk to people nearby',
-            onPressed: () {
-              markStarterMeshVisited();
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NearbyPeersScreen()),
-              );
-            },
+            tooltip: AppLocalizations.of(context).homeTooltipOfflineChat,
+            onPressed: _openOfflineChat,
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
+            tooltip: AppLocalizations.of(context).homeTooltipSearch,
             onPressed: () {
               if (_currentUserId != null) {
                 Navigator.push(
@@ -2429,36 +2535,22 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
           PopupMenuButton<String>(
-            // The dot is placed inside each branch rather than around the pair,
-            // because the two hosts need different tucks: an avatar fills its
-            // box, while `more_vert` is a narrow column of dots the badge would
-            // otherwise sit on top of.
-            icon: (_currentUser?.photoUrl?.isNotEmpty ?? false)
-                ? NewFeatureDot(
-                    anchor: NewFeatureAnchor.homeOverflow,
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage:
-                          avatarImage(_currentUser!.photoUrl!, radius: 16),
-                      backgroundColor: c.primaryLt,
-                    ),
-                  )
-                : const NewFeatureDot(
-                    anchor: NewFeatureAnchor.homeOverflow,
-                    offset: NewFeatureDot.narrowGlyph,
-                    child: Icon(Icons.more_vert),
-                  ),
+            icon: const NewFeatureDot(
+              anchor: NewFeatureAnchor.homeOverflow,
+              offset: NewFeatureDot.narrowGlyph,
+              child: Icon(Icons.more_vert),
+            ),
             onSelected: (value) async {
-              if (value == 'profile') {
-                if (_currentUser != null) {
-                  final updated = await Navigator.push<UserModel>(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            ProfileScreen(currentUser: _currentUser!)),
-                  );
-                  if (updated != null) setState(() => _currentUser = updated);
-                }
+              if (value == 'vault') {
+                if (_currentUserId == null) return;
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VaultSettingsScreen(uid: _currentUserId!),
+                  ),
+                );
+              } else if (value == 'offline') {
+                _openOfflineChat();
               } else if (value == 'settings') {
                 if (_currentUser != null) {
                   final updated = await Navigator.push<UserModel>(
@@ -2467,33 +2559,69 @@ class _HomeScreenState extends State<HomeScreen>
                         builder: (_) =>
                             SettingsScreen(currentUser: _currentUser!)),
                   );
-                  if (updated != null) setState(() => _currentUser = updated);
+                  if (!mounted) return;
+                  setState(() {
+                    if (updated != null) _currentUser = updated;
+                  });
                 }
-              } else if (value == 'rate') {
-                // openStoreListing, not the review sheet: Play's sheet is
-                // quota-limited and may show nothing at all, which is the wrong
-                // thing to hang a tap on.
-                unawaited(ReviewPromptService.instance
-                    .openStoreListing(context: context));
-              } else if (value == 'report') {
-                unawaited(
-                    ReportProblemDialog.show(context, user: _currentUser));
-              } else if (value == 'whatsnew') {
-                unawaited(showWhatsNewDialog(context));
-              } else if (value == 'logout') {
-                _signOut();
+              } else if (value == 'invite') {
+                await showInviteShareSheet(context,
+                    handle: _currentUser?.username);
+              } else if (value == 'anonymous') {
+                if (_currentUserId == null) return;
+                await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnonymousLobbyScreen(
+                        currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name ?? 'User',
+                      ),
+                    ));
               }
             },
             itemBuilder: (BuildContext context) {
+              final l10n = AppLocalizations.of(context);
               return [
                 PopupMenuItem(
-                  value: 'profile',
+                  value: 'vault',
                   child: Row(
                     children: [
-                      Icon(Icons.person_outline_rounded,
+                      Icon(Icons.shield_outlined,
                           color: c.primary, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Profile'),
+                      Flexible(child: Text(l10n.homeMenuPrivateVault)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'offline',
+                  child: Row(
+                    children: [
+                      Icon(Icons.sensors_rounded, color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.nearbyOfflineChatTitle)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'anonymous',
+                  child: Row(
+                    children: [
+                      AnonymousChatIcon(color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.anonLobbyTitle)),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'invite',
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_add_alt_1_rounded,
+                          color: c.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(l10n.homeMenuInvite)),
                     ],
                   ),
                 ),
@@ -2503,49 +2631,8 @@ class _HomeScreenState extends State<HomeScreen>
                     children: [
                       Icon(Icons.settings_outlined, color: c.textMid, size: 20),
                       const SizedBox(width: 12),
-                      const Text('Settings'),
+                      Flexible(child: Text(l10n.homeMenuSettings)),
                       const NewFeatureChip(featureId: NewFeature.chatThemes),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'rate',
-                  child: Row(
-                    children: [
-                      Icon(Icons.star_rate_rounded, color: c.warning, size: 20),
-                      const SizedBox(width: 12),
-                      const Text('Rate us'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'report',
-                  child: Row(
-                    children: [
-                      Icon(Icons.bug_report_outlined, color: c.textMid, size: 20),
-                      const SizedBox(width: 12),
-                      const Text('Report Issue'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'whatsnew',
-                  child: Row(
-                    children: [
-                      Icon(Icons.auto_awesome_rounded,
-                          color: c.primary, size: 20),
-                      const SizedBox(width: 12),
-                      const Text("What's New"),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'logout',
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout_rounded, color: c.error, size: 20),
-                      const SizedBox(width: 12),
-                      Text('Log out', style: TextStyle(color: c.error)),
                     ],
                   ),
                 ),
@@ -2562,21 +2649,66 @@ class _HomeScreenState extends State<HomeScreen>
           // [InterstitialAdService.armPostCall].
           const PostCallInterstitial(),
           if (!_hasFirebaseSession) _buildReverifyBanner(),
-          // ── Anonymous Match Banner — only on Gup tab ──────────────
+          // ── Offline / nearby-peers banner — the differentiator, surfaced
+          // exactly when it's useful. Only on the Gup tab. Never starts mesh
+          // (and so never prompts for permissions) from here: the "N nearby"
+          // variant only appears when the user already turned mesh on, and the
+          // offline variant just invites them into the Nearby screen, which
+          // owns the permission request. ──────────────────────────────────
           if (_tabController.index == 0 && _currentUserId != null)
-            _AnonymousMatchBanner(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AnonymousLobbyScreen(
-                      currentUserId: _currentUserId!,
-                      currentUserName: _currentUser?.name,
-                    ),
-                  ),
-                );
+            Consumer2<ConnectivityProvider, MeshNetworkService>(
+              builder: (context, conn, mesh, _) {
+                final t = AppLocalizations.of(context);
+                final c = AppThemeColors.of(context);
+                final nearby = mesh.peers.length;
+                // Priority: live peers nearby (the "wow") beats the plain
+                // offline nudge; when online with no peers, show nothing.
+                if (mesh.isActive && nearby > 0) {
+                  return _OfflineMeshBanner(
+                    icon: Icons.sensors_rounded,
+                    accent: c.primary,
+                    title: t.homeNearbyBannerTitle(nearby),
+                    subtitle: t.homeNearbyBannerSubtitle,
+                    onTap: _openOfflineChat,
+                  );
+                }
+                if (!conn.isOnline) {
+                  return _OfflineMeshBanner(
+                    icon: Icons.wifi_off_rounded,
+                    accent: c.primary,
+                    title: t.homeOfflineBannerTitle,
+                    subtitle: t.homeOfflineBannerSubtitle,
+                    onTap: _openOfflineChat,
+                  );
+                }
+                return const SizedBox.shrink();
               },
             ),
+          // Anonymous Match Banner — visibility is shared with Settings.
+          ListenableBuilder(
+            listenable: _settings,
+            builder: (context, _) {
+              if (_tabController.index != 0 ||
+                  _currentUserId == null ||
+                  !_settings.showAnonymousChatBanner) {
+                return const SizedBox.shrink();
+              }
+              return _AnonymousMatchBanner(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AnonymousLobbyScreen(
+                        currentUserId: _currentUserId!,
+                        currentUserName: _currentUser?.name,
+                      ),
+                    ),
+                  );
+                },
+                onClose: () => _settings.showAnonymousChatBanner = false,
+              );
+            },
+          ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -2642,7 +2774,7 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             _buildNavItem(
               index: 0,
-              label: 'Gup',
+              label: AppLocalizations.of(context).tabMessages,
               icon: Icons.chat_bubble_rounded,
               selectedIcon: Icons.chat_bubble_rounded,
               isSelected: selectedIndex == 0,
@@ -2650,7 +2782,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             _buildNavItem(
               index: 1,
-              label: 'Moments',
+              label: AppLocalizations.of(context).homeNavMoments,
               icon: Icons.camera_alt_outlined,
               selectedIcon: Icons.camera_alt_rounded,
               isSelected: selectedIndex == 1,
@@ -2658,7 +2790,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             _buildNavItem(
               index: 2,
-              label: 'Calls',
+              label: AppLocalizations.of(context).homeNavCalls,
               icon: Icons.call_outlined,
               selectedIcon: Icons.call_rounded,
               isSelected: selectedIndex == 2,
@@ -2708,7 +2840,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Profile',
+                    AppLocalizations.of(context).homeNavProfile,
                     style: GoogleFonts.poppins(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
@@ -3065,10 +3197,90 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 /// ─── Full-width Anonymous Match Banner with animated gradient shimmer ───────
-class _AnonymousMatchBanner extends StatefulWidget {
+/// Compact, tappable banner that surfaces offline / nearby-peers mesh chat on
+/// the home screen. Purely presentational — the parent decides when (and with
+/// what copy) to show it; see the [Consumer2] in the home body.
+class _OfflineMeshBanner extends StatelessWidget {
+  const _OfflineMeshBanner({
+    required this.icon,
+    required this.accent,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
 
-  const _AnonymousMatchBanner({required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final c = AppThemeColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: accent.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: accent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: c.textHigh,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: c.textMid,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right_rounded, color: accent, size: 22),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnonymousMatchBanner extends StatefulWidget {
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  const _AnonymousMatchBanner({required this.onTap, required this.onClose});
 
   @override
   State<_AnonymousMatchBanner> createState() => _AnonymousMatchBannerState();
@@ -3104,7 +3316,6 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
           onTap: widget.onTap,
           child: Container(
             margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: c.isDark
@@ -3137,61 +3348,87 @@ class _AnonymousMatchBannerState extends State<_AnonymousMatchBanner>
                 ),
               ],
             ),
-            child: Row(
+            child: Stack(
               children: [
-                // ── Icon circle ──
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.shuffle_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // ── Text ──
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(16, 12, 44, 12),
+                  child: Row(
                     children: [
-                      Text(
-                        'Connect with a Stranger',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                      // ── Icon circle ──
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const AnonymousChatIcon(
                           color: Colors.white,
-                          height: 1.2,
+                          size: 20,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Anonymous chat — tap to match!',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w400,
-                          color: Colors.white.withOpacity(0.75),
+                      const SizedBox(width: 12),
+                      // ── Text ──
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              AppLocalizations.of(context).homeStrangerMatchTitle,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              AppLocalizations.of(context).homeStrangerMatchSubtitle,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.white.withOpacity(0.75),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // ── Arrow ──
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.20),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 18,
                         ),
                       ),
                     ],
                   ),
                 ),
-                // ── Arrow ──
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.20),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white,
-                    size: 18,
+                // A separate dismiss target fits within the reserved end space.
+                PositionedDirectional(
+                  top: 0,
+                  bottom: 0,
+                  end: 0,
+                  width: 44,
+                  child: Center(
+                    child: IconButton(
+                      onPressed: widget.onClose,
+                      tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: Colors.white.withOpacity(0.85),
+                        size: 18,
+                      ),
+                    ),
                   ),
                 ),
               ],

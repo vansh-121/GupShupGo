@@ -209,8 +209,12 @@ class _NativeAdCardState extends State<NativeAdCard> {
         ),
         listener: NativeAdListener(
           onAdLoaded: (ad) {
-            if (!mounted) {
+            if (!mounted || !identical(ad, _ad)) {
               ad.dispose();
+              return;
+            }
+            if (!_allowed) {
+              _release();
               return;
             }
             setState(() {
@@ -221,7 +225,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
           onAdFailedToLoad: (ad, error) {
             debugPrint('[NativeAd:${widget.placement}] ⚠️ load failed: $error');
             ad.dispose();
-            if (!mounted) return;
+            if (!mounted || !identical(ad, _ad)) return;
             setState(() {
               _ad = null;
               _loaded = false;
