@@ -62,3 +62,9 @@ fvm_version_check.txt
 
 /.kilo
 
+# Gradle & Kotlin build caches
+.gradle/
+.gradle-*/
+.gradle-codex/
+.kotlin/
+

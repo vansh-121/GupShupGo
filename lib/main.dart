@@ -6,6 +6,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:video_chat_app/services/performance_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +36,9 @@ import 'package:video_chat_app/services/crypto/signal_service.dart';
 import 'package:video_chat_app/services/fcm_service.dart';
 import 'package:video_chat_app/services/mesh_network_service.dart';
 import 'package:video_chat_app/services/streak/server_clock.dart';
-import 'package:video_chat_app/services/sync_service.dart';import 'package:video_chat_app/services/update_service.dart';import 'package:video_chat_app/screens/auth/login_screen.dart';
+import 'package:video_chat_app/services/sync_service.dart';
+import 'package:video_chat_app/services/update_service.dart';
+import 'package:video_chat_app/screens/auth/login_screen.dart';
 import 'package:video_chat_app/screens/unsupported_version_screen.dart';
 import 'package:video_chat_app/services/version_policy.dart';
 import 'package:video_chat_app/provider/subscription_provider.dart';
@@ -81,6 +84,11 @@ void main() async {
     Firebase.initializeApp(),
     SharedPreferences.getInstance().then((prefs) => sharedPrefs = prefs),
   ]);
+
+  // This must be registered during process startup, before runApp. Registering
+  // it later from HomeScreen leaves terminated/background delivery dependent
+  // on whether that screen happened to run in a previous process.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   // Decide which newly shipped features still deserve a "NEW" dot. This has to
   // happen before the home screen calls `maybeShowWhatsNew`, which writes the
@@ -199,7 +207,8 @@ void main() async {
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
             ChangeNotifierProvider(create: (_) => LocaleProvider()),
             ChangeNotifierProvider(create: (_) => ChatThemeProvider()),
-            ChangeNotifierProvider(create: (_) => SubscriptionProvider()..init()),
+            ChangeNotifierProvider(
+                create: (_) => SubscriptionProvider()..init()),
             ChangeNotifierProvider.value(value: connectivityProvider),
             ChangeNotifierProvider(
               create: (_) => MeshNetworkService(
@@ -269,6 +278,9 @@ void _setupCallKitListener() {
     print('CallKit event: ${event.event} | body: ${event.body}');
 
     switch (event.event) {
+      case Event.actionDidUpdateDevicePushTokenVoip:
+        unawaited(FCMService.handleVoipTokenUpdate(event.body));
+        break;
       case Event.actionCallAccept:
         _handleCallAccepted(event.body);
         break;
@@ -353,7 +365,8 @@ void _handleCallAccepted(dynamic body) {
   // If we ALSO push CallScreen here, we get a duplicate.  Skip this path
   // when IncomingCallScreen is active.
   if (FCMService.isIncomingCallScreenShowing) {
-    print('IncomingCallScreen is handling this accept — skipping global handler');
+    print(
+        'IncomingCallScreen is handling this accept — skipping global handler');
     return;
   }
 
@@ -439,6 +452,7 @@ void _checkPendingAcceptedCalls() {
     }
   });
 }
+
 /// Stable identity for the mesh service, kept in SharedPreferences so it
 /// persists across launches even before (or without) signing in.
 class _MeshGuestIdentity {
@@ -455,9 +469,7 @@ _MeshGuestIdentity _ensureMeshGuestIdentity() {
   if (id == null || id.isEmpty) {
     final rng = Random.secure();
     final bytes = List<int>.generate(8, (_) => rng.nextInt(256));
-    final hex = bytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     id = 'g_$hex';
     sharedPrefs.setString(idKey, id);
   }
@@ -525,8 +537,8 @@ class MyApp extends StatelessWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       builder: (context, child) => ScreenShareOverlayHost(
-        child: MeshNotificationListener(
-            child: child ?? const SizedBox.shrink()),
+        child:
+            MeshNotificationListener(child: child ?? const SizedBox.shrink()),
       ),
       home: _AuthGate(authService: _authService),
       debugShowCheckedModeBanner: false,
@@ -570,9 +582,8 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _resolveInitialAuth();
-    _connectivitySub = Connectivity()
-        .onConnectivityChanged
-        .listen(_onConnectivityChanged);
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
 
     // Remote Config is fetched fire-and-forget before runApp, so this first
     // evaluation almost always reads the inert defaults. The listener is what

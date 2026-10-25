@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_performance/firebase_performance.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -16,6 +17,7 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/screens/incoming_call_screen.dart';
 import 'package:video_chat_app/screens/incoming_screen_share_screen.dart';
@@ -57,6 +59,8 @@ class FCMService {
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static const _deviceIdKey = 'gsg_fcm_device_id_v1';
   static const _lastRegisteredUserIdKey = 'gsg_fcm_last_user_id_v1';
+  static const _lastFcmTokenKey = 'gsg_fcm_last_token_v1';
+  static const _nativeCallUserIdKey = 'gsg_native_call_user_id';
   static const _secureStorage = FlutterSecureStorage();
 
   /// Public getter so the global CallKit listener in main.dart can check
@@ -216,8 +220,8 @@ class FCMService {
   /// [requestPermissions] true only from the contextual soft-ask
   /// (NotificationPermissionPrompt); after the user grants, this is called
   /// again so the token registers (iOS won't mint one until permission exists).
-  /// Android full-screen call access is checked independently by the Home and
-  /// Settings permission entry points.
+  /// Android full-screen call access is checked independently during normal
+  /// FCM setup and from the explicit Settings entry point.
   Future<void> setupFCM({
     required String userId,
     bool requestPermissions = false,
@@ -225,8 +229,25 @@ class FCMService {
     print('Setting up FCM for user: $userId');
     final FirebaseMessaging messaging = FirebaseMessaging.instance;
 
+    // The Android FCM receiver runs before Dart when the process is dead. Keep
+    // a non-sensitive mirror of the active uid in Flutter SharedPreferences so
+    // it can reject a stale token belonging to a previously signed-in account.
+    await _mirrorActiveUserForNativeCalls(userId);
+
+    // PushKit has its own token, separate from FCM/APNs notification tokens.
+    // AppDelegate registers it at launch; persist it with this device record as
+    // soon as it is available so iOS calls can wake a terminated app.
+    if (Platform.isIOS) {
+      unawaited(_syncVoipToken(userId));
+    }
+
     if (requestPermissions) {
       await _requestMessagingPermissions();
+    } else if (await hasNotificationPermission()) {
+      // A returning user can already have POST_NOTIFICATIONS while Android
+      // 14+'s separate full-screen-intent access is still disabled. Check it
+      // during every normal setup path; the process guard makes this cheap.
+      requestFullScreenIntentPermission();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -237,9 +258,6 @@ class FCMService {
 
       // Initialise local notification channels & tap routing
       await NotificationService.instance.initialize();
-
-      FirebaseMessaging.onBackgroundMessage(
-          _firebaseMessagingBackgroundHandler);
 
       // Foreground data-only messages — navigate to full-screen incoming call
       FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
@@ -252,8 +270,10 @@ class FCMService {
             return;
           }
 
-          // Show CallKit for ringtone + vibration
-          _showCallKitNotification(message.data);
+          // Android's native FCM receiver normally posts this before Dart is
+          // invoked. Check active calls first so this remains a fallback without
+          // ringing twice. iOS foreground calls still arrive through FCM.
+          await _ensureCallKitNotification(message.data);
 
           // Navigate to full-screen incoming call screen (once only)
           if (!_isIncomingCallScreenShowing) {
@@ -326,10 +346,25 @@ class FCMService {
     // Handled upfront on LoginScreen — no need to request again here.
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Attach this before requesting or retrying a token. Older Play Services /
+    // MIUI builds can rotate the token while getToken() is recovering; when the
+    // listener was attached afterwards, that rotation was lost and the device
+    // stayed unreachable until another app launch.
+    _tokenRefreshSubscription ??=
+        messaging.onTokenRefresh.listen((String newToken) async {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) {
+        print('Ignoring FCM token refresh while signed out');
+        return;
+      }
+      print('FCM token refreshed');
+      await _storeToken(currentUserId, newToken);
+    });
+
     // ═══════════════════════════════════════════════════════════════════════
     // Step 4: Fetch and store FCM token (isolated — failure is recoverable)
     // SERVICE_NOT_AVAILABLE can happen when Google Play Services is busy
-    // or temporarily unavailable. The onTokenRefresh listener below will
+    // or temporarily unavailable. The onTokenRefresh listener above will
     // catch the token when it becomes available later.
     // On Xiaomi/MIUI devices, SERVICE_NOT_AVAILABLE is common because
     // MIUI aggressively kills Google Play Services connections.
@@ -338,14 +373,17 @@ class FCMService {
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
         if (attempt > 1) {
-          // On retry, delete old token to force Play Services to reconnect
-          print('FCM token retry attempt $attempt — deleting old token first');
-          await messaging.deleteToken();
+          // Never delete a working token as a retry mechanism. On Android 12 /
+          // older MIUI, deleteToken() can succeed while the replacement token
+          // request fails, leaving this install absent from every server target.
+          print('FCM token retry attempt $attempt');
           await Future.delayed(Duration(seconds: attempt * 2));
         }
-        token = await messaging.getToken();
-        if (token != null) {
-          print('FCM Token obtained (attempt $attempt): $token');
+        token = await messaging
+            .getToken()
+            .timeout(const Duration(seconds: 10));
+        if (token != null && token.isNotEmpty) {
+          print('FCM token obtained (attempt $attempt)');
           await _storeToken(userId, token);
           break;
         }
@@ -357,20 +395,20 @@ class FCMService {
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 5: Listen for token refreshes (handles initial failure + rotations)
-    // If Step 4 failed, this will catch the token when Play Services recovers.
-    // ═══════════════════════════════════════════════════════════════════════
-    _tokenRefreshSubscription ??=
-        messaging.onTokenRefresh.listen((String newToken) async {
-      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-      if (currentUserId == null) {
-        print('Ignoring FCM token refresh while signed out');
-        return;
+    // A transient Play Services outage must not erase a previously working
+    // registration. Re-publish the last token for this install so the server's
+    // per-device registry remains populated while onTokenRefresh recovers.
+    if (token == null || token.isEmpty) {
+      try {
+        final cachedToken = await _secureStorage.read(key: _lastFcmTokenKey);
+        if (cachedToken != null && cachedToken.isNotEmpty) {
+          print('Using cached FCM token while Play Services recovers');
+          await _storeToken(userId, cachedToken);
+        }
+      } catch (error) {
+        debugPrint('Could not read cached FCM token (non-fatal): $error');
       }
-      print('FCM token refreshed: $newToken');
-      await _storeToken(currentUserId, newToken);
-    });
+    }
   }
 
   /// Stores the FCM token in Firestore for the given user.
@@ -408,12 +446,109 @@ class FCMService {
         key: _lastRegisteredUserIdKey,
         value: userId,
       );
+      try {
+        await _secureStorage.write(key: _lastFcmTokenKey, value: token);
+      } catch (error) {
+        debugPrint('Could not cache FCM token (non-fatal): $error');
+      }
 
       print('FCM token stored for user: $userId on device: $deviceId');
     } catch (e, stack) {
       print('Error storing FCM token: $e');
       CrashlyticsService.logError(e, stack,
           reason: 'FCM._storeToken failed for user $userId');
+    }
+  }
+
+  static Future<void> _mirrorActiveUserForNativeCalls(String userId) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(_nativeCallUserIdKey, userId);
+    } catch (error) {
+      debugPrint('Could not mirror active call user (non-fatal): $error');
+    }
+  }
+
+  static Future<void> _syncVoipToken(String userId) async {
+    try {
+      final dynamic rawToken =
+          await FlutterCallkitIncoming.getDevicePushTokenVoIP();
+      final token = rawToken?.toString() ?? '';
+      if (token.isNotEmpty) {
+        await _storeVoipToken(userId, token);
+      }
+    } catch (error) {
+      debugPrint('VoIP token sync failed (non-fatal): $error');
+    }
+  }
+
+  /// Called from the global CallKit event listener when PushKit rotates the
+  /// device token. PushKit tokens are not FCM registration tokens and must be
+  /// stored separately for direct APNs VoIP delivery.
+  static Future<void> handleVoipTokenUpdate(dynamic body) async {
+    if (!Platform.isIOS || body is! Map) return;
+
+    final data = Map<String, dynamic>.from(body);
+    final token = data['deviceTokenVoIP']?.toString() ?? '';
+    final userId = FirebaseAuth.instance.currentUser?.uid ??
+        await _secureStorage.read(key: _lastRegisteredUserIdKey);
+    if (userId == null || userId.isEmpty) return;
+
+    if (token.isEmpty) {
+      await _removeVoipToken(userId);
+    } else {
+      await _storeVoipToken(userId, token);
+    }
+  }
+
+  static Future<void> _storeVoipToken(String userId, String token) async {
+    try {
+      final deviceId = await _getOrCreateDeviceId();
+      await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
+      final deviceInfo = await _getDeviceInfo();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('devices')
+          .doc(deviceId)
+          .set(
+        {
+          'deviceId': deviceId,
+          'voipToken': token,
+          'voipEnvironment': kReleaseMode ? 'production' : 'sandbox',
+          'platform': 'ios',
+          'deviceModel': deviceInfo,
+          'voipTokenUpdatedAt': FieldValue.serverTimestamp(),
+          'lastSeenAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      debugPrint('VoIP token stored for user: $userId on device: $deviceId');
+    } catch (error, stack) {
+      debugPrint('Error storing VoIP token: $error');
+      CrashlyticsService.logError(error, stack,
+          reason: 'FCM._storeVoipToken failed for user $userId');
+    }
+  }
+
+  static Future<void> _removeVoipToken(String userId) async {
+    try {
+      final deviceId = await _secureStorage.read(key: _deviceIdKey);
+      if (deviceId == null || deviceId.isEmpty) return;
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('devices')
+          .doc(deviceId)
+          .set(
+        {
+          'voipToken': FieldValue.delete(),
+          'voipTokenUpdatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (error) {
+      debugPrint('Error removing VoIP token: $error');
     }
   }
 
@@ -426,6 +561,11 @@ class FCMService {
     // makes logout deterministic regardless of what fails afterwards.
     await _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = null;
+
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.remove(_nativeCallUserIdKey);
+    } catch (_) {}
 
     try {
       final deviceId = await _secureStorage.read(key: _deviceIdKey);
@@ -451,6 +591,7 @@ class FCMService {
       }
 
       await _secureStorage.delete(key: _lastRegisteredUserIdKey);
+      await _secureStorage.delete(key: _lastFcmTokenKey);
       await FirebaseMessaging.instance.deleteToken();
 
       print('FCM token unregistered for user: $userId');
@@ -562,6 +703,8 @@ class FCMService {
       print('Call notification response: ${response.statusCode}');
       if (response.statusCode != 200) {
         print('Failed to send call notification: ${response.body}');
+      } else {
+        print('Call notification delivery: ${response.body}');
       }
     } catch (e, stack) {
       // Best-effort: stop the metric even on error so it doesn't leak.
@@ -729,8 +872,9 @@ class FCMService {
         return;
       }
 
-      // Show native full-screen call UI via CallKit
-      await _showCallKitNotification(message.data);
+      // The Android receiver posts the UI before starting this isolate. This
+      // active-call check keeps the Dart path as a fallback without duplicates.
+      await _ensureCallKitNotification(message.data);
     } else if (messageType == 'resend_request') {
       // A peer can't decrypt something we sent, and only this device holds the
       // plaintext to re-encrypt it. Awaited: the handler's isolate is torn down
@@ -743,6 +887,35 @@ class FCMService {
   // ═══════════════════════════════════════════════════════════════════════════
   // CallKit notification — shared between foreground and background handlers
   // ═══════════════════════════════════════════════════════════════════════════
+
+  static Future<void> _ensureCallKitNotification(
+      Map<String, dynamic> data) async {
+    final channelId = data['channelId']?.toString() ?? '';
+    if (channelId.isEmpty) return;
+
+    try {
+      final dynamic activeCalls = await FlutterCallkitIncoming.activeCalls()
+          .timeout(const Duration(seconds: 2));
+      if (activeCalls is List) {
+        final alreadyActive = activeCalls.any((dynamic rawCall) {
+          if (rawCall is! Map) return false;
+          final call = Map<String, dynamic>.from(rawCall);
+          if (call['id']?.toString() == channelId ||
+              call['uuid']?.toString() == channelId) {
+            return true;
+          }
+          final rawExtra = call['extra'];
+          return rawExtra is Map &&
+              rawExtra['channelId']?.toString() == channelId;
+        });
+        if (alreadyActive) return;
+      }
+    } catch (error) {
+      debugPrint('Could not inspect active calls; using Dart fallback: $error');
+    }
+
+    await _showCallKitNotification(data);
+  }
 
   /// Shows a native phone-call-style notification with Accept / Decline
   /// buttons, ringtone, and vibration — identical to WhatsApp's behavior.
@@ -816,4 +989,11 @@ class FCMService {
       print('Error showing CallKit notification: $e');
     }
   }
+}
+
+/// Registered in main() before runApp so Android can start the background
+/// isolate even when no HomeScreen has been constructed in the current process.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) {
+  return FCMService._firebaseMessagingBackgroundHandler(message);
 }

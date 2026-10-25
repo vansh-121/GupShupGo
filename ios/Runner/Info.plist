@@ -51,12 +51,15 @@
 	     switcher, so this is best-effort on iOS in a way it isn't on Android. -->
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>voip</string>
 		<string>remote-notification</string>
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>GupShupGo needs access to your contacts to match existing friends on GupShupGo.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>GupShupGo needs camera access to scan profile QR codes and for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GupShupGo needs microphone access for voice and video calls.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>GupShupGo uses your location only when you choose to share a location pin in a chat. It is never accessed in the background.</string>
 	<!-- AdMob. GADApplicationIdentifier is not optional: with google_mobile_ads

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 
@@ -28,7 +29,22 @@ class CallSignalingService {
   static const String _collection = 'calls';
 
   static String generateChannelId() {
-    return 'call_${_firestore.collection(_collection).doc().id}';
+    // CallKit requires the incoming call id to be a real UUID. The previous
+    // `call_<Firestore auto id>` value worked as an Agora channel on Android,
+    // but iOS force-parses it with UUID(uuidString:) and cannot present the
+    // call. A UUID is valid for Agora and Firestore as well, so use one id for
+    // signaling, RTC, and the native call UI on every platform.
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // UUID v4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+    final hex =
+        bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-'
+        '${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-'
+        '${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
   }
 
   // ─── Create ────────────────────────────────────────────────────────────────
@@ -67,7 +83,8 @@ class CallSignalingService {
       return true;
     } catch (e, stack) {
       print('CallSignaling: error answering call: $e');
-      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.answerCall failed');
+      CrashlyticsService.logError(e, stack,
+          reason: 'CallSignaling.answerCall failed');
       return false;
     }
   }
@@ -81,7 +98,8 @@ class CallSignalingService {
       });
     } catch (e, stack) {
       print('CallSignaling: error declining call: $e');
-      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.declineCall failed');
+      CrashlyticsService.logError(e, stack,
+          reason: 'CallSignaling.declineCall failed');
     }
   }
 
@@ -95,7 +113,8 @@ class CallSignalingService {
       });
     } catch (e, stack) {
       print('CallSignaling: error ending call: $e');
-      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.endCall failed');
+      CrashlyticsService.logError(e, stack,
+          reason: 'CallSignaling.endCall failed');
     }
   }
 
@@ -108,7 +127,8 @@ class CallSignalingService {
       });
     } catch (e, stack) {
       print('CallSignaling: error marking call as missed: $e');
-      CrashlyticsService.logError(e, stack, reason: 'CallSignaling.missCall failed');
+      CrashlyticsService.logError(e, stack,
+          reason: 'CallSignaling.missCall failed');
     }
   }
 

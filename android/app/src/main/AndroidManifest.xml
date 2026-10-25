@@ -129,6 +129,21 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Replace FlutterFire's receiver with a subclass that posts the
+             native incoming-call UI immediately, then delegates back to
+             FlutterFire for the normal foreground/background Dart streams. -->
+        <receiver
+            android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingReceiver"
+            tools:node="remove" />
+        <receiver
+            android:name=".GupShupFirebaseMessagingReceiver"
+            android:exported="true"
+            android:permission="com.google.android.c2dm.permission.SEND">
+            <intent-filter>
+                <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+            </intent-filter>
+        </receiver>
     </application>
     
     <!-- Required to query activities that can process text, see:

@@ -18,7 +18,8 @@ setGlobalOptions({
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { google } = require("googleapis");
-const { defineSecret } = require("firebase-functions/params");
+const { defineSecret, defineString } = require("firebase-functions/params");
+// const voipPush = require("./voip-push"); // iOS VoIP push (commented out for Android-only focus)
 
 // ─── Google Play Service Account (for subscription verification) ─────────────
 // Set via: firebase functions:secrets:set PLAY_SERVICE_ACCOUNT_KEY
@@ -65,6 +66,14 @@ const streakAdminToken = defineSecret("STREAK_ADMIN_TOKEN");
 const agoraAppId = defineSecret("AGORA_APP_ID");
 const agoraAppCertificate = defineSecret("AGORA_APP_CERTIFICATE");
 
+// ─── Apple PushKit / CallKit (Commented out for Android-only focus) ─────────
+// const apnsKeyId = defineSecret("APNS_KEY_ID");
+// const apnsTeamId = defineSecret("APNS_TEAM_ID");
+// const apnsAuthKey = defineSecret("APNS_AUTH_KEY");
+// const apnsBundleId = defineString("APNS_BUNDLE_ID", {
+//   default: "com.gupshupgo.app",
+// });
+
 // ─── GupShup AI (Gemini & Groq proxies) ─────────────────────────────────────
 // Generative AI API keys. Authorises AI replies and must NEVER ship in the
 // client — the app reaches AI only through `askGupShupAi`. Set via:
@@ -99,38 +108,87 @@ async function getNotificationTargets(userId) {
     return { exists: false, targets: [] };
   }
 
+  const userData = userDoc.data() || {};
   const targets = [];
   const seenTokens = new Set();
   const devicesSnap = await userRef.collection("devices").get();
 
   devicesSnap.forEach((doc) => {
-    const token = doc.data().fcmToken;
-    if (typeof token === "string" && token && !seenTokens.has(token)) {
-      seenTokens.add(token);
-      targets.push({ token, ref: doc.ref, source: "device" });
-    }
+    const data = doc.data() || {};
+    const rawToken = data.fcmToken;
+    const rawVoipToken = data.voipToken;
+    const token = typeof rawToken === "string" && rawToken
+      ? rawToken
+      : null;
+    const voipToken = typeof rawVoipToken === "string" && rawVoipToken
+      ? rawVoipToken
+      : null;
+    const uniqueToken = token && !seenTokens.has(token) ? token : null;
+    if (uniqueToken) seenTokens.add(uniqueToken);
+    if (!uniqueToken && !voipToken) return;
+
+    targets.push({
+      token: uniqueToken,
+      voipToken,
+      voipEnvironment: data.voipEnvironment || null,
+      platform: data.platform || null,
+      ref: doc.ref,
+      source: "device",
+    });
   });
+
+  // Migration fallback for installs that have not opened since per-device
+  // token storage shipped. This prevents an upgrade from silently making the
+  // user unreachable until their next foreground launch.
+  const legacyToken = userData.fcmToken;
+  if (typeof legacyToken === "string" &&
+      legacyToken &&
+      !seenTokens.has(legacyToken)) {
+    targets.push({
+      token: legacyToken,
+      voipToken: null,
+      voipEnvironment: null,
+      platform: null,
+      ref: userRef,
+      source: "legacy",
+    });
+  }
 
   return { exists: true, targets };
 }
 
 async function removeNotificationTarget(target) {
   try {
-    await target.ref.delete();
+    if (target.source === "legacy") {
+      await target.ref.update({
+        fcmToken: admin.firestore.FieldValue.delete(),
+      });
+    } else {
+      // Device docs also contain E2EE public key material and may contain a
+      // still-valid PushKit token. Remove only the rejected FCM token.
+      await target.ref.update({
+        fcmToken: admin.firestore.FieldValue.delete(),
+        tokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
   } catch (error) {
     console.error("Error removing invalid FCM token:", error);
   }
 }
 
-async function sendToUserDevices(userId, buildMessage) {
-  const { exists, targets } = await getNotificationTargets(userId);
-  if (!exists) {
-    return { ok: false, status: 404, body: { error: `User ${userId} not found` } };
+async function removeVoipTarget(target) {
+  if (!target || target.source !== "device") return;
+  try {
+    await target.ref.update({
+      voipToken: admin.firestore.FieldValue.delete(),
+      voipTokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.error("Error removing invalid APNs VoIP token:", error);
   }
-  if (targets.length === 0) {
-    return { ok: false, status: 404, body: { error: `No FCM tokens for user ${userId}` } };
-  }
+}
 
+async function sendFcmTargets(targets, buildMessage) {
   const messages = targets.map((target) => buildMessage(target.token));
   const response = await messaging.sendEach(messages);
   const cleanup = [];
@@ -182,6 +240,18 @@ async function sendToUserDevices(userId, buildMessage) {
       failures,
     },
   };
+}
+
+async function sendToUserDevices(userId, buildMessage) {
+  const { exists, targets } = await getNotificationTargets(userId);
+  if (!exists) {
+    return { ok: false, status: 404, body: { error: `User ${userId} not found` } };
+  }
+  const fcmTargets = targets.filter((target) => target.token);
+  if (fcmTargets.length === 0) {
+    return { ok: false, status: 404, body: { error: `No FCM tokens for user ${userId}` } };
+  }
+  return sendFcmTargets(fcmTargets, buildMessage);
 }
 
 // ─── Batch Multicast Helper ────────────────────────────────────────────────
@@ -267,7 +337,15 @@ streakNotify.configure({
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
 exports.sendCallNotification = onRequest(
-  { cors: true, invoker: "public", minInstances: 0, cpu: 1, concurrency: 80, maxInstances: 3 },
+  {
+    cors: true,
+    invoker: "public",
+    minInstances: 0,
+    cpu: 1,
+    concurrency: 80,
+    maxInstances: 3,
+    // secrets: [apnsKeyId, apnsTeamId, apnsAuthKey], // Uncomment when enabling iOS VoIP PushKit
+  },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");
@@ -305,18 +383,18 @@ exports.sendCallNotification = onRequest(
       } catch (_) { }
 
       const audioOnly = isAudioOnly === true || isAudioOnly === "true";
-
-      const result = await sendToUserDevices(calleeId, (fcmToken) => ({
+      const callData = {
+        calleeId,
+        callerId,
+        callerName,
+        callerPhotoUrl,
+        channelId,
+        type: "incoming_call",
+        isAudioOnly: String(audioOnly),
+      };
+      const buildFcmCallMessage = (fcmToken) => ({
         token: fcmToken,
-        data: {
-          calleeId: calleeId,
-          callerId: callerId,
-          callerName: callerName,
-          callerPhotoUrl: callerPhotoUrl,
-          channelId: channelId,
-          type: "incoming_call",
-          isAudioOnly: String(audioOnly),
-        },
+        data: callData,
         android: {
           priority: "high",
           ttl: 60000,
@@ -324,17 +402,136 @@ exports.sendCallNotification = onRequest(
         apns: {
           headers: {
             "apns-priority": "10",
-            "apns-push-type": "voip",
+            "apns-push-type": "alert",
+            "apns-expiration": String(Math.floor(Date.now() / 1000) + 60),
           },
           payload: {
             aps: {
+              alert: {
+                title: `${callerName} is calling`,
+                body: audioOnly ? "Incoming voice call" : "Incoming video call",
+              },
+              sound: "default",
               "content-available": 1,
             },
           },
         },
-      }));
+      });
 
-      res.status(result.status).json(result.body);
+      const { exists, targets } = await getNotificationTargets(calleeId);
+      if (!exists) {
+        res.status(404).json({ error: `User ${calleeId} not found` });
+        return;
+      }
+
+      // Android-first / FCM delivery: Deliver call notification via FCM (free, high-priority)
+      const fcmTargets = targets.filter((target) => target.token);
+      if (fcmTargets.length === 0) {
+        res.status(404).json({ error: `No call tokens for user ${calleeId}` });
+        return;
+      }
+
+      console.log("Call delivery targets", {
+        registeredDevices: targets.length,
+        fcmTargets: fcmTargets.length,
+      });
+      const fcmResult = await sendFcmTargets(fcmTargets, buildFcmCallMessage);
+      res.status(fcmResult.status).json(fcmResult.body);
+
+      /* ─── iOS Direct VoIP PushKit (Commented out for Android-only rollout) ───
+      // When ready for iOS VoIP calls, uncomment this block and re-enable APNs secrets above:
+      const voipTargets = targets.filter(
+        (target) => target.platform === "ios" && target.voipToken
+      );
+      const initialFcmTargets = targets.filter(
+        (target) => target.token &&
+          !(target.platform === "ios" && target.voipToken)
+      );
+
+      let fcmResult = null;
+      if (initialFcmTargets.length > 0) {
+        fcmResult = await sendFcmTargets(initialFcmTargets, buildFcmCallMessage);
+      }
+
+      let voipResult = { successes: [], failures: [] };
+      if (voipTargets.length > 0) {
+        try {
+          voipResult = await voipPush.sendVoipPushes({
+            targets: voipTargets,
+            topic: apnsBundleId.value(),
+            teamId: apnsTeamId.value(),
+            keyId: apnsKeyId.value(),
+            privateKey: apnsAuthKey.value(),
+            collapseId: channelId,
+            ttlSeconds: 60,
+            payload: {
+              aps: { "content-available": 1 },
+              id: channelId,
+              ...callData,
+            },
+          });
+        } catch (error) {
+          console.error("APNs VoIP delivery failed before send:", error.message);
+          voipResult = {
+            successes: [],
+            failures: voipTargets.map((target) => ({
+              target,
+              status: 0,
+              reason: error.message,
+            })),
+          };
+        }
+      }
+
+      await Promise.all(
+        voipResult.failures
+          .filter(voipPush.isInvalidVoipTokenResult)
+          .map((failure) => removeVoipTarget(failure.target))
+      );
+
+      const fallbackTargets = voipResult.failures
+        .map((failure) => failure.target)
+        .filter((target) => target && target.token);
+      let fallbackResult = null;
+      if (fallbackTargets.length > 0) {
+        fallbackResult = await sendFcmTargets(
+          fallbackTargets,
+          buildFcmCallMessage
+        );
+      }
+
+      const fcmSuccessCount =
+        (fcmResult?.body?.successCount || 0) +
+        (fallbackResult?.body?.successCount || 0);
+      const voipSuccessCount = voipResult.successes.length;
+      const successCount = fcmSuccessCount + voipSuccessCount;
+      const attemptedCount = initialFcmTargets.length + voipTargets.length;
+
+      if (attemptedCount === 0) {
+        res.status(404).json({ error: `No call tokens for user ${calleeId}` });
+        return;
+      }
+
+      if (successCount > 0) {
+        res.status(200).json({
+          success: true,
+          successCount,
+          fcmSuccessCount,
+          voipSuccessCount,
+          failureCount: Math.max(0, attemptedCount - successCount),
+        });
+        return;
+      }
+
+      res.status(500).json({
+        error: "Failed to deliver the call to any registered device",
+        fcmFailures: fcmResult?.body?.failures || [],
+        voipFailures: voipResult.failures.map((failure) => ({
+          status: failure.status,
+          reason: failure.reason,
+        })),
+      });
+      ─── End iOS Direct VoIP PushKit ─── */
     } catch (error) {
       if (error.code && error.code.startsWith("auth/")) {
         res.status(401).json({ error: "Invalid or expired token" });
