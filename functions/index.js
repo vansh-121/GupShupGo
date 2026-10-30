@@ -2,7 +2,9 @@
 const { setGlobalOptions } = require("firebase-functions/v2");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentUpdated, onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const callDelivery = require("./call-delivery");
+const { createFcmSender, shouldRetryDelivery } = require("./fcm-delivery");
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
 
@@ -88,16 +90,7 @@ const db = admin.firestore();
 const messaging = admin.messaging();
 const auth = admin.auth();
 
-const INVALID_FCM_TOKEN_CODES = new Set([
-  "messaging/invalid-registration-token",
-  "messaging/registration-token-not-registered",
-]);
-
-function isInvalidFcmTokenError(error) {
-  if (!error) return false;
-  if (INVALID_FCM_TOKEN_CODES.has(error.code)) return true;
-  return String(error.message || "").includes("Requested entity was not found");
-}
+const sendFcmTargets = createFcmSender({ messaging, removeNotificationTarget });
 
 // ─── Core Helpers ──────────────────────────────────────────────────────────
 
@@ -132,6 +125,7 @@ async function getNotificationTargets(userId) {
       voipToken,
       voipEnvironment: data.voipEnvironment || null,
       platform: data.platform || null,
+      nativeCallsVersion: data.nativeCallsVersion || 0,
       ref: doc.ref,
       source: "device",
     });
@@ -159,18 +153,17 @@ async function getNotificationTargets(userId) {
 
 async function removeNotificationTarget(target) {
   try {
-    if (target.source === "legacy") {
-      await target.ref.update({
+    // A failed send may race with token rotation. Delete only the exact rejected value.
+    await db.runTransaction(async (tx) => {
+      const current = await tx.get(target.ref);
+      if (current.data()?.fcmToken !== target.token) return;
+      tx.update(target.ref, {
         fcmToken: admin.firestore.FieldValue.delete(),
+        ...(target.source === "device" ? {
+          tokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        } : {}),
       });
-    } else {
-      // Device docs also contain E2EE public key material and may contain a
-      // still-valid PushKit token. Remove only the rejected FCM token.
-      await target.ref.update({
-        fcmToken: admin.firestore.FieldValue.delete(),
-        tokenUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
+    });
   } catch (error) {
     console.error("Error removing invalid FCM token:", error);
   }
@@ -186,60 +179,6 @@ async function removeVoipTarget(target) {
   } catch (error) {
     console.error("Error removing invalid APNs VoIP token:", error);
   }
-}
-
-async function sendFcmTargets(targets, buildMessage) {
-  const messages = targets.map((target) => buildMessage(target.token));
-  const response = await messaging.sendEach(messages);
-  const cleanup = [];
-  let successCount = 0;
-  const failures = [];
-
-  response.responses.forEach((result, index) => {
-    if (result.success) {
-      successCount += 1;
-      return;
-    }
-
-    const error = result.error;
-    failures.push({
-      tokenSource: targets[index].source,
-      code: error && error.code,
-      message: error && error.message,
-    });
-
-    if (isInvalidFcmTokenError(error)) {
-      cleanup.push(removeNotificationTarget(targets[index]));
-    }
-  });
-
-  await Promise.all(cleanup);
-
-  if (successCount > 0) {
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        success: true,
-        successCount,
-        failureCount: response.failureCount,
-        cleanedTokenCount: cleanup.length,
-      },
-    };
-  }
-
-  return {
-    ok: false,
-    status: cleanup.length > 0 ? 410 : 500,
-    body: {
-      error: cleanup.length > 0
-        ? "All known FCM tokens were invalid and have been removed"
-        : "Failed to send notification to any registered device",
-      failureCount: response.failureCount,
-      cleanedTokenCount: cleanup.length,
-      failures,
-    },
-  };
 }
 
 async function sendToUserDevices(userId, buildMessage) {
@@ -336,6 +275,35 @@ streakNotify.configure({
 });
 
 // ─── Send Call Notification ──────────────────────────────────────────────────
+// Also catches deletion by older clients. Retry is safe: devices persist tombstones.
+exports.cancelNativeCallNotifications = onDocumentWritten(
+  { document: "calls/{channelId}", retry: true },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    const data = callDelivery.cancellationData(event.params.channelId, before, after);
+    if (!data) return;
+    const { targets } = await getNotificationTargets(data.calleeId);
+    // Older clients do not understand silent cancel messages.
+    const nativeTargets = targets.filter((target) => target.token && target.nativeCallsVersion >= 1);
+    if (!nativeTargets.length) return;
+    const result = await sendFcmTargets(nativeTargets, (token) => ({
+      token, data, android: { priority: "high", ttl: 60000 },
+    }));
+    console.log("Call cancellation submitted", { channelId: data.channelId, ...result.body });
+    if (shouldRetryDelivery(result)) {
+      throw new Error("Call cancellation submission failed for one or more devices");
+    }
+  },
+);
+
+// Terminal call docs are retained for delayed pushes and delivery diagnostics.
+exports.cleanupCallSignaling = onSchedule("every 24 hours", async () => {
+  const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 7 * 86400000);
+  const old = await db.collection("calls").where("createdAt", "<", cutoff).limit(200).get();
+  for (const doc of old.docs) await db.recursiveDelete(doc.ref);
+});
+
 exports.sendCallNotification = onRequest(
   {
     cors: true,
@@ -361,13 +329,28 @@ exports.sendCallNotification = onRequest(
       const decodedToken = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
       const { calleeId, callerId, channelId, isAudioOnly } = req.body;
 
-      if (!calleeId || !callerId || !channelId) {
+      if (!callDelivery.validCallRequest(req.body)) {
         res.status(400).json({ error: "Missing required fields" });
         return;
       }
 
       if (decodedToken.uid !== callerId) {
         res.status(403).json({ error: "Forbidden: caller identity mismatch" });
+        return;
+      }
+
+      const callRef = db.collection("calls").doc(channelId);
+      const expiresAt = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(callRef);
+        const call = snap.data();
+        if (!call || call.callerId !== callerId || call.calleeId !== calleeId || call.status !== "ringing") return null;
+        const expiry = callDelivery.callExpiry(call, Date.now());
+        if (expiry <= Date.now()) return null;
+        if (!call.expiresAt) tx.update(callRef, { expiresAt: admin.firestore.Timestamp.fromMillis(expiry) });
+        return expiry;
+      });
+      if (expiresAt === null) {
+        res.status(409).json({ error: "Call is no longer ringing or participants do not match" });
         return;
       }
 
@@ -390,15 +373,13 @@ exports.sendCallNotification = onRequest(
         callerPhotoUrl,
         channelId,
         type: "incoming_call",
+        expiresAt: String(expiresAt),
         isAudioOnly: String(audioOnly),
       };
       const buildFcmCallMessage = (fcmToken) => ({
         token: fcmToken,
         data: callData,
-        android: {
-          priority: "high",
-          ttl: 60000,
-        },
+        android: callDelivery.androidCallConfig(expiresAt, Date.now()),
         apns: {
           headers: {
             "apns-priority": "10",
@@ -432,10 +413,12 @@ exports.sendCallNotification = onRequest(
       }
 
       console.log("Call delivery targets", {
+        channelId,
         registeredDevices: targets.length,
         fcmTargets: fcmTargets.length,
       });
       const fcmResult = await sendFcmTargets(fcmTargets, buildFcmCallMessage);
+      console.log("Call FCM submission completed", { channelId, ...fcmResult.body });
       res.status(fcmResult.status).json(fcmResult.body);
 
       /* ─── iOS Direct VoIP PushKit (Commented out for Android-only rollout) ───

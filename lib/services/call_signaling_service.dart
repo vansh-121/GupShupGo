@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 
 /// Possible statuses for a call signaling document.
@@ -74,17 +75,34 @@ class CallSignalingService {
   /// viewer, which otherwise opens on a black screen while the sharer, never
   /// told we accepted, never starts capture — should gate on the result;
   /// call-style callers may ignore it.
-  static Future<bool> answerCall(String channelId) async {
+  static Future<bool> answerCall(String channelId, {String? deviceId}) async {
     try {
-      await _firestore.collection(_collection).doc(channelId).update({
-        'status': CallSignalStatus.answered.name,
-        'answeredAt': FieldValue.serverTimestamp(),
+      return await _firestore.runTransaction((tx) async {
+        final ref = _firestore.collection(_collection).doc(channelId);
+        final snapshot = await tx.get(ref);
+        final call = snapshot.data();
+        if (call == null ||
+            call['calleeId'] != FirebaseAuth.instance.currentUser?.uid)
+          return false;
+        if (call['status'] == 'answered') {
+          return deviceId != null && call['acceptedDeviceId'] == deviceId;
+        }
+        if (call['status'] != 'ringing') return false;
+        final expires = call['expiresAt'] as Timestamp?;
+        if (expires != null && expires.toDate().isBefore(DateTime.now()))
+          return false;
+        tx.update(ref, {
+          'status': CallSignalStatus.answered.name,
+          'answeredAt': FieldValue.serverTimestamp(),
+          if (deviceId != null) 'acceptedDeviceId': deviceId,
+        });
+        return true;
       });
-      return true;
     } catch (e, stack) {
       print('CallSignaling: error answering call: $e');
       CrashlyticsService.logError(e, stack,
           reason: 'CallSignaling.answerCall failed');
+      if (deviceId != null) rethrow;
       return false;
     }
   }
@@ -92,10 +110,7 @@ class CallSignalingService {
   /// Callee declined the call.
   static Future<void> declineCall(String channelId) async {
     try {
-      await _firestore.collection(_collection).doc(channelId).update({
-        'status': CallSignalStatus.declined.name,
-        'endedAt': FieldValue.serverTimestamp(),
-      });
+      await _finishIfActive(channelId, CallSignalStatus.declined);
     } catch (e, stack) {
       print('CallSignaling: error declining call: $e');
       CrashlyticsService.logError(e, stack,
@@ -107,10 +122,7 @@ class CallSignalingService {
   /// ringing).
   static Future<void> endCall(String channelId) async {
     try {
-      await _firestore.collection(_collection).doc(channelId).update({
-        'status': CallSignalStatus.ended.name,
-        'endedAt': FieldValue.serverTimestamp(),
-      });
+      await _finishIfActive(channelId, CallSignalStatus.ended);
     } catch (e, stack) {
       print('CallSignaling: error ending call: $e');
       CrashlyticsService.logError(e, stack,
@@ -121,10 +133,7 @@ class CallSignalingService {
   /// No one answered before the timeout.
   static Future<void> missCall(String channelId) async {
     try {
-      await _firestore.collection(_collection).doc(channelId).update({
-        'status': CallSignalStatus.missed.name,
-        'endedAt': FieldValue.serverTimestamp(),
-      });
+      await _finishIfActive(channelId, CallSignalStatus.missed);
     } catch (e, stack) {
       print('CallSignaling: error marking call as missed: $e');
       CrashlyticsService.logError(e, stack,
@@ -152,6 +161,19 @@ class CallSignalingService {
         (e) => e.name == statusStr,
         orElse: () => CallSignalStatus.ringing,
       );
+    });
+  }
+
+  static Future<void> _finishIfActive(
+      String id, CallSignalStatus status) async {
+    final ref = _firestore.collection(_collection).doc(id);
+    await _firestore.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final current = snap.data()?['status'];
+      if (current != 'ringing' &&
+          !(current == 'answered' && status == CallSignalStatus.ended)) return;
+      tx.update(ref,
+          {'status': status.name, 'endedAt': FieldValue.serverTimestamp()});
     });
   }
 
@@ -200,8 +222,8 @@ class CallSignalingService {
   /// Deletes a call document. Called after both parties have left the call
   /// and the call log has been created. Fire-and-forget.
   static Future<void> deleteCallDocument(String channelId) async {
-    try {
-      await _firestore.collection(_collection).doc(channelId).delete();
-    } catch (_) {}
+    // Retain terminal state so delayed Accept/push delivery cannot revive a call.
+    // The backend retention job removes these documents after seven days.
+    await endCall(channelId);
   }
 }

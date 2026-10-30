@@ -26,6 +26,13 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingResult: MethodChannel.Result? = null
 
     private var mediaRecorder: MediaRecorder? = null
+    private var nativeCallChannel: MethodChannel? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("native_call_accept", false)) nativeCallChannel?.invokeMethod("accepted", null)
+    }
 
     // ── Picture-in-Picture state ────────────────────────────────────────
     // Retained so onUserLeaveHint (the manual auto-enter fallback for
@@ -38,6 +45,29 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        nativeCallChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NativeCalls.BRIDGE).apply {
+            setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "bind" -> {
+                            NativeCalls.bind(applicationContext, call.argument<String>("userId")!!, call.argument<String>("deviceId")!!)
+                            result.success(null)
+                        }
+                        "clear" -> { NativeCalls.clear(applicationContext); result.success(null) }
+                        "syncToken" -> { NativeCallWorker.syncToken(applicationContext); result.success(null) }
+                        "active" -> { NativeCalls.activeRtcCall = call.argument<String>("channelId"); result.success(null) }
+                        "pending" -> result.success(NativeCalls.pending(applicationContext))
+                        "acknowledge" -> { NativeCalls.acknowledge(applicationContext, call.argument<String>("channelId")!!); result.success(null) }
+                        "finish" -> { NativeCalls.finish(applicationContext, call.argument<String>("channelId")!!, "ended"); result.success(null) }
+                        "readiness" -> result.success(CallReadiness.read(this@MainActivity))
+                        "openSettings" -> result.success(CallReadiness.open(this@MainActivity, call.argument<String>("page")!!))
+                        "diagnostics" -> result.success(NativeCalls.prefs(applicationContext).getString("events", "[]"))
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) { result.error("NATIVE_CALL", error.message, null) }
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {

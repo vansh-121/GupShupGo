@@ -404,15 +404,48 @@ service cloud.firestore {
         && (resource.data.callerId == request.auth.uid 
             || resource.data.calleeId == request.auth.uid);
       
-      // Only the caller or callee can create a call
+      // Only the authenticated caller may initiate a ringing call.
       allow create: if request.auth != null
-        && (request.resource.data.callerId == request.auth.uid 
-            || request.resource.data.calleeId == request.auth.uid);
+        && request.resource.data.callerId == request.auth.uid
+        && request.resource.data.calleeId != request.auth.uid
+        && request.resource.data.status == 'ringing';
       
       // Only participants can update call status
       allow update: if request.auth != null
         && (resource.data.callerId == request.auth.uid 
-            || resource.data.calleeId == request.auth.uid);
+            || resource.data.calleeId == request.auth.uid)
+        && request.resource.data.callerId == resource.data.callerId
+        && request.resource.data.calleeId == resource.data.calleeId
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['createdAt', 'expiresAt'])
+        && (
+          (request.resource.data.status == resource.data.status
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['acceptedDeviceId']))
+          || (resource.data.status == 'ringing'
+            && request.resource.data.status == 'answered'
+            && request.auth.uid == resource.data.calleeId
+            && (!('expiresAt' in resource.data) || request.time < resource.data.expiresAt)
+            && (!('acceptedDeviceId' in request.resource.data)
+              || exists(/databases/$(database)/documents/users/$(request.auth.uid)/devices/$(request.resource.data.acceptedDeviceId))))
+          || (resource.data.status == 'ringing'
+            && request.resource.data.status == 'declined'
+            && request.auth.uid == resource.data.calleeId)
+          || (resource.data.status == 'ringing' && request.resource.data.status == 'missed')
+          || (resource.data.status in ['ringing', 'answered'] && request.resource.data.status == 'ended')
+        );
+
+      match /deliveryReceipts/{receiptId} {
+        allow read: if request.auth != null
+          && get(/databases/$(database)/documents/calls/$(callId)).data.calleeId == request.auth.uid;
+        allow create, update: if request.auth != null
+          && get(/databases/$(database)/documents/calls/$(callId)).data.calleeId == request.auth.uid
+          && request.resource.data.keys().hasOnly(['deviceId', 'event', 'recordedAt', 'occurredAtMs'])
+          && request.resource.data.event in ['notification_posted', 'declined', 'missed']
+          && request.resource.data.recordedAt == request.time
+          && request.resource.data.occurredAtMs is int
+          && receiptId == request.resource.data.deviceId + '_' + request.resource.data.event
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid)/devices/$(request.resource.data.deviceId));
+      }
       
       // Allow deletion by participants (cleanup after call ends)
       allow delete: if request.auth != null

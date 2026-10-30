@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -13,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:video_chat_app/services/native_call_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -272,6 +274,7 @@ bool _alreadyNavigatedToCall(String channelId) {
 }
 
 void _setupCallKitListener() {
+  if (Platform.isAndroid) return;
   FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
     if (event == null) return;
 
@@ -403,6 +406,10 @@ void _handleCallAccepted(dynamic body) {
 /// and checks [FlutterCallkitIncoming.activeCalls()] for any call that was
 /// accepted. If found, it navigates to CallScreen.
 void _checkPendingAcceptedCalls() {
+  if (Platform.isAndroid) {
+    NativeCallService.instance.start();
+    return;
+  }
   // Wait for the navigator to be mounted (first frame)
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
@@ -413,6 +420,7 @@ void _checkPendingAcceptedCalls() {
 
       // Take the most recent active call
       final Map<String, dynamic> call = Map<String, dynamic>.from(calls.last);
+      if (call['isAccepted'] != true) return;
 
       final rawExtra = call['extra'];
       final Map<String, dynamic> extra = rawExtra is Map

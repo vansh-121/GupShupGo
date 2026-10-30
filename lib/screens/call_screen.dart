@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:video_chat_app/services/native_call_service.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -127,6 +128,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(NativeCallService.setActive(widget.channelId));
     _initializeUserInfo();
 
     // Start E2E call-setup performance trace (stopped when remote joins).
@@ -642,6 +644,7 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    unawaited(NativeCallService.finish(widget.channelId));
     _callTimer?.cancel();
     _noAnswerTimer?.cancel();
     _mediaWatchdogTimer?.cancel();

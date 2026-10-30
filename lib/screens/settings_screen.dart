@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
+import 'package:video_chat_app/screens/call_readiness_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:video_chat_app/widgets/e2ee_banner.dart';
@@ -735,6 +737,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : l10n.settingsNotificationsStatusOff,
                 onTap: _manageNotifications,
               ),
+              if (Platform.isAndroid) ...[
+                _buildStitchDivider(),
+                _buildStitchTile(
+                  icon: Icons.phone_in_talk_outlined,
+                  title: 'Incoming call readiness',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const CallReadinessScreen(),
+                  )),
+                ),
+              ],
               _buildStitchDivider(),
               _buildStitchTile(
                 icon: Icons.shield_outlined,

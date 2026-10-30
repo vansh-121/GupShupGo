@@ -15,6 +15,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:video_chat_app/services/native_call_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -233,6 +234,10 @@ class FCMService {
     // a non-sensitive mirror of the active uid in Flutter SharedPreferences so
     // it can reject a stale token belonging to a previously signed-in account.
     await _mirrorActiveUserForNativeCalls(userId);
+    if (Platform.isAndroid) {
+      if (FirebaseAuth.instance.currentUser?.uid != userId) return;
+      await NativeCallService.bind(userId, await _getOrCreateDeviceId());
+    }
 
     // PushKit has its own token, separate from FCM/APNs notification tokens.
     // AppDelegate registers it at launch; persist it with this device record as
@@ -265,6 +270,7 @@ class FCMService {
         final messageType = message.data['type'] ?? '';
 
         if (messageType == 'incoming_call' || messageType == 'call') {
+          if (Platform.isAndroid) return; // Native receiver is the sole owner.
           if (!await _isMessageForCurrentUser(message.data)) {
             print('Ignoring call notification for a different signed-in user');
             return;
@@ -413,6 +419,12 @@ class FCMService {
 
   /// Stores the FCM token in Firestore for the given user.
   static Future<void> _storeToken(String userId, String token) async {
+    if (FirebaseAuth.instance.currentUser?.uid != userId) return;
+    if (Platform.isAndroid) {
+      // Native WorkManager owns refresh ordering and retries, even without Dart.
+      await NativeCallService.channel.invokeMethod<void>('syncToken');
+      return;
+    }
     try {
       final deviceId = await _getOrCreateDeviceId();
       await _removePreviousAccountDeviceTokenIfNeeded(userId, deviceId);
@@ -553,6 +565,7 @@ class FCMService {
   }
 
   Future<void> unregisterCurrentDevice({required String userId}) async {
+    await NativeCallService.clear();
     // Cancel the token-refresh listener FIRST, before any operation that can
     // throw or provoke a refresh. deleteToken() below triggers onTokenRefresh,
     // and if the listener were still live (or if an earlier step threw and
@@ -574,7 +587,12 @@ class FCMService {
             FirebaseFirestore.instance.collection('users').doc(userId);
         final currentToken = await FirebaseMessaging.instance.getToken();
 
-        await userRef.collection('devices').doc(deviceId).delete();
+        // The device document also holds encryption keys. Remove push fields only.
+        await userRef.collection('devices').doc(deviceId).set({
+          'fcmToken': FieldValue.delete(),
+          'voipToken': FieldValue.delete(),
+          'tokenUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
 
         if (currentToken != null && currentToken.isNotEmpty) {
           final userDoc = await userRef.get();
@@ -616,7 +634,8 @@ class FCMService {
           .doc(previousUserId)
           .collection('devices')
           .doc(deviceId)
-          .delete();
+          .set({'fcmToken': FieldValue.delete(), 'voipToken': FieldValue.delete()},
+              SetOptions(merge: true));
       print('Removed this device from previous FCM user: $previousUserId');
     } catch (e) {
       print('Could not remove previous FCM user token: $e');
@@ -867,6 +886,7 @@ class FCMService {
         }
       }
     } else if (messageType == 'call' || messageType == 'incoming_call') {
+      if (Platform.isAndroid) return;
       if (!await _isMessageForCurrentUser(message.data)) {
         print('Ignoring call notification for a different signed-in user');
         return;

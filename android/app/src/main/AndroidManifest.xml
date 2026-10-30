@@ -51,7 +51,7 @@
 
     <application
         android:label="GupShupGo"
-        android:name="${applicationName}"
+        android:name=".GupShupApplication"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         tools:replace="android:allowBackup">
@@ -121,18 +121,29 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-8214980075451384~2552239193" />
 
-        <!-- Firebase Messaging Service -->
+        <activity
+            android:name=".NativeIncomingCallActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.gupshupgo.app.incoming"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <receiver android:name=".NativeCallActionReceiver" android:exported="false" />
+
+        <!-- Native token rotation; Flutter still handles non-call messages. -->
+        <service android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
+            tools:node="remove" />
         <service
-            android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
+            android:name=".GupShupMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 
-        <!-- Replace FlutterFire's receiver with a subclass that posts the
-             native incoming-call UI immediately, then delegates back to
-             FlutterFire for the normal foreground/background Dart streams. -->
+        <!-- Consume calls natively. Delegate only non-call pushes to FlutterFire. -->
         <receiver
             android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingReceiver"
             tools:node="remove" />
