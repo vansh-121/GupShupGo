@@ -3,7 +3,7 @@ import 'package:video_chat_app/main.dart';
 import 'package:video_chat_app/theme/app_theme.dart';
 
 /// Version shown to the user. Must match pubspec.yaml version name.
-const String kCurrentVersion = '1.2.2';
+const String kCurrentVersion = '1.2.3';
 const String _prefKey = 'pref_whats_new_version';
 
 /// Call this once the home screen is mounted. Shows the dialog only for users
@@ -193,18 +193,18 @@ class _Feature {
 
 const List<_Feature> _features = [
   _Feature(
-    Icons.language_rounded,
-    'Global Multi-Language Support',
-    'Experience GupShupGo in your native language with full localization across 16 world and regional languages.',
+    Icons.phone_in_talk_rounded,
+    'Native Lock-Screen Incoming Calls',
+    'Never miss a call again. Receive incoming voice and video calls with native full-screen alerts, ringtones, and direct answer controls even when your device is locked or the app is closed.',
   ),
   _Feature(
-    Icons.badge_rounded,
-    'Personalized Invite Cards & Links',
-    'Share customized invite cards and direct profile links (gupshupgo.app/u/your_handle) to connect with friends instantly.',
+    Icons.bolt_rounded,
+    'Instant VoIP & CallKit Integration',
+    'High-priority VoIP push notifications and Apple CallKit integration for ultra-low latency signaling, instant wake-up, and multi-device call coordination.',
   ),
   _Feature(
-    Icons.auto_awesome_rounded,
-    'Enhanced In-Chat GupAI',
-    'Supercharged AI assistant support directly inside your chats. Easily rewrite drafts, translate foreign messages, and trigger smart actions on the fly.',
+    Icons.tune_rounded,
+    'Incoming Call Settings & Readiness',
+    'Easily configure and verify critical call permissions (microphone, camera, notifications, full-screen intent, and battery optimization) directly in Settings for flawless reliability.',
   ),
 ];

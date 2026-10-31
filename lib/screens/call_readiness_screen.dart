@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_chat_app/services/native_call_service.dart';
 
 class CallReadinessScreen extends StatefulWidget {
   const CallReadinessScreen({super.key});
+
+  static const title = 'Incoming call settings';
+
   @override
   State<CallReadinessScreen> createState() => _CallReadinessScreenState();
 }
@@ -93,7 +97,7 @@ class _CallReadinessScreenState extends State<CallReadinessScreen>
   Widget build(BuildContext context) {
     final s = _status;
     return Scaffold(
-      appBar: AppBar(title: const Text('Incoming call readiness')),
+      appBar: AppBar(title: const Text(CallReadinessScreen.title)),
       body: _error != null
           ? Center(child: TextButton(onPressed: _load, child: Text(_error!)))
           : s == null
@@ -147,22 +151,25 @@ class _CallReadinessScreenState extends State<CallReadinessScreen>
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => _open('app')),
                       ],
-                      ListTile(
-                          leading: Icon(s['registered'] == true
-                              ? Icons.cloud_done_outlined
-                              : Icons.cloud_off_outlined),
-                          title: Text(s['registered'] == true
-                              ? 'Device registered for calls'
-                              : 'Device registration pending'),
+                      // Technical troubleshooting stays out of production UI.
+                      if (kDebugMode) ...[
+                        ListTile(
+                            leading: Icon(s['registered'] == true
+                                ? Icons.cloud_done_outlined
+                                : Icons.cloud_off_outlined),
+                            title: Text(s['registered'] == true
+                                ? 'Device registered for calls'
+                                : 'Device registration pending'),
+                            subtitle: const Text(
+                                'Registration refreshes automatically when a network is available.')),
+                        ListTile(
+                          leading: const Icon(Icons.copy_outlined),
+                          title: const Text('Copy call diagnostics'),
                           subtitle: const Text(
-                              'Registration refreshes automatically when a network is available.')),
-                      ListTile(
-                        leading: const Icon(Icons.copy_outlined),
-                        title: const Text('Copy call diagnostics'),
-                        subtitle: const Text(
-                            'Copy recent call events to help investigate a failed call.'),
-                        onTap: _copyDiagnostics,
-                      ),
+                              'Copy recent call events to help investigate a failed call.'),
+                          onTap: _copyDiagnostics,
+                        ),
+                      ],
                       const Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(

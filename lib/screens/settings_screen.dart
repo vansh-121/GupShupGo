@@ -741,7 +741,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildStitchDivider(),
                 _buildStitchTile(
                   icon: Icons.phone_in_talk_outlined,
-                  title: 'Incoming call readiness',
+                  title: CallReadinessScreen.title,
                   onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                     builder: (_) => const CallReadinessScreen(),
                   )),

@@ -45,7 +45,7 @@ import 'package:video_chat_app/services/streak/server_clock.dart';
 /// fails the build if the two ever disagree. That test is the reason this is a
 /// constant rather than a `package_info_plus` lookup: the value is only ever
 /// wrong if someone forgets to bump it, and the test makes forgetting loud.
-const int kAppVersionCode = 60;
+const int kAppVersionCode = 61;
 
 /// Where this build stands against the supported-version policy.
 enum VersionSupportState {

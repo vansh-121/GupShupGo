@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Live location sharing and map-based pin picking
 
+## [1.2.3] - 2026-10-31
+
+### Added
+- 📞 **Native Lock-Screen Incoming Calls** — Native full-screen incoming call UI for Android and native CallKit integration for iOS. Answer, decline, and manage incoming voice and video calls with system ringtones, vibration, and caller avatars directly from the lock screen, even when the app is completely closed or terminated.
+- ⚡ **Ultra-Low-Latency VoIP Push Notifications** — Real-time VoIP push messaging pipeline utilizing high-priority FCM data messages and Apple PushKit tokens via Cloud Functions to reliably wake receiving devices within milliseconds.
+- ⚙️ **Incoming Call Settings & Readiness Center** — Dedicated settings dashboard (Settings → Incoming call settings) to guide users through necessary permissions: Microphone, Camera, Full-Screen Intent notifications, and Battery Optimization whitelisting to guarantee 100% incoming call delivery.
+- 🔀 **Multi-Device Call Racing & Atomic Hand-Off** — Robust Firestore transaction-based call claim resolution that prevents race conditions across multiple active devices; picking up on one device instantly dismisses ringing across all other devices.
+
+### Changed
+- Updated version to 1.2.3 (build code 61).
+- 🚀 **Pre-Warmed RTC Media Setup** — Streamlined Agora channel joining and audio/video pipeline initialization upon answering, achieving near-instant call connection times without black screens or audio delay.
+- 🛡️ **Hardened Backend Call Signaling** — Firebase Cloud Functions call dispatch and Firestore security rules enhanced with bidirectional backwards-compatibility, gracefully supporting both legacy call formats and new native signaling payloads.
+- 🎨 **Streamlined Production UI** — Cleaned up diagnostic tools in production builds while ensuring seamless call controls, PiP switching, and screen share stability.
+
 ## [1.2.2] - 2026-10-24
 
 ### Added
@@ -383,6 +397,7 @@ Documents, pins, view-once media and anonymous-room photos, videos and voice not
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.3 | October 2026 | Native Lock-Screen Calls (CallKit & Android), VoIP Push Delivery Pipeline, Incoming Call Settings & Diagnostics |
 | 1.2.2 | October 2026 | 16-Language Localization, Profile Invite Cards & Deep Links, Verified Domain Email Delivery, Vault Security |
 | 1.2.1 | October 2026 | Meet GupAI (In-App Chat Assistant), Self-Healing Encrypted Statuses, High-Concurrency Backend |
 | 1.2.0 | September 2026 | Document & Location Sharing, View-Once Media, Anonymous Chat Media, Full History Search |

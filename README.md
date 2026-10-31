@@ -8,7 +8,7 @@
 
 **The Next-Generation, Offline-Capable, Military-Grade Encrypted Messenger & Arcade built with Flutter & Firebase.**
 
-[![Release: 1.2.2](https://img.shields.io/badge/Release-v1.2.2-blue.svg?style=flat-square)](CHANGELOG.md)
+[![Release: 1.2.3](https://img.shields.io/badge/Release-v1.2.3-blue.svg?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-4F46E5.svg?style=flat-square)](LICENSE)
 [![Flutter SDK](https://img.shields.io/badge/Flutter-%E2%89%A53.2.0-02569B.svg?style=flat-square&logo=flutter)](https://flutter.dev)
 [![Signal Protocol E2EE](https://img.shields.io/badge/Security-Signal%20E2EE-10B981.svg?style=flat-square&logo=signal)](https://signal.org)
@@ -145,8 +145,11 @@ GupShupGo utilizes a clean, decoupled architecture utilizing the **Repository Pa
 </p>
 
 * **Agora RTC Engine:** Ultra-low latency voice and HD video streams configured through `agora_rtc_engine` (`agora_services.dart`).
+* **Native Lock-Screen Calling & CallKit:** Native full-screen incoming call UI for Android (`NativeIncomingCallActivity.kt`, `NativeCalls.kt`) and Apple CallKit (`AppDelegate.swift`) displaying caller avatars, custom ringtones, and direct answer/decline controls from the lock screen.
+* **VoIP Push Notification Pipeline:** High-priority FCM data messaging and Apple PushKit VoIP dispatch via Cloud Functions for instant device wake-up and real-time signaling.
+* **Incoming Call Settings & Readiness:** In-app system readiness check (`CallReadinessScreen`) verifying camera, microphone, full-screen intent, and battery optimization whitelist so calls never fail to ring.
+* **Multi-Device Call Racing:** Atomic Firestore transaction-based claim preventing double-answers and syncing state across all registered user devices.
 * **Live Screen Sharing:** Real-time desktop/mobile screen casting during active video calls, managed via dedicated screen share controllers (`screen_share_session.dart`).
-* **Native OS Integration:** Integrates `flutter_callkit_incoming` to process incoming data-only push notifications, invoking the native Android/iOS call screen (CallKit) even if the app is killed or sleeping.
 * **Hardware Controls:** Multi-state microphone mute, camera flip, speakerphone toggle, call hold, and real-time call logs synchronized to cloud storage.
 
 ### 📸 Ephemeral Updates & Stories (WhatsApp-Style Status)
@@ -445,6 +448,9 @@ GupShupGo is built to meet strict performance requirements:
 * [x] **Self-Healing Message Recovery & Silent Sync:** Automatic background re-encryption and silent FCM sync for 100% reliable, zero-drop messaging.
 * [x] **In-Chat Video Messaging & Poster Thumbnails:** Direct and mesh network video sharing with live upload progress and true aspect ratio playback.
 * [x] **Flexible In-App Updates & Screen Share Request Flow:** Google Play Core background updates and full-screen incoming screen share call UI.
+* [x] **Comprehensive 16-Language Localization:** End-to-end multi-language support across all screens, dialogs, and setup flows.
+* [x] **Personalized Invite Cards & Deep Links:** Customized profile cards and direct profile links (`https://gupshupgo.app/u/<handle>`).
+* [x] **Native Lock-Screen Incoming Calls & VoIP CallKit:** Full-screen native Android incoming call UI, iOS CallKit & PushKit pipeline, multi-device call racing, and incoming call settings.
 
 ### 📅 Phase 2: Future Pipeline
 * [ ] **E2EE Multi-Party Group Calling:** Extending the Double Ratchet protocol to support group calls.
