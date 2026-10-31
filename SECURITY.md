@@ -84,3 +84,4 @@ We believe in recognizing researchers who help keep GupShupGo secure. With your 
 * For eligible high-impact vulnerabilities, we offer custom swag and honorary recognition from the GupShupGo team.
 
 Thank you for helping us keep private communications private!
+

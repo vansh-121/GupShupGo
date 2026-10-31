@@ -106,3 +106,4 @@ You can delete your account at any time in seconds:
 * **Bug Reports:** Open an issue on our [GitHub Issues](https://github.com/vansh-121/GupShupGo/issues).
 * **Feature Ideas:** Submit a feature proposal using our [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md).
 * **Security Issues:** Email `security@gupshupgo.app` (see [`SECURITY.md`](SECURITY.md)).
+

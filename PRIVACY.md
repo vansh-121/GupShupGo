@@ -220,3 +220,4 @@ We welcome inquiries, audits, and scrutiny from the global cryptography and priv
 * **Security & Vulnerability Reports:** `security@gupshupgo.app` (See [`SECURITY.md`](SECURITY.md))
 * **Official Website:** [https://gupshupgo.app](https://gupshupgo.app)
 * **GitHub Issues:** [https://github.com/vansh-121/GupShupGo/issues](https://github.com/vansh-121/GupShupGo/issues)
+

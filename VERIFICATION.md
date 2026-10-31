@@ -158,3 +158,4 @@ apksigner verify --verbose --print-certs GupShupGo-1.2.3.apk
 **Expected Signer Details:**
 * **Certificate SHA-256:** Verified Google Play App Signing key.
 * **Target SDK:** 36 (Android 15+ / 16 KB page-size compliant).
+
