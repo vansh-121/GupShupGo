@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-> ⚠️ **Note:** If you are reporting a security vulnerability that could compromise user data, please **DO NOT** use this public form. Report it directly and confidentially to **`security@gupshupgo.app`** as specified in [`SECURITY.md`](../../SECURITY.md).
+> ⚠️ **Note:** If you are reporting a security vulnerability that could compromise user data, please **DO NOT** use this public form. Report it directly and confidentially to **`support@gupshupgo.app`** as specified in [`SECURITY.md`](../../SECURITY.md).
 
 ### Component or Area
 - [ ] End-to-End Encryption (Signal Protocol / Double Ratchet)

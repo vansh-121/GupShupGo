@@ -32,8 +32,8 @@ We strongly advise all users to remain on the latest version available on Google
 If you believe you have found a security vulnerability in GupShupGo (client app, cryptography implementation, Cloud Functions backend, or mesh protocol), please follow our responsible disclosure process:
 
 ### 1. Primary Reporting Channel
-* **Email:** Send your report directly to **`security@gupshupgo.app`**
-* **Alternative:** You may open a confidential draft advisory via [GitHub Security Advisories](https://github.com/vansh-121/GupShupGo/security/advisories/new).
+* **Email:** Send your report directly to **`support@gupshupgo.app`**
+* **Alternative:** You may open a confidential draft advisory via [GitHub Security Advisories](https://github.com/vansh-121/GupShupGo-Public/security/advisories/new).
 
 ### 2. What to Include in Your Report
 To help us triage and reproduce the issue rapidly, please provide:

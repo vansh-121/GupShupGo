@@ -21,7 +21,7 @@ Modern messaging apps routinely claim to be private while simultaneously collect
 1. **Zero-Knowledge By Default:** All 1-on-1 chats, shared documents, photos, videos, and audio notes are end-to-end encrypted before they leave your device. The cryptographic keys required to decrypt them exist solely on client devices and are never transmitted to our servers.
 2. **Local-First Data Residency:** All conversation histories, contact states, and media caches live in an encrypted, reactive local SQLite database (`Drift`) on your physical device. The cloud backend acts strictly as an asynchronous ciphertext delivery pipe.
 3. **Decentralized Off-Grid Resilience:** When internet connectivity is absent or shut down, GupShupGo operates peer-to-peer over local radio waves (Bluetooth & Wi-Fi Direct), bypassing internet service providers, cell towers, and cloud backbones entirely.
-4. **Zero Commercial Surveillance:** GupShupGo contains zero advertising frameworks, zero third-party tracking SDKs (e.g., no Facebook SDK, no Google AdMob, no behavioral trackers), and does not sell or broker user information to third parties.
+4. **Privacy-Isolated Architecture & Zero Data Brokering:** GupShupGo never sells, brokers, or monetizes user communication data or cryptographic keys. Optional advertising units (Google AdMob) and subscription frameworks (Google Play Billing) are strictly segregated from the messaging and encryption layers, with zero tracking cookies or personal profiling.
 
 ---
 
@@ -186,7 +186,7 @@ The following table explicitly details all data elements handled by GupShupGo:
 | **Phone Number** | Yes (Local Session) | Yes (Tokenized in Auth) | Duration of account lifecycle | ⚠️ Account Verification Only |
 | **Display Name & Avatar** | Yes | Yes (Public Profile) | Duration of account lifecycle | Public to contacts |
 | **Contact Address Book** | Stored locally | **Never uploaded in bulk** | Only queries requested handles | ❌ **No contact scraping** |
-| **Advertising Telemetry** | **None** | **None** | **Zero Trackers** | ❌ **None** |
+| **Advertising Telemetry** | Isolated SDK | Anonymous Ads | Non-personalized | ❌ **No Chat or Key Access** |
 
 ---
 
@@ -196,7 +196,7 @@ To operate real-time communications reliably worldwide, GupShupGo utilizes selec
 
 * **Google Firebase & Google Cloud Platform:** Used for user authentication (phone OTP), Firestore real-time signaling, Cloud Storage (for encrypted media envelopes), and Firebase Cloud Messaging (FCM) for wake-up push notifications. Firebase only processes encrypted ciphertext for message payloads.
 * **Agora RTC Engine:** Transmits live audio, video, and screen-sharing packets over encrypted real-time networks. Streams are ephemeral and never recorded.
-* **Brevo SMTP Relay:** Used exclusively for dispatching verified transactional security emails and invite links with DKIM, SPF, and DMARC verification (`noreply@gupshupgo.app`).
+* **Brevo SMTP Relay:** Used exclusively for dispatching verified transactional security emails and invite links with DKIM, SPF, and DMARC verification (`support@gupshupgo.app`).
 
 No user chat data or cryptographic secrets are ever shared with or accessible by these infrastructure vendors.
 
@@ -216,8 +216,8 @@ You possess complete sovereignty over your data:
 
 We welcome inquiries, audits, and scrutiny from the global cryptography and privacy community.
 
-* **Privacy Questions & Inquiries:** `privacy@gupshupgo.app`
-* **Security & Vulnerability Reports:** `security@gupshupgo.app` (See [`SECURITY.md`](SECURITY.md))
-* **Official Website:** [https://gupshupgo.app](https://gupshupgo.app)
-* **GitHub Issues:** [https://github.com/vansh-121/GupShupGo/issues](https://github.com/vansh-121/GupShupGo/issues)
+* **Official Contact & Inquiries:** `support@gupshupgo.app`
+* **Security & Vulnerability Reports:** `support@gupshupgo.app` (See [`SECURITY.md`](SECURITY.md))
+* **Official Website:** [https://www.gupshupgo.app](https://www.gupshupgo.app)
+* **GitHub Issues:** [https://github.com/vansh-121/GupShupGo-Public/issues](https://github.com/vansh-121/GupShupGo-Public/issues)
 

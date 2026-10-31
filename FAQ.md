@@ -30,8 +30,10 @@ You do not have to trust our source code — you can directly verify that every 
 
 ---
 
-### 3. Does GupShupGo sell my data or show me advertisements?
-**Never.** GupShupGo contains **zero advertising SDKs** (no Google AdMob, no Meta Audience Network) and **zero behavioral analytics trackers** (no Adjust, no AppsFlyer, no tracker cookies). We do not build advertising profiles, and we will never monetize your private data.
+### 3. Does GupShupGo sell my data or track my personal activity?
+**Never.** GupShupGo will never sell, broker, or monetize your private conversations, contacts, or cryptographic keys. 
+
+To support server and infrastructure maintenance, the platform integrates lightweight, non-intrusive Google AdMob ad units (gated by Remote Config) with zero personal profiling. Your messages, calls, media, and keys remain strictly end-to-end encrypted and completely inaccessible to ad networks. Furthermore, GupShupGo Pro provides an option for users who want an entirely ad-free experience.
 
 ---
 
@@ -103,7 +105,7 @@ You can delete your account at any time in seconds:
 ---
 
 ### 11. Where can I report a bug or suggest a new feature?
-* **Bug Reports:** Open an issue on our [GitHub Issues](https://github.com/vansh-121/GupShupGo/issues).
-* **Feature Ideas:** Submit a feature proposal using our [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md).
-* **Security Issues:** Email `security@gupshupgo.app` (see [`SECURITY.md`](SECURITY.md)).
+* **Bug Reports:** Open an issue on [GitHub Issues](https://github.com/vansh-121/GupShupGo-Public/issues).
+* **Feature Ideas:** Submit a proposal using our [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md).
+* **Support & Security Inquiries:** Email `support@gupshupgo.app` (see [`SECURITY.md`](SECURITY.md)).
 

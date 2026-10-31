@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Updated version to 1.2.2 (build code 60).
-- 📬 **Verified Domain Email Infrastructure** — Upgraded email dispatch and notification pipeline to use authenticated Brevo SMTP relay with official DKIM and DMARC verified sender domain (`noreply@gupshupgo.app`).
+- 📬 **Verified Domain Email Infrastructure** — Upgraded email dispatch and notification pipeline to use authenticated Brevo SMTP relay with official DKIM and DMARC verified sender domain (`support@gupshupgo.app`).
 - 🛡️ **Vault Security & PIN Custody Safeguards** — Enhanced Vault PIN dialogs, biometric unlock fallbacks, and tamper-resistant local preferences synchronization.
 - ⚡ **Chat UI Fluidity & Retained Streams** — Implemented `ChatScrollController` and `RetainedStream` utilities for smooth message list scrolling without jumps during active incoming streams.
 
@@ -435,4 +435,4 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 ## Support
 
-For issues, questions, or feature requests, please visit the [GitHub Issues](https://github.com/vansh-121/GupShupGo/issues) page.
+For issues, questions, or feature requests, please visit the [GitHub Issues](https://github.com/vansh-121/GupShupGo-Public/issues) page or contact us at `support@gupshupgo.app`.
