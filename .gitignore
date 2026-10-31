@@ -1,0 +1,12 @@
+# Operating System files
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*~
+
+# Editor directories
+.vscode/
+.idea/
+*.suo
+*.user

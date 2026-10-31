@@ -1,0 +1,438 @@
+# Changelog
+
+All notable changes to the GupShupGo project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [Unreleased]
+
+### Planned Features
+- Group messaging support
+- Message forwarding
+- Backup and restore functionality
+- Global search across all conversations and users (in-chat search shipped in 1.2.0)
+- User blocking with UI improvements
+- Live location sharing and map-based pin picking
+
+## [1.2.3] - 2026-10-31
+
+### Added
+- 📞 **Native Lock-Screen Incoming Calls** — Native full-screen incoming call UI for Android and native CallKit integration for iOS. Answer, decline, and manage incoming voice and video calls with system ringtones, vibration, and caller avatars directly from the lock screen, even when the app is completely closed or terminated.
+- ⚡ **Ultra-Low-Latency VoIP Push Notifications** — Real-time VoIP push messaging pipeline utilizing high-priority FCM data messages and Apple PushKit tokens via Cloud Functions to reliably wake receiving devices within milliseconds.
+- ⚙️ **Incoming Call Settings & Readiness Center** — Dedicated settings dashboard (Settings → Incoming call settings) to guide users through necessary permissions: Microphone, Camera, Full-Screen Intent notifications, and Battery Optimization whitelisting to guarantee 100% incoming call delivery.
+- 🔀 **Multi-Device Call Racing & Atomic Hand-Off** — Robust Firestore transaction-based call claim resolution that prevents race conditions across multiple active devices; picking up on one device instantly dismisses ringing across all other devices.
+
+### Changed
+- Updated version to 1.2.3 (build code 61).
+- 🚀 **Pre-Warmed RTC Media Setup** — Streamlined Agora channel joining and audio/video pipeline initialization upon answering, achieving near-instant call connection times without black screens or audio delay.
+- 🛡️ **Hardened Backend Call Signaling** — Firebase Cloud Functions call dispatch and Firestore security rules enhanced with bidirectional backwards-compatibility, gracefully supporting both legacy call formats and new native signaling payloads.
+- 🎨 **Streamlined Production UI** — Cleaned up diagnostic tools in production builds while ensuring seamless call controls, PiP switching, and screen share stability.
+
+## [1.2.2] - 2026-10-24
+
+### Added
+- 🌍 **Comprehensive 16-Language Localization** — Added full end-to-end multi-language support across all screens, dialogs, and setup flows for 16 languages: English, Hindi, Spanish, Arabic, French, Portuguese, Bengali, Russian, Indonesian, German, Japanese, Chinese Simplified, Urdu, Turkish, Tamil, and Telugu.
+- 🏷️ **Interactive Invite Cards & Deep Links** — Share customized, stylish invite cards and direct profile links (`https://gupshupgo.app/u/<handle>`) with automatic verification, routing, and QR code integration.
+- 🔔 **Contextual Notification Permission Prompts** — Non-intrusive, polite in-app notification permission management and home prompt preference controls.
+
+### Changed
+- Updated version to 1.2.2 (build code 60).
+- 📬 **Verified Domain Email Infrastructure** — Upgraded email dispatch and notification pipeline to use authenticated Brevo SMTP relay with official DKIM and DMARC verified sender domain (`noreply@gupshupgo.app`).
+- 🛡️ **Vault Security & PIN Custody Safeguards** — Enhanced Vault PIN dialogs, biometric unlock fallbacks, and tamper-resistant local preferences synchronization.
+- ⚡ **Chat UI Fluidity & Retained Streams** — Implemented `ChatScrollController` and `RetainedStream` utilities for smooth message list scrolling without jumps during active incoming streams.
+
+## [1.2.1] - 2026-10-07
+
+### Added
+- 🤖 **Meet GupAI** — Your personal, intelligent in-app chat assistant. Ask anything, brainstorm ideas, draft messages, and get real-time answers right inside GupShupGo with smart instant actions.
+- 🔄 **Self-Healing Encrypted Statuses** — Encrypted statuses and stories now automatically reconcile and recover encryption keys across device switches, logouts, and app re-installs so your shared moments are never lost.
+
+### Changed
+- Updated version to 1.2.1 (build code 59).
+- ⚡ **Supercharged Cloud Backend & Real-Time Sync** — Re-architected Cloud Functions for high concurrency, ultra-low latency, and instant model fallback under heavy traffic spikes.
+- 🔒 **Instant Cryptographic Identity Reconciliation** — Auto-clears identity key mismatches and self-heals E2EE sessions on the fly without confusing errors.
+- ⏱️ **Media Download Protection** — Added fail-safe download ceilings for encrypted media transfers to prevent stuck pending states.
+
+## [1.2.0] - 2026-09-27
+
+### Added
+- 📄 **Send Any File** — Share PDFs, Office documents, archives and anything else up to 64 MB straight from the attachment menu. Files are encrypted end-to-end before they leave your device and arrive byte-for-byte identical — no compression, no quality loss. Doubles as the way to send a photo at its original quality. With no internet at all, a file hands off straight to a nearby phone over the offline mesh, then syncs to the cloud — still encrypted end-to-end — the moment you're back online.
+- 🔍 **Search Every Message** — Chat search now looks through your entire conversation history stored on this device, not just the messages currently loaded on screen. Results are found instantly, work offline, and never leave your phone.
+- 📍 **Share Your Location** — Drop a pin from the attachment menu and open it in any maps app. Coordinates are shown before anything is sent, and a pin travels over the offline mesh just like a text message.
+- 👁️ **View Once Photos & Videos** — Send a photo or video that can be opened exactly one time across online, offline mesh, and anonymous stranger chats. For private chats, the encryption key is destroyed the moment it's opened. Screenshots and screen recordings are blocked while on screen on Android.
+- 🕵️ **Media in Anonymous Chat** — Send photos, video and voice notes in anonymous rooms, not just text. Because there's no shared identity to encrypt to a stranger, anything they send you stays blurred until you tap to reveal it, so an unsolicited image can't ambush you — and your own media is never hidden from you.
+- 🔔 **Update Reminders on Open** — When a new version is waiting on the Play Store, GupShupGo now tells you when you open the app instead of only when you go looking in Settings. It's the same one-tap update, shown at most once a day so it nudges rather than nags.
+- ⏳ **Advance Notice Before a Version Retires** — Older builds now get a countdown ("this version stops working in 15 days") that gets more insistent as the date approaches, so an update is never a surprise. Your messages and chats stay exactly where they are.
+- 🔄 **A Clear Way Back** — If a version does reach the end of its life, the app explains what happened and takes you straight to the update, rather than failing in confusing ways.
+
+### Changed
+- Updated version to 1.2.0 (build code 58).
+- The update prompt shown on open is the same dialog as Settings → Check for updates, so you're never told about the same update two different ways.
+- Reply previews and chat exports now recognise documents and location pins instead of falling back to a generic label.
+
+### Note for people on older versions
+Documents, pins, view-once media and anonymous-room photos, videos and voice notes are all new message types. Someone still on 1.1.9 or earlier will see the file name, "📍 Location", or a "📷 Photo"-style label as plain text rather than the full bubble — nothing is lost, but both sides should update to see them properly.
+
+## [1.1.9] - 2026-09-17
+
+### Fixed
+- 🔒 **Rock-Solid Message Encryption** — Fixed an issue where conversations could occasionally become out of sync or show "Message cannot be decrypted" after restarting the app or re-logging in.
+- 🔄 **Self-Healing Message Recovery** — Messages that encounter delivery issues or missing keys now automatically repair and recover in the background without any interruptions.
+- ⚡ **Background Delivery Reliability** — Fixed rare conflicts and delays when receiving multiple encrypted messages simultaneously or while the app is running in the background.
+- 🛡️ **Message & Session Protection** — Ensured all encryption keys and message states are safely stored before sending, preventing dropped messages during unexpected app closures.
+
+### Changed
+- Updated version to 1.1.9 (build code 56).
+- 🚀 **Performance & Stability** — General performance optimizations for faster, more dependable chat syncing.
+
+## [1.1.8] - 2026-09-12
+
+### Added
+- 🎥 **Video Messages in Chats** — Send and receive videos directly in conversations and off-grid mesh chats, with full-screen playback and live progress while sending.
+- 🖼️ **Instant Video Previews** — Videos now appear with crisp preview covers in their true shape, so you can see what they are before tapping play.
+- 📲 **Screen Share Invitations** — A clear incoming invitation screen when someone wants to share their screen, making it effortless to accept or decline.
+- 🔄 **Smoother In-App Updates** — Updates download quietly in the background without interrupting you, with a new "Check for updates" option in Settings anytime you want.
+- 📳 **Crisp Haptic Feedback** — Pleasant, tactile vibration responses when tapping buttons, starting calls, and navigating the app.
+
+### Changed
+- Updated version to 1.1.8 (build code 55).
+- 🎨 **Cleaner Layouts & Snappier Buttons** — Improved spacing, clearer menus, and responsive button states across chats and settings.
+- 🛠️ **Easier Problem Reporting** — Send feedback or report an issue easily right from the Home menu or Settings.
+
+## [1.1.7] - 2026-09-04
+
+### Added
+- 🎨 **Chat Themes** — Give every conversation its own look with custom backgrounds and bubble colours that automatically adapt to light and dark modes.
+- 📄 **Export Chats as PDF** — Export any chat history as a clean, printable PDF document featuring full chat bubbles and embedded photos.
+- 🎙️ **Extended Voice Notes** — Record voice messages up to 2 minutes with improved audio stability.
+- ✨ **New Feature Discovery** — Subtle, non-intrusive indicator badges to highlight newly released features like chat themes and export options.
+
+### Changed
+- Updated version to 1.1.7 (build code 53).
+- ⚡ **High-Efficiency Avatar Decoding** — Replaced uncompressed full-resolution avatar caching with 3× DPR downsampled decoders, reducing scroll-time memory consumption by ~99% and eliminating scroll stutter.
+- 🛡️ **ProGuard & R8 Optimization** — Streamlined ProGuard keep rules and enabled `-repackageclasses`, boosting bytecode obfuscation to ~30% to clear Google Play store policies.
+
+### Fixed
+- 🔒 **Account Profile & Points Safeguard** — Fixed a critical race condition on app reinstall that previously caused existing user handles, Gup Points, and badges to be overwritten by empty sign-in models.
+- 🛡️ **Handle Claim Race Condition** — Fixed Firestore transaction conflicts when validating previously claimed usernames against security rules.
+
+## [1.1.6] - 2026-08-19
+
+### Added
+- 🔗 **Tappable Links in Chats** — Web links in any conversation are now underlined and open straight in your browser with a single tap, in normal chats, offline mesh chats, and anonymous rooms.
+- 🖼️ **Link Previews** — Share a link and both of you see a neat card with the page's title, description, and thumbnail, so you know what you're opening before you tap it.
+- ↩️ **Swipe to Reply** — Swipe any message to the right to reply to it directly. Your reply shows the quoted message above it, so nobody loses track of what you're answering.
+- 👆 **Tap a Quote to Jump** — Tapping the quoted message in a reply scrolls you back to the original and briefly highlights it.
+- 👆 **Fingerprint Unlock, On Your Terms** — Vault settings now has an "Unlock with fingerprint" switch you can turn on or off any time. Turning it on asks for your PIN once; turning it off just means you type your PIN again.
+- 👤 **Tap Anyone to See Their Profile** — People listed in Contacts, in Discover search results and suggestions, in the "You might know" cards, and in your matched device contacts are all tappable now. Tapping opens their profile; the call, message, and add-friend buttons on each row still do exactly what they did before.
+- ✨ **Profiles Actually Tell You Something** — A profile now shows whether they're online or when they were last seen, their level with progress to the next one, their Gup Points, the badges they've earned, and when they joined — instead of just a photo and a name.
+
+### Changed
+- Updated version to 1.1.6 (build code 52).
+- 🔒 **Previews Never Phone Home** — Link cards are prepared entirely on the sender's device, so opening a chat never contacts the linked website. Your IP address is never exposed to a link someone sent you, and cards still appear with no internet connection.
+- 💬 **Replies Survive Deletions** — Each reply carries its own copy of the quoted text, so the quote keeps showing even if the original message was deleted or cleared from your device.
+- 🔑 **You Always Choose Your Vault PIN** — Setting up the vault now always asks you to pick a PIN, and fingerprint unlock is offered afterwards as a convenience. Your PIN is what protects your history, and it is the only thing that can restore your messages on a new phone.
+- ⏳ **"Decide Later" on the Unlock Screen** — Forgetting your PIN no longer forces a choice between deleting everything and being stuck. You can keep using the app with the vault locked, and unlocking later fills in whatever was missed.
+
+### Fixed
+- 👆 **Fingerprint No Longer Asks for a PIN You Never Set** — If you set the vault up with your fingerprint and later reinstalled the app, unlocking asked for a PIN that was never shown to you, leaving a full reset as the only way forward. Setup now always uses a PIN you chose, and anyone already in that situation is asked once — while their history is still readable — to pick a real PIN, with every existing message carried over.
+- 🚫 **No Fingerprint Buttons That Cannot Work** — The unlock screen only offers fingerprint when there is actually something on this device for it to unlock, and explains what to do instead when there isn't.
+- 🔐 **Your PIN Is Only Stored If You Ask** — Previously the app saved your PIN on the device after every unlock, whether or not you wanted fingerprint unlock. It is now saved only when you explicitly turn that feature on.
+- 🛡️ **Message & Quote Tamper Protection** — Fixed a database security rule so that other participants in a chat cannot secretly change who is quoted or fake status-reply details on your messages.
+
+### Technical Details
+- **Ownership Gate Hardening:** Added `replyToMessageId`, `replyToSenderId`, `replyToSenderName`, `replyToType`, and all `statusReply*` fields to `touchesSenderOwnedFields()` in `firestore.rules`, and added comprehensive negative test cases in `message_ownership_rules.test.js`.
+- **Sender-Side Unfurl:** OpenGraph metadata is fetched by the sending device and travels *inside* the encrypted Signal payload (`linkPreview*` fields), so nothing about the link is ever readable by the server and the receiving client makes no outbound request. Thumbnails are re-encoded to a ≤6 KB base64 JPEG to stay well within the 1 MiB Firestore document ceiling after per-device envelope fan-out.
+- **Snapshot Quotes:** `replyTo*` fields carry a self-contained copy of the quoted sender, type, and a 160-character snippet rather than a server-resolvable pointer, which is what makes quotes render for undecryptable, deleted, or never-synced originals.
+- **Content Key Registry:** `kMessageContentKeys` now declares every key that may appear in an encrypted payload, covered by a serializer test asserting `ChatService.applyPayload` consumes all of them — the previously-silent failure mode when adding an encrypted field.
+- **Package Visibility:** Added `android.intent.action.VIEW` `http`/`https` entries to the manifest `<queries>` block, required for link launching on Android 11+.
+- **PIN Custody Flag:** `vaultMeta/config` now carries `pinIsUserChosen`, set only at the moments that *prove* the user supplied the PIN — `setup`, `changePin`, and a successful typed-PIN `unlock`. It lives in Firestore rather than local storage because the question "does this person know their PIN" is account-level and must survive uninstall, and it reveals nothing about the key. A stored PIN is deliberately *not* used as the signal: the old code wrote one on every unlock, so its presence says nothing about its origin, and shape heuristics ("6 digits") misfire in both directions.
+- **One-Time Re-Key:** `classifyPinCustody` (pure, exhaustively tested over all 8 input combinations) resolves to exactly one state that may interrupt the user at launch — config present, custody unproven, old PIN still readable. That case re-keys the whole vault via the existing `changePin`, which validates the old PIN against the verifier, re-encrypts in 150-doc pages, and flips the verifier **last**, so an interrupted run leaves the old PIN valid and can simply be repeated. The window closes permanently once an affected install is removed.
+- **No New Crypto Primitive:** The "confirm you know your PIN" path reuses `unlock`, which returns `false` *before* caching the derived key, so a wrong guess cannot disturb an already-open vault.
+- **Known Limitation:** `flutter_secure_storage` has no biometric binding, so a successful `local_auth` scan is a UI gate rather than a cryptographic one — the stored PIN rests on `encryptedSharedPreferences` / Keychain `first_unlock`. Real binding needs an Android Keystore key with `setUserAuthenticationRequired(true)` behind a platform channel, and is not claimed by the opt-in copy.
+- **Preloaded Profile Entry Point:** `PublicProfileScreen` now takes *either* a `username` to resolve or an already-loaded `UserModel` (`initialUser`). List rows pass the model they already hold, which skips a redundant Firestore read and — more importantly — works for users who never set a handle, since `UserModel.username` is nullable and the handle lookup could never have found them. The `@handle` line is rendered conditionally as a result.
+- **Non-Recursive Row Callback:** `onOpenProfile` on `UserDiscoverTile` is deliberately nullable. `PublicProfileScreen` embeds that same tile as its own action row, so a required callback would navigate from a profile to the identical profile without limit; leaving it unset there keeps the row body inert while its buttons still work. The "You might know" card switched from `Container` to `Ink` so the tap ripple paints above the card background rather than behind it.
+
+---
+
+## [1.1.5] - 2026-08-18
+
+### Added
+- ⚡ **Ultra-Fast & Reliable Messaging** — Rapid back-to-back messages now send and deliver instantly with zero dropped chats or stutter.
+- 🔄 **Smart Chat Auto-Recovery** — If a message ever gets stuck or your connection drops, the app quietly fixes and restores it in the background without needing manual retries.
+- 🌙 **Background Chat Sync** — New silent sync ensures your friends' devices automatically receive and process missing messages even when their phone is locked or in sleep mode.
+- 🛡️ **Enhanced Protection & Spam Prevention** — Advanced security protections to prevent server spam and ensure safe, uninterrupted communication.
+
+### Changed
+- Updated version to 1.1.5 (build code 51).
+- 💾 **Reliable Chat History Storage** — Chat sessions and keys are stored more securely so messages stay available even after phone restarts or app updates.
+- 💬 **Clear Message Statuses** — Improved indicators like "Waiting for this message…" while the app automatically syncs missing conversations.
+
+### Fixed
+- Fixed rapid messages sometimes getting delayed or stuck when sent quickly in a row.
+- Fixed chat sync issues occurring after restarting the device.
+- Fixed unnecessary retry alerts when friends are offline.
+
+### Technical Details
+- **AddressLock Engine:** FIFO async lock per `(uid, deviceId)` tuple protecting libsignal session ratchets against concurrent race conditions.
+- **Wakeup Protocol:** Cloud Function trigger bridging `resendWakeups` collection to high-priority FCM data messages for background recovery.
+- **Store Architecture:** Re-entrant SQLite persistence layer for Double Ratchet sessions and PreKeys.
+
+---
+
+## [1.1.4] - 2026-08-14
+
+### Added
+- 🔐 **Real-Time E2EE Status Indicators** — Dynamic status badges in audio and video calls accurately displaying setup (`Securing call…`), active encryption (`End-to-end encrypted`), or fallback state (`Not encrypted`).
+- ⚡ **Instant Call Teardown & Cancellation** — Aborting outbound calls while connecting immediately retracts signaling documents and stops notifications to prevent ghost ringing.
+- 🛡️ **Support & Problem Report Protection** — Strict Firestore security schema validation (`isValidProblemReport()`) and sliding-window Cloud Function rate-limiting (5 reports / hr / user).
+
+---
+
+## [1.1.3] - 2026-08-10
+
+### Added
+- 📺 **Picture-in-Picture (PiP) Video Calling** — Support for background floating picture-in-picture window during active video calls, enabling uninterrupted multi-tasking.
+- 👤 **Username Handles & QR Profile Sharing** — Reserve unique `@username` handles, generate dynamic QR code profiles, scan QR codes to instantly add friends, and sync contacts.
+- 🔥 **Bond Streak System** — Interactive daily chat streaks with automated streak calculation, visual status badges, and streak restoration mechanism.
+- 📲 **Auto-Verification Phone Auth** — Seamless carrier phone verification with auto-retrieval and streamlined onboarding flow.
+
+### Changed
+- Updated version to 1.1.3 (build code 46).
+- 🚀 **Android 16 KB Page Size Alignment** — Native libraries (Agora RTC Engine, C++ binaries) built and aligned for 16 KB page-size compliance on Android 15+.
+- 📱 **Edge-to-Edge Display Optimization** — Enforced full edge-to-edge UI rendering for Android 10–14+.
+- 🛡️ **Play Integrity Provider** — Replaced deprecated SafetyNet provider with Google Play Integrity API for App Check verification.
+- ⚡ **Progressive Message Sync** — Progressive stream flushing and reconciliation throttling for ultra-low latency chat synchronization.
+
+### Fixed
+- Fixed stale authentication screen issues during username handle setup navigation.
+- Fixed reciprocal contact request privilege escalation in Firestore security rules.
+- Fixed offline connectivity banner color harmonization in dark/light themes.
+
+### Technical Details
+- **PiP Architecture:** Android Picture-in-Picture lifecycle handlers with video aspect ratio preservation.
+- **User Handles:** Firestore rules enforcement for handle uniqueness and sanitization regex.
+- **Streak Engine:** Cloud Functions background trigger with vector-validated streak state transitions.
+- **Target SDK:** Aligned targetSdk to Android API 36 (Android 16).
+
+---
+
+## [1.0.6] - 2026-05-09
+
+### Changed
+- 📹 **Video Quality Upgraded** — Resolution tuned to 720p @ 30fps with 2000 kbps target bitrate (up from 1800 kbps). Uses `maintainFramerate` degradation preference so video stays smooth; previous 1080p setting caused CPU encoding lag on mobile.
+- 🎛️ **Call Controls Fixed** — All buttons on both video and audio call screens now work correctly:
+  - **Speaker**: Replaced deprecated `setEnableSpeakerphone` with the correct `setRouteInCommunicationMode` API
+  - **Mute**: Label dynamically updates to "Unmute" when mic is off
+  - **Hold**: Fixed to use `adjustPlaybackSignalVolume` instead of `muteAllRemoteAudioStreams` (which permanently broke remote audio)
+  - **Camera toggle**: Replaced `muteLocalVideoStream` with `enableLocalVideo` so turning off your camera is properly signalled to the remote user
+  - **Switch camera**: Confirmed working
+- 🖼️ **Camera-Off Placeholder** — When local camera is disabled, the preview tile shows a grey videocam-off icon instead of a frozen frame
+- ⏱️ **Call Timer UI Fixed** — Timer pill now sits inline next to "Connected" on the same line (no more overlap with the username on any device)
+
+### Fixed
+- Fixed camera disable not hiding video feed on the remote user's screen
+- Fixed speaker button having no visual icon change between on/off states
+- Fixed call timer colliding with the username text at the top of the video call screen
+- Fixed Hold button silencing the remote audio permanently across the session
+
+### Technical Details
+- **Video encoder**: `VideoEncoderConfiguration` with `VideoDimensions(1280, 720)`, `frameRate: 30`, `bitrate: 2000`, `minBitrate: 600`, `DegradationPreference.maintainFramerate`
+- **Speaker API**: `setRouteInCommunicationMode(3)` = speaker, `(1)` = earpiece
+- **Camera API**: `enableLocalVideo(bool)` — stops/starts hardware capture and signals remote
+- **Hold audio**: `adjustPlaybackSignalVolume(0/100)` — non-destructive remote silence
+
+---
+
+## [1.0.5] - 2026-05-08
+
+### Added
+- 📱 **Device Session Management** — "Remember this device" feature using secure token storage
+  - Survives OS-level data wipes (MIUI, HyperOS)
+  - Survives force-stop and app data clearing
+  - Maintains login even after battery drain or system crashes
+- 📲 **Device-Specific FCM Token Management** — Per-device token storage and automatic refresh
+- 💬 **Status Reply Functionality** — Users can send direct messages in response to status updates
+- 🔌 **Connectivity Provider** — Real-time network connectivity monitoring with callback system
+- ⚠️ **MIUI/HyperOS Notification Optimization** — Special handling for Xiaomi devices with enhanced layout rendering
+- ✨ **Enhanced What's New Dialog** — Detailed feature descriptions with improved user experience
+
+### Changed
+- Updated version to 1.0.5 with improved feature descriptions
+- Refactored FCM token handling for better reliability across device types
+- Optimized notification rendering for all Android versions
+- Improved device session token exchange with Cloud Functions
+
+### Fixed
+- Fixed notification layout rendering on MIUI/HyperOS devices
+- Improved FCM token refresh handling on device reboot
+- Enhanced device session stability across OS versions
+
+### Technical Details
+- **Device Session Service:** Uses FlutterSecureStorage with Android Keystore encryption
+- **FCM Management:** Per-device token storage with automatic expiry handling
+- **Connectivity Service:** Monitors all connection types (WiFi, mobile, Bluetooth)
+- **Status Replies:** Direct messaging from status viewer with automated link creation
+
+---
+
+## [1.0.4] - 2026-05-03
+
+### Added
+- 🎙️ **Voice Messaging** — Send and receive audio messages within chat with playback controls
+- 🌐 **Mesh Networking** — Offline peer-to-peer chat with nearby devices using Nearby Connections API
+- 🌙 **Dark Mode Support** — Full dark mode implementation with seamless theme switching
+- ✨ **What's New Dialog** — Shows new features and improvements on first launch after app update
+- 📱 **Device Session Management** — Improved session stability and connectivity handling (especially for Redmi devices)
+- 🔌 **Enhanced Connectivity Handling** — Better online/offline status detection with auto-reconnect logic
+- 🔄 **Mesh Notification Listener** — Automatic message sync for offline messages via mesh network
+
+### Changed
+- Updated version code to 27 for Play Store compatibility
+- Improved mesh service integration in chat screen UI
+- Enhanced audio recording error handling with better user feedback
+- Optimized connectivity checks for improved session management
+- Refined Android build settings for peer-to-peer connectivity
+
+### Fixed
+- Fixed session management issues on Redmi devices and other device types
+- Improved backup rules for better data integrity
+- Enhanced authentication handling for better user experience
+- Fixed audio recording errors with graceful fallback
+
+### Technical Details
+- **Mesh Service:** Implemented via Nearby Connections API for offline messaging
+- **Voice Messages:** Native audio recording with platform-specific handling
+- **Theme Provider:** Added theme switching with persistent storage
+- **Connectivity Service:** Smart detection with exponential backoff for reconnection
+
+---
+
+## [1.0.3] - 2026-04-15
+
+### Added
+- 🎨 **Dark Mode Theme** — Complete dark theme support across the entire app
+- ✨ **What's New Dialog** — Feature announcement on first launch after updates
+- 🔄 **Auto-reconnect Logic** — Mesh network auto-reconnection with improved error handling
+
+### Changed
+- Updated version to 1.0.3
+- Enhanced backup and security rules
+- Improved auth handling for better reliability
+- Refined UI components (PhoneAuthScreen, SettingsScreen) for consistent theming
+
+### Fixed
+- Fixed theme consistency across all screens
+- Improved mesh service error handling
+
+---
+
+## [1.0.2] - 2026-03-28
+
+### Added
+- 🌙 **Light and Dark Mode Support** — Full theme switching capability
+- 🎨 **Material Design 3 Theme Provider** — Unified design system
+
+### Changed
+- Updated version to 1.0.2
+- Refactored code formatting for consistency
+
+### Technical Details
+- **Theme Implementation:** Provider-based state management
+- **Persistence:** Uses SharedPreferences for theme persistence
+
+---
+
+## [1.0.1] - 2026-03-10
+
+### Added
+- 🔐 **Phone Authentication** with OTP verification
+- 📱 **Carrier-based Phone Verification** (Phone Number Hint API)
+- 🔗 **Google Sign-In** with account linking
+- 👤 **Guest Login** for quick testing
+- 📞 **Video Calling** with Agora RTC Engine
+- 🎙️ **Voice Calling** (audio-only)
+- 📲 **Native CallKit Call UI** for native call experience
+- 💬 **Real-Time Messaging** with read receipts
+- 📸 **Status Updates** (24-hour expiry)
+- 🔔 **Push Notifications** via Firebase Cloud Messaging
+- ⚙️ **Settings & Privacy Controls**
+- 👥 **User Search** and profile browsing
+- 🟢 **Online/Offline Status** indicators
+
+### Technical Details
+- **Backend:** Firebase (Auth, Firestore, Storage, Cloud Functions, FCM)
+- **Video/Audio:** Agora RTC Engine
+- **Real-Time:** Firebase Cloud Messaging for push notifications
+- **Local Storage:** SharedPreferences for caching and settings
+- **Security:** Firebase App Check, Firestore security rules
+
+---
+
+## [1.0.0] - 2026-02-15
+
+### Initial Release
+- ✅ **Core Chat Application** based on WhatsApp architecture
+- 📞 **Video/Voice Calling** with Agora SDK
+- 💬 **Real-Time Messaging** system
+- 📸 **Status Updates** feature
+- 🔐 **Authentication System**
+- ⚙️ **Settings & Privacy** controls
+- 🎨 **Modern Material Design 3 UI**
+
+### Technical Foundation
+- **Framework:** Flutter (Dart)
+- **Architecture:** Clean Architecture with Service/Provider Pattern
+- **Backend:** Firebase infrastructure
+- **Real-Time:** Firestore with offline support
+- **Calling:** Agora RTC Engine
+- **Push Notifications:** Firebase Cloud Messaging
+
+---
+
+## Version History Summary
+
+| Version | Date | Key Features |
+|---------|------|--------------|
+| 1.2.3 | October 2026 | Native Lock-Screen Calls (CallKit & Android), VoIP Push Delivery Pipeline, Incoming Call Settings & Diagnostics |
+| 1.2.2 | October 2026 | 16-Language Localization, Profile Invite Cards & Deep Links, Verified Domain Email Delivery, Vault Security |
+| 1.2.1 | October 2026 | Meet GupAI (In-App Chat Assistant), Self-Healing Encrypted Statuses, High-Concurrency Backend |
+| 1.2.0 | September 2026 | Document & Location Sharing, View-Once Media, Anonymous Chat Media, Full History Search |
+| 1.1.9 | September 2026 | Chat Encryption Fixes, Self-Healing Message Recovery, Delivery Stability |
+| 1.1.8 | September 2026 | Video Messages in Chat, Instant Video Previews, Incoming Screen Share UI |
+| 1.1.7 | September 2026 | Chat Themes, PDF Chat Export, 2-Minute Voice Notes, Avatar Memory Optimization |
+| 1.1.3 | August 2026 | Picture-in-Picture Video Calls, Username Handles & QR Sharing, Bond Streaks, Android 16 KB Page Size Alignment |
+| 1.0.6 | May 2026 | Video quality, call controls fixed, camera-off signalling, timer UI |
+| 1.0.5 | May 2026 | Device Session Mgmt, FCM Token Mgmt, Status Replies, Connectivity Monitoring, MIUI/HyperOS Optimization |
+| 1.0.4 | May 2026 | Voice Messaging, Mesh Networking, Dark Mode, Device Session Mgmt |
+| 1.0.3 | April 2026 | Dark Mode UI, What's New Dialog, Auto-Reconnect |
+| 1.0.2 | March 2026 | Theme Provider, Dark/Light Mode |
+| 1.0.1 | March 2026 | Complete messaging & calling features |
+| 1.0.0 | February 2026 | Initial release |
+
+---
+
+## Installation Guide
+
+See [README.md](README.md) for detailed installation and setup instructions.
+
+---
+
+## Contributing
+
+Please refer to [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for contribution guidelines.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+For issues, questions, or feature requests, please visit the [GitHub Issues](https://github.com/vansh-121/GupShupGo/issues) page.
