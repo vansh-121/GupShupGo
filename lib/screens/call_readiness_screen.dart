@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_chat_app/services/native_call_service.dart';
 
 class CallReadinessScreen extends StatefulWidget {
@@ -52,6 +54,28 @@ class _CallReadinessScreenState extends State<CallReadinessScreen>
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content:
               Text('Open your phone settings to update this permission.')));
+    }
+  }
+
+  Future<void> _copyDiagnostics() async {
+    try {
+      final events =
+          await NativeCallService.channel.invokeMethod<String>('diagnostics');
+      await Clipboard.setData(ClipboardData(
+        text: const JsonEncoder.withIndent('  ').convert({
+          'readiness': _status,
+          'events': jsonDecode(events ?? '[]'),
+        }),
+      ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Call diagnostics copied')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not copy call diagnostics. Try again.')));
+      }
     }
   }
 
@@ -132,6 +156,13 @@ class _CallReadinessScreenState extends State<CallReadinessScreen>
                               : 'Device registration pending'),
                           subtitle: const Text(
                               'Registration refreshes automatically when a network is available.')),
+                      ListTile(
+                        leading: const Icon(Icons.copy_outlined),
+                        title: const Text('Copy call diagnostics'),
+                        subtitle: const Text(
+                            'Copy recent call events to help investigate a failed call.'),
+                        onTap: _copyDiagnostics,
+                      ),
                       const Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(

@@ -129,11 +129,12 @@ class AgoraService {
   /// (only works if the Agora project is still in "testing / no-certificate"
   /// mode). Once the App Certificate is enabled on the Agora dashboard, a null
   /// here means the join will fail — which is the intended, secure behaviour.
-  static Future<String?> generateToken(String channelName, {int uid = 0}) async {
+  static Future<String?> generateToken(String channelName,
+      {int uid = 0, void Function(String)? onEvent}) async {
     try {
-      final idToken =
-          await FirebaseAuth.instance.currentUser?.getIdToken();
+      final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
       if (idToken == null) {
+        onEvent?.call('rtc_token_signed_out');
         print('generateToken: no signed-in user; cannot mint Agora token');
         return null;
       }
@@ -148,11 +149,13 @@ class AgoraService {
             body: jsonEncode({'channelName': channelName, 'uid': uid}),
           )
           .timeout(const Duration(seconds: 10));
+      onEvent?.call('rtc_token_http_${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final token = data['token'] as String?;
         if (token != null && token.isNotEmpty) return token;
+        onEvent?.call('rtc_token_empty');
         print('generateToken: server returned empty token');
         return null;
       }
@@ -160,6 +163,7 @@ class AgoraService {
       print('generateToken failed: ${response.statusCode} ${response.body}');
       return null;
     } catch (e, stack) {
+      onEvent?.call('rtc_token_error_${e.runtimeType}');
       print('generateToken error: $e');
       CrashlyticsService.logError(e, stack,
           reason: 'AgoraService.generateToken failed for $channelName');

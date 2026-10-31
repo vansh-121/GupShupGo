@@ -1,5 +1,6 @@
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require("@firebase/rules-unit-testing");
 const fs = require("node:fs");
+const assert = require("node:assert/strict");
 const path = require("node:path");
 const firebaseCompat = require("firebase/compat/app");
 require("firebase/compat/firestore");
@@ -36,6 +37,29 @@ describe("native call state and receipt rules", function () {
     await assertFails(db("bob").doc("calls/test").update({ ...answer, acceptedDeviceId: "unregistered" }));
     await assertSucceeds(db("bob").doc("calls/test").update(answer));
     await assertFails(db("bob").doc("calls/test").update({ acceptedDeviceId: "another" }));
+  });
+  it("confirms a pending device registration before claiming the call", async () => {
+    const bob = db("bob");
+    const answer = { status: "answered", acceptedDeviceId: "new-phone", answeredAt: timestamp() };
+    await assertFails(bob.doc("calls/test").update(answer));
+    await assertSucceeds(bob.doc("users/bob/devices/new-phone").set({
+      deviceId: "new-phone", platform: "android", lastSeenAt: timestamp(),
+    }, { merge: true }));
+    await assertSucceeds(bob.runTransaction(async (tx) => {
+      const ref = bob.doc("calls/test");
+      const call = await tx.get(ref);
+      if (call.data().status === "ringing") tx.update(ref, answer);
+    }));
+    assert.equal((await bob.doc("calls/test").get()).data().acceptedDeviceId, "new-phone");
+  });
+  it("acceptance registration keeps existing tokens and encryption keys", async () => {
+    const phone = db("bob").doc("users/bob/devices/phone");
+    await assertSucceeds(phone.set({ fcmToken: "existing-token", nativeCallsVersion: 1 }, { merge: true }));
+    await assertSucceeds(phone.set({ deviceId: "phone", platform: "android", lastSeenAt: timestamp() }, { merge: true }));
+    const data = (await phone.get()).data();
+    assert.equal(data.fcmToken, "existing-token");
+    assert.equal(data.nativeCallsVersion, 1);
+    assert.equal(data.keyBundle.identityKey, "preserve");
   });
   it("terminal calls cannot be revived or changed by a late decline/timeout", async () => {
     await assertSucceeds(db("alice").doc("calls/test").update({ status: "ended" }));

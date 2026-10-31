@@ -22,4 +22,18 @@ function androidCallConfig(expiresAt, now) {
   // Data-only, non-collapsible ringing pushes. Cancel and invite may arrive in either order.
   return { priority: "high", ttl: Math.max(0, Math.min(RING_MS, expiresAt - now)) };
 }
-module.exports = { RING_MS, validCallRequest, callExpiry, cancellationData, androidCallConfig };
+
+function incomingCallData({ callerId, calleeId, channelId, callerName, callerPhotoUrl, isAudioOnly, expiresAt }) {
+  // Published clients read these names and the string audio flag directly.
+  // New fields are additive; no app-version or device-capability field is required.
+  return {
+    callerId, calleeId, channelId,
+    callerName: typeof callerName === "string" && callerName ? callerName : callerId,
+    callerPhotoUrl: typeof callerPhotoUrl === "string" ? callerPhotoUrl : "",
+    type: "incoming_call",
+    isAudioOnly: String(isAudioOnly === true || isAudioOnly === "true"),
+    expiresAt: String(expiresAt),
+  };
+}
+
+module.exports = { RING_MS, validCallRequest, callExpiry, cancellationData, androidCallConfig, incomingCallData };

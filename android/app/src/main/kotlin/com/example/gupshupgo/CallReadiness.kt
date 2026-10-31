@@ -27,6 +27,7 @@ object CallReadiness {
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = if (Build.VERSION.SDK_INT >= 26) manager.getNotificationChannel(NativeCalls.CHANNEL) else null
         return mapOf(
+            "handoffVersion" to 2,
             "notifications" to notificationsEnabled(context),
             "headsUp" to (channel == null || channel.importance >= NotificationManager.IMPORTANCE_HIGH),
             "ringtone" to (channel == null || channel.sound != null),

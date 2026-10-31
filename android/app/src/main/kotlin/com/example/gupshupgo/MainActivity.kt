@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Bundle
 import android.util.Rational
 import android.view.WindowManager
 import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
@@ -27,11 +28,32 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var mediaRecorder: MediaRecorder? = null
     private var nativeCallChannel: MethodChannel? = null
+    private val nativeCallsChanged: () -> Unit = {
+        nativeCallChannel?.invokeMethod("stateChanged", null)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleNativeCallAccept(intent)
+    }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra("native_call_accept", false)) nativeCallChannel?.invokeMethod("accepted", null)
+        handleNativeCallAccept(intent)
+    }
+
+    private fun handleNativeCallAccept(intent: Intent) {
+        if (!intent.getBooleanExtra(NativeCalls.ACCEPT, false)) return
+        val id = intent.getStringExtra(NativeCalls.ID).orEmpty()
+        intent.removeExtra(NativeCalls.ACCEPT)
+        // Persist before notifying Dart. Cold starts recover through pending(); warm
+        // starts also receive this event even when the Flutter lifecycle is already resumed.
+        if (NativeCalls.accept(applicationContext, id) ||
+            NativeCalls.pending(applicationContext)?.get(NativeCalls.ID) == id) {
+            NativeCalls.log(applicationContext, id, "accept_activity_opened")
+            nativeCallChannel?.invokeMethod("accepted", null)
+        }
     }
 
     // ── Picture-in-Picture state ────────────────────────────────────────
@@ -58,16 +80,30 @@ class MainActivity : FlutterFragmentActivity() {
                         "syncToken" -> { NativeCallWorker.syncToken(applicationContext); result.success(null) }
                         "active" -> { NativeCalls.activeRtcCall = call.argument<String>("channelId"); result.success(null) }
                         "pending" -> result.success(NativeCalls.pending(applicationContext))
-                        "acknowledge" -> { NativeCalls.acknowledge(applicationContext, call.argument<String>("channelId")!!); result.success(null) }
+                        "ringing" -> result.success(NativeCalls.ringing(applicationContext))
+                        "accept" -> {
+                            val id = call.argument<String>("channelId")!!
+                            result.success(NativeCalls.accept(applicationContext, id) ||
+                                NativeCalls.pending(applicationContext)?.get(NativeCalls.ID) == id)
+                        }
+                        "decline" -> { NativeCalls.decline(applicationContext, call.argument<String>("channelId")!!); result.success(null) }
+                        "acknowledge" -> result.success(NativeCalls.acknowledge(applicationContext, call.argument<String>("channelId")!!))
                         "finish" -> { NativeCalls.finish(applicationContext, call.argument<String>("channelId")!!, "ended"); result.success(null) }
                         "readiness" -> result.success(CallReadiness.read(this@MainActivity))
                         "openSettings" -> result.success(CallReadiness.open(this@MainActivity, call.argument<String>("page")!!))
                         "diagnostics" -> result.success(NativeCalls.prefs(applicationContext).getString("events", "[]"))
+                        "recordEvent" -> {
+                            val event = call.argument<String>("event").orEmpty()
+                            require(event.matches(Regex("[A-Za-z0-9_:-]{1,100}")))
+                            NativeCalls.log(applicationContext, call.argument<String>("channelId").orEmpty(), event)
+                            result.success(null)
+                        }
                         else -> result.notImplemented()
                     }
                 } catch (error: Exception) { result.error("NATIVE_CALL", error.message, null) }
             }
         }
+        NativeCalls.onChanged = nativeCallsChanged
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -160,6 +196,13 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        if (NativeCalls.onChanged === nativeCallsChanged) NativeCalls.onChanged = null
+        nativeCallChannel?.setMethodCallHandler(null)
+        nativeCallChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     // ── Audio recording helpers ────────────────────────────────────────

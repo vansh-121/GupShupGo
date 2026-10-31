@@ -425,13 +425,22 @@ service cloud.firestore {
             && request.resource.data.status == 'answered'
             && request.auth.uid == resource.data.calleeId
             && (!('expiresAt' in resource.data) || request.time < resource.data.expiresAt)
-            && (!('acceptedDeviceId' in request.resource.data)
-              || exists(/databases/$(database)/documents/users/$(request.auth.uid)/devices/$(request.resource.data.acceptedDeviceId))))
+            // Older clients omit the device claim (or serialize it as null).
+            // Native clients still have to claim a registered device they own.
+            && (request.resource.data.get('acceptedDeviceId', null) == null
+              || (request.resource.data.acceptedDeviceId is string
+                && request.resource.data.acceptedDeviceId.size() > 0
+                && exists(/databases/$(database)/documents/users/$(request.auth.uid)/devices/$(request.resource.data.acceptedDeviceId)))))
           || (resource.data.status == 'ringing'
             && request.resource.data.status == 'declined'
             && request.auth.uid == resource.data.calleeId)
           || (resource.data.status == 'ringing' && request.resource.data.status == 'missed')
           || (resource.data.status in ['ringing', 'answered'] && request.resource.data.status == 'ended')
+          // Released clients can send endCall from dispose after a decline or
+          // timeout. Allow that cleanup without permitting a call to ring again.
+          || (resource.data.status in ['declined', 'missed']
+            && request.resource.data.status == 'ended'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'endedAt']))
         );
 
       match /deliveryReceipts/{receiptId} {

@@ -8,6 +8,7 @@ import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService
@@ -75,7 +76,12 @@ class NativeCallWorker(context: Context, params: WorkerParameters) : Worker(cont
             }
             Result.success()
         } catch (error: Exception) {
-            NativeCalls.log(context, inputData.getString("callId").orEmpty(), "native_work_retry")
+            val cause = generateSequence<Throwable>(error) { it.cause }.last()
+            val firestoreError = generateSequence<Throwable>(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>().firstOrNull()
+            val code = firestoreError?.code?.name?.lowercase()
+                ?: cause.javaClass.simpleName
+            NativeCalls.log(context, inputData.getString("callId").orEmpty(), "${kind}_retry_$code")
             if (runAttemptCount < 8 && stillBound()) Result.retry() else Result.failure()
         }
     }

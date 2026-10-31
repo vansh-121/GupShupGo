@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CallRegistrationStateTest {
+    @Test fun `same account device migration preserves calls but sign out invalidates them`() {
+        val old = registered()
+        assertFalse(old.shouldClearCallsFor("alice"))
+        assertFalse(old.bind("alice", "migrated-phone").shouldClearCallsFor("alice"))
+        assertTrue(old.shouldClearCallsFor("bob"))
+        assertTrue(old.clear().shouldClearCallsFor("alice"))
+    }
     private fun pending() = CallRegistrationState().bind("alice", "phone").observeToken("token-1")
     private fun registered(): CallRegistrationState {
         val state = pending()

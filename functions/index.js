@@ -5,6 +5,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated, onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const callDelivery = require("./call-delivery");
 const { createFcmSender, shouldRetryDelivery } = require("./fcm-delivery");
+const { collectNotificationTargets, nativeCallTargets } = require("./notification-targets");
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { beforeUserSignedIn } = require("firebase-functions/v2/identity");
 
@@ -101,54 +102,11 @@ async function getNotificationTargets(userId) {
     return { exists: false, targets: [] };
   }
 
-  const userData = userDoc.data() || {};
-  const targets = [];
-  const seenTokens = new Set();
   const devicesSnap = await userRef.collection("devices").get();
-
-  devicesSnap.forEach((doc) => {
-    const data = doc.data() || {};
-    const rawToken = data.fcmToken;
-    const rawVoipToken = data.voipToken;
-    const token = typeof rawToken === "string" && rawToken
-      ? rawToken
-      : null;
-    const voipToken = typeof rawVoipToken === "string" && rawVoipToken
-      ? rawVoipToken
-      : null;
-    const uniqueToken = token && !seenTokens.has(token) ? token : null;
-    if (uniqueToken) seenTokens.add(uniqueToken);
-    if (!uniqueToken && !voipToken) return;
-
-    targets.push({
-      token: uniqueToken,
-      voipToken,
-      voipEnvironment: data.voipEnvironment || null,
-      platform: data.platform || null,
-      nativeCallsVersion: data.nativeCallsVersion || 0,
-      ref: doc.ref,
-      source: "device",
-    });
-  });
-
-  // Migration fallback for installs that have not opened since per-device
-  // token storage shipped. This prevents an upgrade from silently making the
-  // user unreachable until their next foreground launch.
-  const legacyToken = userData.fcmToken;
-  if (typeof legacyToken === "string" &&
-      legacyToken &&
-      !seenTokens.has(legacyToken)) {
-    targets.push({
-      token: legacyToken,
-      voipToken: null,
-      voipEnvironment: null,
-      platform: null,
-      ref: userRef,
-      source: "legacy",
-    });
-  }
-
-  return { exists: true, targets };
+  return {
+    exists: true,
+    targets: collectNotificationTargets(userRef, userDoc.data() || {}, devicesSnap.docs),
+  };
 }
 
 async function removeNotificationTarget(target) {
@@ -283,9 +241,15 @@ exports.cancelNativeCallNotifications = onDocumentWritten(
     const after = event.data?.after.data();
     const data = callDelivery.cancellationData(event.params.channelId, before, after);
     if (!data) return;
+    console.log("Call state transition", {
+      channelId: data.channelId,
+      from: before?.status,
+      to: data.status,
+      acceptedDeviceId: data.acceptedDeviceId || null,
+    });
     const { targets } = await getNotificationTargets(data.calleeId);
     // Older clients do not understand silent cancel messages.
-    const nativeTargets = targets.filter((target) => target.token && target.nativeCallsVersion >= 1);
+    const nativeTargets = nativeCallTargets(targets);
     if (!nativeTargets.length) return;
     const result = await sendFcmTargets(nativeTargets, (token) => ({
       token, data, android: { priority: "high", ttl: 60000 },
@@ -366,16 +330,15 @@ exports.sendCallNotification = onRequest(
       } catch (_) { }
 
       const audioOnly = isAudioOnly === true || isAudioOnly === "true";
-      const callData = {
+      const callData = callDelivery.incomingCallData({
         calleeId,
         callerId,
         callerName,
         callerPhotoUrl,
         channelId,
-        type: "incoming_call",
-        expiresAt: String(expiresAt),
-        isAudioOnly: String(audioOnly),
-      };
+        expiresAt,
+        isAudioOnly: audioOnly,
+      });
       const buildFcmCallMessage = (fcmToken) => ({
         token: fcmToken,
         data: callData,

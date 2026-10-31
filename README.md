@@ -349,6 +349,8 @@ firebase deploy --only functions
 ```
 *This deploys `sendCallNotification` (data-only FCM call wakeups) and `sendMessageNotification` endpoints.*
 
+See [call backend compatibility](functions/CALL_COMPATIBILITY.md) for the released-client contract, mixed-version checks, and backend-first rollout order.
+
 ---
 
 ### 3️⃣ Agora Service Configuration

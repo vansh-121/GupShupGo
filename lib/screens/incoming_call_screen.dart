@@ -17,6 +17,8 @@ class IncomingCallScreen extends StatefulWidget {
   final String callerName;
   final String? callerPhotoUrl;
   final bool isAudioOnly;
+  final Future<void> Function()? onNativeAccept;
+  final Future<void> Function()? onNativeDecline;
 
   const IncomingCallScreen({
     super.key,
@@ -25,6 +27,8 @@ class IncomingCallScreen extends StatefulWidget {
     required this.callerName,
     this.callerPhotoUrl,
     this.isAudioOnly = false,
+    this.onNativeAccept,
+    this.onNativeDecline,
   });
 
   @override
@@ -55,6 +59,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
+    // Android's notification and this screen share a native owner for the
+    // deadline, cancellation and Accept actions. Do not run CallKit twice.
+    if (widget.onNativeAccept != null) return;
+
     // Auto-decline after 45 seconds (matches CallKit timeout)
     _autoDeclineTimer = Timer(const Duration(seconds: 45), () {
       if (mounted) _dismissScreen();
@@ -68,6 +76,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     _callKitSubscription =
         FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
       if (event == null || !mounted) return;
+      if (event.body['id'] != widget.channelId) return;
 
       if (event.event == Event.actionCallAccept) {
         // User accepted from the system notification — handle it here so the
@@ -124,6 +133,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     // CallKit fires actionCallAccept almost simultaneously).
     if (_isAccepting) return;
     _isAccepting = true;
+    if (widget.onNativeAccept != null) {
+      unawaited(widget.onNativeAccept!().catchError((Object error) {
+        if (mounted) setState(() => _isAccepting = false);
+      }));
+      return;
+    }
 
     // Cancel listeners FIRST — endCall fires actionCallEnded which
     // would otherwise trigger _dismissScreen and kill the navigation.
@@ -152,6 +167,14 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   void _declineCall() {
+    if (_isAccepting) return;
+    if (widget.onNativeDecline != null) {
+      _isAccepting = true;
+      unawaited(widget.onNativeDecline!().catchError((Object error) {
+        if (mounted) setState(() => _isAccepting = false);
+      }));
+      return;
+    }
     // Cancel listeners FIRST
     _callKitSubscription?.cancel();
     _autoDeclineTimer?.cancel();
@@ -201,7 +224,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                     const SizedBox(width: 4),
                     Text(
                       l10n.callEndToEndEncrypted,
-                      style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
@@ -235,11 +259,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                     child: CircleAvatar(
                       radius: 65,
                       backgroundColor: Colors.white24,
-                      backgroundImage:
-                          widget.callerPhotoUrl != null &&
-                                  widget.callerPhotoUrl!.isNotEmpty
-                              ? avatarImage(widget.callerPhotoUrl!, radius: 65)
-                              : null,
+                      backgroundImage: widget.callerPhotoUrl != null &&
+                              widget.callerPhotoUrl!.isNotEmpty
+                          ? avatarImage(widget.callerPhotoUrl!, radius: 65)
+                          : null,
                       child: widget.callerPhotoUrl == null ||
                               widget.callerPhotoUrl!.isEmpty
                           ? const Icon(Icons.person,

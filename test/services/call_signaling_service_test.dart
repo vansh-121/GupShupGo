@@ -26,5 +26,6 @@ bool _isUuidV4(String value) {
   if (!parts[2].startsWith('4') || !'89ab'.contains(parts[3][0])) {
     return false;
   }
-  return int.tryParse(parts.join(), radix: 16) != null;
+  // UUIDs contain 128 bits; Dart's native int cannot parse that entire value.
+  return RegExp(r'^[0-9a-f]+$').hasMatch(parts.join());
 }

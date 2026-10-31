@@ -74,12 +74,9 @@ class NativeIncomingCallActivity : Activity() {
     }
 
     private fun accept() {
-        if (NativeCalls.accept(applicationContext, callId)) {
-            // Direct Activity destination avoids Android 12 notification trampolines.
-            startActivity(Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                .putExtra("native_call_accept", true))
-        }
+        // Use the same explicit destination as the notification's Answer action.
+        // MainActivity validates and persists Accept before handing it to Flutter.
+        startActivity(NativeCalls.acceptIntent(this, callId))
         finish()
     }
 

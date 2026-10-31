@@ -16,6 +16,7 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:video_chat_app/services/native_call_service.dart';
+import 'package:video_chat_app/services/call_device_identity.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -63,10 +64,17 @@ class FCMService {
   static const _lastFcmTokenKey = 'gsg_fcm_last_token_v1';
   static const _nativeCallUserIdKey = 'gsg_native_call_user_id';
   static const _secureStorage = FlutterSecureStorage();
+  static final _deviceIdentity = CallDeviceIdentity(
+    read: () => _secureStorage.read(key: _deviceIdKey),
+    write: (id) => _secureStorage.write(key: _deviceIdKey, value: id),
+    create: () =>
+        FirebaseFirestore.instance.collection('_localDeviceIds').doc().id,
+  );
 
   /// Public getter so the global CallKit listener in main.dart can check
   /// whether IncomingCallScreen is already handling the accept flow.
-  static bool get isIncomingCallScreenShowing => _isIncomingCallScreenShowing;
+  static bool get isIncomingCallScreenShowing =>
+      _isIncomingCallScreenShowing || NativeCallService.instance.isShowingCall;
 
   /// Shows the accept/reject request UI ([IncomingScreenShareScreen]) for an
   /// incoming screen share. Used by both the foreground FCM handler and the
@@ -77,7 +85,7 @@ class FCMService {
     final channelId = (data['channelId'] ?? '') as String;
     if (channelId.isEmpty) return;
     if (_isScreenShareRequestShowing ||
-        _isIncomingCallScreenShowing ||
+        isIncomingCallScreenShowing ||
         ScreenShareSession.instance.active) {
       return;
     }
@@ -385,9 +393,7 @@ class FCMService {
           print('FCM token retry attempt $attempt');
           await Future.delayed(Duration(seconds: attempt * 2));
         }
-        token = await messaging
-            .getToken()
-            .timeout(const Duration(seconds: 10));
+        token = await messaging.getToken().timeout(const Duration(seconds: 10));
         if (token != null && token.isNotEmpty) {
           print('FCM token obtained (attempt $attempt)');
           await _storeToken(userId, token);
@@ -634,23 +640,17 @@ class FCMService {
           .doc(previousUserId)
           .collection('devices')
           .doc(deviceId)
-          .set({'fcmToken': FieldValue.delete(), 'voipToken': FieldValue.delete()},
-              SetOptions(merge: true));
+          .set({
+        'fcmToken': FieldValue.delete(),
+        'voipToken': FieldValue.delete()
+      }, SetOptions(merge: true));
       print('Removed this device from previous FCM user: $previousUserId');
     } catch (e) {
       print('Could not remove previous FCM user token: $e');
     }
   }
 
-  static Future<String> _getOrCreateDeviceId() async {
-    final existing = await _secureStorage.read(key: _deviceIdKey);
-    if (existing != null && existing.isNotEmpty) return existing;
-
-    final deviceId =
-        FirebaseFirestore.instance.collection('_localDeviceIds').doc().id;
-    await _secureStorage.write(key: _deviceIdKey, value: deviceId);
-    return deviceId;
-  }
+  static Future<String> _getOrCreateDeviceId() => _deviceIdentity.getOrCreate();
 
   static Future<String> _getDeviceInfo() async {
     try {

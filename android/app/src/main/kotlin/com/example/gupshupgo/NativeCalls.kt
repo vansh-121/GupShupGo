@@ -29,12 +29,16 @@ object NativeCalls {
     const val CHANNEL = "native_incoming_calls_v1"
     const val BRIDGE = "com.gupshupgo.app/native_calls"
     const val ID = "channelId"
+    const val ACCEPT = "native_call_accept"
     private const val NOTIFICATION_ID = 7310
     private val handler = Handler(Looper.getMainLooper())
     private val listeners = mutableMapOf<String, ListenerRegistration>()
     private val timers = mutableMapOf<String, Runnable>()
     // Process-local: an evicted RTC process must not leave the next call permanently busy.
     var activeRtcCall: String? = null
+    // An existing engine can mirror ringing in-app. Never create an engine to
+    // deliver this event; cold starts recover the persisted state through ringing().
+    var onChanged: (() -> Unit)? = null
 
     fun prefs(context: Context) = context.getSharedPreferences("native_calls_v1", Context.MODE_PRIVATE)
     fun user(context: Context) = prefs(context).getString("userId", null)
@@ -81,7 +85,10 @@ object NativeCalls {
     fun bind(context: Context, uid: String, deviceId: String) {
         require(FirebaseAuth.getInstance().currentUser?.uid == uid)
         require(CallPolicy.validId(deviceId))
-        if (user(context) != uid || device(context) != deviceId) clear(context)
+        // Resuming Flutter can finish FCM identity migration after Accept was
+        // persisted. Only an account switch invalidates that call; rotating an
+        // install's device ID must not throw away a same-account handoff.
+        if (registration(context).shouldClearCallsFor(uid)) clear(context)
         saveRegistration(context, registration(context).bind(uid, deviceId))
         NativeCallWorker.syncToken(context)
     }
@@ -105,8 +112,10 @@ object NativeCalls {
         }
         prune(context)
         if (data["type"] in setOf("call_cancel", "call_cancelled")) {
-            if (data["status"] == "answered" && data["acceptedDeviceId"] == device(context) &&
-                record(context, id)?.optString("state") in setOf("accepted", "connected")) return
+            if (!CallPolicy.shouldDismissForStatus(data["status"], record(context, id)?.optString("state").orEmpty())) {
+                log(context, id, "answer_push_deferred_to_transaction")
+                return
+            }
             finish(context, id, "cancelled")
             return
         }
@@ -162,11 +171,20 @@ object NativeCalls {
             })
     }
 
+    fun acceptIntent(context: Context, id: String): Intent =
+        Intent(context, MainActivity::class.java)
+            .setData(Uri.parse("gsg-call://$id/accept"))
+            .putExtra(ID, id).putExtra(ACCEPT, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
     private fun activityIntent(context: Context, id: String, accept: Boolean): PendingIntent {
-        val intent = Intent(context, NativeIncomingCallActivity::class.java)
-            .setData(Uri.parse("gsg-call://$id/${if (accept) "accept" else "show"}"))
-            .putExtra(ID, id).putExtra("accept", accept)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // Answer opens Flutter's Activity directly, including an existing background task.
+        // Only the ringing/full-screen notification opens the lightweight native Activity.
+        val intent = if (accept) acceptIntent(context, id) else
+            Intent(context, NativeIncomingCallActivity::class.java)
+                .setData(Uri.parse("gsg-call://$id/show"))
+                .putExtra(ID, id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
@@ -205,8 +223,10 @@ object NativeCalls {
                 if (error != null) { log(context, id, "status_listener_unavailable"); return@addSnapshotListener }
                 if (snapshot == null || snapshot.metadata.isFromCache) return@addSnapshotListener
                 val status = snapshot.getString("status")
-                val ownAnswer = status == "answered" && snapshot.getString("acceptedDeviceId") == device(context)
-                if (!snapshot.exists() || (!ownAnswer && status != "ringing")) finish(context, id, "cancelled")
+                val localState = record(context, id)?.optString("state").orEmpty()
+                if (!snapshot.exists() || CallPolicy.shouldDismissForStatus(status, localState)) {
+                    finish(context, id, "cancelled")
+                }
             }
     }
 
@@ -217,6 +237,7 @@ object NativeCalls {
             call.optString("calleeId") != user(context) || user(context) != FirebaseAuth.getInstance().currentUser?.uid) return false
         stopPresentation(context, id)
         call.put("state", "accepted").put("acceptedAt", System.currentTimeMillis())
+            .put("answerDeviceId", device(context))
         save(context, call)
         prefs(context).edit().putString("pending", id).commit()
         log(context, id, "accept_tapped")
@@ -233,14 +254,35 @@ object NativeCalls {
             finish(context, id, "handoff_expired")
             return null
         }
+        return call.keys().asSequence().associateWith { call.optString(it) } +
+            ("deviceId" to call.optString("answerDeviceId").ifBlank { device(context).orEmpty() })
+    }
+
+    @Synchronized
+    fun ringing(context: Context): Map<String, String>? {
+        prune(context)
+        val uid = user(context) ?: return null
+        if (uid != FirebaseAuth.getInstance().currentUser?.uid) return null
+        val call = records(context).firstOrNull {
+            it.optString("state") == "ringing" && it.optString("calleeId") == uid &&
+                it.optLong("expiresAt") > System.currentTimeMillis()
+        } ?: return null
         return call.keys().asSequence().associateWith { call.optString(it) } + ("deviceId" to device(context).orEmpty())
     }
 
     @Synchronized
-    fun acknowledge(context: Context, id: String) {
-        if (prefs(context).getString("pending", null) == id) prefs(context).edit().remove("pending").commit()
-        record(context, id)?.let { save(context, it.put("state", "connected")) }
+    fun acknowledge(context: Context, id: String): Boolean {
+        // Cancellation/account change can race the answer transaction. A late
+        // acknowledgment must never turn a terminal tombstone into a live call.
+        if (pending(context)?.get(ID) != id) {
+            log(context, id, "handoff_rejected")
+            return false
+        }
+        val call = record(context, id) ?: return false
+        prefs(context).edit().remove("pending").commit()
+        save(context, call.put("state", "connected"))
         log(context, id, "flutter_handoff")
+        return true
     }
 
     fun decline(context: Context, id: String) {
@@ -280,6 +322,7 @@ object NativeCalls {
         .mapNotNull { record(context, it.removePrefix("call:")) }
     private fun save(context: Context, call: JSONObject) {
         prefs(context).edit().putString("call:${call.getString(ID)}", call.toString()).commit()
+        handler.post { onChanged?.invoke() }
     }
     private fun prune(context: Context) {
         val now = System.currentTimeMillis()

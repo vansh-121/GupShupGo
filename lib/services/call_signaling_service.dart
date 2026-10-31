@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:video_chat_app/services/call_acceptance.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 
 /// Possible statuses for a call signaling document.
@@ -77,27 +78,8 @@ class CallSignalingService {
   /// call-style callers may ignore it.
   static Future<bool> answerCall(String channelId, {String? deviceId}) async {
     try {
-      return await _firestore.runTransaction((tx) async {
-        final ref = _firestore.collection(_collection).doc(channelId);
-        final snapshot = await tx.get(ref);
-        final call = snapshot.data();
-        if (call == null ||
-            call['calleeId'] != FirebaseAuth.instance.currentUser?.uid)
-          return false;
-        if (call['status'] == 'answered') {
-          return deviceId != null && call['acceptedDeviceId'] == deviceId;
-        }
-        if (call['status'] != 'ringing') return false;
-        final expires = call['expiresAt'] as Timestamp?;
-        if (expires != null && expires.toDate().isBefore(DateTime.now()))
-          return false;
-        tx.update(ref, {
-          'status': CallSignalStatus.answered.name,
-          'answeredAt': FieldValue.serverTimestamp(),
-          if (deviceId != null) 'acceptedDeviceId': deviceId,
-        });
-        return true;
-      });
+      return await _answerCall(channelId, deviceId: deviceId) ==
+          CallAnswerOutcome.accepted;
     } catch (e, stack) {
       print('CallSignaling: error answering call: $e');
       CrashlyticsService.logError(e, stack,
@@ -105,6 +87,109 @@ class CallSignalingService {
       if (deviceId != null) rethrow;
       return false;
     }
+  }
+
+  /// Native registration runs in WorkManager and may still be pending when an
+  /// older account-level FCM token delivers a call. Publish the device identity
+  /// before claiming it; never retry a rejected claim without its device ID.
+  /// This merge preserves FCM tokens and any existing encryption keys.
+  static Future<CallAnswerOutcome> answerCallOnDevice(
+    String channelId, {
+    required String userId,
+    required String deviceId,
+    required void Function(String) onEvent,
+  }) async {
+    if (FirebaseAuth.instance.currentUser?.uid != userId) {
+      return CallAnswerOutcome.signedOut;
+    }
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(deviceId)) {
+      throw const CallAcceptanceException('device_identity_missing');
+    }
+    var stage = 'device_registration';
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('devices')
+          .doc(deviceId)
+          .set({
+        'deviceId': deviceId,
+        'platform': 'android',
+        'lastSeenAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+      onEvent('accept_device_confirmed');
+      if (FirebaseAuth.instance.currentUser?.uid != userId) {
+        return CallAnswerOutcome.signedOut;
+      }
+      stage = 'transaction';
+      return await _answerCall(channelId,
+          deviceId: deviceId, expectedUserId: userId);
+    } on FirebaseException catch (error, stack) {
+      unawaited(CrashlyticsService.logError(error, stack,
+              reason: 'Call Accept $stage: ${error.code}')
+          .catchError((_) {}));
+      throw CallAcceptanceException('${stage}_${error.code}',
+          retryable: const {'unavailable', 'deadline-exceeded', 'aborted'}
+              .contains(error.code));
+    } on TimeoutException {
+      throw CallAcceptanceException('${stage}_timeout', retryable: true);
+    }
+  }
+
+  static Future<CallAnswerOutcome> _answerCall(String channelId,
+      {String? deviceId, String? expectedUserId}) async {
+    final uid = expectedUserId ?? FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return CallAnswerOutcome.signedOut;
+    return _firestore.runTransaction((tx) async {
+      final ref = _firestore.collection(_collection).doc(channelId);
+      final snapshot = await tx.get(ref);
+      final call = snapshot.data();
+      if (FirebaseAuth.instance.currentUser?.uid != uid) {
+        return CallAnswerOutcome.signedOut;
+      }
+      if (call == null) return CallAnswerOutcome.missing;
+      if (call['calleeId'] != uid) return CallAnswerOutcome.wrongAccount;
+      if (call['status'] == 'answered') {
+        return deviceId != null && call['acceptedDeviceId'] == deviceId
+            ? CallAnswerOutcome.accepted
+            : CallAnswerOutcome.answeredElsewhere;
+      }
+      if (call['status'] != 'ringing') return CallAnswerOutcome.ended;
+      final expires = call['expiresAt'] as Timestamp?;
+      if (expires != null && !expires.toDate().isAfter(DateTime.now())) {
+        return CallAnswerOutcome.expired;
+      }
+      tx.update(ref, {
+        'status': CallSignalStatus.answered.name,
+        'answeredAt': FieldValue.serverTimestamp(),
+        if (deviceId != null) 'acceptedDeviceId': deviceId,
+      });
+      return CallAnswerOutcome.accepted;
+    }, timeout: const Duration(seconds: 15), maxAttempts: 3);
+  }
+
+  /// A dismissed Accept must not hang up a call won by another device (including
+  /// a legacy client with no device claim). Re-read ownership in the transaction
+  /// instead of trusting whether this route once saw `answered`.
+  static Future<void> finishCallOnDevice(String channelId,
+      {required String userId, required String deviceId}) async {
+    if (FirebaseAuth.instance.currentUser?.uid != userId) return;
+    final ref = _firestore.collection(_collection).doc(channelId);
+    await _firestore.runTransaction((tx) async {
+      final call = (await tx.get(ref)).data();
+      if (FirebaseAuth.instance.currentUser?.uid != userId ||
+          call == null ||
+          call['calleeId'] != userId) return;
+      final status = call['status'];
+      if (status != 'ringing' &&
+          !(status == 'answered' && call['acceptedDeviceId'] == deviceId)) {
+        return;
+      }
+      tx.update(ref, {
+        'status': 'ended',
+        'endedAt': FieldValue.serverTimestamp(),
+      });
+    }, timeout: const Duration(seconds: 15), maxAttempts: 3);
   }
 
   /// Callee declined the call.

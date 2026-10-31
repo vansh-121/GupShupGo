@@ -13,6 +13,7 @@ import 'package:video_chat_app/services/ads/interstitial_ad_service.dart';
 import 'package:video_chat_app/services/agora_services.dart';
 import 'package:video_chat_app/services/call_log_service.dart';
 import 'package:video_chat_app/services/call_signaling_service.dart';
+import 'package:video_chat_app/services/call_acceptance.dart';
 import 'package:video_chat_app/services/crashlytics_service.dart';
 import 'package:video_chat_app/services/crypto/call_encryption_service.dart';
 import 'package:video_chat_app/services/crypto/device_identity_service.dart';
@@ -36,13 +37,16 @@ class CallScreen extends StatefulWidget {
   final String? calleeId;
   final String? calleeName;
   final bool isAudioOnly;
+  final CallAcceptance? acceptance;
 
-  const CallScreen({super.key, 
+  const CallScreen({
+    super.key,
     required this.channelId,
     required this.isCaller,
     this.calleeId,
     this.calleeName,
     this.isAudioOnly = false,
+    this.acceptance,
   });
 
   @override
@@ -79,6 +83,10 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _noAnswerTimer;
   bool _isEndingCall = false; // prevents double-close race conditions
   bool _cleanupDone = false; // guards _cleanupAndPop against double execution
+  bool _mediaStarted = false;
+  Future<void>? _signalingFinish;
+  Timer? _joinTimeoutTimer;
+  Timer? _peerTimeoutTimer;
 
   // ── E2EE state tracking ─────────────────────────────────────────────────
   bool _encryptionApplied = false;
@@ -90,7 +98,8 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _mediaWatchdogTimer;
   bool _remoteMediaReceived = false;
   StreamSubscription<DocumentSnapshot>? _e2eeSubscription;
-  String _endReasonText = ''; // shown briefly before closing (e.g. "Call Declined")
+  String _endReasonText =
+      ''; // shown briefly before closing (e.g. "Call Declined")
 
   // ── Performance: E2E call setup trace ────────────────────────────────────
   // Started in initState, stopped when the remote peer joins (the moment
@@ -128,8 +137,44 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_initializeUserInfo().catchError((Object error) {
+      NativeCallService.recordEvent(
+          widget.channelId, 'call_profile_unavailable');
+    }));
+    unawaited(_prepareCall());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_isEndingCall) {
+        _callStates?.updateState(CallState.Calling);
+      }
+    });
+  }
+
+  Future<void> _prepareCall() async {
+    final acceptance = widget.acceptance;
+    if (acceptance != null) {
+      final outcome = await acceptance.connect();
+      if (!mounted || _isEndingCall) {
+        unawaited(acceptance.close());
+        return;
+      }
+      if (outcome != CallAnswerOutcome.accepted) {
+        final l10n = AppLocalizations.of(context);
+        _autoCloseWithReason(outcome == CallAnswerOutcome.failed
+            ? l10n.callFailedToConnect
+            : outcome == CallAnswerOutcome.expired
+                ? l10n.callNoAnswer
+                : l10n.callEnded);
+        return;
+      }
+    }
+    if (!mounted || _isEndingCall) return;
+    _mediaStarted = true;
     unawaited(NativeCallService.setActive(widget.channelId));
-    _initializeUserInfo();
+    NativeCallService.recordEvent(widget.channelId, 'rtc_starting');
+    _joinTimeoutTimer = Timer(const Duration(seconds: 35), () {
+      if (!_isInitialized) _failConnection('rtc_join_timeout');
+    });
+    if (!widget.isCaller) _waitForPeer();
 
     // Start E2E call-setup performance trace (stopped when remote joins).
     PerformanceService.startTrace(
@@ -138,7 +183,13 @@ class _CallScreenState extends State<CallScreen> {
         'call_type': widget.isAudioOnly ? 'audio' : 'video',
         'role': widget.isCaller ? 'caller' : 'callee',
       },
-    ).then((t) => _callSetupTrace = t);
+    ).then((t) {
+      if (mounted && !_isEndingCall) {
+        _callSetupTrace = t;
+      } else {
+        unawaited(PerformanceService.stopTrace(t));
+      }
+    });
 
     // Kick off the Signal key exchange AND the Agora token fetch
     // immediately, in parallel with the engine init below. _initAgora
@@ -146,7 +197,9 @@ class _CallScreenState extends State<CallScreen> {
     // needs them. This hides ~1–3s of network latency under the engine
     // init + permission-prompt time.
     _callKeyFuture = _exchangeCallKey();
-    _tokenFuture = AgoraService.generateToken(widget.channelId);
+    _tokenFuture = AgoraService.generateToken(widget.channelId,
+        onEvent: (event) =>
+            NativeCallService.recordEvent(widget.channelId, event));
     _initAgora();
     _listenToSignaling();
     _listenToE2eeNegotiation();
@@ -170,9 +223,24 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
-  /// Called by [PipService] when Android enters or leaves the floating PiP
-  /// window. Collapsing to remote-video-only happens in [build] based on this
-  /// flag; here we just trigger the rebuild.
+  Future<void> _finishSignaling() =>
+      _signalingFinish ??= widget.acceptance?.close() ??
+          CallSignalingService.endCall(widget.channelId);
+
+  void _waitForPeer() {
+    if (_remoteUserJoined || _peerTimeoutTimer != null) return;
+    _peerTimeoutTimer = Timer(const Duration(seconds: 35), () {
+      if (!_remoteUserJoined) _failConnection('rtc_peer_timeout');
+    });
+  }
+
+  void _failConnection(String code) {
+    if (!mounted || _isEndingCall) return;
+    NativeCallService.recordEvent(widget.channelId, code);
+    unawaited(_finishSignaling());
+    _autoCloseWithReason(AppLocalizations.of(context).callFailedToConnect);
+  }
+
   void _onPipModeChanged() {
     if (!mounted) return;
     setState(() => _isInPipMode = PipService.instance.isInPipMode.value);
@@ -243,6 +311,7 @@ class _CallScreenState extends State<CallScreen> {
         case CallSignalStatus.answered:
           // Callee answered — cancel the no-answer timer.
           _noAnswerTimer?.cancel();
+          _waitForPeer();
           break;
 
         case CallSignalStatus.ringing:
@@ -257,6 +326,8 @@ class _CallScreenState extends State<CallScreen> {
     if (_isEndingCall || !mounted) return;
     _isEndingCall = true;
     _noAnswerTimer?.cancel();
+    _joinTimeoutTimer?.cancel();
+    _peerTimeoutTimer?.cancel();
 
     setState(() {
       _endReasonText = reason;
@@ -293,7 +364,7 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _cleanupAndPop() async {
     if (_cleanupDone) return;
     _cleanupDone = true;
-    await _createCallLog();
+    if (_mediaStarted) unawaited(_createCallLog());
 
     // A call the peer joined and stayed on is the one moment in this app where
     // the user is reliably pleased and not mid-task, so it is where the review
@@ -322,9 +393,8 @@ class _CallScreenState extends State<CallScreen> {
     _mediaWatchdogTimer?.cancel();
     _e2eeSubscription?.cancel();
 
-    // Fire-and-forget: delete the signaling document so it can't interfere
-    // with future calls (especially important when channelId is reused).
-    CallSignalingService.deleteCallDocument(widget.channelId);
+    // Finish only this device's claim; retain terminal state for delayed pushes.
+    unawaited(_finishSignaling());
 
     if (mounted) {
       Provider.of<CallStateNotifier>(context, listen: false)
@@ -355,7 +425,8 @@ class _CallScreenState extends State<CallScreen> {
 
     // Callee: check the caller's e2ee flag before wasting time polling.
     // If the caller already wrote e2ee: false, skip the poll entirely.
-    final callerE2ee = await CallSignalingService.getE2eeStatus(widget.channelId);
+    final callerE2ee =
+        await CallSignalingService.getE2eeStatus(widget.channelId);
     if (callerE2ee == false) {
       print('Caller set e2ee=false — skipping key poll, joining unencrypted');
       return null;
@@ -399,31 +470,45 @@ class _CallScreenState extends State<CallScreen> {
       // Set initial call start time to avoid null errors
       _callStartTime = DateTime.now();
 
-      // Initialize Agora engine
+      final permitted = await AgoraService.requestPermissions(
+          isAudioOnly: widget.isAudioOnly);
+      if (!mounted || _isEndingCall) return;
+      if (!permitted) {
+        _failConnection('rtc_permission_denied');
+        return;
+      }
       _engine = await AgoraService.initAgora(isAudioOnly: widget.isAudioOnly);
-
-      // Request permissions
-      await AgoraService.requestPermissions(isAudioOnly: widget.isAudioOnly);
+      if (!mounted || _isEndingCall) {
+        await AgoraService.releaseEngine(_engine);
+        return;
+      }
 
       // Set up event handlers
       _engine!.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
+            if (!mounted || _isEndingCall) return;
+            _joinTimeoutTimer?.cancel();
+            NativeCallService.recordEvent(widget.channelId, 'rtc_local_joined');
             print("Local user joined channel: ${connection.channelId}");
             setState(() {
               _isInitialized = true;
               _callStartTime = DateTime.now(); // Track call start time
             });
-            Provider.of<CallStateNotifier>(context, listen: false)
-                .updateState(CallState.Connected);
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
+            if (!mounted || _isEndingCall) return;
+            _peerTimeoutTimer?.cancel();
+            NativeCallService.recordEvent(widget.channelId, 'rtc_peer_joined');
+            Provider.of<CallStateNotifier>(context, listen: false)
+                .updateState(CallState.Connected);
             print("Remote user joined: $remoteUid");
             setState(() {
               _remoteUid = remoteUid;
               _remoteUserJoined = true;
             });
-            _noAnswerTimer?.cancel(); // Remote user joined — cancel no-answer timer
+            _noAnswerTimer
+                ?.cancel(); // Remote user joined — cancel no-answer timer
             _startCallTimer();
 
             // Video calls: now that remote video exists, arm Picture-in-
@@ -454,16 +539,22 @@ class _CallScreenState extends State<CallScreen> {
               _callSetupTrace = null;
             }
           },
-          onRemoteAudioStateChanged: (RtcConnection connection, int remoteUid,
-              RemoteAudioState state, RemoteAudioStateReason reason, int elapsed) {
+          onRemoteAudioStateChanged: (RtcConnection connection,
+              int remoteUid,
+              RemoteAudioState state,
+              RemoteAudioStateReason reason,
+              int elapsed) {
             if (state == RemoteAudioState.remoteAudioStateDecoding ||
                 state == RemoteAudioState.remoteAudioStateStarting) {
               _remoteMediaReceived = true;
               _mediaWatchdogTimer?.cancel();
             }
           },
-          onRemoteVideoStateChanged: (RtcConnection connection, int remoteUid,
-              RemoteVideoState state, RemoteVideoStateReason reason, int elapsed) {
+          onRemoteVideoStateChanged: (RtcConnection connection,
+              int remoteUid,
+              RemoteVideoState state,
+              RemoteVideoStateReason reason,
+              int elapsed) {
             if (state == RemoteVideoState.remoteVideoStateDecoding ||
                 state == RemoteVideoState.remoteVideoStateStarting) {
               _remoteMediaReceived = true;
@@ -472,6 +563,7 @@ class _CallScreenState extends State<CallScreen> {
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
               UserOfflineReasonType reason) {
+            if (!mounted || _isEndingCall) return;
             print("Remote user left: $remoteUid (reason: $reason)");
             setState(() {
               _remoteUid = null;
@@ -481,7 +573,7 @@ class _CallScreenState extends State<CallScreen> {
             // end the call for this side too (WhatsApp behavior). ──
             if (_remoteUserJoined && !_isEndingCall) {
               // The remote user was in the call and left — end it.
-              CallSignalingService.endCall(widget.channelId);
+              unawaited(_finishSignaling());
               _autoCloseWithReason('Call Ended');
             }
           },
@@ -489,20 +581,30 @@ class _CallScreenState extends State<CallScreen> {
             print("Token will expire, should refresh token");
           },
           onError: (ErrorCodeType err, String msg) {
+            if (!mounted || _isEndingCall) return;
+            NativeCallService.recordEvent(
+                widget.channelId, 'rtc_error_${err.name}');
             print("Agora Error: $err - $msg");
             if (err == ErrorCodeType.errDecryptionFailed) {
-              print('⚠️ Agora reported errDecryptionFailed — triggering immediate E2EE fallback');
+              print(
+                  '⚠️ Agora reported errDecryptionFailed — triggering immediate E2EE fallback');
               _handleEncryptionMismatchRecovery();
             } else if (err == ErrorCodeType.errInvalidToken) {
+              _failConnection('rtc_invalid_token');
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(
-                        AppLocalizations.of(context).callTokenExpired),
+                    content:
+                        Text(AppLocalizations.of(context).callTokenExpired),
                     backgroundColor: Colors.red,
                   ),
                 );
               }
+            }
+          },
+          onConnectionStateChanged: (connection, state, reason) {
+            if (state == ConnectionStateType.connectionStateFailed) {
+              _failConnection('rtc_connection_${reason.name}');
             }
           },
         ),
@@ -510,6 +612,7 @@ class _CallScreenState extends State<CallScreen> {
 
       // Small delay to ensure engine is fully initialized
       await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted || _isEndingCall) return;
 
       // ── E2EE: enable Agora media encryption with a per-call key ──────
       // The key is exchanged out-of-band via a Signal-encrypted envelope.
@@ -523,6 +626,7 @@ class _CallScreenState extends State<CallScreen> {
       } catch (e) {
         print('Call encryption setup failed (continuing unencrypted): $e');
       }
+      if (!mounted || _isEndingCall) return;
       // Encryption attempt has resolved — reflect the real result in the badge.
       _encryptionApplied = e2eeEnabled;
       _encryptionResolved = true;
@@ -541,9 +645,14 @@ class _CallScreenState extends State<CallScreen> {
       // with engine init and E2EE key exchange). By now the Cloud Function
       // round-trip has usually completed, so this resolves instantly.
       final rtcToken = await _tokenFuture;
+      if (!mounted || _isEndingCall) return;
+      if (rtcToken == null || rtcToken.isEmpty) {
+        _failConnection('rtc_token_unavailable');
+        return;
+      }
 
       await _engine!.joinChannel(
-        token: rtcToken ?? '',
+        token: rtcToken,
         channelId: widget.channelId,
         uid: 0,
         options: ChannelMediaOptions(
@@ -555,8 +664,11 @@ class _CallScreenState extends State<CallScreen> {
           autoSubscribeVideo: !widget.isAudioOnly,
         ),
       );
-    } catch (e) {
+    } catch (e, stack) {
       print("Error initializing Agora: $e");
+      unawaited(CrashlyticsService.logError(e, stack,
+              reason: 'Call media initialization failed')
+          .catchError((_) {}));
       // Stop setup trace with failure attributes.
       if (_callSetupTrace != null) {
         PerformanceService.stopTrace(_callSetupTrace!, attributes: {
@@ -565,13 +677,7 @@ class _CallScreenState extends State<CallScreen> {
         });
         _callSetupTrace = null;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  AppLocalizations.of(context).callFailedToInit(widget.isAudioOnly ? "audio" : "video", e.toString()))),
-        );
-      }
+      _failConnection('rtc_init_${e.runtimeType}');
     }
   }
 
@@ -601,7 +707,8 @@ class _CallScreenState extends State<CallScreen> {
     if (_isRecoveringEncryption) return;
     _isRecoveringEncryption = true;
 
-    print('⚠️ Media decryption mismatch detected — disabling local encryption & notifying peer');
+    print(
+        '⚠️ Media decryption mismatch detected — disabling local encryption & notifying peer');
     CrashlyticsService.log('E2EE mismatch recovery triggered');
 
     try {
@@ -644,9 +751,13 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    _isEndingCall = true;
+    unawaited(_finishSignaling());
     unawaited(NativeCallService.finish(widget.channelId));
     _callTimer?.cancel();
     _noAnswerTimer?.cancel();
+    _joinTimeoutTimer?.cancel();
+    _peerTimeoutTimer?.cancel();
     _mediaWatchdogTimer?.cancel();
     _signalingSubscription?.cancel();
     _e2eeSubscription?.cancel();
@@ -659,13 +770,7 @@ class _CallScreenState extends State<CallScreen> {
     }
 
     // Create call log (fire and forget for cases like back button press)
-    _createCallLog();
-
-    // If we're being disposed without having explicitly ended the call
-    // (e.g. back button, system kill), mark it as ended in Firestore.
-    if (!_isEndingCall) {
-      CallSignalingService.endCall(widget.channelId);
-    }
+    if (_mediaStarted) unawaited(_createCallLog());
 
     // Use proper release method with cleanup tracking
     AgoraService.releaseEngine(_engine);
@@ -779,7 +884,7 @@ class _CallScreenState extends State<CallScreen> {
     _isEndingCall = true;
 
     // Signal the other party via Firestore
-    await CallSignalingService.endCall(widget.channelId);
+    unawaited(_finishSignaling());
 
     await _cleanupAndPop();
   }
@@ -956,7 +1061,8 @@ class _CallScreenState extends State<CallScreen> {
                           setState(() => _isOnHold = !_isOnHold);
                           // Mute our mic on hold; silence remote via volume (not permanent mute)
                           _engine?.muteLocalAudioStream(_isOnHold || _isMuted);
-                          _engine?.adjustPlaybackSignalVolume(_isOnHold ? 0 : 100);
+                          _engine
+                              ?.adjustPlaybackSignalVolume(_isOnHold ? 0 : 100);
                         },
                       ),
                     ],
@@ -1013,7 +1119,7 @@ class _CallScreenState extends State<CallScreen> {
     required VoidCallback onTap,
   }) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: _isInitialized && !_isEndingCall ? onTap : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1045,6 +1151,18 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _isEndingCall = true;
+          unawaited(_finishSignaling());
+        }
+      },
+      child: _buildCallContent(context),
+    );
+  }
+
+  Widget _buildCallContent(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
     // For audio calls, use the dedicated WhatsApp-style audio UI
@@ -1106,13 +1224,14 @@ class _CallScreenState extends State<CallScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Center(
-                  child: Icon(Icons.videocam_off, color: Colors.white54, size: 32),
+                  child:
+                      Icon(Icons.videocam_off, color: Colors.white54, size: 32),
                 ),
               ),
             ),
 
           // Loading indicator
-          if (!_isInitialized)
+          if (!_isInitialized && _endReasonText.isEmpty)
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1126,7 +1245,6 @@ class _CallScreenState extends State<CallScreen> {
                 ],
               ),
             ),
-
 
           // Control buttons at bottom
           Positioned(
@@ -1149,11 +1267,14 @@ class _CallScreenState extends State<CallScreen> {
                         ? l10n.callTurnOffSpeaker
                         : l10n.callTurnOnSpeaker,
                     icon: Icon(
-                      _isSpeakerOn ? Icons.volume_up : Icons.phone_in_talk_outlined,
+                      _isSpeakerOn
+                          ? Icons.volume_up
+                          : Icons.phone_in_talk_outlined,
                       color: _isSpeakerOn ? Colors.black : Colors.white,
                       size: 26,
                     ),
                     onPressed: () async {
+                      if (!_isInitialized || _isEndingCall) return;
                       setState(() => _isSpeakerOn = !_isSpeakerOn);
                       await _engine?.setRouteInCommunicationMode(
                         _isSpeakerOn ? 3 : 1, // 3=speaker, 1=earpiece
@@ -1177,6 +1298,7 @@ class _CallScreenState extends State<CallScreen> {
                       size: 28,
                     ),
                     onPressed: () {
+                      if (!_isInitialized || _isEndingCall) return;
                       setState(() => _isMuted = !_isMuted);
                       _engine?.muteLocalAudioStream(_isMuted);
                     },
@@ -1214,6 +1336,7 @@ class _CallScreenState extends State<CallScreen> {
                       size: 28,
                     ),
                     onPressed: () {
+                      if (!_isInitialized || _isEndingCall) return;
                       setState(() => _isFrontCamera = !_isFrontCamera);
                       _engine?.switchCamera();
                     },
@@ -1238,6 +1361,7 @@ class _CallScreenState extends State<CallScreen> {
                       size: 28,
                     ),
                     onPressed: () {
+                      if (!_isInitialized || _isEndingCall) return;
                       setState(() => _localVideoEnabled = !_localVideoEnabled);
                       _engine?.muteLocalVideoStream(!_localVideoEnabled);
                     },
@@ -1257,7 +1381,9 @@ class _CallScreenState extends State<CallScreen> {
               children: [
                 Text(
                   widget.calleeName ??
-                      (widget.isCaller ? l10n.callCalling : l10n.callIncomingVoice),
+                      (widget.isCaller
+                          ? l10n.callCalling
+                          : l10n.callIncomingVoice),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,

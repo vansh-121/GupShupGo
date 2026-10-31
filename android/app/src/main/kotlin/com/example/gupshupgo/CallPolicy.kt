@@ -16,4 +16,10 @@ object CallPolicy {
 
     fun canRing(now: Long, expiresAt: Long, handled: Boolean): Boolean =
         !handled && expiresAt > now && expiresAt - now <= RING_MS
+
+    // An answer push can beat the transaction response and older deployments
+    // may omit the winning device. Once Accept was tapped, only the server
+    // transaction may decide who won; do not erase its inbox on this hint.
+    fun shouldDismissForStatus(status: String?, localState: String): Boolean =
+        status != "ringing" && !(status == "answered" && localState in setOf("accepted", "connected"))
 }

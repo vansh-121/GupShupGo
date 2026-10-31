@@ -8,6 +8,8 @@ data class CallRegistrationState(
     val registeredToken: String? = null,
     val generation: Long = 0,
 ) {
+    fun shouldClearCallsFor(nextUserId: String) = userId != nextUserId
+
     fun isBound(authUserId: String?) = !userId.isNullOrEmpty() &&
         !deviceId.isNullOrEmpty() && userId == authUserId
 

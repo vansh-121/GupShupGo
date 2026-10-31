@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CallPolicyTest {
+    @Test fun `answer push before transaction response preserves the accept inbox`() {
+        assertFalse(CallPolicy.shouldDismissForStatus("answered", "accepted"))
+        assertFalse(CallPolicy.shouldDismissForStatus("answered", "connected"))
+        // Devices that have not accepted still dismiss ringing immediately.
+        assertTrue(CallPolicy.shouldDismissForStatus("answered", "ringing"))
+    }
+    @Test fun `caller hangup and missing calls still cancel an in flight accept`() {
+        for (status in listOf("ended", "declined", "missed", null)) {
+            assertTrue(CallPolicy.shouldDismissForStatus(status, "accepted"))
+            assertTrue(CallPolicy.shouldDismissForStatus(status, "connected"))
+        }
+        assertFalse(CallPolicy.shouldDismissForStatus("ringing", "ringing"))
+    }
     @Test fun `legacy pushes expire from FCM send time not process startup`() {
         assertEquals(61000L, CallPolicy.expiresAt(emptyMap(), 1000))
         assertFalse(CallPolicy.canRing(62000, 61000, false))
