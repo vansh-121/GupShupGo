@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep these in sync with IncomingCallScreen and CallScreen in Flutter. -->
+    <color name="native_call_teal">#00A884</color>
+    <color name="native_call_mid">#005C4B</color>
+    <color name="native_call_dark">#111B21</color>
+    <color name="native_call_decline">#EA0038</color>
+
+    <string name="native_call_app_name" translatable="false">GupShupGo</string>
+    <string name="native_call_unknown_caller">Incoming caller</string>
+    <string name="native_call_incoming_voice">Incoming voice call</string>
+    <string name="native_call_incoming_video">Incoming video call</string>
+    <string name="native_call_accept">Accept</string>
+    <string name="native_call_decline">Decline</string>
+    <string name="native_call_accept_voice">Accept voice call</string>
+    <string name="native_call_accept_video">Accept video call</string>
+    <string name="native_call_decline_description">Decline call</string>
+
+    <style name="NativeIncomingCallTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/native_call_dark</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">@color/native_call_teal</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

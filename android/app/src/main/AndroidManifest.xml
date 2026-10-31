@@ -129,7 +129,7 @@
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
+            android:theme="@style/NativeIncomingCallTheme" />
         <receiver android:name=".NativeCallActionReceiver" android:exported="false" />
 
         <!-- Native token rotation; Flutter still handles non-call messages. -->

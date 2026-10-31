@@ -9,14 +9,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** A plain lock-screen Activity: loading it cannot start Flutter. */
+/** A native lock-screen Activity: presenting a call never starts Flutter. */
 class NativeIncomingCallActivity : Activity() {
     private var callId = ""
     private val handler = Handler(Looper.getMainLooper())
@@ -34,42 +32,38 @@ class NativeIncomingCallActivity : Activity() {
         @Suppress("DEPRECATION")
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         showIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); showIntent(intent) }
 
     private fun showIntent(intent: Intent) {
+        handler.removeCallbacks(check)
         callId = intent.getStringExtra(NativeCalls.ID).orEmpty()
         val call = NativeCalls.record(this, callId)
         if (call == null || call.optString("state") != "ringing") { finish(); return }
         if (intent.getBooleanExtra("accept", false)) { accept(); return }
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(32, 64, 32, 64)
-            setBackgroundColor(Color.rgb(15, 30, 31))
-            setOnApplyWindowInsetsListener { view, insets ->
-                @Suppress("DEPRECATION")
-                view.setPadding(32, insets.systemWindowInsetTop + 32, 32, insets.systemWindowInsetBottom + 32)
-                insets
-            }
-        }
-        layout.addView(TextView(this).apply { text = "GupShupGo"; textSize = 18f; setTextColor(Color.LTGRAY) })
-        layout.addView(TextView(this).apply {
-            text = call.optString("callerName").ifBlank { "Incoming caller" }.take(120)
-            textSize = 30f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setPadding(0, 40, 0, 20)
-        })
-        layout.addView(TextView(this).apply {
-            text = if (call.optString("isAudioOnly") == "true") "Incoming voice call" else "Incoming video call"
-            textSize = 18f; setTextColor(Color.LTGRAY); setPadding(0, 0, 0, 48)
-        })
-        layout.addView(Button(this).apply { text = "Accept"; setOnClickListener { accept() } })
-        layout.addView(Button(this).apply {
-            text = "Decline"; setOnClickListener { NativeCalls.decline(applicationContext, callId); finish() }
-        })
-        setContentView(layout)
-        handler.removeCallbacks(check)
+        setContentView(NativeIncomingCallView(
+            context = this,
+            callerName = call.optString("callerName").ifBlank { getString(R.string.native_call_unknown_caller) }.take(120),
+            callerPhotoUrl = call.optString("callerPhotoUrl"),
+            isAudioOnly = call.optString("isAudioOnly") == "true",
+            onAccept = { accept() },
+            onDecline = { NativeCalls.decline(applicationContext, callId); finish() },
+        ))
         handler.post(check)
     }
 
