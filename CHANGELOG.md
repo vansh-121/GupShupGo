@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User blocking with UI improvements
 - Live location sharing and map-based pin picking
 
+## [1.2.4] - 2026-11-11
+
+### Added
+- 🔗 **Deep Link Navigation Service** — Added end-to-end `DeepLinkService` handling profile (`https://gupshupgo.app/u/<handle>`) and email-based deep link destinations (contacts tab, Gup Arcade, direct chat) with cold-start queuing and deferred routing until auth and onboarding settle.
+- 🔥 **Bond Streak Restoration UI** — Enhanced the home screen with dedicated icons and contextual prompts to restore broken bond streaks seamlessly.
+
+### Fixed & Changed
+- Updated version to 1.2.4 (build code 62).
+- 🛡️ **Post-Lookup Auth & Session Guard** — Re-validated authentication state and routing readiness after asynchronous user profile lookups in deep link handling to prevent stale chat routing or opening chats after sign-out.
+- ⚡ **Build & Pipeline Reliability** — Modernized dependency configurations, Gradle properties, and static analysis options for smoother CI and faster builds.
+
 ## [1.2.3] - 2026-10-31
 
 ### Added
@@ -397,6 +408,7 @@ Documents, pins, view-once media and anonymous-room photos, videos and voice not
 
 | Version | Date | Key Features |
 |---------|------|--------------|
+| 1.2.4 | November 2026 | Deep Link Navigation Engine, Post-Lookup Auth Safety Guards, Streak Bond Restoration UI |
 | 1.2.3 | October 2026 | Native Lock-Screen Calls (CallKit & Android), VoIP Push Delivery Pipeline, Incoming Call Settings & Diagnostics |
 | 1.2.2 | October 2026 | 16-Language Localization, Profile Invite Cards & Deep Links, Verified Domain Email Delivery, Vault Security |
 | 1.2.1 | October 2026 | Meet GupAI (In-App Chat Assistant), Self-Healing Encrypted Statuses, High-Concurrency Backend |

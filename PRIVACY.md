@@ -1,8 +1,8 @@
 # GupShupGo Privacy & Cryptography Whitepaper
 
-**Last Updated:** October 31, 2026  
+**Last Updated:** November 11, 2026  
 **Document Classification:** Public Transparency Specification  
-**Version:** 1.2.3
+**Version:** 1.2.4
 
 ---
 

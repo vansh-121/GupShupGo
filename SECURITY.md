@@ -2,7 +2,7 @@
 
 **Document Status:** Official Security Disclosure Policy  
 **Maintained by:** GupShupGo Security & Engineering Team  
-**Last Updated:** October 31, 2026
+**Last Updated:** November 11, 2026
 
 ---
 
@@ -18,10 +18,10 @@ Security updates and patches are actively maintained for the following releases:
 
 | Version | Supported | Status |
 | :--- | :---: | :--- |
-| **1.2.3 (Build 61)** | ✅ Yes | Current Production Release |
-| **1.2.2 (Build 60)** | ✅ Yes | Active Support |
-| **1.2.1 (Build 59)** | ⚠️ Deprecated | Please update to 1.2.3 |
-| **< 1.2.0** | ❌ No | Unsupported |
+| **1.2.4 (Build 62)** | ✅ Yes | Current Production Release |
+| **1.2.3 (Build 61)** | ✅ Yes | Active Support |
+| **1.2.2 (Build 60)** | ⚠️ Deprecated | Please update to 1.2.4 |
+| **< 1.2.1** | ❌ No | Unsupported |
 
 We strongly advise all users to remain on the latest version available on Google Play to ensure all cryptographic patches and security mitigations are present.
 

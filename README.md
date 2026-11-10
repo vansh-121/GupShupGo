@@ -8,7 +8,7 @@
 
 **The Next-Generation, Offline-Capable, Zero-Knowledge Encrypted Messenger, Real-Time Calling Engine & Arcade.**
 
-[![Release: 1.2.3](https://img.shields.io/badge/Release-v1.2.3_(Build_61)-blue.svg?style=flat-square)](CHANGELOG.md)
+[![Release: 1.2.4](https://img.shields.io/badge/Release-v1.2.4_(Build_62)-blue.svg?style=flat-square)](CHANGELOG.md)
 [![Privacy: Zero-Knowledge](https://img.shields.io/badge/Privacy-Zero--Knowledge-10B981.svg?style=flat-square)](PRIVACY.md)
 [![Encryption: Signal Protocol](https://img.shields.io/badge/Encryption-Signal%20Protocol-0284C7.svg?style=flat-square)](PRIVACY.md#3-cryptographic-specification)
 [![Offline: P2P Mesh](https://img.shields.io/badge/Offline-P2P%20Mesh-F59E0B.svg?style=flat-square)](PRIVACY.md#5-decentralized-offline-mesh-protocol)
